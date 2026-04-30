@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_release_date_is_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-release-date").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-release-date").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -39,7 +38,8 @@ async fn router_discovery_books_list_supports_release_date_is_in_runtime_owned_m
         .expect("strict release-date match payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -69,19 +69,16 @@ async fn router_discovery_books_list_supports_release_date_is_in_runtime_owned_m
         .and_then(Value::as_array)
         .expect("strict release-date missing payload should expose content array");
     assert_eq!(missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_release_date_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-release-date-is-not").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-release-date-is-not").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -112,7 +109,8 @@ async fn router_discovery_books_list_supports_release_date_is_not_in_runtime_own
         .expect("strict release-date isNot excluded payload should expose content array");
     assert_eq!(excluded_content.len(), 0);
 
-    let kept_response = app
+    let kept_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -142,19 +140,16 @@ async fn router_discovery_books_list_supports_release_date_is_not_in_runtime_own
         .and_then(Value::as_array)
         .expect("strict release-date isNot kept payload should expose content array");
     assert_eq!(kept_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_release_date_null_operators_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-release-date-null").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-release-date-null").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let is_null_response = app
+    let is_null_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -184,7 +179,8 @@ async fn router_discovery_books_list_supports_release_date_null_operators_in_run
         .expect("strict books release-date isNull payload should expose content array");
     assert_eq!(is_null_content.len(), 0);
 
-    let is_not_null_response = app
+    let is_not_null_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -213,20 +209,17 @@ async fn router_discovery_books_list_supports_release_date_null_operators_in_run
         .and_then(Value::as_array)
         .expect("strict books release-date isNotNull payload should expose content array");
     assert_eq!(is_not_null_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_release_date_greater_than_and_less_than_in_runtime_owned_mode()
  {
-    let paths = new_router_fixture("router-discovery-books-list-strict-release-date-range").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-release-date-range").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let gt_matched_response = app
+    let gt_matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -257,7 +250,8 @@ async fn router_discovery_books_list_supports_release_date_greater_than_and_less
         .expect("strict books release-date greaterThan match payload should expose content array");
     assert_eq!(gt_matched_content.len(), 1);
 
-    let gt_missing_response = app
+    let gt_missing_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -290,7 +284,8 @@ async fn router_discovery_books_list_supports_release_date_greater_than_and_less
         );
     assert_eq!(gt_missing_content.len(), 0);
 
-    let lt_matched_response = app
+    let lt_matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -321,7 +316,8 @@ async fn router_discovery_books_list_supports_release_date_greater_than_and_less
         .expect("strict books release-date lessThan match payload should expose content array");
     assert_eq!(lt_matched_content.len(), 1);
 
-    let lt_missing_response = app
+    let lt_missing_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -351,20 +347,16 @@ async fn router_discovery_books_list_supports_release_date_greater_than_and_less
         .and_then(Value::as_array)
         .expect("strict books release-date lessThan missing payload should expose content array");
     assert_eq!(lt_missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_release_date_date_style_ops_in_runtime_owned_mode() {
-    let paths =
-        new_router_fixture("router-discovery-books-list-strict-release-date-date-style").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-release-date-date-style").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let after_match = app
+    let after_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -395,7 +387,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date after match payload should expose content array");
     assert_eq!(after_match_content.len(), 1);
 
-    let after_miss = app
+    let after_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -426,7 +419,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date after miss payload should expose content array");
     assert_eq!(after_miss_content.len(), 0);
 
-    let before_match = app
+    let before_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -457,7 +451,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date before match payload should expose content array");
     assert_eq!(before_match_content.len(), 1);
 
-    let before_miss = app
+    let before_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -488,7 +483,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date before miss payload should expose content array");
     assert_eq!(before_miss_content.len(), 0);
 
-    let is_in_the_last_match = app
+    let is_in_the_last_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -519,7 +515,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date isInTheLast match payload should expose content array");
     assert_eq!(is_in_the_last_match_content.len(), 1);
 
-    let is_in_the_last_miss = app
+    let is_in_the_last_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -550,7 +547,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         .expect("strict books release-date isInTheLast miss payload should expose content array");
     assert_eq!(is_in_the_last_miss_content.len(), 0);
 
-    let is_not_in_the_last_match = app
+    let is_not_in_the_last_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -583,7 +581,8 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
         );
     assert_eq!(is_not_in_the_last_match_content.len(), 1);
 
-    let is_not_in_the_last_miss = app
+    let is_not_in_the_last_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -615,6 +614,4 @@ async fn router_discovery_books_list_supports_release_date_date_style_ops_in_run
             "strict books release-date isNotInTheLast miss payload should expose content array",
         );
     assert_eq!(is_not_in_the_last_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

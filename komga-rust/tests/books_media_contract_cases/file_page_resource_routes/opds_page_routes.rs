@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v1_book_page_uses_zero_based_external_page_numbers() {
-    let paths = new_router_fixture("router-opds-v1-book-page-zero-based").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-book-page-zero-based").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -13,10 +12,10 @@ async fn router_opds_v1_book_page_uses_zero_based_external_page_numbers() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let zero_response = app
+    let zero_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -31,7 +30,9 @@ async fn router_opds_v1_book_page_uses_zero_based_external_page_numbers() {
 
     assert_eq!(zero_response.status(), StatusCode::OK);
 
-    let one_response = app
+    let one_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -49,16 +50,13 @@ async fn router_opds_v1_book_page_uses_zero_based_external_page_numbers() {
         payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_book_page_routes_do_not_negotiate_pdf_for_pdf_books() {
-    let paths = new_router_fixture("router-opds-book-page-no-pdf-negotiation").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-book-page-no-pdf-negotiation").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -66,14 +64,14 @@ async fn router_opds_book_page_routes_do_not_negotiate_pdf_for_pdf_books() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for route in [
         "/opds/v1.2/books/book-pdf-1/pages/0",
         "/opds/v2/books/book-pdf-1/pages/1",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -98,6 +96,4 @@ async fn router_opds_book_page_routes_do_not_negotiate_pdf_for_pdf_books() {
             "route: {route}, content-type was: {content_type}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }

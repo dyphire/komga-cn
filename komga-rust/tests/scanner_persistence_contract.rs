@@ -26,10 +26,6 @@ const MINIMAL_PNG_BYTES: &[u8] = &[
     0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
-mod support {
-    pub mod persistence_contract_fixture;
-}
-
-use support::persistence_contract_fixture;
+mod support;
 
 mod scanner_persistence_contract_cases;

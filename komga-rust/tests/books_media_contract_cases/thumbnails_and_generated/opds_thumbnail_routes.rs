@@ -2,18 +2,22 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_book_thumbnail_routes_convert_selected_png_to_jpeg() {
-    let paths = new_router_fixture("router-opds-book-thumbnail-jpeg").await;
-    seed_router_contract_data(&paths).await;
-    seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes()).await;
+    let ctx = TestFixture::builder("router-opds-book-thumbnail-jpeg")
+        .with_seed(|paths| async move {
+            seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes())
+                .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for route in [
         "/opds/v1.2/books/book-1/thumbnail",
         "/opds/v2/books/book-1/thumbnail",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -44,17 +48,15 @@ async fn router_opds_book_thumbnail_routes_convert_selected_png_to_jpeg() {
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_book_thumbnail_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-book-thumbnail-auth-doc").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-opds-v2-book-thumbnail-auth-doc").await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -87,21 +89,18 @@ async fn router_opds_v2_book_thumbnail_unauthorized_returns_opds_auth_document()
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.contains("application/opds-authentication+json"))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_book_thumbnail_routes_unauthorized_include_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-book-thumbnail-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-opds-v1-book-thumbnail-basic-challenge").await;
 
     for route in [
         "/opds/v1.2/books/book-1/thumbnail",
         "/opds/v1.2/books/book-1/thumbnail/small",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -131,21 +130,17 @@ async fn router_opds_v1_book_thumbnail_routes_unauthorized_include_basic_challen
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_book_thumbnail_small_resizes_selected_png_to_jpeg() {
-    let paths = new_router_fixture("router-opds-v1-book-thumbnail-small-resize").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-book-thumbnail-small-resize").await;
     let large_png = distinct_png_bytes(640, 480, 0, 0, 255);
-    seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &large_png).await;
+    seed_book_thumbnail_bytes(ctx.paths(), "thumb-book-1", "image/png", &large_png).await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -178,7 +173,9 @@ async fn router_opds_v1_book_thumbnail_small_resizes_selected_png_to_jpeg() {
     );
     assert_eq!(small_image.width().max(small_image.height()), 300);
 
-    let full_response = app
+    let full_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -199,17 +196,14 @@ async fn router_opds_v1_book_thumbnail_small_resizes_selected_png_to_jpeg() {
     assert!(
         full_image.width().max(full_image.height()) > small_image.width().max(small_image.height())
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnail_bytes() {
-    let paths = new_router_fixture("router-opds-v1-book-thumbnail-small-generated").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-opds-v1-book-thumbnail-small-generated").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for small generated thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -219,14 +213,14 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
         .expect("existing thumbnails should be deleted before small generated test");
     cleanup_pool.close().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
     generate_book_thumbnail(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before small generated test");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail lookup");
     let generated_thumbnail_id = sqlx::query(
@@ -241,17 +235,17 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
 
     let tampered_jpeg = distinct_jpeg_bytes(4, 3, 255, 0, 0);
     seed_book_thumbnail_bytes(
-        &paths,
+        ctx.paths(),
         &generated_thumbnail_id,
         "image/jpeg",
         &tampered_jpeg,
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let small = app
+    let small = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -277,7 +271,9 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
         .to_vec();
     assert_eq!(small_body, tampered_jpeg);
 
-    let full = app
+    let full = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -295,21 +291,18 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
         .to_vec();
 
     assert_ne!(full_body, tampered_jpeg);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_book_thumbnail_small_falls_back_to_original_bytes_when_resize_fails() {
-    let paths = new_router_fixture("router-opds-v1-book-thumbnail-small-resize-fallback").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-book-thumbnail-small-resize-fallback").await;
     let invalid_png = b"not-a-real-png-thumbnail".to_vec();
-    seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &invalid_png).await;
+    seed_book_thumbnail_bytes(ctx.paths(), "thumb-book-1", "image/png", &invalid_png).await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -334,8 +327,6 @@ async fn router_opds_v1_book_thumbnail_small_falls_back_to_original_bytes_when_r
         .expect("opds v1 book thumbnail small fallback body should be readable")
         .to_vec();
     assert_eq!(body, invalid_png);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -355,14 +346,13 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             _ => unreachable!("unsupported source case"),
         };
 
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
+        let ctx = TestFixture::new(fixture_name).await;
 
         match source {
-            "epub" => write_router_epub_with_cover(&paths, "books/book-1.epub"),
+            "epub" => write_router_epub_with_cover(ctx.paths(), "books/book-1.epub"),
             "pdf" => {
                 seed_router_pdf_book(
-                    &paths,
+                    ctx.paths(),
                     "book-pdf-1",
                     "series-1",
                     "fixture-page.pdf",
@@ -373,7 +363,7 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             _ => unreachable!("unsupported source case"),
         }
 
-        let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for generated thumbnail cleanup");
         sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -383,17 +373,17 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             .expect("existing thumbnails should be deleted before generated-source test");
         cleanup_pool.close().await;
 
-        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("pool for generate_book_thumbnail");
         generate_book_thumbnail(&pool, book_id)
             .await
             .expect("generate_book_thumbnail should succeed before generated-source test");
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-        let auth_token = login_with_basic_and_get_token(app.clone()).await;
+        let auth_token = ctx.login_admin().await;
 
-        let before = app
+        let before = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -411,7 +401,7 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             .expect("opds v2 generated thumbnail baseline body should be readable")
             .to_vec();
 
-        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for generated thumbnail lookup");
         let generated_thumbnail_id = sqlx::query(
@@ -429,10 +419,17 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             "pdf" => distinct_png_bytes(4, 3, 255, 0, 0),
             _ => unreachable!("unsupported source case"),
         };
-        seed_book_thumbnail_bytes(&paths, &generated_thumbnail_id, "image/png", &tampered_png)
-            .await;
+        seed_book_thumbnail_bytes(
+            ctx.paths(),
+            &generated_thumbnail_id,
+            "image/png",
+            &tampered_png,
+        )
+        .await;
 
-        let after = app
+        let after = ctx
+            .app()
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -450,7 +447,5 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             .to_vec();
 
         assert_eq!(after_body, before_body, "source: {source}");
-
-        cleanup_router_fixture(paths);
     }
 }

@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_media_asset_routes_forbid_age_restricted_user() {
-    let paths = new_router_fixture("router-book-media-asset-restricted-user").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-media-asset-restricted-user").await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -14,19 +13,15 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
     )
     .await;
     write_router_epub_resource(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         "OEBPS/chapter.xhtml",
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
     for route in [
         "/api/v1/books/book-1/file",
@@ -35,7 +30,8 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
         "/api/v1/books/book-1/resource/OEBPS/chapter.xhtml",
         "/api/v1/books/book-1/progression",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -52,7 +48,8 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
     }
 
     for route in ["/api/v1/books/book-1/progression"] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -77,24 +74,22 @@ async fn router_book_media_asset_routes_forbid_age_restricted_user() {
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing() {
-    let paths = new_router_fixture("router-book-file-delete-missing-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-book-file-delete-missing-book")
+        .without_runtime_workers()
+        .build()
+        .await;
 
     // This contract inspects the queued TASK row itself, so runtime workers must stay off or the
     // background consumer can claim and delete the missing-book delete task before verification.
-    let app = komga_server::app::build_router_without_runtime_workers_for_contract(
-        &runtime_config_for_paths(&paths),
-    )
-    .await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -108,7 +103,7 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing book file delete verification");
     let rows = sqlx::query(
@@ -134,6 +129,4 @@ async fn router_book_file_delete_enqueues_delete_book_even_when_book_is_missing(
             "uniqueId": "DeleteBook_missing-book"
         }),
     );
-
-    cleanup_router_fixture(paths);
 }

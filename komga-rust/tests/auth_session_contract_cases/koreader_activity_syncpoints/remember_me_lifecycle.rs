@@ -61,10 +61,9 @@ async fn login_member_with_remember_me(
 
 pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cookie() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-remember-me-password-reset-lifecycle").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-remember-me-password-reset-lifecycle").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -72,8 +71,8 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
     let (member_session_cookie, member_remember_me_cookie, member_user_id) =
         login_member_with_remember_me(
             app.clone(),
@@ -90,12 +89,8 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
                 .uri("/sse/v1/events")
                 .header(
                     "x-auth-token",
-                    login_with_basic_credentials_and_get_token(
-                        app.clone(),
-                        "member@example.org",
-                        "router-contract-member-123",
-                    )
-                    .await,
+                    ctx.login_with_credentials("member@example.org", "router-contract-member-123")
+                        .await,
                 )
                 .body(Body::empty())
                 .expect("member lifecycle sse request should build"),
@@ -172,8 +167,6 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
         .await
         .expect("remember-me replay after password reset should complete");
     assert_eq!(remember_replay_response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -183,10 +176,9 @@ async fn password_change_invalidates_existing_remember_me_cookie() {
 
 pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_old_remember_me() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-remember-me-self-password-change").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-remember-me-self-password-change").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -194,7 +186,7 @@ pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_ol
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
     let (member_session_cookie, member_remember_me_cookie, _) = login_member_with_remember_me(
         app.clone(),
         "member@example.org",
@@ -256,15 +248,10 @@ pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_ol
         .expect("self password old remember-me replay should complete");
     assert_eq!(remember_replay_response.status(), StatusCode::UNAUTHORIZED);
 
-    let new_session_token = login_with_basic_credentials_and_get_token(
-        app,
-        "member@example.org",
-        "router-contract-member-456",
-    )
-    .await;
+    let new_session_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-456")
+        .await;
     assert!(!new_session_token.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -274,10 +261,9 @@ async fn self_password_change_keeps_session_but_invalidates_old_remember_me() {
 
 pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_expired_event() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-admin-user-update-session-expired-sse").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-admin-user-update-session-expired-sse").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -285,14 +271,11 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_header_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_header_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let response = app
         .clone()
@@ -361,8 +344,6 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
         .await
         .expect("admin user update existing session request should complete");
     assert_eq!(me_response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -373,10 +354,10 @@ async fn admin_user_update_expires_sessions_and_emits_session_expired_event() {
 #[tokio::test]
 async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_session_expired() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-remember-me-user-delete-lifecycle").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-remember-me-user-delete-lifecycle").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -384,14 +365,11 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_header_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_header_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
     let (member_session_cookie, member_remember_me_cookie, member_user_id) =
         login_member_with_remember_me(
             app.clone(),
@@ -478,6 +456,4 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
         .await
         .expect("remember-me replay after delete should complete");
     assert_eq!(remember_replay_response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }

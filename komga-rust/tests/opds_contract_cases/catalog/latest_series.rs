@@ -2,16 +2,16 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_catalog_latest_series_skips_one_shots_before_limit() {
-    let paths = new_router_fixture("router-opds-v2-catalog-latest-series-skips-oneshots").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_catalog_fields(&paths, "series-1", false, "2024-01-01 00:00:00").await;
+    let ctx = TestFixture::new("router-opds-v2-catalog-latest-series-skips-oneshots").await;
+    update_router_series_catalog_fields(ctx.paths(), "series-1", false, "2024-01-01 00:00:00")
+        .await;
 
     for index in 0..5 {
         let series_id = format!("oneshot-series-{}", index + 1);
         let title = format!("OneShot {}", index + 1);
-        seed_router_custom_series(&paths, &series_id, &title, "library-1").await;
+        seed_router_custom_series(ctx.paths(), &series_id, &title, "library-1").await;
         update_router_series_catalog_fields(
-            &paths,
+            ctx.paths(),
             &series_id,
             true,
             format!("2024-02-0{} 00:00:00", index + 1).as_str(),
@@ -19,10 +19,11 @@ async fn router_opds_v2_catalog_latest_series_skips_one_shots_before_limit() {
         .await;
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -66,21 +67,19 @@ async fn router_opds_v2_catalog_latest_series_skips_one_shots_before_limit() {
         navigation[0].get("title").and_then(Value::as_str),
         Some("Series 1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_series_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-latest-series-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-opds-v2-latest-series-unauthorized-auth-doc").await;
 
     for route in [
         "/opds/v2/libraries/series/latest",
         "/opds/v2/libraries/library-1/series/latest",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -140,17 +139,13 @@ async fn router_opds_v2_latest_series_unauthorized_returns_opds_auth_document() 
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_series_uses_kotlin_self_links() {
-    let paths = new_router_fixture("router-opds-v2-latest-series-self-link").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-latest-series-self-link").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for (route, expected_title, expected_self_href) in [
         (
@@ -164,7 +159,9 @@ async fn router_opds_v2_latest_series_uses_kotlin_self_links() {
             "http://localhost/opds/v2/libraries/library-1/series/latest",
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -243,15 +240,13 @@ async fn router_opds_v2_latest_series_uses_kotlin_self_links() {
             .expect("latest series navigation should be present");
         assert!(!navigation.is_empty(), "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_shots_before_paging() {
-    let paths = new_router_fixture("router-opds-v2-latest-series-page-metadata").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_catalog_fields(&paths, "series-1", false, "2024-02-01 00:00:00").await;
+    let ctx = TestFixture::new("router-opds-v2-latest-series-page-metadata").await;
+    update_router_series_catalog_fields(ctx.paths(), "series-1", false, "2024-02-01 00:00:00")
+        .await;
 
     for (index, last_modified) in [
         "2024-02-05 00:00:00",
@@ -264,8 +259,8 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
     {
         let series_id = format!("latest-series-{}", index + 2);
         let title = format!("Series {}", index + 2);
-        seed_router_custom_series(&paths, &series_id, &title, "library-1").await;
-        update_router_series_catalog_fields(&paths, &series_id, false, last_modified).await;
+        seed_router_custom_series(ctx.paths(), &series_id, &title, "library-1").await;
+        update_router_series_catalog_fields(ctx.paths(), &series_id, false, last_modified).await;
     }
 
     for (index, last_modified) in ["2024-03-02 00:00:00", "2024-03-01 00:00:00"]
@@ -274,14 +269,15 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
     {
         let series_id = format!("oneshot-latest-series-{}", index + 1);
         let title = format!("OneShot Latest {}", index + 1);
-        seed_router_custom_series(&paths, &series_id, &title, "library-1").await;
-        update_router_series_catalog_fields(&paths, &series_id, true, last_modified).await;
+        seed_router_custom_series(ctx.paths(), &series_id, &title, "library-1").await;
+        update_router_series_catalog_fields(ctx.paths(), &series_id, true, last_modified).await;
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -350,16 +346,13 @@ async fn router_opds_v2_latest_series_includes_page_metadata_and_filters_one_sho
         navigation[1].get("title").and_then(Value::as_str),
         Some("Series 5")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_series_hides_age_restricted_series_for_exclude_user() {
-    let paths = new_router_fixture("router-opds-v2-latest-series-age-restricted").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-latest-series-age-restricted").await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted-series@example.org",
         "router-contract-restricted-series-123",
@@ -367,15 +360,16 @@ async fn router_opds_v2_latest_series_hides_age_restricted_series_for_exclude_us
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted-series@example.org",
-        "router-contract-restricted-series-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "restricted-series@example.org",
+            "router-contract-restricted-series-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -403,6 +397,4 @@ async fn router_opds_v2_latest_series_hides_age_restricted_series_for_exclude_us
             .map(Vec::len),
         Some(0)
     );
-
-    cleanup_router_fixture(paths);
 }

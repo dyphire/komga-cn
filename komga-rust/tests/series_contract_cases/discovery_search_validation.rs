@@ -295,14 +295,15 @@ async fn legacy_series_get_ids(app: &axum::Router, auth_token: &str, uri: &str) 
 
 #[tokio::test]
 async fn router_discovery_series_get_routes_match_paperback_compatibility_shape() {
-    let paths = new_router_fixture("router-discovery-series-papperback-get-compat").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
+    let ctx = TestFixture::builder("router-discovery-series-papperback-get-compat")
+        .with_search_index()
+        .build()
+        .await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
-    let search_response = app
+    let search_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -320,7 +321,9 @@ async fn router_discovery_series_get_routes_match_paperback_compatibility_shape(
     assert_eq!(search_status, StatusCode::OK, "payload: {search_payload}");
     assert_eq!(series_page_ids(&search_payload), vec!["series-1"]);
 
-    let detail_response = app
+    let detail_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -338,21 +341,21 @@ async fn router_discovery_series_get_routes_match_paperback_compatibility_shape(
         detail_payload.get("id"),
         Some(&Value::String("series-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_supports_kotlin_legacy_filters_and_regex() {
-    let paths = new_router_fixture("router-discovery-series-get-kotlin-legacy-filters").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_counts(&paths, 1, Some(1)).await;
-    seed_router_series_read_progress(&paths, 1, 0).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-kotlin-legacy-filters")
+        .with_seed(|paths| async move {
+            seed_router_series_counts(&paths, 1, Some(1)).await;
+            seed_router_series_read_progress(&paths, 1, 0).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -367,82 +370,80 @@ async fn router_discovery_series_get_supports_kotlin_legacy_filters_and_regex() 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(series_page_ids(&payload), vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_keeps_collection_filter_when_combined_with_other_filters() {
-    let paths = new_router_fixture("router-discovery-series-get-collection-filter-retained").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_counts(&paths, 1, Some(1)).await;
-    seed_router_series_read_progress(&paths, 1, 0).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Series Outside Collection",
-            age_rating: Some(16),
-            release_date: Some("2024-02-01"),
-            sharing_label: Some("Family"),
-            author: Some(("John Doe", "writer")),
-            collection_id: None,
-        },
-    )
-    .await;
-    seed_series_read_progress_for(&paths, "series-2", 1, 0).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-collection-filter-retained")
+        .with_seed(|paths| async move {
+            seed_router_series_counts(&paths, 1, Some(1)).await;
+            seed_router_series_read_progress(&paths, 1, 0).await;
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Series Outside Collection",
+                    age_rating: Some(16),
+                    release_date: Some("2024-02-01"),
+                    sharing_label: Some("Family"),
+                    author: Some(("John Doe", "writer")),
+                    collection_id: None,
+                },
+            )
+            .await;
+            seed_series_read_progress_for(&paths, "series-2", 1, 0).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&collection_id=collection-1&read_status=READ&sharing_label=Family&author=John+Doe,writer",
     )
     .await;
 
     assert_eq!(ids, vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_treats_release_year_values_as_or() {
-    let paths = new_router_fixture("router-discovery-series-get-release-year-or").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Alpha 2022",
-            age_rating: Some(16),
-            release_date: Some("2022-06-15"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-3",
-            title: "Beta 2023",
-            age_rating: Some(16),
-            release_date: Some("2023-07-20"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-release-year-or")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Alpha 2022",
+                    age_rating: Some(16),
+                    release_date: Some("2022-06-15"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-3",
+                    title: "Beta 2023",
+                    age_rating: Some(16),
+                    release_date: Some("2023-07-20"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let mut ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&release_year=2022&release_year=2024&sort=metadata.titleSort,asc",
     )
@@ -450,67 +451,65 @@ async fn router_discovery_series_get_treats_release_year_values_as_or() {
     ids.sort();
 
     assert_eq!(ids, vec!["series-1", "series-2"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_matches_sharing_label_and_author_exactly() {
-    let paths = new_router_fixture("router-discovery-series-get-sharing-author-exact").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Near Match Series",
-            age_rating: Some(16),
-            release_date: Some("2024-03-01"),
-            sharing_label: Some("Family Friendly"),
-            author: Some(("John Doe Jr", "writer")),
-            collection_id: None,
-        },
-    )
-    .await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-sharing-author-exact")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Near Match Series",
+                    age_rating: Some(16),
+                    release_date: Some("2024-03-01"),
+                    sharing_label: Some("Family Friendly"),
+                    author: Some(("John Doe Jr", "writer")),
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&sharing_label=Family&author=John+Doe",
     )
     .await;
 
     assert_eq!(ids, vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_only_applies_author_filter_when_query_contains_name_and_role()
 {
-    let paths = new_router_fixture("router-discovery-series-get-author-delimiter-semantics").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Second Author Series",
-            age_rating: Some(16),
-            release_date: Some("2024-03-02"),
-            sharing_label: None,
-            author: Some(("Jane Roe", "writer")),
-            collection_id: None,
-        },
-    )
-    .await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-author-delimiter-semantics")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Second Author Series",
+                    age_rating: Some(16),
+                    release_date: Some("2024-03-02"),
+                    sharing_label: None,
+                    author: Some(("Jane Roe", "writer")),
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let ignored_author_ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&author=John+Doe",
     )
@@ -518,52 +517,51 @@ async fn router_discovery_series_get_only_applies_author_filter_when_query_conta
     assert_eq!(ignored_author_ids, vec!["series-1", "series-2"]);
 
     let empty_name_ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&author=%2Cwriter",
     )
     .await;
     assert!(empty_name_ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_supports_legacy_age_rating_numeric_or_null_values() {
-    let paths = new_router_fixture("router-discovery-series-get-age-rating-null-or").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Null Age Series",
-            age_rating: None,
-            release_date: Some("2024-04-01"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-3",
-            title: "Adult Age Series",
-            age_rating: Some(18),
-            release_date: Some("2024-05-01"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-age-rating-null-or")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Null Age Series",
+                    age_rating: None,
+                    release_date: Some("2024-04-01"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-3",
+                    title: "Adult Age Series",
+                    age_rating: Some(18),
+                    release_date: Some("2024-05-01"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let mut ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&age_rating=16&age_rating=bad-value&sort=metadata.titleSort,asc",
     )
@@ -571,61 +569,60 @@ async fn router_discovery_series_get_supports_legacy_age_rating_numeric_or_null_
     ids.sort();
 
     assert_eq!(ids, vec!["series-1", "series-2"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_keeps_kotlin_unsorted_default_when_no_sort_or_search() {
-    let paths = new_router_fixture("router-discovery-series-get-unsorted-default").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "A Sorted First Title",
-            age_rating: Some(16),
-            release_date: Some("2024-06-01"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
+    let ctx = TestFixture::builder("router-discovery-series-get-unsorted-default")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "A Sorted First Title",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-01"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let ids = legacy_series_get_ids(&app, &auth_token, "/api/v1/series?page=0&size=20").await;
+    let ids = legacy_series_get_ids(ctx.app(), &auth_token, "/api/v1/series?page=0&size=20").await;
 
     assert_eq!(ids, vec!["series-1", "series-2"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_sorts_by_series_name_and_returns_name_field() {
-    let paths = new_router_fixture("router-discovery-series-get-sort-by-name").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Alpha Shelf Name",
-            age_rating: Some(16),
-            release_date: Some("2024-06-02"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-    update_series_metadata_title(&paths, "series-2", "Zeta Display Title").await;
+    let ctx = TestFixture::builder("router-discovery-series-get-sort-by-name")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Alpha Shelf Name",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-02"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+            update_series_metadata_title(&paths, "series-2", "Zeta Display Title").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -646,69 +643,67 @@ async fn router_discovery_series_get_sorts_by_series_name_and_returns_name_field
         series_page_names(&payload),
         vec!["Alpha Shelf Name", "Series 1"]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_sorts_by_collection_number_when_requested() {
-    let paths = new_router_fixture("router-discovery-series-get-sort-by-collection-number").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Collection Number Two",
-            age_rating: Some(16),
-            release_date: Some("2024-06-03"),
-            sharing_label: None,
-            author: None,
-            collection_id: Some("collection-1"),
-        },
-    )
-    .await;
-    update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-sort-by-collection-number")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Collection Number Two",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-03"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: Some("collection-1"),
+                },
+            )
+            .await;
+            update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&collection_id=collection-1&sort=collection.number,desc",
     )
     .await;
 
     assert_eq!(ids, vec!["series-2", "series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_without_collection_filter()
  {
-    let paths =
-        new_router_fixture("router-discovery-series-get-collection-number-without-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Collection Number Detached",
-            age_rating: Some(16),
-            release_date: Some("2024-06-03"),
-            sharing_label: None,
-            author: None,
-            collection_id: Some("collection-1"),
-        },
-    )
-    .await;
-    update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-collection-number-without-filter")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Collection Number Detached",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-03"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: Some("collection-1"),
+                },
+            )
+            .await;
+            update_collection_series_number(&paths, "collection-1", "series-2", 5).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -724,68 +719,66 @@ async fn router_discovery_series_get_treats_collection_number_sort_as_unsorted_w
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert!(!series_page_sorted(&payload));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_sorts_by_read_date_when_requested() {
-    let paths = new_router_fixture("router-discovery-series-get-sort-by-read-date").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Read Later Series",
-            age_rating: Some(16),
-            release_date: Some("2024-06-04"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
-    update_series_read_date(&paths, "series-1", "2024-06-10T00:00:00Z").await;
-    update_series_read_date(&paths, "series-2", "2024-06-11T00:00:00Z").await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-discovery-series-get-sort-by-read-date")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Read Later Series",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-04"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+            update_series_read_date(&paths, "series-1", "2024-06-10T00:00:00Z").await;
+            update_series_read_date(&paths, "series-2", "2024-06-11T00:00:00Z").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let ids = legacy_series_get_ids(
-        &app,
+        ctx.app(),
         &auth_token,
         "/api/v1/series?page=0&size=20&sort=readDate,desc",
     )
     .await;
 
     assert_eq!(ids, vec!["series-2", "series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_explicit_sort() {
-    let paths =
-        new_router_fixture("router-discovery-series-get-unsupported-sort-with-search").await;
-    seed_router_contract_data(&paths).await;
-    seed_legacy_series_fixture(
-        &paths,
-        LegacySeriesFixture {
-            series_id: "series-2",
-            title: "Series 1 Companion",
-            age_rating: Some(16),
-            release_date: Some("2024-06-05"),
-            sharing_label: None,
-            author: None,
-            collection_id: None,
-        },
-    )
-    .await;
+    let ctx = TestFixture::builder("router-discovery-series-get-unsupported-sort-with-search")
+        .with_seed(|paths| async move {
+            seed_legacy_series_fixture(
+                &paths,
+                LegacySeriesFixture {
+                    series_id: "series-2",
+                    title: "Series 1 Companion",
+                    age_rating: Some(16),
+                    release_date: Some("2024-06-05"),
+                    sharing_label: None,
+                    author: None,
+                    collection_id: None,
+                },
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -801,21 +794,23 @@ async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_e
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert!(!series_page_sorted(&payload));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() {
-    let paths = new_router_fixture("router-discovery-series-list-default-deleted-hidden").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
-    soft_delete_series(&paths, &["series-deleted"]).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-default-deleted-hidden")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
+                .await;
+            soft_delete_series(&paths, &["series-deleted"]).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -840,21 +835,22 @@ async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(series_page_ids(&payload), vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-deleted").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
-    soft_delete_series(&paths, &["series-deleted"]).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-strict-deleted")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
+                .await;
+            soft_delete_series(&paths, &["series-deleted"]).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let not_deleted_response = app
+    let not_deleted_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -880,7 +876,8 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
     let not_deleted_payload = response_json(not_deleted_response).await;
     assert_eq!(series_page_ids(&not_deleted_payload), vec!["series-1"]);
 
-    let deleted_response = app
+    let deleted_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -905,21 +902,21 @@ async fn router_discovery_series_list_supports_deleted_filter_in_runtime_owned_m
     assert_eq!(deleted_response.status(), StatusCode::OK);
     let deleted_payload = response_json(deleted_response).await;
     assert_eq!(series_page_ids(&deleted_payload), vec!["series-deleted"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_deleted_filter_handles_deleted_only_library() {
-    let paths =
-        new_router_fixture("router-discovery-series-list-runtime-only-deleted-visible").await;
-    seed_router_contract_data(&paths).await;
-    soft_delete_series(&paths, &["series-1"]).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-runtime-only-deleted-visible")
+        .with_seed(|paths| async move {
+            soft_delete_series(&paths, &["series-1"]).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -944,20 +941,16 @@ async fn router_discovery_series_list_deleted_filter_handles_deleted_only_librar
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(series_page_ids(&payload), vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_not_found() {
-    let paths = new_router_fixture("router-discovery-removed-v1-series-routes").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-removed-v1-series-routes").await;
+    let auth_token = ctx.login_admin().await;
 
     let route = "/api/v1/series/alphabetical-groups?page=0&size=20";
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -971,19 +964,15 @@ async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_no
         .expect("removed series v1 alphabetical-groups request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_books_route_remains_available_for_deprecated_compatibility() {
-    let paths = new_router_fixture("router-discovery-deprecated-series-books-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-deprecated-series-books-compat").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -999,24 +988,25 @@ async fn router_discovery_series_books_route_remains_available_for_deprecated_co
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(book_page_ids(&payload), vec!["book-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_alphabetical_groups_groups_by_title_sort_first_character() {
-    let paths = new_router_fixture("router-discovery-series-alphabetical-groups-title-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
-    seed_router_custom_series(&paths, "series-3", "Series 3", "library-1").await;
-    seed_router_series_title_sort(&paths, "series-1", "Alpha Shelf").await;
-    seed_router_series_title_sort(&paths, "series-2", "Beta Shelf").await;
-    seed_router_series_title_sort(&paths, "series-3", "Beta Archive").await;
+    let ctx = TestFixture::builder("router-discovery-series-alphabetical-groups-title-sort")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
+            seed_router_custom_series(&paths, "series-3", "Series 3", "library-1").await;
+            seed_router_series_title_sort(&paths, "series-1", "Alpha Shelf").await;
+            seed_router_series_title_sort(&paths, "series-2", "Beta Shelf").await;
+            seed_router_series_title_sort(&paths, "series-3", "Beta Archive").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1051,20 +1041,17 @@ async fn router_discovery_series_alphabetical_groups_groups_by_title_sort_first_
         .collect::<Vec<_>>();
 
     assert_eq!(groups, vec![("a".to_string(), 1), ("b".to_string(), 2)]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_alphabetical_groups_rejects_unknown_condition_type() {
-    let paths =
-        new_router_fixture("router-discovery-series-alphabetical-groups-unknown-condition").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("router-discovery-series-alphabetical-groups-unknown-condition").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1093,18 +1080,12 @@ async fn router_discovery_series_alphabetical_groups_rejects_unknown_condition_t
             "error": "invalid series alphabetical-groups request: InvalidSemantics(\"unsupported series condition type: UnknownSeriesCondition\")"
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condition() {
-    let paths =
-        new_router_fixture("router-discovery-series-alphabetical-groups-empty-condition").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-series-alphabetical-groups-empty-condition").await;
+    let auth_token = ctx.login_admin().await;
 
     for (case, body) in [
         ("empty-condition", json!({ "condition": {} })),
@@ -1119,7 +1100,8 @@ async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condi
             }),
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -1144,21 +1126,16 @@ async fn router_discovery_series_alphabetical_groups_rejects_empty_untyped_condi
             "case: {case}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_alphabetical_groups_rejects_non_object_bodies() {
-    let paths =
-        new_router_fixture("router-discovery-series-alphabetical-groups-non-object-body").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-series-alphabetical-groups-non-object-body").await;
+    let auth_token = ctx.login_admin().await;
 
     for (case, body) in [("array", Body::from("[]")), ("null", Body::from("null"))] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -1174,19 +1151,15 @@ async fn router_discovery_series_alphabetical_groups_rejects_non_object_bodies()
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "case: {case}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-oneshot").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-oneshot").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let not_oneshot_response = app
+    let not_oneshot_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -1216,7 +1189,8 @@ async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_m
         .expect("strict series oneshot=false payload should expose content array");
     assert_eq!(not_oneshot_content.len(), 1);
 
-    let oneshot_response = app
+    let oneshot_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -1245,19 +1219,16 @@ async fn router_discovery_series_list_supports_oneshot_filter_in_runtime_owned_m
         .and_then(Value::as_array)
         .expect("strict series oneshot=true payload should expose content array");
     assert_eq!(oneshot_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_rejects_unknown_condition_type_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-unknown-condition").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-unknown-condition").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1281,19 +1252,16 @@ async fn router_discovery_series_list_rejects_unknown_condition_type_in_runtime_
         .expect("strict series/list unknown-condition request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_rejects_unknown_operator_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-unknown-operator").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-unknown-operator").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1316,18 +1284,13 @@ async fn router_discovery_series_list_rejects_unknown_operator_in_runtime_owned_
         .expect("strict series/list unknown-operator request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode_in_runtime_owned_mode()
  {
-    let paths = new_router_fixture("router-discovery-series-list-strict-sort-modes").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-sort-modes").await;
+    let auth_token = ctx.login_admin().await;
 
     for sort in [
         "metadata.titleSort,asc",
@@ -1338,7 +1301,8 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
         "booksMetadata.releaseDate,desc",
         "booksCount,desc",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -1364,7 +1328,9 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    let unsupported_response = app
+    let unsupported_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1393,84 +1359,83 @@ async fn router_discovery_series_list_applies_default_sort_for_unknown_sort_mode
         .and_then(Value::as_array)
         .expect("strict series unsupported sort payload should expose content array");
     assert_eq!(unsupported_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_date_books_count_and_alias_dates()
  {
-    let paths = new_router_fixture("router-discovery-series-list-runtime-sort-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
+    let ctx = TestFixture::builder("router-discovery-series-list-runtime-sort-order")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-2", "Series 2", "library-1").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("series runtime sort db should open");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Zulu Series")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series-1 title sort should update");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Alpha Series")
-        .bind("series-2")
-        .execute(&pool)
-        .await
-        .expect("series-2 title sort should update");
-    for (series_id, created, last_modified, book_count) in [
-        (
-            "series-1",
-            "2024-01-01 00:00:00",
-            "2024-01-10 00:00:00",
-            1_i64,
-        ),
-        (
-            "series-2",
-            "2024-02-01 00:00:00",
-            "2024-02-10 00:00:00",
-            3_i64,
-        ),
-    ] {
-        sqlx::query(
-            "UPDATE SERIES \
-             SET CREATED_DATE = ?, LAST_MODIFIED_DATE = ?, BOOK_COUNT = ? \
-             WHERE ID = ?",
-        )
-        .bind(created)
-        .bind(last_modified)
-        .bind(book_count)
-        .bind(series_id)
-        .execute(&pool)
-        .await
-        .expect("series runtime sort fixture should update series timestamps and counts");
-    }
-    sqlx::query(
-        "UPDATE BOOK_METADATA_AGGREGATION \
-         SET RELEASE_DATE = ? \
-         WHERE SERIES_ID = ?",
-    )
-    .bind("2024-01-15")
-    .bind("series-1")
-    .execute(&pool)
-    .await
-    .expect("series-1 aggregation release date should update");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA_AGGREGATION (RELEASE_DATE, SUMMARY, SUMMARY_NUMBER, SERIES_ID) \
-         VALUES (?, ?, ?, ?)",
-    )
-    .bind("2024-02-15")
-    .bind("")
-    .bind("")
-    .bind("series-2")
-    .execute(&pool)
-    .await
-    .expect("series-2 aggregation release date should insert");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("series runtime sort db should open");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Zulu Series")
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("series-1 title sort should update");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Alpha Series")
+                .bind("series-2")
+                .execute(&pool)
+                .await
+                .expect("series-2 title sort should update");
+            for (series_id, created, last_modified, book_count) in [
+                (
+                    "series-1",
+                    "2024-01-01 00:00:00",
+                    "2024-01-10 00:00:00",
+                    1_i64,
+                ),
+                (
+                    "series-2",
+                    "2024-02-01 00:00:00",
+                    "2024-02-10 00:00:00",
+                    3_i64,
+                ),
+            ] {
+                sqlx::query(
+                    "UPDATE SERIES \
+                     SET CREATED_DATE = ?, LAST_MODIFIED_DATE = ?, BOOK_COUNT = ? \
+                     WHERE ID = ?",
+                )
+                .bind(created)
+                .bind(last_modified)
+                .bind(book_count)
+                .bind(series_id)
+                .execute(&pool)
+                .await
+                .expect("series runtime sort fixture should update series timestamps and counts");
+            }
+            sqlx::query(
+                "UPDATE BOOK_METADATA_AGGREGATION \
+                 SET RELEASE_DATE = ? \
+                 WHERE SERIES_ID = ?",
+            )
+            .bind("2024-01-15")
+            .bind("series-1")
+            .execute(&pool)
+            .await
+            .expect("series-1 aggregation release date should update");
+            sqlx::query(
+                "INSERT INTO BOOK_METADATA_AGGREGATION (RELEASE_DATE, SUMMARY, SUMMARY_NUMBER, SERIES_ID) \
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind("2024-02-15")
+            .bind("")
+            .bind("")
+            .bind("series-2")
+            .execute(&pool)
+            .await
+            .expect("series-2 aggregation release date should insert");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     for (sort, expected_ids) in [
         ("metadata.titleSort,asc", vec!["series-2", "series-1"]),
@@ -1483,7 +1448,8 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
         ),
         ("booksCount,desc", vec!["series-2", "series-1"]),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -1517,6 +1483,4 @@ async fn router_discovery_series_list_sorts_runtime_owned_results_by_release_dat
             .collect::<Vec<_>>();
         assert_eq!(ids, expected_ids, "sort: {sort}");
     }
-
-    cleanup_router_fixture(paths);
 }

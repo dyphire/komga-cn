@@ -11,14 +11,16 @@ fn fixed_layout_extension_blob() -> Vec<u8> {
 
 #[tokio::test]
 async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() {
-    let paths = new_router_fixture("router-kobo-book-metadata-cache-headers").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-cache-headers")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -39,7 +41,9 @@ async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() 
         .map(str::to_string)
         .expect("kobo metadata response should include etag");
 
-    let second_response = app
+    let second_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -54,17 +58,18 @@ async fn router_kobo_book_metadata_route_sets_etag_and_supports_if_none_match() 
 
     assert_eq!(second_response.status(), StatusCode::NOT_MODIFIED);
     assert!(second_response.headers().contains_key(header::ETAG));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders() {
-    let paths = new_router_fixture("router-kobo-book-metadata-parity").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-parity")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for kobo metadata parity");
     sqlx::query("UPDATE BOOK_METADATA SET ISBN = ? WHERE BOOK_ID = ?")
@@ -81,10 +86,11 @@ async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders
         .expect("book metadata epub is kepub should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -125,24 +131,25 @@ async fn router_kobo_book_metadata_uses_persisted_fields_instead_of_placeholders
         metadata.pointer("/DownloadUrls/0/Url"),
         Some(&json!(format!(
             "http://localhost:{}/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=true",
-            runtime_config_for_paths(&paths).bind_address.port()
+            ctx.config().bind_address.port()
         )))
     );
     assert_eq!(
         metadata.pointer("/ContributorRoles/0/Name"),
         Some(&json!("Jane Writer"))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
-    let paths = new_router_fixture("router-kobo-book-metadata-fixed-layout").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-fixed-layout")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for fixed-layout metadata parity");
     sqlx::query("UPDATE MEDIA SET EPUB_IS_KEPUB = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -154,10 +161,11 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
         .expect("book metadata media extension should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -183,24 +191,25 @@ async fn router_kobo_book_metadata_uses_epub3fl_for_fixed_layout_books() {
         metadata.pointer("/DownloadUrls/0/Url"),
         Some(&json!(format!(
             "http://localhost:{}/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=false",
-            runtime_config_for_paths(&paths).bind_address.port()
+            ctx.config().bind_address.port()
         )))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_book_metadata_uses_kobo_port_when_host_omits_port() {
-    let paths = new_router_fixture("router-kobo-book-metadata-kobo-port").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-kobo-port")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -225,20 +234,21 @@ async fn router_kobo_book_metadata_uses_kobo_port_when_host_omits_port() {
             "http://localhost:8085/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=true"
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_proxy_disabled() {
-    let paths = new_router_fixture("router-kobo-book-metadata-missing-local").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-missing-local")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -252,8 +262,6 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await, json!([]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -274,12 +282,15 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-book-metadata-missing-metadata-row").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-missing-metadata-row")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for missing metadata row");
     sqlx::query("DELETE FROM BOOK_METADATA WHERE BOOK_ID = ?")
@@ -289,10 +300,11 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
         .expect("book metadata row should be deleted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -307,7 +319,6 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await, json!([]));
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server.join.abort();
 }
@@ -329,15 +340,18 @@ async fn router_kobo_book_metadata_proxies_missing_books_when_proxy_enabled() {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-book-metadata-proxy-missing").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-book-metadata-proxy-missing")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -355,7 +369,6 @@ async fn router_kobo_book_metadata_proxies_missing_books_when_proxy_enabled() {
         json!([{"Title":"Proxy Title","DownloadUrls":[{"Format":"EPUB3","Url":"https://proxy.example/book.epub"}]}])
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join

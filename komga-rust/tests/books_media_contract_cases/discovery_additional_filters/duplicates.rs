@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_books_duplicates_requires_admin() {
-    let paths = new_router_fixture("router-books-duplicates-requires-admin").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-books-duplicates-requires-admin").await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -13,15 +12,13 @@ async fn router_books_duplicates_requires_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -34,17 +31,18 @@ async fn router_books_duplicates_requires_admin() {
         .expect("books duplicates restricted request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
-    let paths = new_router_fixture("router-books-duplicates-admin-x-api-key-compat").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-admin-x-api-key-compat")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates api-key db should open");
     for book_id in ["book-1", "book-2"] {
@@ -63,10 +61,10 @@ async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
         .expect("duplicate api-key file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let create_response = app
+    let create_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -89,7 +87,9 @@ async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
         .expect("books duplicates api key create response should expose key")
         .to_string();
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -109,17 +109,18 @@ async fn router_books_duplicates_accepts_admin_x_api_key_like_kotlin_clients() {
         .and_then(Value::as_array)
         .expect("books duplicates x-api-key payload should expose content array");
     assert_eq!(content.len(), 2);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_returns_full_book_dto_page() {
-    let paths = new_router_fixture("router-books-duplicates-full-book-dto").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-full-book-dto")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates dto db should open");
     for book_id in ["book-1", "book-2"] {
@@ -138,10 +139,11 @@ async fn router_books_duplicates_returns_full_book_dto_page() {
         .expect("duplicate file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -173,17 +175,18 @@ async fn router_books_duplicates_returns_full_book_dto_page() {
         Some(&json!("application/epub+zip"))
     );
     assert!(first.get("fileLastModified").is_some_and(Value::is_string));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_ignores_same_hash_with_different_sizes() {
-    let paths = new_router_fixture("router-books-duplicates-hash-size-pair").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-hash-size-pair")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates hash-size db should open");
     for book_id in ["book-1", "book-2"] {
@@ -196,10 +199,11 @@ async fn router_books_duplicates_ignores_same_hash_with_different_sizes() {
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -219,17 +223,18 @@ async fn router_books_duplicates_ignores_same_hash_with_different_sizes() {
         .expect("books duplicates hash-size payload should expose content array");
     assert!(content.is_empty());
     assert_eq!(payload.get("totalElements"), Some(&json!(0)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_honors_sort_query() {
-    let paths = new_router_fixture("router-books-duplicates-sort-query").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-sort-query")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -248,10 +253,11 @@ async fn router_books_duplicates_honors_sort_query() {
         .expect("sort duplicate file size should align for book-2");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -274,17 +280,18 @@ async fn router_books_duplicates_honors_sort_query() {
     assert_eq!(content[1].get("id"), Some(&json!("book-1")));
     assert_eq!(payload.pointer("/sort/sorted"), Some(&json!(true)));
     assert_eq!(payload.pointer("/pageable/sort/sorted"), Some(&json!(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_sorts_series_by_title_sort() {
-    let paths = new_router_fixture("router-books-duplicates-series-title-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-series-title-sort")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates series sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -312,10 +319,11 @@ async fn router_books_duplicates_sorts_series_by_title_sort() {
         .expect("series-2 title sort should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -336,19 +344,20 @@ async fn router_books_duplicates_sorts_series_by_title_sort() {
     assert_eq!(content.len(), 2);
     assert_eq!(content[0].get("id"), Some(&json!("book-1")));
     assert_eq!(content[1].get("id"), Some(&json!("book-2")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_defaults_to_file_hash_asc_sort() {
-    let paths = new_router_fixture("router-books-duplicates-default-filehash-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
-    seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
-    seed_router_pdf_book(&paths, "book-4", "series-1", "book-4.pdf", "Book 4").await;
+    let ctx = TestFixture::builder("router-books-duplicates-default-filehash-sort")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+            seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
+            seed_router_pdf_book(&paths, "book-4", "series-1", "book-4.pdf", "Book 4").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates default sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -371,10 +380,11 @@ async fn router_books_duplicates_defaults_to_file_hash_asc_sort() {
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -399,17 +409,18 @@ async fn router_books_duplicates_defaults_to_file_hash_asc_sort() {
     assert_eq!(content[3].get("fileHash"), Some(&json!("z-hash")));
     assert_eq!(payload.pointer("/sort/sorted"), Some(&json!(true)));
     assert_eq!(payload.pointer("/pageable/sort/sorted"), Some(&json!(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_unpaged_ignores_explicit_sort_query() {
-    let paths = new_router_fixture("router-books-duplicates-unpaged-ignore-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
+    let ctx = TestFixture::builder("router-books-duplicates-unpaged-ignore-sort")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates unpaged ignore-sort db should open");
     for book_id in ["book-1", "book-2"] {
@@ -435,10 +446,11 @@ async fn router_books_duplicates_unpaged_ignores_explicit_sort_query() {
         .expect("book-2 title should update for unpaged ignore-sort test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -469,18 +481,19 @@ async fn router_books_duplicates_unpaged_ignores_explicit_sort_query() {
         payload.pointer("/pageable/sort/unsorted"),
         Some(&json!(true))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_duplicates_includes_same_hash_books_outside_duplicate_size_pair() {
-    let paths = new_router_fixture("router-books-duplicates-hash-key-expands-selection").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
-    seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
+    let ctx = TestFixture::builder("router-books-duplicates-hash-key-expands-selection")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+            seed_router_pdf_book(&paths, "book-3", "series-1", "book-3.pdf", "Book 3").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books duplicates expanded selection db should open");
     for book_id in ["book-1", "book-2"] {
@@ -501,10 +514,11 @@ async fn router_books_duplicates_includes_same_hash_books_outside_duplicate_size
         .expect("same hash different size book should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -533,6 +547,4 @@ async fn router_books_duplicates_includes_same_hash_books_outside_duplicate_size
     assert_eq!(payload.get("totalElements"), Some(&json!(3)));
     assert_eq!(payload.get("totalPages"), Some(&json!(1)));
     assert_eq!(payload.get("last"), Some(&json!(true)));
-
-    cleanup_router_fixture(paths);
 }

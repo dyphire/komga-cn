@@ -5,11 +5,10 @@ use komga_infrastructure::sqlite::{
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch() {
-    let paths = new_router_fixture("runtime-refresh-series-metadata-applies-epub-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-applies-epub-provider").await;
 
     write_router_epub_with_package_document(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="bookid">
@@ -31,7 +30,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         </package>"##,
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB series metadata fixture setup");
     sqlx::query(
@@ -59,17 +58,17 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         .expect("existing series genres should be cleared before EPUB provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -87,7 +86,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         .await
         .expect("EPUB series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB series metadata verification");
     let metadata = sqlx::query(
@@ -127,18 +126,14 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
             .collect::<Vec<_>>(),
         vec!["Adventure".to_string(), "Mystery".to_string()],
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book_providers() {
-    let paths =
-        new_router_fixture("runtime-refresh-series-metadata-ignores-non-iso-language").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-ignores-non-iso-language").await;
 
     write_router_epub_with_package_document(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="bookid">
@@ -158,7 +153,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         </package>"##,
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid EPUB language series metadata fixture setup");
     sqlx::query(
@@ -181,17 +176,17 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
     .expect("series metadata should be reset before invalid language refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -209,7 +204,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         .await
         .expect("invalid language series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid language series metadata verification");
     let metadata = sqlx::query(
@@ -238,18 +233,14 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         "en-US",
         "non-ISO language tags should be ignored to match Kotlin BCP47TagValidator semantics",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_without_matching_provider()
  {
-    let paths =
-        new_router_fixture("runtime-refresh-series-metadata-ignores-generic-series-xml").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-ignores-generic-series-xml").await;
 
-    let series_sidecar_path = paths.config_dir.join("series/series-1.xml");
+    let series_sidecar_path = ctx.paths().config_dir.join("series/series-1.xml");
     if let Some(parent) = series_sidecar_path.parent() {
         std::fs::create_dir_all(parent).expect("series sidecar parent directory should be created");
     }
@@ -259,7 +250,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
     )
     .expect("series sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generic series sidecar fixture setup");
     sqlx::query(
@@ -291,17 +282,17 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
     .expect("series metadata should be reset before generic sidecar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -319,7 +310,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
         .await
         .expect("generic series sidecar refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generic series sidecar verification");
     let metadata = sqlx::query(
@@ -340,19 +331,15 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
         metadata.get::<String, _>("SUMMARY"),
         "Series Baseline Summary"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_and_collection_side_effects()
  {
-    let paths =
-        new_router_fixture("runtime-refresh-series-metadata-applies-comicinfo-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-applies-comicinfo-provider").await;
 
     write_router_epub_with_package_document_and_entries(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="bookid">
@@ -374,7 +361,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         )],
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo series metadata fixture setup");
     sqlx::query(
@@ -420,17 +407,17 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         .expect("existing collection memberships should be normalized before ComicInfo provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -448,7 +435,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         .await
         .expect("ComicInfo series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo series metadata verification");
     let metadata = sqlx::query(
@@ -522,17 +509,14 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         vec!["series-1".to_string()],
     );
     assert_eq!(existing_membership_count, 1_i64);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_providers() {
-    let paths = new_router_fixture("runtime-refresh-series-metadata-ignores-deleted-books").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-ignores-deleted-books").await;
 
     write_router_epub_with_package_document(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="bookid">
@@ -549,7 +533,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         </package>"##,
     );
     write_router_epub_with_package_document_and_entries(
-        &paths,
+        ctx.paths(),
         "books/book-deleted-series-provider.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="bookid">
@@ -570,7 +554,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         )],
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for deleted series-provider fixture setup");
     sqlx::query(
@@ -621,17 +605,17 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
     .expect("series metadata should be reset before deleted-book provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -649,7 +633,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         .await
         .expect("deleted-book series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for deleted-book provider verification");
     let metadata = sqlx::query(
@@ -686,16 +670,13 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         deleted_collection, 0,
         "deleted books must not create collection side effects during series metadata refresh",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
-    let paths = new_router_fixture("runtime-refresh-series-metadata-applies-mylar-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-applies-mylar-provider").await;
 
-    let series_json_path = paths.config_dir.join("series/series-1/series.json");
+    let series_json_path = ctx.paths().config_dir.join("series/series-1/series.json");
     if let Some(parent) = series_json_path.parent() {
         std::fs::create_dir_all(parent)
             .expect("mylar series sidecar parent directory should exist");
@@ -724,7 +705,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     )
     .expect("mylar series sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Mylar series metadata fixture setup");
     sqlx::query(
@@ -748,17 +729,17 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     .expect("series metadata should be reset before Mylar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -776,7 +757,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
         .await
         .expect("Mylar series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Mylar series metadata verification");
     let metadata = sqlx::query(
@@ -798,17 +779,13 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
         metadata.get::<Option<i64>, _>("TOTAL_BOOK_COUNT"),
         Some(13_i64)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_gate_is_disabled() {
-    let paths =
-        new_router_fixture("runtime-refresh-series-metadata-ignores-mylar-when-disabled").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-ignores-mylar-when-disabled").await;
 
-    let series_json_path = paths.config_dir.join("series/series-1/series.json");
+    let series_json_path = ctx.paths().config_dir.join("series/series-1/series.json");
     if let Some(parent) = series_json_path.parent() {
         std::fs::create_dir_all(parent)
             .expect("mylar series sidecar parent directory should exist");
@@ -837,7 +814,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     )
     .expect("disabled Mylar series sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for disabled Mylar fixture setup");
     sqlx::query(
@@ -863,17 +840,17 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     .expect("series metadata should be reset before disabled Mylar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -891,7 +868,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
         .await
         .expect("disabled Mylar series metadata refresh task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for disabled Mylar verification");
     let metadata = sqlx::query(
@@ -922,6 +899,4 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
         metadata.get::<Option<i64>, _>("TOTAL_BOOK_COUNT"),
         Some(5_i64)
     );
-
-    cleanup_router_fixture(paths);
 }

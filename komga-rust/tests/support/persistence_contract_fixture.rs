@@ -9,6 +9,7 @@ use komga_infrastructure::sqlite::{
     connect_shared_pool, connect_test_pool, evict_shared_pools_for_paths,
 };
 
+#[derive(Clone)]
 pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,
     pub main_db: PathBuf,

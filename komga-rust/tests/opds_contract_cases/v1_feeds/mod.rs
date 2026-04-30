@@ -23,13 +23,12 @@ mod collection_readlist_details;
 
 #[tokio::test]
 async fn router_opds_v1_publishers_returns_atom_feed() {
-    let paths = new_router_fixture("router-opds-v1-publishers-feed").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-publishers-feed").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -48,18 +47,15 @@ async fn router_opds_v1_publishers_returns_atom_feed() {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     assert!(content_type.contains("application/atom+xml"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and_uses_persisted_entry_updated()
  {
-    let paths = new_router_fixture("router-opds-v1-readlists-visible-order-updated").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlists-visible-order-updated").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "router-contract-library-123",
@@ -67,7 +63,7 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 readlists db should open");
     sqlx::query(
@@ -108,15 +104,13 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
         .expect("out-of-scope readlist book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "router-contract-library-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "router-contract-library-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -146,17 +140,14 @@ async fn router_opds_v1_readlists_filters_out_of_scope_entries_sorts_by_name_and
         alpha_pos < default_pos,
         "readlists list must preserve Kotlin name ordering, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_and_uses_persisted_entry_updated()
  {
-    let paths = new_router_fixture("router-opds-v1-collections-visible-order-updated").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collections-visible-order-updated").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "router-contract-library-123",
@@ -164,7 +155,7 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collections db should open");
     sqlx::query(
@@ -201,7 +192,7 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
     sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
         .bind("library-2")
         .bind("Library 2")
-        .bind(paths.config_dir.to_string_lossy().to_string())
+        .bind(ctx.paths().config_dir.to_string_lossy().to_string())
         .execute(&pool)
         .await
         .expect("library-2 should be inserted for out-of-scope collection test");
@@ -227,15 +218,13 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
     .expect("out-of-scope collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "router-contract-library-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "router-contract-library-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -268,16 +257,13 @@ async fn router_opds_v1_collections_filters_out_of_scope_entries_sorts_by_name_a
         alpha_pos < default_pos,
         "collections list must preserve Kotlin name ordering, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collections_keeps_empty_collection_for_all_library_user() {
-    let paths = new_router_fixture("router-opds-v1-collections-empty-visible").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collections-empty-visible").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collections empty-visible db should open");
     sqlx::query(
@@ -293,10 +279,11 @@ async fn router_opds_v1_collections_keeps_empty_collection_for_all_library_user(
     .expect("empty collection should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -315,16 +302,13 @@ async fn router_opds_v1_collections_keeps_empty_collection_for_all_library_user(
         "all-libraries OPDS collections list should keep empty collections like Kotlin, body={body}"
     );
     assert!(body.contains("/opds/v1.2/collections/collection-empty"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collections_formats_sqlite_naive_updated_like_kotlin() {
-    let paths = new_router_fixture("router-opds-v1-collections-naive-updated").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collections-naive-updated").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collections naive-updated db should open");
     sqlx::query(
@@ -351,10 +335,11 @@ async fn router_opds_v1_collections_formats_sqlite_naive_updated_like_kotlin() {
         .format(&Rfc3339)
         .expect("expected OPDS updated timestamp should format");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -377,16 +362,13 @@ async fn router_opds_v1_collections_formats_sqlite_naive_updated_like_kotlin() {
         ),
         "OPDS v1 collections should format SQLite naive updated like Kotlin, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collections_preserves_unicode_collation_order() {
-    let paths = new_router_fixture("router-opds-v1-collections-unicode-order").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collections-unicode-order").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collections unicode-order db should open");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
@@ -431,10 +413,11 @@ async fn router_opds_v1_collections_preserves_unicode_collation_order() {
     .expect("zulu collection series should insert for Unicode ordering test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -461,14 +444,11 @@ async fn router_opds_v1_collections_preserves_unicode_collation_order() {
         alpha_pos < eclair_pos && eclair_pos < zulu_pos,
         "OPDS v1 collections should keep Kotlin Unicode collation order, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
-    let paths = new_router_fixture("router-opds-v1-collections-tertiary-case-order").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collections-tertiary-case-order").await;
 
     let collator = kotlin_unicode_3_collator();
     let mut names = [
@@ -484,7 +464,7 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
         ("collection-b", names[0].clone()),
     ];
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collections tertiary-case-order db should open");
     sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
@@ -529,10 +509,11 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
     .expect("third collection series should insert for tertiary case-order test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -564,22 +545,22 @@ async fn router_opds_v1_collections_preserves_kotlin_tertiary_case_order() {
             "OPDS v1 collections should keep Kotlin tertiary case order, body={body}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_library_detail_orders_series_by_title_sort() {
-    let paths = new_router_fixture("router-opds-v1-library-detail-title-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
-    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Alpha Sort").await;
-    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Zeta Sort").await;
+    let ctx = TestFixture::new("router-opds-v1-library-detail-title-sort").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(ctx.paths(), "series-1", "Zeta Display", "Alpha Sort")
+        .await;
+    update_router_series_metadata_titles(ctx.paths(), "series-2", "Alpha Display", "Zeta Sort")
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -603,18 +584,15 @@ async fn router_opds_v1_library_detail_orders_series_by_title_sort() {
         series_1_pos < series_2_pos,
         "OPDS v1 library detail should order by Kotlin titleSort semantics, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_library_detail_hides_age_restricted_series() {
-    let paths = new_router_fixture("router-opds-v1-library-detail-age-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-0", "Visible Series", "library-1").await;
-    update_router_series_age_rating(&paths, "series-0", 0).await;
+    let ctx = TestFixture::new("router-opds-v1-library-detail-age-restricted").await;
+    seed_router_custom_series(ctx.paths(), "series-0", "Visible Series", "library-1").await;
+    update_router_series_age_rating(ctx.paths(), "series-0", 0).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -622,15 +600,13 @@ async fn router_opds_v1_library_detail_hides_age_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -646,26 +622,34 @@ async fn router_opds_v1_library_detail_hides_age_restricted_series() {
     let body = response_text(response).await;
     assert!(!body.contains("/opds/v1.2/series/series-1"));
     assert!(body.contains("/opds/v1.2/series/series-0"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_library_detail_paginates_after_restrictions_filtering() {
-    let paths = new_router_fixture("router-opds-v1-library-detail-filtered-pagination").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-0", "Visible Series", "library-1").await;
-    seed_router_custom_series(&paths, "series-2", "Restricted Series 2", "library-1").await;
-    update_router_series_metadata_titles(&paths, "series-2", "Restricted Series 2", "Alpha Sort")
+    let ctx = TestFixture::new("router-opds-v1-library-detail-filtered-pagination").await;
+    seed_router_custom_series(ctx.paths(), "series-0", "Visible Series", "library-1").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Restricted Series 2", "library-1").await;
+    update_router_series_metadata_titles(
+        ctx.paths(),
+        "series-2",
+        "Restricted Series 2",
+        "Alpha Sort",
+    )
+    .await;
+    update_router_series_metadata_titles(
+        ctx.paths(),
+        "series-1",
+        "Restricted Series 1",
+        "Beta Sort",
+    )
+    .await;
+    update_router_series_metadata_titles(ctx.paths(), "series-0", "Visible Series", "Gamma Sort")
         .await;
-    update_router_series_metadata_titles(&paths, "series-1", "Restricted Series 1", "Beta Sort")
-        .await;
-    update_router_series_metadata_titles(&paths, "series-0", "Visible Series", "Gamma Sort").await;
-    update_router_series_age_rating(&paths, "series-2", 18).await;
-    update_router_series_age_rating(&paths, "series-1", 18).await;
-    update_router_series_age_rating(&paths, "series-0", 0).await;
+    update_router_series_age_rating(ctx.paths(), "series-2", 18).await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 18).await;
+    update_router_series_age_rating(ctx.paths(), "series-0", 0).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -673,15 +657,13 @@ async fn router_opds_v1_library_detail_paginates_after_restrictions_filtering() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -702,22 +684,20 @@ async fn router_opds_v1_library_detail_paginates_after_restrictions_filtering() 
         !body.contains("rel=\"next\""),
         "OPDS v1 library detail must paginate after restrictions filtering, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_publishers_preserves_unicode_collation_order() {
-    let paths = new_router_fixture("router-opds-v1-publishers-unicode-order").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_publisher(&paths, "series-1", "Zulu House").await;
-    seed_router_custom_series(&paths, "series-ang", "Series Å", "library-1").await;
-    update_router_series_publisher(&paths, "series-ang", "Ångström Press").await;
+    let ctx = TestFixture::new("router-opds-v1-publishers-unicode-order").await;
+    update_router_series_publisher(ctx.paths(), "series-1", "Zulu House").await;
+    seed_router_custom_series(ctx.paths(), "series-ang", "Series Å", "library-1").await;
+    update_router_series_publisher(ctx.paths(), "series-ang", "Ångström Press").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -741,6 +721,4 @@ async fn router_opds_v1_publishers_preserves_unicode_collation_order() {
         angstrom_pos < zulu_pos,
         "OPDS v1 publishers should keep Kotlin Unicode collation order, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }

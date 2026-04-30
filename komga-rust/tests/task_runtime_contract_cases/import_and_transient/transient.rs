@@ -2,8 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload() {
-    let paths = new_router_fixture("router-transient-books-scan-analyze").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-scan-analyze").await;
 
     let transient_dir = unique_transient_dir("scan-analyze");
     std::fs::create_dir_all(&transient_dir).expect("transient import directory should be created");
@@ -12,8 +11,8 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
     std::fs::write(&candidate_file, candidate_bytes)
         .expect("transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -127,14 +126,12 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
     let invalid_page_payload = response_json(invalid_page_response).await;
     assert_json_error(&invalid_page_payload, "Page number does not exist");
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_books_scan_returns_kotlin_style_tsid_ids() {
-    let paths = new_router_fixture("router-transient-books-tsid-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-tsid-id").await;
 
     let transient_dir = unique_transient_dir("tsid-id");
     std::fs::create_dir_all(&transient_dir).expect("tsid transient directory should be created");
@@ -142,8 +139,8 @@ async fn router_transient_books_scan_returns_kotlin_style_tsid_ids() {
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("tsid transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -172,14 +169,12 @@ async fn router_transient_books_scan_returns_kotlin_style_tsid_ids() {
         "expected runtime to stop exposing path-hash-prefixed transient ids: {transient_id}"
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_books_scan_skips_hidden_files_and_directories_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-skip-hidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-skip-hidden").await;
 
     let transient_dir = unique_transient_dir("skip-hidden");
     std::fs::create_dir_all(&transient_dir)
@@ -193,8 +188,8 @@ async fn router_transient_books_scan_skips_hidden_files_and_directories_like_kot
     std::fs::write(hidden_dir.join("nested.jpg"), b"nested-image-bytes")
         .expect("nested hidden transient candidate should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .oneshot(
@@ -224,14 +219,12 @@ async fn router_transient_books_scan_skips_hidden_files_and_directories_like_kot
         Some(&Value::String("visible".to_string()))
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_books_rescan_generates_a_new_id_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-rescan-new-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-rescan-new-id").await;
 
     let transient_dir = unique_transient_dir("rescan-new-id");
     std::fs::create_dir_all(&transient_dir).expect("rescan transient directory should be created");
@@ -239,8 +232,8 @@ async fn router_transient_books_rescan_generates_a_new_id_like_kotlin() {
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("rescan transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let first_scan_response = app
         .clone()
@@ -304,17 +297,15 @@ async fn router_transient_books_rescan_generates_a_new_id_like_kotlin() {
         "expected rescan to return a fresh transient cache entry instead of reusing analyzed state"
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_not_found_for_missing_id_like_kotlin() {
-    let paths = new_router_fixture("router-transient-page-missing-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-page-missing-id").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -329,15 +320,12 @@ async fn router_transient_book_page_returns_not_found_for_missing_id_like_kotlin
         .expect("missing-id transient page request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_not_found_with_message_when_media_not_ready_like_kotlin()
  {
-    let paths = new_router_fixture("router-transient-page-not-ready").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-page-not-ready").await;
 
     let transient_dir = unique_transient_dir("page-not-ready");
     std::fs::create_dir_all(&transient_dir).expect("not-ready transient directory should exist");
@@ -345,8 +333,8 @@ async fn router_transient_book_page_returns_not_found_with_message_when_media_no
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("not-ready transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -382,15 +370,13 @@ async fn router_transient_book_page_returns_not_found_with_message_when_media_no
     let payload = response_json(response).await;
     assert_json_error(&payload, "Book analysis failed");
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_not_found_with_message_when_file_is_missing_like_kotlin()
  {
-    let paths = new_router_fixture("router-transient-page-file-missing").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-page-file-missing").await;
 
     let transient_dir = unique_transient_dir("page-file-missing");
     std::fs::create_dir_all(&transient_dir).expect("file-missing transient directory should exist");
@@ -398,8 +384,8 @@ async fn router_transient_book_page_returns_not_found_with_message_when_file_is_
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("file-missing transient candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -452,22 +438,20 @@ async fn router_transient_book_page_returns_not_found_with_message_when_file_is_
     let payload = response_json(response).await;
     assert_json_error(&payload, "File not found, it may have moved");
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_rendered_jpeg_for_pdf_like_kotlin() {
-    let paths = new_router_fixture("router-transient-page-pdf").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-page-pdf").await;
 
     let transient_dir = unique_transient_dir("page-pdf");
     std::fs::create_dir_all(&transient_dir).expect("pdf transient directory should exist");
     let candidate_file = transient_dir.join("candidate.pdf");
     write_single_page_pdf_fixture(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -529,17 +513,15 @@ async fn router_transient_book_page_returns_rendered_jpeg_for_pdf_like_kotlin() 
         "expected rendered jpeg bytes for transient pdf page"
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_returns_not_found_for_missing_id_like_kotlin() {
-    let paths = new_router_fixture("router-transient-book-analyze-missing-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-book-analyze-missing-id").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -554,14 +536,11 @@ async fn router_transient_book_analyze_returns_not_found_for_missing_id_like_kot
         .expect("missing-id transient analyze request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_returns_error_dto_when_file_is_missing_like_kotlin() {
-    let paths = new_router_fixture("router-transient-book-analyze-missing-file").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-book-analyze-missing-file").await;
 
     let transient_dir = unique_transient_dir("analyze-missing-file");
     std::fs::create_dir_all(&transient_dir)
@@ -570,8 +549,8 @@ async fn router_transient_book_analyze_returns_error_dto_when_file_is_missing_li
     std::fs::write(&candidate_file, b"transient-image-bytes")
         .expect("missing-file analyze candidate file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -622,14 +601,12 @@ async fn router_transient_book_analyze_returns_error_dto_when_file_is_missing_li
         Some(&Value::String("ERR_1018".to_string()))
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_returns_error_dto_for_broken_epub_like_kotlin() {
-    let paths = new_router_fixture("router-transient-book-analyze-broken-epub").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-book-analyze-broken-epub").await;
 
     let transient_dir = unique_transient_dir("analyze-broken-epub");
     std::fs::create_dir_all(&transient_dir)
@@ -637,8 +614,8 @@ async fn router_transient_book_analyze_returns_error_dto_for_broken_epub_like_ko
     let candidate_file = transient_dir.join("Series 1 7.epub");
     write_zip_as_epub(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -689,14 +666,12 @@ async fn router_transient_book_analyze_returns_error_dto_for_broken_epub_like_ko
     assert_eq!(payload.get("seriesId"), Some(&Value::Null));
     assert_eq!(payload.get("number"), Some(&Value::Null));
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_uses_epub_series_metadata_but_not_epub_number_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-analyze-epub-non-divina").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-analyze-epub-non-divina").await;
 
     let transient_dir = unique_transient_dir("analyze-epub-non-divina");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
@@ -710,8 +685,8 @@ async fn router_transient_book_analyze_uses_epub_series_metadata_but_not_epub_nu
         )],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -781,14 +756,12 @@ async fn router_transient_book_analyze_uses_epub_series_metadata_but_not_epub_nu
         .expect("transient epub page request should complete");
     assert_eq!(page_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-analyze-epub-comicinfo-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-analyze-epub-comicinfo-provider").await;
 
     let transient_dir = unique_transient_dir("analyze-epub-comicinfo-provider");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
@@ -808,8 +781,8 @@ async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotli
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -851,15 +824,13 @@ async fn router_transient_book_analyze_uses_comicinfo_number_for_epub_like_kotli
     );
     assert_eq!(payload.get("number"), Some(&Value::from(8.0)));
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_divina_epub_like_kotlin()
  {
-    let paths = new_router_fixture("router-transient-books-page-epub-non-divina-oob").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-page-epub-non-divina-oob").await;
 
     let transient_dir = unique_transient_dir("page-epub-non-divina-oob");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
@@ -873,8 +844,8 @@ async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_di
         )],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -924,16 +895,14 @@ async fn router_transient_book_page_returns_bad_request_for_out_of_bounds_non_di
         "Page number does not exist",
     );
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_page_returns_internal_error_for_supported_non_divina_page_number_like_kotlin()
  {
-    let paths =
-        new_router_fixture("router-transient-books-page-epub-non-divina-supported-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("router-transient-books-page-epub-non-divina-supported-number").await;
 
     let transient_dir = unique_transient_dir("page-epub-non-divina-supported-number");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
@@ -950,8 +919,8 @@ async fn router_transient_book_page_returns_internal_error_for_supported_non_div
         &[("OEBPS/chapter.xhtml", chapter_html.as_bytes())],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -999,14 +968,12 @@ async fn router_transient_book_page_returns_internal_error_for_supported_non_div
         .expect("transient epub page request should complete");
     assert_eq!(page_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_uses_comicinfo_provider_metadata_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-analyze-comicinfo-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-analyze-comicinfo-provider").await;
 
     let transient_dir = unique_transient_dir("analyze-comicinfo-provider");
     std::fs::create_dir_all(&transient_dir).expect("transient cbz directory should be created");
@@ -1023,8 +990,8 @@ async fn router_transient_book_analyze_uses_comicinfo_provider_metadata_like_kot
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -1064,14 +1031,12 @@ async fn router_transient_book_analyze_uses_comicinfo_provider_metadata_like_kot
     );
     assert_eq!(payload.get("number"), Some(&Value::from(8.0)));
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_and_page_support_divina_compatible_epub_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-analyze-epub-divina").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-analyze-epub-divina").await;
 
     let transient_dir = unique_transient_dir("analyze-epub-divina");
     std::fs::create_dir_all(&transient_dir).expect("transient epub directory should be created");
@@ -1089,8 +1054,8 @@ async fn router_transient_book_analyze_and_page_support_divina_compatible_epub_l
         ],
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -1159,22 +1124,20 @@ async fn router_transient_book_analyze_and_page_support_divina_compatible_epub_l
         .expect("transient epub page response body should be readable");
     assert_eq!(response_bytes.as_ref(), page_bytes.as_slice());
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_book_analyze_returns_dynamic_pdf_page_payload_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-analyze-pdf-dynamic").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-analyze-pdf-dynamic").await;
 
     let transient_dir = unique_transient_dir("analyze-pdf-dynamic");
     std::fs::create_dir_all(&transient_dir).expect("pdf transient directory should exist");
     let candidate_file = transient_dir.join("candidate.pdf");
     write_single_page_pdf_fixture(&candidate_file);
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let scan_response = app
         .clone()
@@ -1223,20 +1186,18 @@ async fn router_transient_book_analyze_returns_dynamic_pdf_page_payload_like_kot
     assert_eq!(pages[0].get("width"), Some(&Value::from(3200)));
     assert_eq!(pages[0].get("height"), Some(&Value::from(4528)));
 
-    cleanup_router_fixture(paths);
     let _ = std::fs::remove_dir_all(&transient_dir);
 }
 
 #[tokio::test]
 async fn router_transient_books_rejects_paths_inside_existing_library_with_err_1017_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-library-contained").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-library-contained").await;
 
-    let contained_dir = paths.config_dir.join("transient-contained");
+    let contained_dir = ctx.paths().config_dir.join("transient-contained");
     std::fs::create_dir_all(&contained_dir).expect("contained transient directory should exist");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1259,14 +1220,11 @@ async fn router_transient_books_rejects_paths_inside_existing_library_with_err_1
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = response_json(response).await;
     assert_spring_bad_request(&payload, "ERR_1017", "/api/v1/transient-books");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_transient_books_does_not_rebase_relative_paths_to_config_dir_like_kotlin() {
-    let paths = new_router_fixture("router-transient-books-relative-path").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-transient-books-relative-path").await;
 
     let relative_name = format!(
         "transient-relative-{}",
@@ -1275,12 +1233,12 @@ async fn router_transient_books_does_not_rebase_relative_paths_to_config_dir_lik
             .expect("system time should be after unix epoch")
             .as_nanos()
     );
-    let config_scoped_dir = paths.config_dir.join(&relative_name);
+    let config_scoped_dir = ctx.paths().config_dir.join(&relative_name);
     std::fs::create_dir_all(&config_scoped_dir)
         .expect("config-scoped transient directory should exist");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1303,6 +1261,4 @@ async fn router_transient_books_does_not_rebase_relative_paths_to_config_dir_lik
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = response_json(response).await;
     assert_spring_bad_request(&payload, "ERR_1016", "/api/v1/transient-books");
-
-    cleanup_router_fixture(paths);
 }

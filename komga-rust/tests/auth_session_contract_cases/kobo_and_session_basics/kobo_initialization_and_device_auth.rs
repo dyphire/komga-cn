@@ -4,10 +4,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_kobo_initialization_returns_forbidden_for_session_user_without_kobo_sync_role() {
-    let paths = new_router_fixture("router-kobo-initialization-missing-kobo-sync-role").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-kobo-initialization-missing-kobo-sync-role").await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "member-no-kobo-sync",
         "member-no-kobo-sync@example.org",
         "member-no-kobo-sync-123",
@@ -15,10 +14,11 @@ async fn router_kobo_initialization_returns_forbidden_for_session_user_without_k
         &["USER", "PAGE_STREAMING"],
     )
     .await;
-    seed_kobo_sync_api_key(&paths, "membernokobosync", "member-no-kobo-sync").await;
+    seed_kobo_sync_api_key(ctx.paths(), "membernokobosync", "member-no-kobo-sync").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -31,20 +31,17 @@ async fn router_kobo_initialization_returns_forbidden_for_session_user_without_k
         .expect("kobo initialization request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_initialization_returns_unauthorized_for_invalid_path_token_even_with_kobo_sync_session()
  {
-    let paths = new_router_fixture("router-kobo-initialization-invalid-path-token").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-kobo-initialization-invalid-path-token").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -58,22 +55,19 @@ async fn router_kobo_initialization_returns_unauthorized_for_invalid_path_token_
         .expect("kobo invalid path token request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_initialization_returns_fixed_api_token_header_and_absolute_local_urls() {
-    let paths = new_router_fixture("router-kobo-initialization-api-token").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::new("router-kobo-initialization-api-token").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
 
-    let config = runtime_config_for_paths(&paths);
-    let expected_host = format!("http://127.0.0.1:{}", config.bind_address.port());
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let expected_host = format!("http://127.0.0.1:{}", ctx.config().bind_address.port());
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -131,21 +125,19 @@ async fn router_kobo_initialization_returns_fixed_api_token_header_and_absolute_
             "{expected_host}/kobo/any-token/v1/books/{{ImageId}}/thumbnail/{{Width}}/{{Height}}/{{Quality}}/{{IsGreyscale}}/image.jpg"
         )))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_initialization_uses_kobo_port_when_host_omits_port() {
-    let paths = new_router_fixture("router-kobo-initialization-kobo-port").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+    let ctx = TestFixture::new("router-kobo-initialization-kobo-port").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PORT", "8085").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -164,21 +156,19 @@ async fn router_kobo_initialization_uses_kobo_port_when_host_omits_port() {
         payload.pointer("/Resources/image_host"),
         Some(&Value::String("http://localhost:8085".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_initialization_prefers_forwarded_host_over_kobo_port() {
-    let paths = new_router_fixture("router-kobo-initialization-forwarded-host").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+    let ctx = TestFixture::new("router-kobo-initialization-forwarded-host").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PORT", "8085").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -199,8 +189,6 @@ async fn router_kobo_initialization_prefers_forwarded_host_over_kobo_port() {
         payload.pointer("/Resources/image_host"),
         Some(&Value::String("https://demo.komga.org".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -220,16 +208,15 @@ async fn router_kobo_initialization_uses_proxied_resources_and_overrides_local_u
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-initialization-proxy-success").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::new("router-kobo-initialization-proxy-success").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -264,7 +251,6 @@ async fn router_kobo_initialization_uses_proxied_resources_and_overrides_local_u
         Some(&Value::String("https://proxy.example/library".to_string()))
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -286,15 +272,15 @@ async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_p
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-initialization-proxy-fallback").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::new("router-kobo-initialization-proxy-fallback").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -316,7 +302,6 @@ async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_p
         ))
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -337,15 +322,15 @@ async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-initialization-proxy-unauthorized").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::new("router-kobo-initialization-proxy-unauthorized").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -360,7 +345,6 @@ async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -380,15 +364,15 @@ async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-auth-device-proxy-success").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::new("router-kobo-auth-device-proxy-success").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -420,7 +404,6 @@ async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
         ))
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -441,15 +424,15 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-auth-device-proxy-unauthorized").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::new("router-kobo-auth-device-proxy-unauthorized").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -496,7 +479,6 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
     assert_eq!(tracking.chars().nth(18), Some('-'));
     assert_eq!(tracking.chars().nth(23), Some('-'));
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -506,14 +488,14 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
 
 #[tokio::test]
 async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_is_disabled() {
-    let paths = new_router_fixture("router-kobo-auth-device-proxy-disabled").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::new("router-kobo-auth-device-proxy-disabled").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -536,6 +518,4 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_is_disab
         payload.get("UserKey"),
         Some(&Value::String("123".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }

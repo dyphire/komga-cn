@@ -1,22 +1,15 @@
 use super::*;
 
-async fn build_page_hash_delete_tasks_router(paths: &RuntimeDbPaths) -> axum::Router {
-    // These contracts assert queued TASK rows, so runtime workers must stay off or the
-    // background consumer can claim and delete the rows before the assertions inspect them.
-    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
-        paths,
-    ))
-    .await
-}
-
 #[tokio::test]
 async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_without_touching_media_rows()
  {
-    let paths = new_router_fixture("router-page-hash-delete-all-enqueue-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_known_page_hash_samples(&paths).await;
+    let ctx = TestFixture::builder("router-page-hash-delete-all-enqueue-only")
+        .without_runtime_workers()
+        .build()
+        .await;
+    seed_known_page_hash_samples(ctx.paths()).await;
 
-    let setup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let setup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-all setup");
     sqlx::query(
@@ -33,8 +26,8 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     .expect("second duplicate page row should be inserted");
     setup_pool.close().await;
 
-    let app = build_page_hash_delete_tasks_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -50,7 +43,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-all verification");
     let remaining_media_rows =
@@ -72,7 +65,7 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
     assert_eq!(remaining_media_rows, 3);
     assert_eq!(delete_count, 1);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for page hash delete-all verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -142,18 +135,18 @@ async fn router_post_page_hash_delete_all_enqueues_remove_hashed_pages_tasks_wit
             "uniqueId": "RemoveHashedPages_book-known-2"
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_post_page_hash_delete_all_accepts_missing_hash_without_enqueuing_tasks_like_kotlin()
 {
-    let paths = new_router_fixture("router-page-hash-delete-all-missing-hash").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-page-hash-delete-all-missing-hash")
+        .without_runtime_workers()
+        .build()
+        .await;
 
-    let app = build_page_hash_delete_tasks_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -169,7 +162,7 @@ async fn router_post_page_hash_delete_all_accepts_missing_hash_without_enqueuing
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing-hash delete-all verification");
     let queued_count = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
@@ -180,19 +173,19 @@ async fn router_post_page_hash_delete_all_accepts_missing_hash_without_enqueuing
     tasks_pool.close().await;
 
     assert_eq!(queued_count, 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_without_touching_media_rows_like_kotlin()
  {
-    let paths = new_router_fixture("router-page-hash-delete-match-enqueue-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_known_page_hash_samples(&paths).await;
+    let ctx = TestFixture::builder("router-page-hash-delete-match-enqueue-only")
+        .without_runtime_workers()
+        .build()
+        .await;
+    seed_known_page_hash_samples(ctx.paths()).await;
 
-    let app = build_page_hash_delete_tasks_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -216,7 +209,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for page hash delete-match verification");
     let remaining_media_rows =
@@ -238,7 +231,7 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
     assert_eq!(remaining_media_rows, 2);
     assert_eq!(delete_count, 1);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for page hash delete-match verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -274,18 +267,18 @@ async fn router_post_page_hash_delete_match_enqueues_remove_hashed_pages_task_wi
             "uniqueId": "RemoveHashedPages_book-known-1"
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enqueues_task_like_kotlin()
  {
-    let paths = new_router_fixture("router-page-hash-delete-match-missing-hash").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-page-hash-delete-match-missing-hash")
+        .without_runtime_workers()
+        .build()
+        .await;
 
-    let app = build_page_hash_delete_tasks_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -309,7 +302,7 @@ async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enque
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for missing-hash delete-match verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -330,6 +323,4 @@ async fn router_post_page_hash_delete_match_accepts_missing_hash_and_still_enque
     assert_eq!(payload["bookId"], json!("book-missing-hash"));
     assert_eq!(payload["pages"][0]["fileHash"], json!("missing-hash"));
     assert_eq!(payload["pages"][0]["pageNumber"], json!(1));
-
-    cleanup_router_fixture(paths);
 }

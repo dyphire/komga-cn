@@ -4,19 +4,16 @@ use komga_application::media_assets::{
 };
 use std::sync::{Arc, Mutex};
 
-async fn enqueue_books_import(paths: &RuntimeDbPaths, payload: Value, context: &str) {
+async fn enqueue_books_import(app: &Router, auth_token: &str, payload: Value, context: &str) {
     // These route contracts assert the queued TASK rows themselves, so they must not race
     // the background worker that would claim and delete import jobs during the same test.
-    let app =
-        build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/books/import")
-                .header("x-auth-token", &auth_token)
+                .header("x-auth-token", auth_token)
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(payload.to_string()))
                 .expect("books/import request should build"),
@@ -65,16 +62,20 @@ impl MediaImportPort for RecordingImportPort {
 
 #[tokio::test]
 async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
-    let paths = new_router_fixture("router-books-import-individual-tasks").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-books-import-individual-tasks")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let token = ctx.login_admin().await;
 
-    let source_a = paths.config_dir.join("incoming-a.cbz");
-    let source_b = paths.config_dir.join("incoming-b.cbz");
+    let source_a = ctx.paths().config_dir.join("incoming-a.cbz");
+    let source_b = ctx.paths().config_dir.join("incoming-b.cbz");
     std::fs::write(&source_a, b"import-fixture-a").expect("source_a should be writable");
     std::fs::write(&source_b, b"import-fixture-b").expect("source_b should be writable");
 
     enqueue_books_import(
-        &paths,
+        ctx.app(),
+        &token,
         json!({
             "copyMode": "COPY",
             "books": [
@@ -93,7 +94,7 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
     .await;
 
     let rows = load_import_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT SIMPLE_TYPE, GROUP_ID, PAYLOAD \
          FROM TASK \
          WHERE SIMPLE_TYPE = 'ImportBook' \
@@ -128,7 +129,8 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
     }
 
     enqueue_books_import(
-        &paths,
+        ctx.app(),
+        &token,
         json!({
             "copyMode": "HARDLINK",
             "books": [
@@ -150,7 +152,7 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
     .await;
 
     let rows = load_import_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT GROUP_ID, PAYLOAD \
          FROM TASK \
          WHERE SIMPLE_TYPE = 'ImportBook'",
@@ -203,17 +205,19 @@ async fn router_books_import_enqueues_individual_tasks_in_tasks_db() {
         );
         assert!(payload.get("sourceFile").is_some());
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_import_accepts_missing_books_like_kotlin() {
-    let paths = new_router_fixture("router-books-import-missing-books").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-books-import-missing-books")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let token = ctx.login_admin().await;
 
     enqueue_books_import(
-        &paths,
+        ctx.app(),
+        &token,
         json!({
             "copyMode": "COPY"
         }),
@@ -222,26 +226,24 @@ async fn router_books_import_accepts_missing_books_like_kotlin() {
     .await;
 
     let rows = load_import_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT ID FROM TASK WHERE SIMPLE_TYPE = 'ImportBook'",
         "import task rows should be queryable after missing-books request",
     )
     .await;
 
     assert!(rows.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_and_source() {
-    let paths = new_router_fixture("router-books-import-deterministic-unique-id").await;
-    seed_router_contract_data(&paths).await;
-    let app =
-        build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-books-import-deterministic-unique-id")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let token = ctx.login_admin().await;
 
-    let source = paths.config_dir.join("incoming-dedup.cbz");
+    let source = ctx.paths().config_dir.join("incoming-dedup.cbz");
     std::fs::write(&source, b"import-dedup-fixture").expect("dedup source should be writable");
     let expected_id = format!("ImportBook_series-1_{}", source.to_string_lossy());
 
@@ -273,13 +275,14 @@ async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_
             }),
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/books/import")
-                    .header("x-auth-token", &auth_token)
+                    .header("x-auth-token", &token)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(payload.to_string()))
                     .expect("deterministic books/import request should build"),
@@ -291,7 +294,7 @@ async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_
     }
 
     let rows = load_import_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT ID, PAYLOAD \
          FROM TASK \
          WHERE SIMPLE_TYPE = 'ImportBook'",
@@ -320,14 +323,15 @@ async fn router_books_import_reuses_kotlin_style_unique_id_for_duplicate_series_
         payload.get("upgradeBookId").and_then(Value::as_str),
         Some("book-1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_scan_library() {
-    let paths = new_router_fixture("router-books-import-follow-up-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-books-import-follow-up-shape")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let token = ctx.login_admin().await;
 
     let source_root = std::env::temp_dir().join(format!(
         "komga-import-follow-up-{}-{}",
@@ -343,7 +347,8 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
         .expect("follow-up source should be writable");
 
     enqueue_books_import(
-        &paths,
+        ctx.app(),
+        &token,
         json!({
             "copyMode": "COPY",
             "books": [
@@ -358,7 +363,7 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     .await;
 
     let mut rows = load_import_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT PRIORITY, PAYLOAD \
          FROM TASK \
          WHERE SIMPLE_TYPE = 'ImportBook' \
@@ -412,5 +417,4 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
 
     let _ = std::fs::remove_file(&source);
     let _ = std::fs::remove_dir_all(&source_root);
-    cleanup_router_fixture(paths);
 }

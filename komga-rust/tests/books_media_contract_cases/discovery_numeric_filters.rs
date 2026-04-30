@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-number-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-number-sort").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let number_sort_is_match = app
+    let number_sort_is_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -33,7 +32,8 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort is match payload should expose content array");
     assert_eq!(number_sort_is_match_content.len(), 1);
 
-    let number_sort_is_miss = app
+    let number_sort_is_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -58,7 +58,8 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort is miss payload should expose content array");
     assert_eq!(number_sort_is_miss_content.len(), 0);
 
-    let number_sort_is_not_match = app
+    let number_sort_is_not_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -83,7 +84,8 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort isNot match payload should expose content array");
     assert_eq!(number_sort_is_not_match_content.len(), 1);
 
-    let number_sort_is_not_miss = app
+    let number_sort_is_not_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -108,8 +110,7 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort isNot miss payload should expose content array");
     assert_eq!(number_sort_is_not_miss_content.len(), 0);
 
-    let number_sort_gt_match = app
-        .clone()
+    let number_sort_gt_match = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -133,8 +134,7 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort greaterThan match payload should expose content array");
     assert_eq!(number_sort_gt_match_content.len(), 1);
 
-    let number_sort_gt_miss = app
-        .clone()
+    let number_sort_gt_miss = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -158,8 +158,7 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort greaterThan miss payload should expose content array");
     assert_eq!(number_sort_gt_miss_content.len(), 0);
 
-    let number_sort_lt_match = app
-        .clone()
+    let number_sort_lt_match = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -183,8 +182,7 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .expect("strict books number-sort lessThan match payload should expose content array");
     assert_eq!(number_sort_lt_match_content.len(), 1);
 
-    let number_sort_lt_miss = app
-        .clone()
+    let number_sort_lt_miss = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -207,6 +205,4 @@ async fn router_discovery_books_list_supports_number_sort_ops_in_runtime_owned_m
         .and_then(Value::as_array)
         .expect("strict books number-sort lessThan miss payload should expose content array");
     assert_eq!(number_sort_lt_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

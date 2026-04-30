@@ -2,14 +2,17 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlist_books_returns_paginated_content_and_library_filter() {
-    let paths = new_router_fixture("router-readlist-books-paging-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-books-paging-filter")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let paged_response = app
+    let paged_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -53,7 +56,8 @@ async fn router_readlist_books_returns_paginated_content_and_library_filter() {
         Some(3)
     );
 
-    let filtered_response = app
+    let filtered_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -88,18 +92,18 @@ async fn router_readlist_books_returns_paginated_content_and_library_filter() {
             .and_then(Value::as_bool),
         Some(true),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_detail_books_siblings_and_book_tags_accept_basic_auth_like_kotlin_clients()
 {
-    let paths = new_router_fixture("router-readlist-detail-books-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-detail-books-basic-auth-compat")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -110,7 +114,8 @@ async fn router_readlist_detail_books_siblings_and_book_tags_accept_basic_auth_l
         "/api/v1/readlists/readlist-1/books/book-2/next",
         "/api/v1/tags/book?readlist_id=readlist-1",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -126,34 +131,36 @@ async fn router_readlist_detail_books_siblings_and_book_tags_accept_basic_auth_l
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_returns_empty_page_when_library_id_filter_excludes_visible_books_like_kotlin()
  {
-    let paths = new_router_fixture("router-readlist-books-library-filter-empty-page").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-restricted-user",
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-books-library-filter-empty-page")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-restricted-user",
+                "library-restricted@example.org",
+                "router-contract-library-restricted-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "library-restricted@example.org",
+            "router-contract-library-restricted-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -183,20 +190,21 @@ async fn router_readlist_books_returns_empty_page_when_library_id_filter_exclude
             .and_then(Value::as_bool),
         Some(true),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_tags_supports_readlist_scope() {
-    let paths = new_router_fixture("router-book-tags-readlist-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-book-tags-readlist-scope")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -215,20 +223,21 @@ async fn router_book_tags_supports_readlist_scope() {
         payload,
         json!(["favorite-tag", "library-one-tag", "library-two-tag"])
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_tags_supports_repeated_library_id_query() {
-    let paths = new_router_fixture("router-book-tags-repeated-library-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-book-tags-repeated-library-id")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -247,21 +256,22 @@ async fn router_book_tags_supports_repeated_library_id_query() {
         payload,
         json!(["favorite-tag", "library-one-tag", "library-two-tag"])
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_and_siblings_follow_release_date_when_unordered() {
-    let paths = new_router_fixture("router-readlist-unordered-release-date").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    mark_readlist_unordered(&paths, "readlist-1").await;
+    let ctx = TestFixture::builder("router-readlist-unordered-release-date")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            mark_readlist_unordered(&paths, "readlist-1").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let books = app
+    let books = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -284,7 +294,8 @@ async fn router_readlist_books_and_siblings_follow_release_date_when_unordered()
         .collect::<Vec<_>>();
     assert_eq!(book_ids, vec!["book-1", "book-2", "book-3"]);
 
-    let previous = app
+    let previous = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -303,7 +314,9 @@ async fn router_readlist_books_and_siblings_follow_release_date_when_unordered()
         Some("book-1")
     );
 
-    let next = app
+    let next = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -320,116 +333,123 @@ async fn router_readlist_books_and_siblings_follow_release_date_when_unordered()
         next_payload.get("id").and_then(Value::as_str),
         Some("book-3")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_filters_content_restricted_books_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-books-content-restrictions").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        18,
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-books-content-restrictions")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                18,
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("readlist books content restriction db should open");
-    sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("series-2")
-    .bind(0_i64)
-    .bind("Series 2")
-    .bind("series/series-2")
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("restricted series row should be inserted");
-    sqlx::query(
-        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("ONGOING")
-    .bind("Series 2")
-    .bind("Series 2")
-    .bind("PubHouse")
-    .bind("EN")
-    .bind(21_i64)
-    .bind("series-2")
-    .execute(&pool)
-    .await
-    .expect("restricted series metadata row should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("book-2")
-    .bind(0_i64)
-    .bind("book-2.epub")
-    .bind("books/book-2.epub")
-    .bind("series-2")
-    .bind(2_048_i64)
-    .bind(2_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("restricted book row should be inserted");
-    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("application/epub+zip")
-        .bind("READY")
-        .bind("book-2")
-        .bind(10_i64)
-        .execute(&pool)
-        .await
-        .expect("restricted media row should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("2")
-    .bind(2.0_f64)
-    .bind("Book 2")
-    .bind("2024-01-16")
-    .bind("book-2")
-    .execute(&pool)
-    .await
-    .expect("restricted book metadata row should be inserted");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
-        .bind("readlist-2")
-        .bind("Filtered ReadList")
-        .bind(2_i64)
-        .bind(true)
-        .execute(&pool)
-        .await
-        .expect("filtered readlist row should be inserted");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-1")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("visible readlist book row should be inserted");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-2")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("restricted readlist book row should be inserted");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("readlist books content restriction db should open");
+            sqlx::query(
+                "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind("series-2")
+            .bind(0_i64)
+            .bind("Series 2")
+            .bind("series/series-2")
+            .bind("library-1")
+            .execute(&pool)
+            .await
+            .expect("restricted series row should be inserted");
+            sqlx::query(
+                "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("ONGOING")
+            .bind("Series 2")
+            .bind("Series 2")
+            .bind("PubHouse")
+            .bind("EN")
+            .bind(21_i64)
+            .bind("series-2")
+            .execute(&pool)
+            .await
+            .expect("restricted series metadata row should be inserted");
+            sqlx::query(
+                "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("book-2")
+            .bind(0_i64)
+            .bind("book-2.epub")
+            .bind("books/book-2.epub")
+            .bind("series-2")
+            .bind(2_048_i64)
+            .bind(2_i64)
+            .bind("library-1")
+            .execute(&pool)
+            .await
+            .expect("restricted book row should be inserted");
+            sqlx::query(
+                "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("application/epub+zip")
+            .bind("READY")
+            .bind("book-2")
+            .bind(10_i64)
+            .execute(&pool)
+            .await
+            .expect("restricted media row should be inserted");
+            sqlx::query(
+                "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind("2")
+            .bind(2.0_f64)
+            .bind("Book 2")
+            .bind("2024-01-16")
+            .bind("book-2")
+            .execute(&pool)
+            .await
+            .expect("restricted book metadata row should be inserted");
+            sqlx::query(
+                "INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("Filtered ReadList")
+            .bind(2_i64)
+            .bind(true)
+            .execute(&pool)
+            .await
+            .expect("filtered readlist row should be inserted");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("visible readlist book row should be inserted");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-2")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("restricted readlist book row should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -452,53 +472,57 @@ async fn router_readlist_books_filters_content_restricted_books_like_kotlin() {
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["book-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_returns_not_found_for_library_hidden_readlist_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-books-library-hidden-not-found").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-restricted-user",
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-books-library-hidden-not-found")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-restricted-user",
+                "library-restricted@example.org",
+                "router-contract-library-restricted-123",
+                &["library-1"],
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("readlist books library-hidden db should open");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
-        .bind("readlist-2")
-        .bind("Library Hidden ReadList")
-        .bind(1_i64)
-        .bind(true)
-        .execute(&pool)
-        .await
-        .expect("library-hidden readlist row should be inserted");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-3")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("library-hidden readlist book row should be inserted");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("readlist books library-hidden db should open");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
+                .bind("readlist-2")
+                .bind("Library Hidden ReadList")
+                .bind(1_i64)
+                .bind(true)
+                .execute(&pool)
+                .await
+                .expect("library-hidden readlist row should be inserted");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-3")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("library-hidden readlist book row should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "library-restricted@example.org",
+            "router-contract-library-restricted-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -511,20 +535,21 @@ async fn router_readlist_books_returns_not_found_for_library_hidden_readlist_lik
         .expect("library-hidden readlist books request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_author_filter_requires_matching_role() {
-    let paths = new_router_fixture("router-readlist-author-role-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-author-role-filter")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let matching = app
+    let matching = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -547,7 +572,9 @@ async fn router_readlist_books_author_filter_requires_matching_role() {
         .collect::<Vec<_>>();
     assert_eq!(matching_ids, vec!["book-1", "book-2"]);
 
-    let mismatching = app
+    let mismatching = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -568,21 +595,22 @@ async fn router_readlist_books_author_filter_requires_matching_role() {
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert!(mismatching_ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_author_filter_accepts_empty_role_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-author-empty-role-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_readlist_author_edge_case(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-author-empty-role-filter")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_readlist_author_edge_case(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -607,21 +635,22 @@ async fn router_readlist_books_author_filter_accepts_empty_role_like_kotlin() {
         .collect::<Vec<_>>();
 
     assert_eq!(ids, vec!["book-3"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_author_filter_ignores_bare_name_like_kotlin_http_query() {
-    let paths = new_router_fixture("router-readlist-author-bare-name-ignored").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_readlist_author_edge_case(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-author-bare-name-ignored")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_readlist_author_edge_case(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -645,21 +674,23 @@ async fn router_readlist_books_author_filter_ignores_bare_name_like_kotlin_http_
         .collect::<Vec<_>>();
 
     assert_eq!(ids, vec!["book-1", "book-2", "book-3"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_books_preserves_blank_and_comma_author_roles() {
-    let paths = new_router_fixture("router-readlist-author-payload-fidelity").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_readlist_author_edge_case(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-author-payload-fidelity")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_readlist_author_edge_case(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -690,20 +721,21 @@ async fn router_readlist_books_preserves_blank_and_comma_author_roles() {
         author.get("name").and_then(Value::as_str) == Some("Casey Role")
             && author.get("role").and_then(Value::as_str) == Some("CoWriter")
     }));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_book_siblings_follow_readlist_order() {
-    let paths = new_router_fixture("router-readlist-book-siblings").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-book-siblings")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let previous = app
+    let previous = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -722,7 +754,8 @@ async fn router_readlist_book_siblings_follow_readlist_order() {
         Some("book-1")
     );
 
-    let next = app
+    let next = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -741,7 +774,9 @@ async fn router_readlist_book_siblings_follow_readlist_order() {
         Some("book-3")
     );
 
-    let missing = app
+    let missing = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -753,6 +788,4 @@ async fn router_readlist_book_siblings_follow_readlist_order() {
         .await
         .expect("readlist missing previous request should complete");
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }

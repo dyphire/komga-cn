@@ -5,28 +5,23 @@ use komga_infrastructure::sqlite::{
 use sqlx::Row;
 use std::path::Path;
 
-mod support {
-    pub mod persistence_contract_fixture;
-}
-
+mod support;
+use support::fixture::TestDbFixture;
 use support::persistence_contract_fixture;
 
 #[tokio::test]
 async fn bootstrap_fresh_install() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-fresh-install")
-        .expect("fresh install db paths should be created");
-    let oracle_paths =
-        persistence_contract_fixture::new_runtime_db_paths("runtime-schema-fresh-install-oracle")
-            .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-fresh-install");
+    let oracle = TestDbFixture::new("runtime-schema-fresh-install-oracle").await;
 
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("fresh main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("fresh install main db should be accepted");
 
-    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&ctx.paths().tasks_db, 1)
         .await
         .expect("fresh tasks sqlite db should open");
     setup::bootstrap_tasks_pool(&tasks_pool)
@@ -34,27 +29,20 @@ async fn bootstrap_fresh_install() {
         .expect("fresh install tasks db should be bootstrapped");
 
     assert!(
-        paths.main_db.exists(),
+        ctx.paths().main_db.exists(),
         "fresh install bootstrap should create Kotlin-compatible main sqlite file at {}",
-        paths.main_db.display(),
+        ctx.paths().main_db.display(),
     );
     assert!(
-        paths.tasks_db.exists(),
+        ctx.paths().tasks_db.exists(),
         "fresh install bootstrap should create Kotlin-compatible tasks sqlite file at {}",
-        paths.tasks_db.display(),
+        ctx.paths().tasks_db.display(),
     );
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-    persistence_contract_fixture::seed_tasks_db_from_flyway(&oracle_paths.tasks_db)
-        .await
-        .expect("tasks db flyway oracle should be created");
-
-    let fresh_main_inventory = comparable_schema_inventory(&paths.main_db)
+    let fresh_main_inventory = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("fresh main db schema inventory should load");
-    let oracle_main_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle_main_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
     assert_eq!(
@@ -62,10 +50,10 @@ async fn bootstrap_fresh_install() {
         "fresh install main db must match Kotlin/Flyway sqlite schema inventory exactly",
     );
 
-    let fresh_tasks_inventory = comparable_schema_inventory(&paths.tasks_db)
+    let fresh_tasks_inventory = comparable_schema_inventory(&ctx.paths().tasks_db)
         .await
         .expect("fresh tasks db schema inventory should load");
-    let oracle_tasks_inventory = comparable_schema_inventory(&oracle_paths.tasks_db)
+    let oracle_tasks_inventory = comparable_schema_inventory(&oracle.paths().tasks_db)
         .await
         .expect("oracle tasks db schema inventory should load");
     assert_eq!(
@@ -75,46 +63,37 @@ async fn bootstrap_fresh_install() {
 
     main_pool.close().await;
     tasks_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn open_current_schema_db() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-current")
-        .expect("current schema db paths should be created");
-    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
-        .await
-        .expect("main db flyway fixture should be created");
-    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
-        .await
-        .expect("tasks db flyway fixture should be created");
+    let ctx = TestDbFixture::new("runtime-schema-current").await;
 
-    let main_before = comparable_schema_inventory(&paths.main_db)
+    let main_before = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("main db schema inventory should load before bootstrap");
-    let tasks_before = comparable_schema_inventory(&paths.tasks_db)
+    let tasks_before = comparable_schema_inventory(&ctx.paths().tasks_db)
         .await
         .expect("tasks db schema inventory should load before bootstrap");
 
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("current main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("current main sqlite db should pass schema gate without rewrite");
 
-    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&ctx.paths().tasks_db, 1)
         .await
         .expect("current tasks sqlite db should open");
     setup::bootstrap_tasks_pool(&tasks_pool)
         .await
         .expect("current tasks sqlite db should pass schema gate without rewrite");
 
-    let main_after = comparable_schema_inventory(&paths.main_db)
+    let main_after = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("main db schema inventory should load after bootstrap");
-    let tasks_after = comparable_schema_inventory(&paths.tasks_db)
+    let tasks_after = comparable_schema_inventory(&ctx.paths().tasks_db)
         .await
         .expect("tasks db schema inventory should load after bootstrap");
 
@@ -129,21 +108,14 @@ async fn open_current_schema_db() {
 
     main_pool.close().await;
     tasks_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
 }
 
 #[tokio::test]
 async fn repair_historyless_tasks_schema_to_latest_inventory() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-tasks",
-    )
-    .expect("historyless tasks db paths should be created");
-    let oracle_paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-tasks-oracle",
-    )
-    .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-repair-historyless-tasks");
+    let oracle = TestDbFixture::new("runtime-schema-repair-historyless-tasks-oracle").await;
 
-    let tasks_pool = connect_test_pool(&paths.tasks_db, 1)
+    let tasks_pool = connect_test_pool(&ctx.paths().tasks_db, 1)
         .await
         .expect("historyless tasks sqlite db should open");
     sqlx::query(
@@ -167,14 +139,10 @@ async fn repair_historyless_tasks_schema_to_latest_inventory() {
         .await
         .expect("historyless tasks sqlite db should be repaired by rust runtime");
 
-    persistence_contract_fixture::seed_tasks_db_from_flyway(&oracle_paths.tasks_db)
-        .await
-        .expect("tasks db flyway oracle should be created");
-
-    let repaired_inventory = comparable_schema_inventory(&paths.tasks_db)
+    let repaired_inventory = comparable_schema_inventory(&ctx.paths().tasks_db)
         .await
         .expect("repaired tasks db schema inventory should load");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.tasks_db)
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().tasks_db)
         .await
         .expect("oracle tasks db schema inventory should load");
 
@@ -184,26 +152,15 @@ async fn repair_historyless_tasks_schema_to_latest_inventory() {
     );
 
     tasks_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn repair_historyless_main_schema_with_missing_index_to_latest_inventory() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-main-missing-index",
-    )
-    .expect("historyless main db paths should be created");
-    let oracle_paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-main-missing-index-oracle",
-    )
-    .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new("runtime-schema-repair-historyless-main-missing-index").await;
+    let oracle =
+        TestDbFixture::new("runtime-schema-repair-historyless-main-missing-index-oracle").await;
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
-        .await
-        .expect("historyless main sqlite db should be created from Rust-owned migrations");
-
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("historyless main sqlite db should open");
     sqlx::query("DROP INDEX IF EXISTS idx__series_metadata__title")
@@ -215,14 +172,10 @@ async fn repair_historyless_main_schema_with_missing_index_to_latest_inventory()
         .await
         .expect("historyless main sqlite db with missing index should be repaired by rust runtime");
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-
-    let repaired_inventory = comparable_schema_inventory(&paths.main_db)
+    let repaired_inventory = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("repaired main db schema inventory should load");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
 
@@ -232,26 +185,15 @@ async fn repair_historyless_main_schema_with_missing_index_to_latest_inventory()
     );
 
     main_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn repair_historyless_main_schema_with_missing_trigger_to_latest_inventory() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-main-missing-trigger",
-    )
-    .expect("historyless main db paths should be created");
-    let oracle_paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-repair-historyless-main-missing-trigger-oracle",
-    )
-    .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new("runtime-schema-repair-historyless-main-missing-trigger").await;
+    let oracle =
+        TestDbFixture::new("runtime-schema-repair-historyless-main-missing-trigger-oracle").await;
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
-        .await
-        .expect("historyless main sqlite db should be created from Rust-owned migrations");
-
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("historyless main sqlite db should open");
     sqlx::query("DROP TRIGGER IF EXISTS series_metadata__after_update")
@@ -263,14 +205,10 @@ async fn repair_historyless_main_schema_with_missing_trigger_to_latest_inventory
         "historyless main sqlite db with missing trigger should be repaired by rust runtime",
     );
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-
-    let repaired_inventory = comparable_schema_inventory(&paths.main_db)
+    let repaired_inventory = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("repaired main db schema inventory should load");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
 
@@ -280,16 +218,13 @@ async fn repair_historyless_main_schema_with_missing_trigger_to_latest_inventory
     );
 
     main_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn reject_outdated_schema() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-outdated")
-        .expect("outdated db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-outdated");
 
-    let pool = connect_test_pool(&paths.main_db, 1)
+    let pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("sqlite pool should open");
     let persistence = SqlitePersistenceContext::new(pool.clone());
@@ -317,19 +252,15 @@ async fn reject_outdated_schema() {
     );
 
     pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
 }
 
 #[tokio::test]
 async fn migrate_legacy_main_schema_to_latest_inventory() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-migrate-legacy")
-        .expect("legacy db paths should be created");
-    let oracle_paths =
-        persistence_contract_fixture::new_runtime_db_paths("runtime-schema-migrate-legacy-oracle")
-            .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-migrate-legacy");
+    let oracle = TestDbFixture::new("runtime-schema-migrate-legacy-oracle").await;
 
     apply_sql_file(
-        &paths.main_db,
+        &ctx.paths().main_db,
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(
                 "crates/infrastructure/sqlx-migrations/main/V20200706141854__initial_migration.sql",
@@ -338,25 +269,21 @@ async fn migrate_legacy_main_schema_to_latest_inventory() {
     )
     .await
     .expect("legacy main schema fixture should be created");
-    seed_flyway_history(&paths.main_db, &["20200706141854"])
+    seed_flyway_history(&ctx.paths().main_db, &["20200706141854"])
         .await
         .expect("legacy main db should carry flyway history");
 
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("legacy main sqlite db should be migrated by rust runtime");
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-
-    let migrated_inventory = comparable_schema_inventory(&paths.main_db)
+    let migrated_inventory = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("migrated main db schema inventory should load");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
 
@@ -366,23 +293,16 @@ async fn migrate_legacy_main_schema_to_latest_inventory() {
     );
 
     main_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-migrate-legacy-without-flyway-history",
-    )
-    .expect("legacy db paths should be created");
-    let oracle_paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-migrate-legacy-without-flyway-history-oracle",
-    )
-    .expect("oracle db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-migrate-legacy-without-flyway-history");
+    let oracle =
+        TestDbFixture::new("runtime-schema-migrate-legacy-without-flyway-history-oracle").await;
 
     apply_sql_file(
-        &paths.main_db,
+        &ctx.paths().main_db,
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(
                 "crates/infrastructure/sqlx-migrations/main/V20200706141854__initial_migration.sql",
@@ -392,21 +312,17 @@ async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory()
     .await
     .expect("legacy main schema fixture without flyway history should be created");
 
-    let main_pool = connect_test_pool(&paths.main_db, 1)
+    let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
     setup::bootstrap_pool(&main_pool)
         .await
         .expect("legacy main sqlite db without flyway history should be migrated by rust runtime");
 
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-
-    let migrated_inventory = comparable_schema_inventory(&paths.main_db)
+    let migrated_inventory = comparable_schema_inventory(&ctx.paths().main_db)
         .await
         .expect("migrated main db schema inventory should load");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
 
@@ -416,8 +332,6 @@ async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory()
     );
 
     main_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
@@ -430,30 +344,26 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
         20250108172343,
     ];
 
-    let oracle_paths = persistence_contract_fixture::new_runtime_db_paths(
-        "runtime-schema-migrate-historyless-prefixes-oracle",
-    )
-    .expect("oracle db paths should be created");
-    persistence_contract_fixture::seed_main_db_from_flyway(&oracle_paths.main_db)
-        .await
-        .expect("main db flyway oracle should be created");
-    let oracle_inventory = comparable_schema_inventory(&oracle_paths.main_db)
+    let oracle = TestDbFixture::new("runtime-schema-migrate-historyless-prefixes-oracle").await;
+    let oracle_inventory = comparable_schema_inventory(&oracle.paths().main_db)
         .await
         .expect("oracle main db schema inventory should load");
 
     for version in HISTORYLESS_SCHEMA_CHECKPOINTS {
-        let paths = persistence_contract_fixture::new_runtime_db_paths(
+        let ctx = TestDbFixture::new_raw(
             format!("runtime-schema-migrate-historyless-checkpoint-{version}").as_str(),
+        );
+
+        persistence_contract_fixture::seed_main_db_from_flyway_through(
+            &ctx.paths().main_db,
+            *version,
         )
-        .expect("historyless prefix db paths should be created");
+        .await
+        .unwrap_or_else(|error| {
+            panic!("historyless Kotlin prefix fixture {version} should be created: {error}")
+        });
 
-        persistence_contract_fixture::seed_main_db_from_flyway_through(&paths.main_db, *version)
-            .await
-            .unwrap_or_else(|error| {
-                panic!("historyless Kotlin prefix fixture {version} should be created: {error}")
-            });
-
-        let main_pool = connect_test_pool(&paths.main_db, 1)
+        let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
             .await
             .expect("historyless prefix main sqlite db should open");
         setup::bootstrap_pool(&main_pool)
@@ -464,7 +374,7 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
                 )
             });
 
-        let migrated_inventory = comparable_schema_inventory(&paths.main_db)
+        let migrated_inventory = comparable_schema_inventory(&ctx.paths().main_db)
             .await
             .unwrap_or_else(|error| {
                 panic!(
@@ -477,21 +387,17 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
         );
 
         main_pool.close().await;
-        persistence_contract_fixture::cleanup(paths);
     }
-
-    persistence_contract_fixture::cleanup(oracle_paths);
 }
 
 #[tokio::test]
 async fn sqlite_connect_layer_bootstraps_main_database_and_tasks_setup_bootstraps_tasks_database() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("runtime-schema-connect-layer")
-        .expect("connect-layer db paths should be created");
+    let ctx = TestDbFixture::new_raw("runtime-schema-connect-layer");
 
-    let main_context = connect_main_write_context(&paths.main_db)
+    let main_context = connect_main_write_context(&ctx.paths().main_db)
         .await
         .expect("main write context should bootstrap main sqlite schema");
-    let tasks_pool = connect_write_pool(&paths.tasks_db)
+    let tasks_pool = connect_write_pool(&ctx.paths().tasks_db)
         .await
         .expect("tasks sqlite db should open through the write pool");
     setup::bootstrap_tasks_pool(&tasks_pool)
@@ -548,7 +454,6 @@ async fn sqlite_connect_layer_bootstraps_main_database_and_tasks_setup_bootstrap
 
     main_context.pool().close().await;
     tasks_pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
 }
 
 async fn schema_inventory(

@@ -317,26 +317,21 @@ async fn books_ondeck_ids(app: &axum::Router, auth_token: &str, uri: &str) -> Ve
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_requires_auth() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-requires-auth").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-requires-auth").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = books_ondeck_response(&app, None, "/api/v1/books/ondeck").await;
+    let response = books_ondeck_response(&ctx.app().clone(), None, "/api/v1/books/ondeck").await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_returns_representative_book_detail_fields_and_kotlin_unpaged_shape()
  {
-    let paths = new_router_fixture("router-discovery-books-ondeck-full-payload").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-full-payload").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -344,11 +339,14 @@ async fn router_discovery_books_ondeck_returns_representative_book_detail_fields
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response =
-        books_ondeck_response(&app, Some(&auth_token), "/api/v1/books/ondeck?unpaged=true").await;
+    let response = books_ondeck_response(
+        &ctx.app().clone(),
+        Some(&auth_token),
+        "/api/v1/books/ondeck?unpaged=true",
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
@@ -382,18 +380,15 @@ async fn router_discovery_books_ondeck_returns_representative_book_detail_fields
     assert_eq!(payload.pointer("/pageable/paged"), Some(&json!(true)));
     assert_eq!(payload.pointer("/pageable/unpaged"), Some(&json!(false)));
     assert_eq!(payload.get("size"), Some(&json!(20)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-basic-auth-compat").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -401,8 +396,9 @@ async fn router_discovery_books_ondeck_accepts_basic_auth_like_kotlin_clients() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -422,21 +418,22 @@ async fn router_discovery_books_ondeck_accepts_basic_auth_like_kotlin_clients() 
         .expect("books/ondeck basic-auth request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-label-allow").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
-    insert_ondeck_book(&paths, "book-3", "series-1", "library-1", 3, "Book 3").await;
-    insert_ondeck_book(&paths, "book-4", "series-2", "library-1", 4, "Book 4").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
-    update_ondeck_series_book_count(&paths, "series-2", 2).await;
+    let ctx = TestFixture::builder("router-discovery-books-ondeck-label-allow")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
+    insert_ondeck_book(ctx.paths(), "book-3", "series-1", "library-1", 3, "Book 3").await;
+    insert_ondeck_book(ctx.paths(), "book-4", "series-2", "library-1", 4, "Book 4").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
+    update_ondeck_series_book_count(ctx.paths(), "series-2", 2).await;
     seed_ondeck_user(
-        &paths,
+        ctx.paths(),
         "label-allow-user",
         "label-allow@example.org",
         "router-contract-label-allow-123",
@@ -449,7 +446,7 @@ async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "label-allow-user",
         "series-1",
         "book-1",
@@ -457,7 +454,7 @@ async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "label-allow-user",
         "series-2",
         "book-2",
@@ -465,29 +462,26 @@ async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "label-allow@example.org",
-        "router-contract-label-allow-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("label-allow@example.org", "router-contract-label-allow-123")
+        .await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck").await;
+    let ids = books_ondeck_ids(&ctx.app().clone(), &auth_token, "/api/v1/books/ondeck").await;
     assert_eq!(ids, vec!["book-3"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_filters_to_requested_library_ids() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-library-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
-    insert_ondeck_book(&paths, "book-4", "series-3", "library-2", 4, "Book 4").await;
-    update_ondeck_series_book_count(&paths, "series-3", 2).await;
+    let ctx = TestFixture::builder("router-discovery-books-ondeck-library-filter")
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
+    insert_ondeck_book(ctx.paths(), "book-4", "series-3", "library-2", 4, "Book 4").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-3", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-3",
         "book-3",
@@ -495,28 +489,24 @@ async fn router_discovery_books_ondeck_filters_to_requested_library_ids() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let ids = books_ondeck_ids(
-        &app,
+        &ctx.app().clone(),
         &auth_token,
         "/api/v1/books/ondeck?library_id=library-1",
     )
     .await;
     assert!(ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_filters_to_authorized_library_intersection() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-authorized-library-filter").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-authorized-library-filter").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
-        &paths,
+        ctx.paths(),
         "library-restricted-user",
         "library-restricted@example.org",
         "router-contract-library-restricted-123",
@@ -529,7 +519,7 @@ async fn router_discovery_books_ondeck_filters_to_authorized_library_intersectio
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "library-restricted-user",
         "series-1",
         "book-1",
@@ -537,16 +527,15 @@ async fn router_discovery_books_ondeck_filters_to_authorized_library_intersectio
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "library-restricted@example.org",
+            "router-contract-library-restricted-123",
+        )
+        .await;
 
     let forbidden_ids = books_ondeck_ids(
-        &app,
+        &ctx.app().clone(),
         &auth_token,
         "/api/v1/books/ondeck?library_id=library-2",
     )
@@ -554,24 +543,21 @@ async fn router_discovery_books_ondeck_filters_to_authorized_library_intersectio
     assert!(forbidden_ids.is_empty());
 
     let allowed_ids = books_ondeck_ids(
-        &app,
+        &ctx.app().clone(),
         &auth_token,
         "/api/v1/books/ondeck?library_id=library-1",
     )
     .await;
     assert_eq!(allowed_ids, vec!["book-2"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_hides_age_restricted_series() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-age-restricted").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-age-restricted").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -579,7 +565,7 @@ async fn router_discovery_books_ondeck_hides_age_restricted_series() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "series-1",
         "book-1",
@@ -587,28 +573,21 @@ async fn router_discovery_books_ondeck_hides_age_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck").await;
+    let ids = books_ondeck_ids(&ctx.app().clone(), &auth_token, "/api/v1/books/ondeck").await;
     assert!(ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_hides_allow_only_age_mismatch_series() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-age-allow-only").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-age-allow-only").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
-        &paths,
+        ctx.paths(),
         "allow-only-user",
         "allow-only@example.org",
         "router-contract-allow-only-123",
@@ -621,7 +600,7 @@ async fn router_discovery_books_ondeck_hides_allow_only_age_mismatch_series() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "allow-only-user",
         "series-1",
         "book-1",
@@ -629,28 +608,21 @@ async fn router_discovery_books_ondeck_hides_allow_only_age_mismatch_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "allow-only@example.org",
-        "router-contract-allow-only-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("allow-only@example.org", "router-contract-allow-only-123")
+        .await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck").await;
+    let ids = books_ondeck_ids(&ctx.app().clone(), &auth_token, "/api/v1/books/ondeck").await;
     assert!(ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_hides_label_restricted_series() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-label-restricted").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-label-restricted").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
-        &paths,
+        ctx.paths(),
         "label-restricted-user",
         "label-restricted@example.org",
         "router-contract-label-restricted-123",
@@ -663,7 +635,7 @@ async fn router_discovery_books_ondeck_hides_label_restricted_series() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "label-restricted-user",
         "series-1",
         "book-1",
@@ -671,31 +643,31 @@ async fn router_discovery_books_ondeck_hides_label_restricted_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "label-restricted@example.org",
-        "router-contract-label-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "label-restricted@example.org",
+            "router-contract-label-restricted-123",
+        )
+        .await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck").await;
+    let ids = books_ondeck_ids(&ctx.app().clone(), &auth_token, "/api/v1/books/ondeck").await;
     assert!(ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_orders_by_most_recent_read_date_desc() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-most-recent-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
-    insert_ondeck_book(&paths, "book-4", "series-1", "library-1", 4, "Book 4").await;
-    insert_ondeck_book(&paths, "book-5", "series-2", "library-1", 5, "Book 5").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
-    update_ondeck_series_book_count(&paths, "series-2", 2).await;
+    let ctx = TestFixture::builder("router-discovery-books-ondeck-most-recent-order")
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
+    insert_ondeck_book(ctx.paths(), "book-4", "series-1", "library-1", 4, "Book 4").await;
+    insert_ondeck_book(ctx.paths(), "book-5", "series-2", "library-1", 5, "Book 5").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
+    update_ondeck_series_book_count(ctx.paths(), "series-2", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -703,7 +675,7 @@ async fn router_discovery_books_ondeck_orders_by_most_recent_read_date_desc() {
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-2",
         "book-2",
@@ -711,26 +683,31 @@ async fn router_discovery_books_ondeck_orders_by_most_recent_read_date_desc() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
+    let ids = books_ondeck_ids(
+        &ctx.app().clone(),
+        &auth_token,
+        "/api/v1/books/ondeck?page=0&size=20",
+    )
+    .await;
     assert_eq!(ids, vec!["book-5", "book-4"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_equal_read_dates_match_kotlin_sql_order() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-equal-read-date-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
-    insert_ondeck_book(&paths, "book-3", "series-1", "library-1", 3, "Book 3").await;
-    insert_ondeck_book(&paths, "book-4", "series-2", "library-1", 4, "Book 4").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
-    update_ondeck_series_book_count(&paths, "series-2", 2).await;
+    let ctx = TestFixture::builder("router-discovery-books-ondeck-equal-read-date-order")
+        .with_seed(|paths| async move {
+            seed_router_contract_nullable_samples(&paths).await;
+        })
+        .build()
+        .await;
+    insert_ondeck_book(ctx.paths(), "book-3", "series-1", "library-1", 3, "Book 3").await;
+    insert_ondeck_book(ctx.paths(), "book-4", "series-2", "library-1", 4, "Book 4").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
+    update_ondeck_series_book_count(ctx.paths(), "series-2", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -738,7 +715,7 @@ async fn router_discovery_books_ondeck_equal_read_dates_match_kotlin_sql_order()
     )
     .await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-2",
         "book-2",
@@ -746,26 +723,26 @@ async fn router_discovery_books_ondeck_equal_read_dates_match_kotlin_sql_order()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let route_ids =
-        books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
-    let kotlin_ids = kotlin_equivalent_ondeck_ids(&paths, "admin-user").await;
+    let route_ids = books_ondeck_ids(
+        &ctx.app().clone(),
+        &auth_token,
+        "/api/v1/books/ondeck?page=0&size=20",
+    )
+    .await;
+    let kotlin_ids = kotlin_equivalent_ondeck_ids(ctx.paths(), "admin-user").await;
     assert_eq!(route_ids, kotlin_ids);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_returns_first_unread_book_per_series() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-first-unread").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    insert_ondeck_book(&paths, "book-3", "series-1", "library-1", 3, "Book 3").await;
-    update_ondeck_series_book_count(&paths, "series-1", 3).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-first-unread").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    insert_ondeck_book(ctx.paths(), "book-3", "series-1", "library-1", 3, "Book 3").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 3).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -773,23 +750,24 @@ async fn router_discovery_books_ondeck_returns_first_unread_book_per_series() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
+    let ids = books_ondeck_ids(
+        &ctx.app().clone(),
+        &auth_token,
+        "/api/v1/books/ondeck?page=0&size=20",
+    )
+    .await;
     assert_eq!(ids, vec!["book-2"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() {
-    let paths = new_router_fixture("router-discovery-books-ondeck-in-progress-series").await;
-    seed_router_contract_data(&paths).await;
-    insert_ondeck_book(&paths, "book-2", "series-1", "library-1", 2, "Book 2").await;
-    update_ondeck_series_book_count(&paths, "series-1", 2).await;
+    let ctx = TestFixture::new("router-discovery-books-ondeck-in-progress-series").await;
+    insert_ondeck_book(ctx.paths(), "book-2", "series-1", "library-1", 2, "Book 2").await;
+    update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "series-1",
         "book-1",
@@ -797,7 +775,7 @@ async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() 
     )
     .await;
     insert_ondeck_read_progress(
-        &paths,
+        ctx.paths(),
         "admin-user",
         "book-2",
         3_i64,
@@ -806,7 +784,7 @@ async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() 
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("ondeck in-progress db should open");
     sqlx::query(
@@ -821,11 +799,13 @@ async fn router_discovery_books_ondeck_excludes_series_with_in_progress_books() 
     .expect("ondeck in-progress series counters should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let ids = books_ondeck_ids(&app, &auth_token, "/api/v1/books/ondeck?page=0&size=20").await;
+    let ids = books_ondeck_ids(
+        &ctx.app().clone(),
+        &auth_token,
+        "/api/v1/books/ondeck?page=0&size=20",
+    )
+    .await;
     assert!(ids.is_empty());
-
-    cleanup_router_fixture(paths);
 }

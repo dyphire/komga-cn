@@ -15,13 +15,9 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         .enable_all()
         .build()
         .expect("worker spawn lifecycle test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("worker-spawn-lifecycle").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
-    let config = runtime_config_for_paths(&paths);
-    let runtime = runtime.block_on(runtime_task_context(&paths));
+    let ctx = runtime.block_on(TestFixture::new("worker-spawn-lifecycle"));
+    let config = ctx.config().clone();
+    let runtime = runtime.block_on(runtime_task_context(ctx.paths()));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
@@ -76,8 +72,6 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         field_str(auth_shutdown, "worker_id"),
         Some("authentication_activity_cleanup")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
@@ -86,13 +80,9 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         .enable_all()
         .build()
         .expect("worker shutdown signal test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("worker-shutdown-signal").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
-    let config = runtime_config_for_paths(&paths);
-    let runtime = runtime.block_on(runtime_task_context(&paths));
+    let ctx = runtime.block_on(TestFixture::new("worker-shutdown-signal"));
+    let config = ctx.config().clone();
+    let runtime = runtime.block_on(runtime_task_context(ctx.paths()));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
@@ -162,8 +152,6 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         auth_shutdown_index < marker_index,
         "auth cleanup worker should stop before marker: {events:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
@@ -172,11 +160,10 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         .enable_all()
         .build()
         .expect("periodic scan worker test runtime should build");
-    let paths = executor.block_on(async {
-        let paths = new_router_fixture("worker-periodic-scan-lifecycle").await;
-        seed_router_contract_data(&paths).await;
+    let ctx = executor.block_on(TestFixture::new("worker-periodic-scan-lifecycle"));
 
-        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    executor.block_on(async {
+        let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("periodic scan worker db should open");
         sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID = ?")
@@ -186,10 +173,9 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
             .await
             .expect("periodic scan worker library interval should be updated");
         pool.close().await;
-        paths
     });
-    let config = runtime_config_for_paths(&paths);
-    let runtime = executor.block_on(runtime_task_context(&paths));
+    let config = ctx.config().clone();
+    let runtime = executor.block_on(runtime_task_context(ctx.paths()));
     let task_queue = Arc::new(Mutex::new(executor.block_on(
         TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
@@ -299,8 +285,6 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
             .is_some_and(|value| value.contains("unsupported library scan interval: FUTURE_VALUE")),
         "periodic scan failure should emit actionable worker-level error context: {failure:?}",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
@@ -309,17 +293,16 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         .enable_all()
         .build()
         .expect("periodic multi-library scan worker test runtime should build");
-    let paths = executor.block_on(async {
-        let paths = new_router_fixture("worker-periodic-scan-multi-library").await;
-        seed_router_contract_data(&paths).await;
+    let ctx = executor.block_on(TestFixture::new("worker-periodic-scan-multi-library"));
 
-        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    executor.block_on(async {
+        let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("periodic multi-library scan worker db should open");
         sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
             .bind("library-2")
             .bind("Library 2")
-            .bind(paths.config_dir.to_string_lossy().to_string())
+            .bind(ctx.paths().config_dir.to_string_lossy().to_string())
             .execute(&pool)
             .await
             .expect("periodic multi-library scan worker second library should be inserted");
@@ -331,10 +314,9 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
             .await
             .expect("periodic multi-library scan intervals should be updated");
         pool.close().await;
-        paths
     });
-    let config = runtime_config_for_paths(&paths);
-    let runtime = executor.block_on(runtime_task_context(&paths));
+    let config = ctx.config().clone();
+    let runtime = executor.block_on(runtime_task_context(ctx.paths()));
     let task_queue = Arc::new(Mutex::new(executor.block_on(
         TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
@@ -380,8 +362,6 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
     assert!(last_run.contains_key("library-1"));
     assert!(last_run.contains_key("library-2"));
     assert!(!last_run.contains_key("stale-library"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
@@ -390,13 +370,9 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         .enable_all()
         .build()
         .expect("background worker iteration test runtime should build");
-    let paths = executor.block_on(async {
-        let paths = new_router_fixture("worker-background-task-lifecycle").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
-    let config = runtime_config_for_paths(&paths);
-    let runtime = executor.block_on(runtime_task_context(&paths));
+    let ctx = executor.block_on(TestFixture::new("worker-background-task-lifecycle"));
+    let config = ctx.config().clone();
+    let runtime = executor.block_on(runtime_task_context(ctx.paths()));
 
     let idle_queue = Arc::new(Mutex::new(executor.block_on(
         TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
@@ -489,8 +465,6 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
             .is_some_and(|value| value.contains("unsupported runtime task type: UNSUPPORTED_TASK")),
         "background worker failure should retain task processing error: {failure:?}",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
@@ -499,13 +473,9 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
         .enable_all()
         .build()
         .expect("auth cleanup worker lifecycle test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("worker-auth-cleanup-lifecycle").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
-    let config = runtime.block_on(runtime_task_context(&paths));
-    let log_config = runtime_config_for_paths(&paths);
+    let ctx = runtime.block_on(TestFixture::new("worker-auth-cleanup-lifecycle"));
+    let config = runtime.block_on(runtime_task_context(ctx.paths()));
+    let log_config = ctx.config().clone();
 
     let complete_logs = capture_router_logs_async_result(&log_config, {
         let config = config.clone();
@@ -619,8 +589,6 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
             .is_some_and(|value| value.contains("failed to clean up authentication activity")),
         "auth cleanup failure should keep sqlite error context: {failure:?}",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 fn worker_event<'a>(

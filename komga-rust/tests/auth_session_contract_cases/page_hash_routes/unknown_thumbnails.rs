@@ -3,11 +3,10 @@ use super::*;
 #[tokio::test]
 async fn router_get_page_hash_unknown_thumbnail_returns_original_image_without_resize_like_kotlin()
 {
-    let paths = new_router_fixture("router-page-hash-unknown-thumbnail-original-image").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-page-hash-unknown-thumbnail-original-image").await;
     let expected = large_png_bytes(640, 320);
     seed_unknown_page_hash_source(
-        &paths,
+        ctx.paths(),
         "book-unknown-thumb-image",
         "unknown-thumb-image-hash",
         "images/unknown-thumb-image.png",
@@ -17,8 +16,8 @@ async fn router_get_page_hash_unknown_thumbnail_returns_original_image_without_r
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -44,23 +43,20 @@ async fn router_get_page_hash_unknown_thumbnail_returns_original_image_without_r
         .await
         .expect("unknown page hash thumbnail body should be readable");
     assert_eq!(body.as_ref(), expected.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_unknown_thumbnail_renders_pdf_page_without_resize_like_kotlin() {
-    let paths = new_router_fixture("router-page-hash-unknown-thumbnail-pdf-original").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-page-hash-unknown-thumbnail-pdf-original").await;
     seed_unknown_page_hash_pdf_match(
-        &paths,
+        ctx.paths(),
         "book-unknown-thumb-pdf-original",
         "unknown-thumb-pdf-original-hash",
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -88,20 +84,21 @@ async fn router_get_page_hash_unknown_thumbnail_renders_pdf_page_without_resize_
     let image = image::load_from_memory(&body)
         .expect("pdf unknown page hash thumbnail should decode as image");
     assert!(image.width().max(image.height()) > 300);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_unknown_thumbnail_honors_resize_and_renders_jpeg_for_pdf_like_kotlin()
 {
-    let paths = new_router_fixture("router-page-hash-unknown-thumbnail-pdf-resize").await;
-    seed_router_contract_data(&paths).await;
-    seed_unknown_page_hash_pdf_match(&paths, "book-unknown-thumb-pdf", "unknown-thumb-pdf-hash")
-        .await;
+    let ctx = TestFixture::new("router-page-hash-unknown-thumbnail-pdf-resize").await;
+    seed_unknown_page_hash_pdf_match(
+        ctx.paths(),
+        "book-unknown-thumb-pdf",
+        "unknown-thumb-pdf-hash",
+    )
+    .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -129,18 +126,15 @@ async fn router_get_page_hash_unknown_thumbnail_honors_resize_and_renders_jpeg_f
     let image = image::load_from_memory(&body)
         .expect("resized unknown page hash pdf thumbnail should decode as image");
     assert_eq!(image.width().max(image.height()), 300);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_match_is_missing_like_kotlin()
  {
-    let paths = new_router_fixture("router-page-hash-unknown-thumbnail-missing-match").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-page-hash-unknown-thumbnail-missing-match").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -155,17 +149,14 @@ async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_match_is_
         .expect("missing-match unknown page hash thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_page_source_is_missing_like_kotlin()
  {
-    let paths = new_router_fixture("router-page-hash-unknown-thumbnail-missing-source").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-page-hash-unknown-thumbnail-missing-source").await;
     let source_path = seed_unknown_page_hash_source(
-        &paths,
+        ctx.paths(),
         "book-missing-source",
         "missing-source-hash",
         "images/missing-source.png",
@@ -176,8 +167,8 @@ async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_page_sour
     .await;
     std::fs::remove_file(&source_path).expect("missing-source fixture should be removable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -192,6 +183,4 @@ async fn router_get_page_hash_unknown_thumbnail_returns_not_found_when_page_sour
         .expect("missing-source unknown page hash thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }

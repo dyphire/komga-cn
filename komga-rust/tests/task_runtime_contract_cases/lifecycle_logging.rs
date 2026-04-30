@@ -6,13 +6,9 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
         .enable_all()
         .build()
         .expect("success lifecycle test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("scheduler-logging-success-lifecycle").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
+    let ctx = runtime.block_on(TestFixture::new("scheduler-logging-success-lifecycle"));
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let task = TaskQueueRecord::new(
         "UpgradeIndex:logging-success",
         1_000,
@@ -86,13 +82,9 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
         .enable_all()
         .build()
         .expect("failure lifecycle test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("scheduler-logging-failure-disown").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
+    let ctx = runtime.block_on(TestFixture::new("scheduler-logging-failure-disown"));
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let failed_task = TaskQueueRecord::new(
         "UNSUPPORTED_TASK:logging-failure",
         2_000,
@@ -192,13 +184,9 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         .enable_all()
         .build()
         .expect("recover lifecycle test runtime should build");
-    let paths = runtime.block_on(async {
-        let paths = new_router_fixture("scheduler-logging-recover").await;
-        seed_router_contract_data(&paths).await;
-        paths
-    });
+    let ctx = runtime.block_on(TestFixture::new("scheduler-logging-recover"));
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let task = TaskQueueRecord::new(
         "UpgradeIndex:logging-recover",
         1_000,
@@ -254,16 +242,13 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         "task should be claimed before and after recovery"
     );
     assert_eq!(field_str(complete, "outcome"), Some("completed"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persistence() {
-    let paths = new_router_fixture("scheduler-batch-claim-ordering").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("scheduler-batch-claim-ordering").await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for batch claim ordering setup");
     for (id, priority, group_id, class_name, simple_type) in [
@@ -315,7 +300,7 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
     }
     tasks_pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main").await;
     let claimed = [
@@ -352,7 +337,7 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
         "claimed tasks should expose their persisted owner after batch selection",
     );
 
-    let verify_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should reopen for batch claim ordering verification");
     let rows = sqlx::query("SELECT ID, OWNER FROM TASK ORDER BY PRIORITY DESC, ID ASC")
@@ -389,8 +374,6 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
         ],
         "batch claim should persist rust-main ownership only for the tasks that were actually claimable",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 fn task_events<'a>(

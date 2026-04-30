@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_manifest_dispatches_to_pdf_profile_payload() {
-    let paths = new_router_fixture("router-book-manifest-default-uses-pdf-profile").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-manifest-default-uses-pdf-profile").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -13,10 +12,11 @@ async fn router_book_manifest_dispatches_to_pdf_profile_payload() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -57,16 +57,13 @@ async fn router_book_manifest_dispatches_to_pdf_profile_payload() {
             .and_then(Value::as_str),
         Some("application/pdf")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_pdf_uses_raw_pdf_pages_in_reading_order() {
-    let paths = new_router_fixture("router-book-manifest-pdf-reading-order").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-manifest-pdf-reading-order").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -74,10 +71,10 @@ async fn router_book_manifest_pdf_uses_raw_pdf_pages_in_reading_order() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -105,19 +102,16 @@ async fn router_book_manifest_pdf_uses_raw_pdf_pages_in_reading_order() {
         reading_order[0].get("type").and_then(Value::as_str),
         Some("application/pdf")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_pdf_returns_bad_request_with_message_for_non_pdf_media() {
-    let paths = new_router_fixture("router-book-manifest-pdf-profile-mismatch").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-manifest-pdf-profile-mismatch").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -139,16 +133,13 @@ async fn router_book_manifest_pdf_returns_bad_request_with_message_for_non_pdf_m
                 .to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_divina_accepts_pdf_books() {
-    let paths = new_router_fixture("router-book-manifest-divina-pdf-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-manifest-divina-pdf-book").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -156,10 +147,10 @@ async fn router_book_manifest_divina_accepts_pdf_books() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -206,6 +197,4 @@ async fn router_book_manifest_divina_accepts_pdf_books() {
             .and_then(Value::as_str),
         Some("image/jpeg")
     );
-
-    cleanup_router_fixture(paths);
 }

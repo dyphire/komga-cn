@@ -11,21 +11,20 @@ const GIF_1X1: &[u8] = &[
 
 #[tokio::test]
 async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-thumbnail").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
+    let ctx = TestFixture::new("runtime-blocked-main-database-thumbnail").await;
+    write_router_epub_resource(ctx.paths(), "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -40,7 +39,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         .await
         .expect("blocked main-database thumbnail generation should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for thumbnail verification");
     let generated_count = sqlx::query(
@@ -57,20 +56,17 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         generated_count, 0,
         "runtime must not generate book thumbnails when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_with_generated_selection()
  {
-    let paths =
-        new_router_fixture("runtime-generate-book-thumbnail-replaces-invalid-selected-thumbnail")
+    let ctx =
+        TestFixture::new("runtime-generate-book-thumbnail-replaces-invalid-selected-thumbnail")
             .await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
+    write_router_epub_resource(ctx.paths(), "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -83,7 +79,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
         .await
         .expect("generate-book-thumbnail task should replace invalid selected thumbnail cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail verification");
     let thumbnails = sqlx::query(
@@ -105,6 +101,4 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
         thumbnails[0].get::<bool, _>("SELECTED"),
         "generated thumbnail should become selected after housekeeping removes the invalid previous selection",
     );
-
-    cleanup_router_fixture(paths);
 }

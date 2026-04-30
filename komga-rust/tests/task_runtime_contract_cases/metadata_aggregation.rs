@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfaces() {
-    let paths = new_router_fixture("runtime-aggregate-series-books-metadata-surfaces").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-aggregate-series-books-metadata-surfaces").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series booksMetadata aggregation fixture");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, RELEASE_DATE = ? WHERE BOOK_ID = ?")
@@ -53,7 +52,7 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
         .expect("second aggregated tag should insert for aggregation fixture");
     pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -72,10 +71,11 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
         .expect("aggregate-series-metadata task should process for series booksMetadata fixture");
     assert_eq!(processed, 1);
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let series_response = app
+    let series_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -148,16 +148,13 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
             ("Updated Writer".to_string(), "writer".to_string()),
         ]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_sort() {
-    let paths = new_router_fixture("runtime-aggregate-series-preserves-metadata-title").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-aggregate-series-preserves-metadata-title").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for metadata title aggregation fixture");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")
@@ -175,7 +172,7 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
         .expect("series metadata title should update for metadata title aggregation fixture");
     pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -194,10 +191,11 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
         .expect("aggregate-series-metadata task should preserve series metadata title fields");
     assert_eq!(processed, 1);
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let series_response = app
+    let series_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -229,6 +227,4 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
             .and_then(|metadata| metadata.get("titleSort")),
         Some(&Value::String("Curated Sort Title".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }

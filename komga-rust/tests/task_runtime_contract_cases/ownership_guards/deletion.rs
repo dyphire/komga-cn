@@ -38,20 +38,19 @@ async fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &s
 
 #[tokio::test]
 async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-delete-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-delete-book").await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
@@ -60,7 +59,7 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
         .await
         .expect("blocked main-database delete-book should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book verification");
     let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE ID = ?")
@@ -75,16 +74,16 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
         book_rows, 1,
         "runtime must not delete books when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-delete-series").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-delete-series").await;
 
-    let series_dir = paths.config_dir.join("blocked-delete-series/series-1");
+    let series_dir = ctx
+        .paths()
+        .config_dir
+        .join("blocked-delete-series/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("blocked delete-series fixture series directory should exist");
     let book_file = series_dir.join("book-1.epub");
@@ -97,7 +96,7 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("blocked delete-series series sidecar should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for blocked delete-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -136,17 +135,17 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
     .expect("blocked delete-series series sidecar row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
@@ -160,7 +159,7 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
         "runtime must not delete series files when the main database is external-owned",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for blocked delete-series verification");
     let book_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM BOOK WHERE ID = ?")
@@ -179,16 +178,13 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
 
     assert_eq!(book_rows, 1);
     assert_eq!(series_rows, 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() {
-    let paths = new_router_fixture("runtime-delete-book-soft-delete-staging").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-soft-delete-staging").await;
 
-    let delete_dir = paths.config_dir.join("delete-book");
+    let delete_dir = ctx.paths().config_dir.join("delete-book");
     std::fs::create_dir_all(&delete_dir).expect("delete-book fixture directory should exist");
     let book_file = delete_dir.join("book-1.epub");
     let sidecar_thumbnail = delete_dir.join("book-1.png");
@@ -197,7 +193,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     std::fs::write(&sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book fixture sidecar thumbnail should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book fixture setup");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -237,7 +233,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -258,7 +254,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
         "delete-book runtime should remove the now-empty parent directory"
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -311,23 +307,20 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
         series_old_last_modified,
         "delete-book runtime should refresh series last-modified so series changes remain externally visible",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
     let _guard = delete_runtime_sse_lock().lock().await;
-    let paths = new_router_fixture("runtime-delete-book-sse-book-changed").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-sse-book-changed").await;
 
-    let delete_dir = paths.config_dir.join("delete-book-sse");
+    let delete_dir = ctx.paths().config_dir.join("delete-book-sse");
     std::fs::create_dir_all(&delete_dir).expect("delete-book sse fixture directory should exist");
     let book_file = delete_dir.join("book-1.epub");
     std::fs::write(&book_file, b"delete-book-sse-fixture")
         .expect("delete-book sse fixture book file should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book sse fixture setup");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -339,7 +332,7 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -369,16 +362,13 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
         book_changed.payload.get("libraryId"),
         Some(&Value::String("library-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_sidecar_files() {
-    let paths = new_router_fixture("runtime-delete-book-oneshot-soft-delete-staging").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-oneshot-soft-delete-staging").await;
 
-    let series_dir = paths.config_dir.join("delete-oneshot/series-1");
+    let series_dir = ctx.paths().config_dir.join("delete-oneshot/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("delete-book oneshot series directory should exist");
     let book_file = series_dir.join("book-1.epub");
@@ -391,7 +381,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot series sidecar should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -448,7 +438,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -473,7 +463,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
         "delete-book oneshot runtime should remove the now-empty series directory"
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -543,16 +533,16 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
         read_progress_count, 1,
         "delete-book oneshot runtime should preserve READ_PROGRESS rows until EmptyTrash performs hard cleanup"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
-    let paths = new_router_fixture("runtime-delete-book-oneshot-deletes-full-series").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-oneshot-deletes-full-series").await;
 
-    let series_dir = paths.config_dir.join("delete-oneshot-full-series/series-1");
+    let series_dir = ctx
+        .paths()
+        .config_dir
+        .join("delete-oneshot-full-series/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("delete-book oneshot full-series directory should exist");
     let first_book_file = series_dir.join("book-1.epub");
@@ -571,7 +561,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot full-series series sidecar should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot full-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ?, ONESHOT = 1 WHERE ID = ?")
@@ -644,7 +634,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
     .expect("delete-book oneshot full-series series sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -662,7 +652,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
         "delete-book oneshot should delete every book file and sidecar in the series, then remove the empty series directory",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot full-series verification");
     let first_book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -689,16 +679,13 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
         first_book_deleted.is_some() && second_book_deleted.is_some() && series_deleted.is_some(),
         "delete-book oneshot should soft-delete every book row and the series row once the series path passes filesystem preconditions",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing() {
-    let paths = new_router_fixture("runtime-delete-book-missing-file-soft-delete").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-missing-file-soft-delete").await;
 
-    let delete_dir = paths.config_dir.join("delete-book-missing");
+    let delete_dir = ctx.paths().config_dir.join("delete-book-missing");
     std::fs::create_dir_all(&delete_dir)
         .expect("delete-book missing fixture directory should exist");
     let missing_book_file = delete_dir.join("book-1.epub");
@@ -706,7 +693,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     std::fs::write(&sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book missing fixture sidecar thumbnail should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book missing fixture setup");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -738,7 +725,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     .expect("delete-book missing fixture read progress row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -759,7 +746,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
         "delete-book missing-file should still remove the now-empty parent directory"
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book missing-file verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -796,16 +783,16 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     assert_eq!(thumbnail_count, 2);
     assert_eq!(read_progress_count, 1);
     assert_eq!(series_row.get::<i64, _>("BOOK_COUNT"), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_readonly() {
-    let paths = new_router_fixture("runtime-delete-book-oneshot-readonly-series-no-staging").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-book-oneshot-readonly-series-no-staging").await;
 
-    let series_dir = paths.config_dir.join("delete-oneshot-readonly/series-1");
+    let series_dir = ctx
+        .paths()
+        .config_dir
+        .join("delete-oneshot-readonly/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("delete-book oneshot readonly series directory should exist");
     let book_file = series_dir.join("book-1.epub");
@@ -818,7 +805,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-book oneshot readonly series sidecar should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot readonly fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -864,7 +851,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     std::fs::set_permissions(&series_dir, permissions)
         .expect("delete-book oneshot readonly series directory should become readonly");
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -872,7 +859,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
         .await
         .expect("delete-book oneshot readonly runtime should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-book oneshot readonly verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -914,16 +901,13 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     std::fs::set_permissions(&series_dir, cleanup_permissions).expect(
         "delete-book oneshot readonly series directory permissions should reset for cleanup",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_files() {
-    let paths = new_router_fixture("runtime-delete-series-soft-delete-staging").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-series-soft-delete-staging").await;
 
-    let series_dir = paths.config_dir.join("delete-series/series-1");
+    let series_dir = ctx.paths().config_dir.join("delete-series/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("delete-series fixture series directory should exist");
     let book_file = series_dir.join("book-1.epub");
@@ -936,7 +920,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     std::fs::write(&series_sidecar_thumbnail, fixture_png_bytes())
         .expect("delete-series fixture series sidecar should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -993,7 +977,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1018,7 +1002,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
         "delete-series runtime should remove the now-empty series directory"
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series verification");
     let book_row = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -1079,24 +1063,21 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     assert_eq!(book_thumbnail_count, 2);
     assert_eq!(series_thumbnail_count, 1);
     assert_eq!(read_progress_count, 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
     let _guard = delete_runtime_sse_lock().lock().await;
-    let paths = new_router_fixture("runtime-delete-series-sse-series-changed").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-series-sse-series-changed").await;
 
-    let series_dir = paths.config_dir.join("delete-series-sse/series-1");
+    let series_dir = ctx.paths().config_dir.join("delete-series-sse/series-1");
     std::fs::create_dir_all(&series_dir)
         .expect("delete-series sse fixture series directory should exist");
     let book_file = series_dir.join("book-1.epub");
     std::fs::write(&book_file, b"delete-series-sse-fixture")
         .expect("delete-series sse fixture book file should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series sse fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -1114,7 +1095,7 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1140,16 +1121,13 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
         series_changed.payload.get("libraryId"),
         Some(&Value::String("library-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missing() {
-    let paths = new_router_fixture("runtime-delete-series-missing-directory-no-staging").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-series-missing-directory-no-staging").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series missing-directory fixture setup");
     sqlx::query("UPDATE SERIES SET URL = ? WHERE ID = ?")
@@ -1166,7 +1144,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
         .expect("delete-series missing-directory book url should be updated");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1174,7 +1152,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
         .await
         .expect("delete-series missing-directory runtime should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for delete-series missing-directory verification");
     let book_deleted = sqlx::query("SELECT DELETED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
@@ -1195,6 +1173,4 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
         book_deleted.is_none() && series_deleted.is_none(),
         "delete-series missing-directory should not soft-delete rows when series filesystem preconditions fail",
     );
-
-    cleanup_router_fixture(paths);
 }

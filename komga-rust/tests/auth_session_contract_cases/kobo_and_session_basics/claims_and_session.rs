@@ -3,13 +3,12 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 #[tokio::test]
 async fn router_users_me_basic_auth_defaults_to_session_cookie_without_auth_token_header() {
-    let paths = new_router_fixture("router-users-me-basic-defaults-to-cookie").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-users-me-basic-defaults-to-cookie").await;
     let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -38,17 +37,15 @@ async fn router_users_me_basic_auth_defaults_to_session_cookie_without_auth_toke
         payload.get("email"),
         Some(&Value::String("admin@example.org".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_claim_rejects_invalid_email_header() {
-    let paths = new_router_fixture("router-claim-invalid-email-header").await;
+    let ctx = TestFixture::new("router-claim-invalid-email-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -62,17 +59,17 @@ async fn router_claim_rejects_invalid_email_header() {
         .expect("claim request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_claim_returns_kotlin_already_claimed_message() {
-    let paths = new_router_fixture("router-claim-already-claimed-message").await;
+    let ctx = TestFixture::builder("router-claim-already-claimed-message")
+        .without_standard_seed()
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -87,7 +84,9 @@ async fn router_claim_returns_kotlin_already_claimed_message() {
         .expect("initial claim request should complete");
     assert_eq!(first_response.status(), StatusCode::OK);
 
-    let second_response = app
+    let second_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -113,18 +112,15 @@ async fn router_claim_returns_kotlin_already_claimed_message() {
         ))
     );
     assert_eq!(payload.get("status"), Some(&Value::from(400)));
-
-    cleanup_router_fixture(paths);
 }
 
 pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_session() {
-    let paths = new_router_fixture("router-login-set-cookie-session-header").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-login-set-cookie-session-header").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -144,19 +140,16 @@ pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_se
         .expect("login/set-cookie should return set-cookie header");
     assert!(set_cookie.starts_with(&format!("KOMGA-SESSION={auth_token}")));
     assert!(set_cookie.contains("Path=/"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_logout_post_clears_session_cookie() {
-    let paths = new_router_fixture("router-logout-post-clears-session-cookie").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-logout-post-clears-session-cookie").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -180,6 +173,4 @@ async fn router_logout_post_clears_session_cookie() {
             .iter()
             .any(|cookie| cookie.contains("KOMGA-SESSION=;"))
     );
-
-    cleanup_router_fixture(paths);
 }

@@ -2,12 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_readlist_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-readlist-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-readlist-unauthorized-auth-doc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -19,18 +18,15 @@ async fn router_opds_v2_readlist_unauthorized_returns_opds_auth_document() {
         .expect("opds v2 readlist unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_readlist() {
-    let paths = new_router_fixture("router-opds-v2-readlist-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-readlist-scope").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2-readlist",
         "series-2",
         "library-2",
@@ -40,14 +36,14 @@ async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_r
     )
     .await;
     seed_router_readlist(
-        &paths,
+        ctx.paths(),
         "readlist-2",
         "ReadList 2",
         "book-library-2-readlist",
     )
     .await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -55,15 +51,13 @@ async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_r
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let hidden_response = app
+    let hidden_response = ctx
+        .app()
+        .clone()
         .clone()
         .oneshot(
             Request::builder()
@@ -77,7 +71,9 @@ async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_r
         .expect("hidden readlist request should complete");
     assert_eq!(hidden_response.status(), StatusCode::NOT_FOUND);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -89,20 +85,18 @@ async fn router_opds_v2_readlist_returns_not_found_for_missing_or_out_of_scope_r
         .await
         .expect("missing readlist request should complete");
     assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_readlist_keeps_books_without_sharing_labels() {
-    let paths = new_router_fixture("router-opds-v2-readlist-without-sharing-labels").await;
-    seed_router_contract_data(&paths).await;
-    clear_router_series_sharing_labels(&paths, "series-1").await;
+    let ctx = TestFixture::new("router-opds-v2-readlist-without-sharing-labels").await;
+    clear_router_series_sharing_labels(ctx.paths(), "series-1").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -128,24 +122,29 @@ async fn router_opds_v2_readlist_keeps_books_without_sharing_labels() {
             .and_then(Value::as_str),
         Some("Book 1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_readlist_uses_kotlin_shape_and_publications() {
-    let paths = new_router_fixture("router-opds-v2-readlist-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
-    seed_router_readlist_book_entry(&paths, "readlist-1", "book-pdf", -1).await;
-    update_router_readlist_ordered(&paths, "readlist-1", false).await;
-    update_router_readlist_last_modified(&paths, "readlist-1", "2024-02-03 04:05:06").await;
-    update_router_book_isbn(&paths, "book-1", "9780000000005").await;
+    let ctx = TestFixture::new("router-opds-v2-readlist-shape").await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf",
+        "series-1",
+        "book-pdf.pdf",
+        "Book PDF",
+    )
+    .await;
+    seed_router_readlist_book_entry(ctx.paths(), "readlist-1", "book-pdf", -1).await;
+    update_router_readlist_ordered(ctx.paths(), "readlist-1", false).await;
+    update_router_readlist_last_modified(ctx.paths(), "readlist-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(ctx.paths(), "book-1", "9780000000005").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -236,6 +235,4 @@ async fn router_opds_v2_readlist_uses_kotlin_shape_and_publications() {
             .and_then(Value::as_str),
         Some("Series 1")
     );
-
-    cleanup_router_fixture(paths);
 }

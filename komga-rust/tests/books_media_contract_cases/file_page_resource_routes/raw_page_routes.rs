@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming_check() {
-    let paths = new_router_fixture("router-book-raw-page-no-304-before-role-check").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-no-304-before-role-check").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -13,7 +12,7 @@ async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming
     )
     .await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "admin-access-no-page-streaming",
         "admin-access-no-page-streaming@example.org",
         "router-contract-admin-access-123",
@@ -22,15 +21,16 @@ async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "admin-access-no-page-streaming@example.org",
-        "router-contract-admin-access-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "admin-access-no-page-streaming@example.org",
+            "router-contract-admin-access-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -44,16 +44,13 @@ async fn router_book_raw_page_does_not_return_not_modified_before_page_streaming
         .expect("book raw page role-order request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
-    let paths = new_router_fixture("router-book-raw-page-negative-page-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-negative-page-number").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -61,10 +58,11 @@ async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -82,16 +80,13 @@ async fn router_book_raw_page_returns_bad_request_for_negative_page_number() {
         payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-raw-page-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-basic-auth-compat").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -99,8 +94,9 @@ async fn router_book_raw_page_accepts_basic_auth_like_kotlin_clients() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -120,16 +116,13 @@ async fn router_book_raw_page_accepts_basic_auth_like_kotlin_clients() {
         .expect("raw page basic-auth request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() {
-    let paths = new_router_fixture("router-book-raw-page-non-integer-page-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-non-integer-page-number").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -137,10 +130,11 @@ async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -153,28 +147,26 @@ async fn router_book_raw_page_returns_bad_request_for_non_integer_page_number() 
         .expect("non-integer raw page request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_content_disposition_uses_book_name_not_metadata_title() {
-    let paths = new_router_fixture("router-book-raw-page-uses-book-name").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-uses-book-name").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
         "Metadata Title",
     )
     .await;
-    update_router_book_name(&paths, "book-pdf-1", "Filesystem Shelf Name").await;
+    update_router_book_name(ctx.paths(), "book-pdf-1", "Filesystem Shelf Name").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -200,16 +192,13 @@ async fn router_book_raw_page_content_disposition_uses_book_name_not_metadata_ti
         !disposition.contains("Metadata Title-1"),
         "disposition was: {disposition}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_missing_pdf_page_number() {
-    let paths = new_router_fixture("router-book-page-missing-pdf-page").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-missing-pdf-page").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -217,10 +206,11 @@ async fn router_book_raw_page_returns_bad_request_for_missing_pdf_page_number() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -238,16 +228,13 @@ async fn router_book_raw_page_returns_bad_request_for_missing_pdf_page_number() 
         payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_not_found_with_message_when_media_not_ready() {
-    let paths = new_router_fixture("router-book-raw-page-media-not-ready").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-media-not-ready").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -255,7 +242,7 @@ async fn router_book_raw_page_returns_not_found_with_message_when_media_not_read
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book raw page not-ready db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -266,10 +253,11 @@ async fn router_book_raw_page_returns_not_found_with_message_when_media_not_read
         .expect("media status should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -287,16 +275,13 @@ async fn router_book_raw_page_returns_not_found_with_message_when_media_not_read
         payload.get("error"),
         Some(&Value::String("Book analysis failed".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
-    let paths = new_router_fixture("router-book-raw-page-restricted-before-not-ready").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-restricted-before-not-ready").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -304,7 +289,7 @@ async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
     )
     .await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "restricted-page-user",
         "restricted-page-user@example.org",
         "router-contract-restricted-page-123",
@@ -313,7 +298,7 @@ async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book raw page restricted db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -330,15 +315,16 @@ async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
         .expect("series age rating should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted-page-user@example.org",
-        "router-contract-restricted-page-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "restricted-page-user@example.org",
+            "router-contract-restricted-page-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -351,16 +337,13 @@ async fn router_book_raw_page_forbidden_before_not_ready_for_restricted_user() {
         .expect("restricted raw pdf page request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_not_found_with_message_when_file_is_missing() {
-    let paths = new_router_fixture("router-book-raw-page-file-missing").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-file-missing").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -368,13 +351,14 @@ async fn router_book_raw_page_returns_not_found_with_message_when_file_is_missin
     )
     .await;
 
-    let pdf_path = paths.config_dir.join("books/fixture-page.pdf");
+    let pdf_path = ctx.paths().config_dir.join("books/fixture-page.pdf");
     std::fs::remove_file(&pdf_path).expect("pdf fixture should be removable");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -394,16 +378,13 @@ async fn router_book_raw_page_returns_not_found_with_message_when_file_is_missin
             "File not found, it may have moved".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
-    let paths = new_router_fixture("router-book-raw-page-not-modified-before-not-ready").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-not-modified-before-not-ready").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -411,7 +392,7 @@ async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book raw page not-ready db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -422,10 +403,11 @@ async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
         .expect("media status should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -439,6 +421,4 @@ async fn router_book_raw_page_returns_not_modified_before_not_ready_checks() {
         .expect("not-modified raw pdf page request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
-
-    cleanup_router_fixture(paths);
 }

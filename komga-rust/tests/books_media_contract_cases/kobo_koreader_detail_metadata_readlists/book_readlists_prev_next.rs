@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_book_readlists_returns_existing_persisted_readlists() {
-    let paths = new_router_fixture("router-discovery-book-readlists-persisted").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-readlists-persisted").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -31,30 +30,27 @@ async fn router_discovery_book_readlists_returns_existing_persisted_readlists() 
         content[0].get("id"),
         Some(&Value::String("readlist-1".to_string())),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-readlists-siblings-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-readlists-siblings-basic-auth-compat").await;
     seed_router_primary_series_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-prev-basic-auth",
         "book-prev-basic-auth.cbz",
         "Previous Basic Auth Book",
     )
     .await;
     seed_router_primary_series_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-next-basic-auth",
         "book-next-basic-auth.cbz",
         "Next Basic Auth Book",
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book sibling basic-auth db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -77,7 +73,6 @@ async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_client
         .expect("next basic-auth sibling number sort should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -86,7 +81,8 @@ async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_client
         "/api/v1/books/book-1/previous",
         "/api/v1/books/book-1/next",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -102,17 +98,14 @@ async fn router_book_readlists_and_siblings_accept_basic_auth_like_kotlin_client
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_readlists_applies_content_restrictions_to_book_ids_and_filtered_like_kotlin()
  {
-    let paths = new_router_fixture("router-discovery-book-readlists-content-restrictions").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-readlists-content-restrictions").await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -120,7 +113,7 @@ async fn router_discovery_book_readlists_applies_content_restrictions_to_book_id
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book readlists restricted db should open");
     sqlx::query(
@@ -203,15 +196,13 @@ async fn router_discovery_book_readlists_applies_content_restrictions_to_book_id
         .expect("filtered readlist restricted book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -248,16 +239,13 @@ async fn router_discovery_book_readlists_applies_content_restrictions_to_book_id
         .expect("partially visible readlist should still be returned");
     assert_eq!(filtered.get("filtered"), Some(&Value::Bool(true)));
     assert_eq!(filtered.get("bookIds"), Some(&json!(["book-1"])));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number() {
-    let paths = new_router_fixture("router-book-previous-number-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-previous-number-sort").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book previous number-sort db should open");
     sqlx::query(
@@ -296,7 +284,7 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
     .expect("previous sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for previous sibling fixture");
     let file = File::create(books_dir.join("book-prev-1.cbz"))
@@ -312,10 +300,11 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
     zip.finish()
         .expect("previous sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -333,16 +322,13 @@ async fn router_book_previous_uses_metadata_number_sort_instead_of_book_number()
         payload.get("id"),
         Some(&Value::String("book-prev-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
-    let paths = new_router_fixture("router-book-previous-excludes-deleted").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-previous-excludes-deleted").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book previous deleted db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -420,7 +406,7 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
     .expect("deleted previous sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for deleted previous fixture");
     for file_name in ["book-prev-active.cbz", "book-prev-deleted.cbz"] {
@@ -438,10 +424,11 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
             .expect("previous sibling cbz fixture should finish successfully");
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -460,16 +447,13 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
         Some(&Value::String("book-prev-deleted".to_string()))
     );
     assert_eq!(payload.get("deleted"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_previous_skips_equal_number_sort_ties() {
-    let paths = new_router_fixture("router-book-previous-number-sort-tie").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-previous-number-sort-tie").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book previous tie db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -514,7 +498,7 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
     .expect("tie previous sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for tie previous fixture");
     let file = File::create(books_dir.join("book-0a.cbz"))
@@ -530,10 +514,11 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
     zip.finish()
         .expect("tie previous sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -546,16 +531,13 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
         .expect("book previous tie request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
-    let paths = new_router_fixture("router-book-next-number-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-next-number-sort").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book next number-sort db should open");
     sqlx::query(
@@ -594,7 +576,7 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
     .expect("next sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for next sibling fixture");
     let file = File::create(books_dir.join("book-next-1.cbz"))
@@ -610,10 +592,11 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
     zip.finish()
         .expect("next sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -631,16 +614,13 @@ async fn router_book_next_uses_metadata_number_sort_instead_of_book_number() {
         payload.get("id"),
         Some(&Value::String("book-next-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
-    let paths = new_router_fixture("router-book-next-excludes-deleted").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-next-excludes-deleted").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book next deleted db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -718,7 +698,7 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
     .expect("deleted next sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for deleted next fixture");
     for file_name in ["book-next-active.cbz", "book-next-deleted.cbz"] {
@@ -736,10 +716,11 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
             .expect("next sibling cbz fixture should finish successfully");
     }
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -758,16 +739,13 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
         Some(&Value::String("book-next-deleted".to_string()))
     );
     assert_eq!(payload.get("deleted"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_next_skips_equal_number_sort_ties() {
-    let paths = new_router_fixture("router-book-next-number-sort-tie").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-next-number-sort-tie").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book next tie db should open");
     sqlx::query("UPDATE BOOK_METADATA SET NUMBER_SORT = ? WHERE BOOK_ID = ?")
@@ -812,7 +790,7 @@ async fn router_book_next_skips_equal_number_sort_ties() {
     .expect("tie next sibling metadata row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for tie next fixture");
     let file = File::create(books_dir.join("book-1z.cbz"))
@@ -828,10 +806,11 @@ async fn router_book_next_skips_equal_number_sort_ties() {
     zip.finish()
         .expect("tie next sibling cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -844,16 +823,13 @@ async fn router_book_next_skips_equal_number_sort_ties() {
         .expect("book next tie request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_next_reuses_book_detail_payload_fields() {
-    let paths = new_router_fixture("router-book-next-detail-payload").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-next-detail-payload").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book next detail payload db should open");
     sqlx::query(
@@ -904,7 +880,7 @@ async fn router_book_next_reuses_book_detail_payload_fields() {
     .expect("next detail sibling read progress row should be inserted");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for next detail payload fixture");
     let file = File::create(books_dir.join("book next detail.cbz"))
@@ -920,10 +896,11 @@ async fn router_book_next_reuses_book_detail_payload_fields() {
     zip.finish()
         .expect("next detail payload cbz fixture should finish successfully");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -963,6 +940,4 @@ async fn router_book_next_reuses_book_detail_payload_fields() {
             .and_then(|progress| progress.get("deviceName")),
         Some(&Value::String("Next Reader".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }

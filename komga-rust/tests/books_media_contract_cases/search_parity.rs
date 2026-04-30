@@ -34,10 +34,11 @@ fn page_ids(payload: &Value) -> Vec<String> {
 
 #[tokio::test]
 async fn router_discovery_books_get_route_matches_paperback_compatibility_shape() {
-    let paths = new_router_fixture("router-discovery-books-get-paperback-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-discovery-books-get-paperback-compat")
+        .with_search_index()
+        .build()
+        .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let route = "/api/v1/books?page=0&size=20&search=Book%201&tag=Favorite&media_status=READY&read_status=UNREAD&released_after=2023-01-01&library_id=library-1";
@@ -55,7 +56,8 @@ async fn router_discovery_books_get_route_matches_paperback_compatibility_shape(
         "fullTextSearch": "Book 1"
     });
 
-    let get_response = app
+    let get_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -69,7 +71,9 @@ async fn router_discovery_books_get_route_matches_paperback_compatibility_shape(
         .await
         .expect("deprecated books GET request should complete");
 
-    let post_response = app
+    let post_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -95,36 +99,54 @@ async fn router_discovery_books_get_route_matches_paperback_compatibility_shape(
     );
     assert_eq!(get_payload.get("number"), post_payload.get("number"));
     assert_eq!(get_payload.get("size"), post_payload.get("size"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_locks_main_search_parity_for_retained_inputs() {
-    let paths = new_router_fixture("router-discovery-books-list-main-search-parity").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
-    update_book_search_fixture_title(&paths, "book-2", "Book Book 2").await;
+    let ctx = TestFixture::builder("router-discovery-books-list-main-search-parity")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+            update_book_search_fixture_title(&paths, "book-2", "Book Book 2").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let admin_token = ctx.login_admin().await;
 
-    let blank_ids = books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("   ")).await;
+    let blank_ids = books_list_ids(
+        &ctx.app().clone(),
+        &admin_token,
+        Some("relevance,desc"),
+        Some("   "),
+    )
+    .await;
     assert_eq!(blank_ids, vec!["book-1", "book-2", "book-3"]);
 
-    let relevance_desc_ids =
-        books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("book")).await;
+    let relevance_desc_ids = books_list_ids(
+        &ctx.app().clone(),
+        &admin_token,
+        Some("relevance,desc"),
+        Some("book"),
+    )
+    .await;
     assert_eq!(relevance_desc_ids, vec!["book-2", "book-1", "book-3"]);
 
-    let default_relevance_ids = books_list_ids(&app, &admin_token, None, Some("book")).await;
+    let default_relevance_ids =
+        books_list_ids(&ctx.app().clone(), &admin_token, None, Some("book")).await;
     assert_eq!(default_relevance_ids, vec!["book-2", "book-1", "book-3"]);
 
-    let relevance_asc_ids =
-        books_list_ids(&app, &admin_token, Some("relevance,asc"), Some("book")).await;
+    let relevance_asc_ids = books_list_ids(
+        &ctx.app().clone(),
+        &admin_token,
+        Some("relevance,asc"),
+        Some("book"),
+    )
+    .await;
     assert_eq!(relevance_asc_ids, vec!["book-3", "book-1", "book-2"]);
 
     let fielded_ids = books_list_ids(
-        &app,
+        &ctx.app().clone(),
         &admin_token,
         Some("relevance,desc"),
         Some("title:book"),
@@ -132,12 +154,17 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
     .await;
     assert_eq!(fielded_ids, vec!["book-2", "book-1", "book-3"]);
 
-    let invalid_query_ids =
-        books_list_ids(&app, &admin_token, Some("relevance,desc"), Some("title:(")).await;
+    let invalid_query_ids = books_list_ids(
+        &ctx.app().clone(),
+        &admin_token,
+        Some("relevance,desc"),
+        Some("title:("),
+    )
+    .await;
     assert!(invalid_query_ids.is_empty());
 
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -145,35 +172,33 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
         &["USER", "PAGE_STREAMING"],
     )
     .await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
     let visible_ids = books_list_ids(
-        &app,
+        &ctx.app().clone(),
         &restricted_token,
         Some("relevance,desc"),
         Some("book"),
     )
     .await;
     assert_eq!(visible_ids, vec!["book-3"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
-    let paths = new_router_fixture("router-discovery-books-list-accent-cjk-recall").await;
-    seed_router_contract_data(&paths).await;
-    update_book_search_fixture_title(&paths, "book-1", "Café 東京 Book 1").await;
+    let ctx = TestFixture::builder("router-discovery-books-list-accent-cjk-recall")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            update_book_search_fixture_title(&paths, "book-1", "Café 東京 Book 1").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let admin_token = ctx.login_admin().await;
 
     let accent_cjk_ids = books_list_ids(
-        &app,
+        &ctx.app().clone(),
         &admin_token,
         Some("relevance,desc"),
         Some("cafe 東京"),
@@ -184,18 +209,14 @@ async fn router_discovery_books_list_retains_accent_folded_and_cjk_recall() {
         vec!["book-1"],
         "books/list should retain accent-folded mixed CJK recall at the route boundary",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_ignores_legacy_regex_search_body_input() {
-    let paths = new_router_fixture("router-discovery-books-list-legacy-regex-search").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-legacy-regex-search").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let baseline_ids = books_list_ids(&app, &auth_token, None, None).await;
+    let auth_token = ctx.login_admin().await;
+    let baseline_ids = books_list_ids(&ctx.app().clone(), &auth_token, None, None).await;
 
     for legacy_field in ["regexSearch", "searchRegex", "search_regex"] {
         let mut payload = json!({
@@ -207,8 +228,13 @@ async fn router_discovery_books_list_ignores_legacy_regex_search_body_input() {
         });
         payload[legacy_field] = Value::String("(".to_string());
 
-        let response =
-            books_list_response(&app, &auth_token, true, Body::from(payload.to_string())).await;
+        let response = books_list_response(
+            &ctx.app().clone(),
+            &auth_token,
+            true,
+            Body::from(payload.to_string()),
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::OK, "field={legacy_field}");
 
@@ -222,40 +248,33 @@ async fn router_discovery_books_list_ignores_legacy_regex_search_body_input() {
             .collect::<Vec<_>>();
         assert_eq!(ids, baseline_ids, "field={legacy_field}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_rejects_invalid_request_bodies() {
-    let paths = new_router_fixture("router-discovery-books-list-invalid-bodies").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-books-list-invalid-bodies").await;
+    let auth_token = ctx.login_admin().await;
 
     for (case, body) in [
         ("empty", Body::empty()),
         ("invalid-json", Body::from("{")),
         ("array-body", Body::from("[]")),
     ] {
-        let response = books_list_response(&app, &auth_token, false, body).await;
+        let response = books_list_response(ctx.app(), &auth_token, false, body).await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "case={case}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_blank_full_text_search_does_not_report_relevance_sort() {
-    let paths = new_router_fixture("router-discovery-books-list-blank-search-unsorted-meta").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-blank-search-unsorted-meta").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -290,19 +309,17 @@ async fn router_discovery_books_list_blank_full_text_search_does_not_report_rele
         payload.pointer("/pageable/sort/unsorted"),
         Some(&json!(true))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_marks_unsorted_page_shape_without_full_text_search() {
-    let paths = new_router_fixture("router-discovery-books-list-unsorted-page-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-unsorted-page-shape").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -336,6 +353,4 @@ async fn router_discovery_books_list_marks_unsorted_page_shape_without_full_text
         payload.pointer("/pageable/sort/unsorted"),
         Some(&json!(true))
     );
-
-    cleanup_router_fixture(paths);
 }

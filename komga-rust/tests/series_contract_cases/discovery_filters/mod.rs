@@ -6,13 +6,11 @@ mod nullable_metadata;
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_series_status_is_and_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-series-status").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-series-status").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -43,7 +41,8 @@ async fn router_discovery_series_list_supports_series_status_is_and_is_not_in_ru
         .expect("strict series status=is payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -74,7 +73,8 @@ async fn router_discovery_series_list_supports_series_status_is_and_is_not_in_ru
         .expect("strict series status=isNot excluded payload should expose content array");
     assert_eq!(excluded_content.len(), 0);
 
-    let kept_response = app
+    let kept_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -104,19 +104,15 @@ async fn router_discovery_series_list_supports_series_status_is_and_is_not_in_ru
         .and_then(Value::as_array)
         .expect("strict series status=isNot kept payload should expose content array");
     assert_eq!(kept_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_library_id_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-library-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-library-id").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -147,7 +143,9 @@ async fn router_discovery_series_list_supports_library_id_in_runtime_owned_mode(
         .expect("strict series library-id match payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -176,19 +174,15 @@ async fn router_discovery_series_list_supports_library_id_in_runtime_owned_mode(
         .and_then(Value::as_array)
         .expect("strict series library-id miss payload should expose content array");
     assert_eq!(missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_tag_filter_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-tag").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-tag").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -219,7 +213,9 @@ async fn router_discovery_series_list_supports_tag_filter_in_runtime_owned_mode(
         .expect("strict series tag match payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -248,30 +244,29 @@ async fn router_discovery_series_list_supports_tag_filter_in_runtime_owned_mode(
         .and_then(Value::as_array)
         .expect("strict series tag miss payload should expose content array");
     assert_eq!(missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-anyof-allof").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-strict-anyof-allof")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("series allOf sharing-label db should open");
+            sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+                .bind("series-1")
+                .bind("Teamwork")
+                .execute(&pool)
+                .await
+                .expect("secondary sharing label should be inserted for allOf contains coverage");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("series allOf sharing-label db should open");
-    sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
-        .bind("series-1")
-        .bind("Teamwork")
-        .execute(&pool)
-        .await
-        .expect("secondary sharing label should be inserted for allOf contains coverage");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let all_of_match_response = app
+    let all_of_match_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -304,7 +299,8 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .expect("strict series allOf match payload should expose content array");
     assert_eq!(all_of_match_content.len(), 1);
 
-    let all_of_miss_response = app
+    let all_of_miss_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -337,7 +333,8 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .expect("strict series allOf miss payload should expose content array");
     assert_eq!(all_of_miss_content.len(), 0);
 
-    let all_of_contains_response = app
+    let all_of_contains_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -370,7 +367,8 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .expect("strict series allOf sharing-label contains payload should expose content array");
     assert_eq!(all_of_contains_content.len(), 1);
 
-    let nested_all_of_contains_response = app
+    let nested_all_of_contains_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -411,7 +409,8 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         );
     assert_eq!(nested_all_of_contains_content.len(), 1);
 
-    let any_of_match_response = app
+    let any_of_match_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -444,7 +443,9 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .expect("strict series anyOf match payload should expose content array");
     assert_eq!(any_of_match_content.len(), 1);
 
-    let any_of_miss_response = app
+    let any_of_miss_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -475,6 +476,4 @@ async fn router_discovery_series_list_supports_anyof_and_allof_in_runtime_owned_
         .and_then(Value::as_array)
         .expect("strict series anyOf miss payload should expose content array");
     assert_eq!(any_of_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

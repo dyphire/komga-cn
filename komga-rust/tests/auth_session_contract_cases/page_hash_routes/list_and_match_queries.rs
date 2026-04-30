@@ -2,12 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_get_page_hashes_honors_match_count_desc_sort_like_kotlin() {
-    let paths = new_router_fixture("router-page-hashes-known-match-count-desc").await;
-    seed_router_contract_data(&paths).await;
-    seed_known_page_hash_samples(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-known-match-count-desc").await;
+    seed_known_page_hash_samples(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -38,18 +37,15 @@ async fn router_get_page_hashes_honors_match_count_desc_sort_like_kotlin() {
     assert_eq!(hashes, vec!["gamma-hash", "alpha-hash", "beta-hash"]);
     assert_eq!(payload["sort"]["sorted"], true);
     assert_eq!(payload["sort"]["unsorted"], false);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hashes_filters_by_action_query_like_kotlin() {
-    let paths = new_router_fixture("router-page-hashes-known-action-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_known_page_hash_samples(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-known-action-filter").await;
+    seed_known_page_hash_samples(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -79,18 +75,15 @@ async fn router_get_page_hashes_filters_by_action_query_like_kotlin() {
         .collect::<Vec<_>>();
     assert_eq!(hashes, vec!["alpha-hash", "beta-hash"]);
     assert_eq!(payload["totalElements"], json!(2));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hashes_rejects_invalid_action_query_like_kotlin() {
-    let paths = new_router_fixture("router-page-hashes-known-invalid-action").await;
-    seed_router_contract_data(&paths).await;
-    seed_known_page_hash_samples(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-known-invalid-action").await;
+    seed_known_page_hash_samples(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -105,18 +98,15 @@ async fn router_get_page_hashes_rejects_invalid_action_query_like_kotlin() {
         .expect("known page hashes invalid-action request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hashes_unknown_honors_hash_desc_sort_query() {
-    let paths = new_router_fixture("router-page-hashes-unknown-hash-desc-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_unknown_page_hash_samples(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-unknown-hash-desc-sort").await;
+    seed_unknown_page_hash_samples(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -147,18 +137,15 @@ async fn router_get_page_hashes_unknown_honors_hash_desc_sort_query() {
     assert_eq!(hashes, vec!["z-hash".to_string(), "a-hash".to_string()]);
     assert_eq!(payload["sort"]["sorted"], true);
     assert_eq!(payload["sort"]["unsorted"], false);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hashes_unknown_honors_kotlin_legacy_sort_keys() {
-    let paths = new_router_fixture("router-page-hashes-unknown-legacy-sort-keys").await;
-    seed_router_contract_data(&paths).await;
-    seed_unknown_page_hash_samples(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-unknown-legacy-sort-keys").await;
+    seed_unknown_page_hash_samples(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     for sort in ["url,desc", "bookId,desc", "pageNumber,desc"] {
         let response = app
@@ -196,18 +183,15 @@ async fn router_get_page_hashes_unknown_honors_kotlin_legacy_sort_keys() {
         assert_eq!(payload["sort"]["sorted"], true, "sort={sort}");
         assert_eq!(payload["sort"]["unsorted"], false, "sort={sort}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hashes_unknown_groups_same_hash_even_when_file_sizes_differ() {
-    let paths = new_router_fixture("router-page-hashes-unknown-groups-by-hash-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_unknown_page_hash_samples_with_mixed_sizes(&paths).await;
+    let ctx = TestFixture::new("router-page-hashes-unknown-groups-by-hash-only").await;
+    seed_unknown_page_hash_samples_with_mixed_sizes(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -230,18 +214,15 @@ async fn router_get_page_hashes_unknown_groups_same_hash_even_when_file_sizes_di
     assert_eq!(content.len(), 1);
     assert_eq!(content[0]["hash"], json!("mixed-size-hash"));
     assert_eq!(content[0]["matchCount"], json!(2));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_honors_page_number_desc_sort_query() {
-    let paths = new_router_fixture("router-page-hash-matches-page-number-desc").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+    let ctx = TestFixture::new("router-page-hash-matches-page-number-desc").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -271,18 +252,15 @@ async fn router_get_page_hash_matches_honors_page_number_desc_sort_query() {
     assert_eq!(page_numbers, vec![5, 3, 1]);
     assert_eq!(payload["sort"]["sorted"], true);
     assert_eq!(payload["sort"]["unsorted"], false);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_rejects_match_count_and_total_size_sort_keys() {
-    let paths = new_router_fixture("router-page-hash-matches-unsupported-aggregate-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+    let ctx = TestFixture::new("router-page-hash-matches-unsupported-aggregate-sort").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     for sort in ["matchCount,desc", "totalSize,desc"] {
         let response = app
@@ -304,24 +282,21 @@ async fn router_get_page_hash_matches_rejects_match_count_and_total_size_sort_ke
             "sort={sort}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_converts_file_url_to_path_string() {
-    let paths = new_router_fixture("router-page-hash-matches-url-to-path").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+    let ctx = TestFixture::new("router-page-hash-matches-url-to-path").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
     update_book_url(
-        &paths,
+        ctx.paths(),
         "book-match-1",
         "file:/library-root/books/book-match-1.cbz",
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -341,19 +316,16 @@ async fn router_get_page_hash_matches_converts_file_url_to_path_string() {
         .as_array()
         .expect("page hash matches content should be an array");
     assert_eq!(content[0]["url"], "/library-root/books/book-match-1.cbz");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_returns_internal_error_for_unparseable_book_url() {
-    let paths = new_router_fixture("router-page-hash-matches-invalid-url").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
-    update_book_url(&paths, "book-match-1", "::not-a-valid-url::").await;
+    let ctx = TestFixture::new("router-page-hash-matches-invalid-url").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
+    update_book_url(ctx.paths(), "book-match-1", "::not-a-valid-url::").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -368,24 +340,21 @@ async fn router_get_page_hash_matches_returns_internal_error_for_unparseable_boo
         .expect("page hash matches invalid url request should complete");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_decodes_percent_encoded_file_url_path() {
-    let paths = new_router_fixture("router-page-hash-matches-decodes-file-url-path").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+    let ctx = TestFixture::new("router-page-hash-matches-decodes-file-url-path").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
     update_book_url(
-        &paths,
+        ctx.paths(),
         "book-match-1",
         "file:/library%20root/books/book%20match%201.cbz",
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -405,23 +374,20 @@ async fn router_get_page_hash_matches_decodes_percent_encoded_file_url_path() {
         .as_array()
         .expect("page hash matches content should be an array");
     assert_eq!(content[0]["url"], "/library root/books/book match 1.cbz");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_returns_internal_error_for_null_file_size() {
-    let paths = new_router_fixture("router-page-hash-matches-null-file-size").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
-    update_media_page_file_size_to_null(&paths, "book-match-1", 0).await;
+    let ctx = TestFixture::new("router-page-hash-matches-null-file-size").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
+    update_media_page_file_size_to_null(ctx.paths(), "book-match-1", 0).await;
     assert_eq!(
-        load_media_page_file_size(&paths, "book-match-1", 0).await,
+        load_media_page_file_size(ctx.paths(), "book-match-1", 0).await,
         None
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -436,24 +402,21 @@ async fn router_get_page_hash_matches_returns_internal_error_for_null_file_size(
         .expect("page hash matches null file size request should complete");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_page_hash_matches_returns_internal_error_for_non_file_url() {
-    let paths = new_router_fixture("router-page-hash-matches-http-url").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_match_samples(&paths, "match-sort-hash").await;
+    let ctx = TestFixture::new("router-page-hash-matches-http-url").await;
+    seed_page_hash_match_samples(ctx.paths(), "match-sort-hash").await;
     update_book_url(
-        &paths,
+        ctx.paths(),
         "book-match-1",
         "https://example.com/books/book-match-1.cbz",
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -468,6 +431,4 @@ async fn router_get_page_hash_matches_returns_internal_error_for_non_file_url() 
         .expect("page hash matches non-file url request should complete");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-    cleanup_router_fixture(paths);
 }

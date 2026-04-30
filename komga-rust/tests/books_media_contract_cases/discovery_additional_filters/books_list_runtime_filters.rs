@@ -2,14 +2,17 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-read-status").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, true).await;
+    let ctx = TestFixture::builder("router-discovery-books-list-strict-read-status")
+        .with_seed(|paths| async move {
+            seed_router_read_progress(&paths, true).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let unread_response = app
+    let unread_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -40,7 +43,8 @@ async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runti
         .expect("strict unread payload should expose content array");
     assert_eq!(unread_content.len(), 0);
 
-    let read_response = app
+    let read_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -75,7 +79,8 @@ async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runti
         Some(&Value::String("book-1".to_string()))
     );
 
-    let excluded_read_response = app
+    let excluded_read_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -106,7 +111,8 @@ async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runti
         .expect("strict read isNot excluded payload should expose content array");
     assert_eq!(excluded_read_content.len(), 0);
 
-    let kept_not_unread_response = app
+    let kept_not_unread_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -140,19 +146,16 @@ async fn router_discovery_books_list_supports_read_status_is_and_is_not_in_runti
         kept_not_unread_content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_library_id_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-library-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-library-id").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -183,7 +186,9 @@ async fn router_discovery_books_list_supports_library_id_in_runtime_owned_mode()
         .expect("strict books library-id match payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -212,19 +217,16 @@ async fn router_discovery_books_list_supports_library_id_in_runtime_owned_mode()
         .and_then(Value::as_array)
         .expect("strict books library-id miss payload should expose content array");
     assert_eq!(missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_oneshot_filter_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-oneshot").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-oneshot").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let oneshot_true_response = app
+    let oneshot_true_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -254,7 +256,8 @@ async fn router_discovery_books_list_supports_oneshot_filter_in_runtime_owned_mo
         .expect("strict oneshot=true payload should expose content array");
     assert_eq!(oneshot_true_content.len(), 0);
 
-    let oneshot_false_response = app
+    let oneshot_false_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -287,6 +290,4 @@ async fn router_discovery_books_list_supports_oneshot_filter_in_runtime_owned_mo
         oneshot_false_content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }

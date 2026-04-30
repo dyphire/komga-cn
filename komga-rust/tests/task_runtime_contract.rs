@@ -1,3 +1,4 @@
+use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_application::task_processing::TaskQueueRecord;
@@ -11,9 +12,6 @@ use komga_infrastructure::sqlite::{
 };
 use komga_infrastructure::task_queue::TaskRuntimeContext;
 use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
-use komga_server::app::{
-    build_router_with_config, build_router_without_runtime_workers_for_contract,
-};
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::fs;
@@ -21,9 +19,9 @@ use tower::util::ServiceExt;
 
 mod support;
 
+use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, log_capture::*, media_file_fixtures::*,
-    response_helpers::*, user_auth::*,
+    RuntimeDbPaths, log_capture::*, media_file_fixtures::*, response_helpers::*,
 };
 
 mod task_runtime_contract_cases;

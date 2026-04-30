@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_users_delete_invalidates_target_users_existing_session() {
-    let paths = new_router_fixture("router-users-delete-invalidates-target-session").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-delete-invalidates-target-session").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -13,14 +12,11 @@ async fn router_users_delete_invalidates_target_users_existing_session() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let delete_response = app
         .clone()
@@ -49,16 +45,16 @@ async fn router_users_delete_invalidates_target_users_existing_session() {
         .expect("deleted user existing session request should complete");
 
     assert_eq!(me_response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_non_admin_demo_mode_blocks_sensitive_me_endpoints() {
-    let paths = new_router_fixture("router-users-me-demo-mode-forbidden-endpoints").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-users-me-demo-mode-forbidden-endpoints")
+        .demo_mode()
+        .build()
+        .await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -66,13 +62,10 @@ async fn router_non_admin_demo_mode_blocks_sensitive_me_endpoints() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths)).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     for (method, uri, content_type, body) in [
         (
@@ -116,16 +109,13 @@ async fn router_non_admin_demo_mode_blocks_sensitive_me_endpoints() {
             "demo mode should forbid {method} {uri} for non-admin users"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_update_expires_target_users_existing_session_when_restrictions_change() {
-    let paths = new_router_fixture("router-users-update-expires-target-session").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-update-expires-target-session").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -133,14 +123,11 @@ async fn router_users_update_expires_target_users_existing_session_when_restrict
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let patch_response = app
         .clone()
@@ -172,17 +159,14 @@ async fn router_users_update_expires_target_users_existing_session_when_restrict
         .expect("updated user existing session request should complete");
 
     assert_eq!(me_response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_update_keeps_target_users_existing_session_when_effective_access_is_unchanged()
  {
-    let paths = new_router_fixture("router-users-update-keeps-target-session-when-unchanged").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-update-keeps-target-session-when-unchanged").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -190,14 +174,11 @@ async fn router_users_update_keeps_target_users_existing_session_when_effective_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let patch_response = app
         .clone()
@@ -244,16 +225,13 @@ async fn router_users_update_keeps_target_users_existing_session_when_effective_
         payload.get("email"),
         Some(&Value::String("member@example.org".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_update_keeps_session_when_labels_only_change_case_or_overlap() {
-    let paths = new_router_fixture("router-users-update-keeps-session-label-normalization").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-update-keeps-session-label-normalization").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -261,7 +239,7 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for user label normalization seed");
     sqlx::query("INSERT INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
@@ -280,14 +258,11 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
         .expect("user exclude label should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let patch_response = app
         .clone()
@@ -324,7 +299,7 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
         .expect("label normalization existing session request should complete");
     assert_eq!(me_response.status(), StatusCode::OK);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for label normalization verification");
     let rows = sqlx::query(
@@ -344,17 +319,14 @@ async fn router_users_update_keeps_session_when_labels_only_change_case_or_overl
         normalized,
         vec![("patched".to_string(), true), ("both".to_string(), false)]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_create_normalizes_content_restriction_labels() {
-    let paths = new_router_fixture("router-users-create-normalizes-labels").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-create-normalizes-labels").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -388,7 +360,7 @@ async fn router_users_create_normalizes_content_restriction_labels() {
         Some(&vec![Value::String("both".to_string())])
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for created user normalization verification");
     let user_id = payload
@@ -412,8 +384,6 @@ async fn router_users_create_normalizes_content_restriction_labels() {
         normalized,
         vec![("patched".to_string(), true), ("both".to_string(), false)]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -438,11 +408,10 @@ async fn router_users_create_returns_kotlin_like_validation_violations() {
             "must not be blank",
         ),
     ] {
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
+        let ctx = TestFixture::new(fixture_name).await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-        let admin_token = login_with_basic_and_get_token(app.clone()).await;
+        let app = ctx.app().clone();
+        let admin_token = ctx.login_admin().await;
 
         let response = app
             .oneshot(
@@ -468,18 +437,15 @@ async fn router_users_create_returns_kotlin_like_validation_violations() {
                 }
             ]))
         );
-
-        cleanup_router_fixture(paths);
     }
 }
 
 #[tokio::test]
 async fn router_users_create_returns_spring_error_envelope_for_duplicate_email() {
-    let paths = new_router_fixture("router-users-create-duplicate-email-envelope").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-create-duplicate-email-envelope").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -521,16 +487,13 @@ async fn router_users_create_returns_spring_error_envelope_for_duplicate_email()
         payload.get("timestamp").and_then(Value::as_u64).is_some(),
         "duplicate-email response should include numeric timestamp: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_by_id_password_allows_self_update_without_expiring_current_session() {
-    let paths = new_router_fixture("router-users-by-id-password-self-update").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-by-id-password-self-update").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -538,13 +501,10 @@ async fn router_users_by_id_password_allows_self_update_without_expiring_current
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let patch_response = app
         .clone()
@@ -577,24 +537,21 @@ async fn router_users_by_id_password_allows_self_update_without_expiring_current
         .expect("self password existing session request should complete");
     assert_eq!(me_response.status(), StatusCode::OK);
 
-    let new_login_token = login_with_basic_credentials_and_get_token(
-        app,
-        "member@example.org",
-        "router-contract-member-456",
-    )
-    .await;
+    let new_login_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-456")
+        .await;
     assert!(!new_login_token.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_password_endpoints_return_forbidden_in_demo_mode() {
-    let paths = new_router_fixture("router-users-password-demo-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-users-password-demo-forbidden")
+        .demo_mode()
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_demo_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     for uri in [
         "/api/v2/users/me/password",
@@ -620,6 +577,4 @@ async fn router_password_endpoints_return_forbidden_in_demo_mode() {
             "demo mode should forbid password updates at {uri}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }

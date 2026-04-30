@@ -4,11 +4,10 @@ use super::*;
 
 #[tokio::test]
 async fn router_put_announcements_deduplicates_duplicate_ids() {
-    let paths = new_router_fixture("router-put-announcements-deduplicates-ids").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-announcements-deduplicates-ids").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -27,11 +26,9 @@ async fn router_put_announcements_deduplicates_duplicate_ids() {
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_announcement_read_ids_for_user(&paths, "admin-user").await,
+        load_announcement_read_ids_for_user(ctx.paths(), "admin-user").await,
         vec!["announcement-1".to_string(), "announcement-2".to_string()]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -44,11 +41,10 @@ async fn router_get_releases_returns_internal_error_when_upstream_fetch_fails() 
         std::env::set_var("KOMGA_RUST_RELEASES_URL", "http://127.0.0.1:1/releases");
     }
 
-    let paths = new_router_fixture("router-get-releases-upstream-failure").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-releases-upstream-failure").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -64,7 +60,6 @@ async fn router_get_releases_returns_internal_error_when_upstream_fetch_fails() 
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
 }
 
@@ -81,11 +76,10 @@ async fn router_get_releases_returns_internal_error_for_non_array_payload() {
         std::env::set_var("KOMGA_RUST_RELEASES_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-releases-non-array-payload").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-releases-non-array-payload").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -101,7 +95,6 @@ async fn router_get_releases_returns_internal_error_for_non_array_payload() {
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
     server
         .join
@@ -126,11 +119,10 @@ async fn router_get_releases_returns_internal_error_for_non_success_status_with_
         std::env::set_var("KOMGA_RUST_RELEASES_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-releases-non-success-valid-array").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-releases-non-success-valid-array").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -146,7 +138,6 @@ async fn router_get_releases_returns_internal_error_for_non_success_status_with_
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
     server
         .join
@@ -167,11 +158,10 @@ async fn router_get_announcements_returns_internal_error_when_upstream_fetch_fai
         );
     }
 
-    let paths = new_router_fixture("router-get-announcements-upstream-failure").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-announcements-upstream-failure").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -187,7 +177,6 @@ async fn router_get_announcements_returns_internal_error_when_upstream_fetch_fai
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
 }
 
@@ -208,12 +197,11 @@ async fn router_get_announcements_does_not_passthrough_unknown_feed_fields() {
         std::env::set_var("KOMGA_RUST_ANNOUNCEMENTS_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-announcements-known-dto-fields-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_announcement_read_ids(&paths, "admin-user", &["announcement-1"]).await;
+    let ctx = TestFixture::new("router-get-announcements-known-dto-fields-only").await;
+    seed_announcement_read_ids(ctx.paths(), "admin-user", &["announcement-1"]).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -237,7 +225,6 @@ async fn router_get_announcements_does_not_passthrough_unknown_feed_fields() {
     assert_eq!(items[0]["date_modified"], "2024-01-01T00:00:00Z");
     assert_eq!(items[0]["_komga"]["read"], true);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
     server
         .join
@@ -257,11 +244,10 @@ async fn router_get_announcements_returns_not_found_for_null_body_payload() {
         std::env::set_var("KOMGA_RUST_ANNOUNCEMENTS_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-announcements-null-body").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-announcements-null-body").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -277,7 +263,6 @@ async fn router_get_announcements_returns_not_found_for_null_body_payload() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
     server
         .join
@@ -302,11 +287,10 @@ async fn router_get_announcements_returns_internal_error_for_invalid_date_modifi
         std::env::set_var("KOMGA_RUST_ANNOUNCEMENTS_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-announcements-invalid-date-modified").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-announcements-invalid-date-modified").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -322,7 +306,6 @@ async fn router_get_announcements_returns_internal_error_for_invalid_date_modifi
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
     server
         .join
@@ -347,11 +330,10 @@ async fn router_get_announcements_returns_internal_error_for_non_success_upstrea
         std::env::set_var("KOMGA_RUST_ANNOUNCEMENTS_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-get-announcements-non-success-status").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-announcements-non-success-status").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -367,7 +349,6 @@ async fn router_get_announcements_returns_internal_error_for_non_success_upstrea
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_ANNOUNCEMENTS_URL", previous);
     server
         .join
@@ -377,11 +358,10 @@ async fn router_get_announcements_returns_internal_error_for_non_success_upstrea
 
 #[tokio::test]
 async fn router_client_settings_global_list_does_not_inject_missing_oauth_hide_login_default() {
-    let paths = new_router_fixture("router-client-settings-global-list-no-synthetic-default").await;
-    seed_router_contract_data(&paths).await;
-    seed_global_client_setting(&paths, "public.setting", "public-value", true).await;
+    let ctx = TestFixture::new("router-client-settings-global-list-no-synthetic-default").await;
+    seed_global_client_setting(ctx.paths(), "public.setting", "public-value", true).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -401,6 +381,4 @@ async fn router_client_settings_global_list_does_not_inject_missing_oauth_hide_l
         .expect("global client settings response should be an object");
     assert_eq!(settings["public.setting"]["value"], "public-value");
     assert!(settings.get("webui.oauth2.hide_login").is_none());
-
-    cleanup_router_fixture(paths);
 }

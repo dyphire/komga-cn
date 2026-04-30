@@ -4,11 +4,8 @@ mod readlists;
 
 #[tokio::test]
 async fn router_opds_v2_library_browse_uses_kotlin_top_level_title_and_links() {
-    let paths = new_router_fixture("router-opds-v2-library-browse-route").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-opds-v2-library-browse-route").await;
+    let auth_token = ctx.login_admin().await;
 
     for (route, expected_title, expected_self_href) in [
         (
@@ -22,7 +19,9 @@ async fn router_opds_v2_library_browse_uses_kotlin_top_level_title_and_links() {
             "http://localhost/opds/v2/libraries/library-1/browse",
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -110,17 +109,12 @@ async fn router_opds_v2_library_browse_uses_kotlin_top_level_title_and_links() {
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collections_use_kotlin_top_level_shape() {
-    let paths = new_router_fixture("router-opds-v2-collections-shape").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-opds-v2-collections-shape").await;
+    let auth_token = ctx.login_admin().await;
 
     for (route, expected_title, expected_self_href) in [
         (
@@ -134,7 +128,9 @@ async fn router_opds_v2_collections_use_kotlin_top_level_shape() {
             "http://localhost/opds/v2/libraries/library-1/collections",
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -235,16 +231,13 @@ async fn router_opds_v2_collections_use_kotlin_top_level_shape() {
             "route: {route}, collection detail links should not live in top-level navigation"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
-    let paths = new_router_fixture("router-opds-v2-collections-paging-metadata").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-collections-paging-metadata").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 collections paging db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -266,8 +259,7 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
     .expect("second collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for (route, expected_self_href, expected_next_href) in [
         (
@@ -281,7 +273,9 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
             "http://localhost/opds/v2/libraries/library-1/collections?page=1",
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -351,17 +345,14 @@ async fn router_opds_v2_collections_include_kotlin_paging_metadata_and_links() {
             .collect::<Vec<_>>();
         assert_eq!(collection_titles, vec!["Collection 1"], "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collections_keep_restricted_collections_in_groups_like_kotlin() {
-    let paths = new_router_fixture("router-opds-v2-collections-restricted-group-visibility").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_age_rating(&paths, "series-1", 21).await;
+    let ctx = TestFixture::new("router-opds-v2-collections-restricted-group-visibility").await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 21).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -369,19 +360,17 @@ async fn router_opds_v2_collections_keep_restricted_collections_in_groups_like_k
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
     for route in [
         "/opds/v2/libraries/collections",
         "/opds/v2/libraries/library-1/collections",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -418,24 +407,22 @@ async fn router_opds_v2_collections_keep_restricted_collections_in_groups_like_k
             .collect::<Vec<_>>();
         assert_eq!(collection_titles, vec!["Collection 1"], "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collections_top_level_navigation_hides_empty_subsections() {
-    let paths = new_router_fixture("router-opds-v2-collections-empty-subsections").await;
-    seed_router_contract_data(&paths).await;
-    clear_router_collections_and_readlists(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-collections-empty-subsections").await;
+    clear_router_collections_and_readlists(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for route in [
         "/opds/v2/libraries/collections",
         "/opds/v2/libraries/library-1/collections",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -464,18 +451,15 @@ async fn router_opds_v2_collections_top_level_navigation_hides_empty_subsections
             "route: {route}, empty collections/readlists should be omitted from top-level navigation"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collection_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-collection-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-collection-unauthorized-auth-doc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -487,17 +471,14 @@ async fn router_opds_v2_collection_unauthorized_returns_opds_auth_document() {
         .expect("opds v2 collection unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope_collection() {
-    let paths = new_router_fixture("router-opds-v2-collection-scope-not-found").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-collection-scope-not-found").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "router-contract-library-123",
@@ -505,7 +486,7 @@ async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 collection scope db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -527,15 +508,13 @@ async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope
     .expect("library-scoped collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "router-contract-library-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "router-contract-library-123")
+        .await;
 
-    let hidden_response = app
+    let hidden_response = ctx
+        .app()
+        .clone()
         .clone()
         .oneshot(
             Request::builder()
@@ -548,24 +527,25 @@ async fn router_opds_v2_collection_returns_not_found_for_missing_or_out_of_scope
         .await
         .expect("hidden collection request should complete");
     assert_eq!(hidden_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collection_uses_kotlin_navigation_shape_and_ordering() {
-    let paths = new_router_fixture("router-opds-v2-collection-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
-    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
-    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
-    update_router_collection_last_modified(&paths, "collection-1", "2024-01-20 01:02:03").await;
-    seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
+    let ctx = TestFixture::new("router-opds-v2-collection-shape").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(ctx.paths(), "series-1", "Zeta Display", "Zulu Sort")
+        .await;
+    update_router_series_metadata_titles(ctx.paths(), "series-2", "Alpha Display", "Alpha Sort")
+        .await;
+    update_router_collection_last_modified(ctx.paths(), "collection-1", "2024-01-20 01:02:03")
+        .await;
+    seed_router_collection_series_entry(ctx.paths(), "collection-1", "series-2", 99).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -638,17 +618,14 @@ async fn router_opds_v2_collection_uses_kotlin_navigation_shape_and_ordering() {
         navigation[0].get("type").and_then(Value::as_str),
         Some("application/opds+json")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_by_restrictions() {
-    let paths = new_router_fixture("router-opds-v2-collection-empty-visible-feed").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_age_rating(&paths, "series-1", 21).await;
+    let ctx = TestFixture::new("router-opds-v2-collection-empty-visible-feed").await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 21).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -656,15 +633,13 @@ async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_b
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -692,23 +667,23 @@ async fn router_opds_v2_collection_returns_empty_feed_when_series_are_filtered_b
             .map(Vec::len),
         Some(0)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_collection_keeps_empty_navigation_for_out_of_range_pages() {
-    let paths = new_router_fixture("router-opds-v2-collection-out-of-range-empty-page").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
-    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
-    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
-    seed_router_collection_series_entry(&paths, "collection-1", "series-2", 99).await;
+    let ctx = TestFixture::new("router-opds-v2-collection-out-of-range-empty-page").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(ctx.paths(), "series-1", "Zeta Display", "Zulu Sort")
+        .await;
+    update_router_series_metadata_titles(ctx.paths(), "series-2", "Alpha Display", "Alpha Sort")
+        .await;
+    seed_router_collection_series_entry(ctx.paths(), "collection-1", "series-2", 99).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -745,17 +720,15 @@ async fn router_opds_v2_collection_keeps_empty_navigation_for_out_of_range_pages
             && link.get("href").and_then(Value::as_str)
                 == Some("http://localhost/opds/v2/collections/collection-1?page=1")
     }));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
-    let paths = new_router_fixture("router-opds-v2-series-shape-and-tag-filter").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_catalog_fields(&paths, "series-1", false, "2024-02-20 01:02:03").await;
+    let ctx = TestFixture::new("router-opds-v2-series-shape-and-tag-filter").await;
+    update_router_series_catalog_fields(ctx.paths(), "series-1", false, "2024-02-20 01:02:03")
+        .await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-untagged",
         "series-1",
         "library-1",
@@ -765,7 +738,7 @@ async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 series detail db should open");
     sqlx::query("UPDATE SERIES_METADATA SET SUMMARY = ? WHERE SERIES_ID = ?")
@@ -782,10 +755,11 @@ async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
         .expect("tagged book summary should be updated for opds series route");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -931,16 +905,13 @@ async fn router_opds_v2_series_uses_kotlin_shape_tag_filter_and_facets() {
                     == Some("http://localhost/opds/v2/books/book-1/thumbnail")
             })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
-    let paths = new_router_fixture("router-opds-v2-series-facets-include-non-ready-tags").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-series-facets-include-non-ready-tags").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-hidden-tag",
         "series-1",
         "library-1",
@@ -950,7 +921,7 @@ async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 series hidden-tag db should open");
     sqlx::query("UPDATE MEDIA SET STATUS = ? WHERE BOOK_ID = ?")
@@ -967,10 +938,11 @@ async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
         .expect("hidden-tag book metadata tag should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -1010,6 +982,4 @@ async fn router_opds_v2_series_facets_keep_tags_from_non_ready_books() {
             .and_then(Value::as_str)
             != Some("Book Hidden Tag")
     }));
-
-    cleanup_router_fixture(paths);
 }

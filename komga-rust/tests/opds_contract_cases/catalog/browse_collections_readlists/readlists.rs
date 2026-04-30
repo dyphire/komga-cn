@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_library_readlists_respect_kotlin_library_scope_statuses() {
-    let paths = new_router_fixture("router-opds-v2-library-readlists-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
+    let ctx = TestFixture::new("router-opds-v2-library-readlists-scope").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -14,15 +13,13 @@ async fn router_opds_v2_library_readlists_respect_kotlin_library_scope_statuses(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let forbidden_response = app
+    let forbidden_response = ctx
+        .app()
+        .clone()
         .clone()
         .oneshot(
             Request::builder()
@@ -36,7 +33,9 @@ async fn router_opds_v2_library_readlists_respect_kotlin_library_scope_statuses(
         .expect("forbidden readlists request should complete");
     assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -48,19 +47,15 @@ async fn router_opds_v2_library_readlists_respect_kotlin_library_scope_statuses(
         .await
         .expect("missing-library readlists request should complete");
     assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
-    let paths = new_router_fixture("router-opds-v2-readlists-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_readlist(&paths, "readlist-0", "Alpha ReadList", "book-1").await;
-    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
+    let ctx = TestFixture::new("router-opds-v2-readlists-shape").await;
+    seed_router_readlist(ctx.paths(), "readlist-0", "Alpha ReadList", "book-1").await;
+    update_router_library_last_modified(ctx.paths(), "library-1", "2024-02-03 04:05:06").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for (route, expected_title, expected_self_href, expected_next_href, expected_modified) in [
         (
@@ -78,7 +73,9 @@ async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
             Some("2024-02-03T04:05:06Z"),
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -236,7 +233,9 @@ async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
         "/opds/v2/libraries/readlists?page=2&size=1",
         "/opds/v2/libraries/library-1/readlists?page=2&size=1",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -274,6 +273,4 @@ async fn router_opds_v2_readlists_use_kotlin_grouped_feed_shape() {
             "route: {route}, Kotlin keeps empty group navigation arrays"
         );
     }
-
-    cleanup_router_fixture(paths);
 }

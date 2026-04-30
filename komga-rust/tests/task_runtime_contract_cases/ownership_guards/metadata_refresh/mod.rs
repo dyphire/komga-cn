@@ -22,16 +22,15 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
             0_i64,
         ),
     ] {
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
+        let ctx = TestFixture::new(fixture_name).await;
 
-        let sidecar_dir = paths.config_dir.join("books");
+        let sidecar_dir = ctx.paths().config_dir.join("books");
         std::fs::create_dir_all(&sidecar_dir)
             .expect("book metadata sidecar directory should exist");
         std::fs::write(sidecar_dir.join("book-1.xml"), xml)
             .expect("book metadata sidecar fixture with read list should be written");
 
-        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for readlist-only metadata fixture setup");
         sqlx::query(
@@ -66,7 +65,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         .expect("book metadata sidecar row should be inserted for readlist-only test");
         pool.close().await;
 
-        let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+        let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
             .await
             .expect("tasks db should open for readlist-only metadata task setup");
         sqlx::query(
@@ -92,13 +91,13 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         .expect("readlist-only metadata task row should be inserted");
         tasks_pool.close().await;
 
-        let runtime = runtime_task_context(&paths).await;
+        let runtime = runtime_task_context(ctx.paths()).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         scheduler
             .process_available(&runtime).await
             .expect("runtime should process readlist-only RefreshBookMetadata tasks successfully");
 
-        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for readlist-only metadata verification");
         let metadata = sqlx::query("SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -133,16 +132,14 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         assert_eq!(readlist.get::<i64, _>("ORDERED"), 1);
         assert_eq!(readlist_book.get::<i64, _>("NUMBER"), expected_number);
 
-        cleanup_router_fixture(paths);
     }
 }
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_requests_it() {
-    let paths = new_router_fixture("runtime-refresh-book-metadata-applies-comicinfo-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-book-metadata-applies-comicinfo-number").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     std::fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -150,7 +147,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     )
     .expect("book metadata sidecar fixture with number should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for number metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -170,7 +167,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     .expect("book metadata sidecar row should be inserted for number capability test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for number metadata task setup");
     sqlx::query(
@@ -196,14 +193,14 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     .expect("number-only metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should process number-only RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for number metadata verification");
     let metadata =
@@ -216,18 +213,14 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
 
     assert_eq!(metadata.get::<String, _>("NUMBER"), "7");
     assert_eq!(metadata.get::<f64, _>("NUMBER_SORT"), 7.0_f64);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_lock_semantics() {
-    let paths =
-        new_router_fixture("runtime-refresh-book-metadata-applies-remaining-comicinfo-fields")
-            .await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-refresh-book-metadata-applies-remaining-comicinfo-fields").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     std::fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -235,7 +228,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     )
     .expect("book metadata sidecar fixture with remaining ComicInfo fields should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for remaining ComicInfo metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -278,7 +271,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
         .expect("seed metadata link should be inserted before remaining ComicInfo test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for remaining ComicInfo metadata task setup");
     sqlx::query(
@@ -304,14 +297,14 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     .expect("remaining ComicInfo metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should process remaining ComicInfo metadata fields successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for remaining ComicInfo metadata verification");
     let metadata =
@@ -383,18 +376,14 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
         ],
         "unlocked links should be replaced from valid ComicInfo Web URIs only",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_only_capabilities() {
-    let paths =
-        new_router_fixture("runtime-refresh-book-metadata-skips-comicinfo-for-isbn-tags-only")
-            .await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-refresh-book-metadata-skips-comicinfo-for-isbn-tags-only").await;
     seed_router_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-comicinfo-gate-1",
         "series-1",
         "comicinfo-gate.cbz",
@@ -402,7 +391,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     )
     .await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     std::fs::write(
         sidecar_dir.join("comicinfo-gate.xml"),
@@ -410,7 +399,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     )
     .expect("ComicInfo ISBN/tags-only sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo gate fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -448,7 +437,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
         .expect("book metadata tags should be cleared before ComicInfo gate test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for ComicInfo gate metadata task setup");
     sqlx::query(
@@ -474,14 +463,14 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     .expect("ComicInfo gate metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should process ComicInfo gate metadata tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo gate metadata verification");
     let metadata = sqlx::query("SELECT ISBN FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -505,6 +494,4 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
         tags.is_empty(),
         "TAGS-only refresh must not trigger ComicInfo provider when Kotlin capability gate would skip it",
     );
-
-    cleanup_router_fixture(paths);
 }

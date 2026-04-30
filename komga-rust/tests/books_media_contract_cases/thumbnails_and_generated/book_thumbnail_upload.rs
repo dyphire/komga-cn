@@ -2,16 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag() {
-    let paths = new_router_fixture("router-book-thumbnail-upload-multipart").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-upload-multipart").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -50,16 +49,13 @@ async fn router_book_thumbnail_upload_parses_multipart_image_and_selected_flag()
     );
     assert_eq!(payload.get("width"), Some(&json!(1)));
     assert_eq!(payload.get("height"), Some(&json!(1)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected() {
-    let paths = new_router_fixture("router-book-thumbnail-upload-auto-selects-first").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-upload-auto-selects-first").await;
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for book thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -69,13 +65,13 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
         .expect("existing book-1 thumbnails should be deleted before upload test");
     cleanup_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -91,7 +87,7 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
 
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for selected thumbnail verification");
     let selected_count = sqlx::query(
@@ -105,16 +101,13 @@ async fn router_book_thumbnail_upload_selects_thumbnail_when_none_was_selected()
     verify_pool.close().await;
 
     assert_eq!(selected_count, 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_upload_accepts_oneshot_book() {
-    let paths = new_router_fixture("router-book-thumbnail-upload-oneshot-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-upload-oneshot-book").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot book thumbnail setup");
     sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
@@ -131,13 +124,13 @@ async fn router_book_thumbnail_upload_accepts_oneshot_book() {
         .expect("series oneshot flag should update for thumbnail upload contract consistency");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -162,17 +155,13 @@ async fn router_book_thumbnail_upload_accepts_oneshot_book() {
         Some(&Value::String("USER_UPLOADED".to_string()))
     );
     assert_eq!(payload.get("selected"), Some(&Value::Bool(false)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
-    let paths = new_router_fixture("router-book-thumbnail-upload-invalid-selected").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-upload-invalid-selected").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let boundary = "komga-rust-invalid-selected-boundary";
     let mut body = Vec::new();
@@ -189,7 +178,9 @@ async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
     )
     .expect("multipart invalid-selected field should be written");
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -213,23 +204,20 @@ async fn router_book_thumbnail_upload_rejects_invalid_selected_flag() {
             "book thumbnail selected field must be true or false".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-thumbnail-admin-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-admin-basic-auth-compat").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -251,7 +239,8 @@ async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_client
         .expect("book thumbnail basic-auth upload should return thumbnail id")
         .to_string();
 
-    let select = app
+    let select = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -267,5 +256,4 @@ async fn router_book_thumbnail_admin_routes_accept_basic_auth_like_kotlin_client
         .await
         .expect("book thumbnail basic-auth select request should complete");
     assert_eq!(select.status(), StatusCode::ACCEPTED);
-    cleanup_router_fixture(paths);
 }

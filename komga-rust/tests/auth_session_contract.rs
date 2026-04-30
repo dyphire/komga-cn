@@ -10,9 +10,10 @@ use tower::util::ServiceExt;
 
 mod support;
 
+use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths, contract_seed::*, external_service_support::*, fixture_bootstrap::*,
-    log_capture::*, media_file_fixtures::*, response_helpers::*, user_auth::*,
+    RuntimeDbPaths, external_service_support::*, log_capture::*, media_file_fixtures::*,
+    response_helpers::*, user_auth::*,
 };
 
 mod auth_session_contract_cases;
@@ -65,13 +66,15 @@ async fn rotating_remember_me_key_requires_restart_before_existing_cookie_is_inv
 
 #[tokio::test]
 async fn server_context_path_mounts_api_routes_under_runtime_prefix() {
-    let paths = new_router_fixture("router-server-context-path-mounts-api").await;
-    let mut config = runtime_config_for_paths(&paths);
-    config.server_context_path = Some("/komga".to_string());
+    let ctx = TestFixture::builder("router-server-context-path-mounts-api")
+        .with_config(|config| {
+            config.server_context_path = Some("/komga".to_string());
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&config).await;
-
-    let prefixed_response = app
+    let prefixed_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -83,7 +86,9 @@ async fn server_context_path_mounts_api_routes_under_runtime_prefix() {
         .expect("prefixed settings request should complete");
     assert_eq!(prefixed_response.status(), StatusCode::UNAUTHORIZED);
 
-    let bare_response = app
+    let bare_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/v1/settings")
@@ -93,8 +98,6 @@ async fn server_context_path_mounts_api_routes_under_runtime_prefix() {
         .await
         .expect("bare settings request should complete");
     assert_eq!(bare_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]

@@ -5,8 +5,7 @@ use komga_infrastructure::sqlite::{
 
 #[tokio::test]
 async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-import").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-import").await;
 
     let source_root = std::env::temp_dir().join(format!(
         "komga-import-blocked-{}-{}",
@@ -32,17 +31,17 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
     })
     .to_string();
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -61,7 +60,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
         .await
         .expect("blocked main-database import should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for import verification");
     let historical_events =
@@ -72,7 +71,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
             .get::<i64, _>("COUNT");
     verify_pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for blocked import follow-up verification");
     let analyze_follow_ups =
@@ -88,7 +87,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
         "runtime must not persist import historical events when main database is external-owned",
     );
     assert!(
-        !paths
+        !ctx.paths()
             .config_dir
             .join("series/series-1/blocked-import.cbz")
             .exists(),
@@ -101,20 +100,18 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
 
     let _ = std::fs::remove_file(&source_file);
     let _ = std::fs::remove_dir_all(&source_root);
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-extension-repair").await;
-    seed_router_contract_data(&paths).await;
-    std::fs::create_dir_all(paths.config_dir.join("books"))
+    let ctx = TestFixture::new("runtime-blocked-main-database-extension-repair").await;
+    std::fs::create_dir_all(ctx.paths().config_dir.join("books"))
         .expect("book directory should exist for extension-repair fixture");
-    let source_path = paths.config_dir.join("books/repair-book.bin");
+    let source_path = ctx.paths().config_dir.join("books/repair-book.bin");
     std::fs::write(&source_path, b"repair-extension-fixture")
         .expect("book file should be written for extension-repair fixture");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for extension-repair fixture setup");
     sqlx::query("UPDATE LIBRARY SET REPAIR_EXTENSIONS = 1 WHERE ID = ?")
@@ -149,17 +146,17 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
     .expect("extension-repair fixture media row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -186,7 +183,7 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
         .await
         .expect("blocked main-database extension repair should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for extension-repair verification");
     let url = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -206,18 +203,18 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
         "runtime must not rename source files during extension repair when main database is external-owned",
     );
     assert!(
-        !paths.config_dir.join("books/repair-book.gif").exists(),
+        !ctx.paths()
+            .config_dir
+            .join("books/repair-book.gif")
+            .exists(),
         "runtime must not create repaired-extension files when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-find-books-to-convert").await;
-    seed_router_contract_data(&paths).await;
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let ctx = TestFixture::new("runtime-blocked-main-database-find-books-to-convert").await;
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for find-books-to-convert fixture setup");
     sqlx::query("UPDATE LIBRARY SET CONVERT_TO_CBZ = 1 WHERE ID = ?")
@@ -252,17 +249,17 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
     .expect("find-books-to-convert fixture media row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -284,6 +281,4 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
         processed, 1,
         "runtime must not enqueue downstream convert-book tasks when find-books-to-convert is blocked by external-owned main database",
     );
-
-    cleanup_router_fixture(paths);
 }

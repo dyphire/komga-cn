@@ -2,19 +2,22 @@ use super::*;
 
 #[tokio::test]
 async fn router_download_routes_do_not_get_shallow_etag_headers() {
-    let paths = new_router_fixture("router-download-routes-no-shallow-etag").await;
-    seed_router_contract_data(&paths).await;
-    seed_kobo_sync_api_key(&paths, "any-token", "admin-user").await;
-    let books_dir = paths.config_dir.join("books");
+    let ctx = TestFixture::builder("router-download-routes-no-shallow-etag")
+        .with_seed(|paths| async move {
+            seed_kobo_sync_api_key(&paths, "any-token", "admin-user").await;
+        })
+        .build()
+        .await;
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for download exclusion test");
     std::fs::write(books_dir.join("book-1.epub"), b"download-exclusion-body")
         .expect("book fixture file should be written for download exclusion test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let libraries_response = app
+    let libraries_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -38,7 +41,8 @@ async fn router_download_routes_do_not_get_shallow_etag_headers() {
         "/opds/v2/books/book-1/file/book-1.epub",
         "/kobo/any-token/v1/books/book-1/file/epub",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -62,6 +66,4 @@ async fn router_download_routes_do_not_get_shallow_etag_headers() {
             "download route should not receive shallow etag: {route}",
         );
     }
-
-    cleanup_router_fixture(paths);
 }

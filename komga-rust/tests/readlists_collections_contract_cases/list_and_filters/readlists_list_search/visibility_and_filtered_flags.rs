@@ -2,67 +2,72 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlists_default_name_order_and_filtered_flags_match_kotlin() {
-    let paths = new_router_fixture("router-readlists-default-order-filtered-flags").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlists-default-order-filtered-flags")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for readlists default-order seed");
-    sqlx::query("UPDATE READLIST SET NAME = ?, BOOK_COUNT = ? WHERE ID = ?")
-        .bind("Gamma ReadList")
-        .bind(3_i64)
-        .bind("readlist-1")
-        .execute(&pool)
-        .await
-        .expect("readlist-1 should update for readlists default-order seed");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("Alpha ReadList")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("readlist-2 row should insert for readlists default-order seed");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-2")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("readlist-2 membership should insert for readlists default-order seed");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-        .bind("readlist-3")
-        .bind("Zulu ReadList")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("readlist-3 row should insert for readlists default-order seed");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-3")
-        .bind("book-3")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("readlist-3 membership should insert for readlists default-order seed");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for readlists default-order seed");
+            sqlx::query("UPDATE READLIST SET NAME = ?, BOOK_COUNT = ? WHERE ID = ?")
+                .bind("Gamma ReadList")
+                .bind(3_i64)
+                .bind("readlist-1")
+                .execute(&pool)
+                .await
+                .expect("readlist-1 should update for readlists default-order seed");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+                .bind("readlist-2")
+                .bind("Alpha ReadList")
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("readlist-2 row should insert for readlists default-order seed");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-2")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("readlist-2 membership should insert for readlists default-order seed");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+                .bind("readlist-3")
+                .bind("Zulu ReadList")
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("readlist-3 row should insert for readlists default-order seed");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-3")
+            .bind("book-3")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("readlist-3 membership should insert for readlists default-order seed");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -97,52 +102,53 @@ async fn router_readlists_default_name_order_and_filtered_flags_match_kotlin() {
         content[1].get("filtered").and_then(Value::as_bool),
         Some(true)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlists_apply_content_restrictions_and_filtered_flags_like_kotlin() {
-    let paths = new_router_fixture("router-readlists-content-restrictions").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        15,
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlists-content-restrictions")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                15,
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for readlists content-restriction seed");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("Denied ReadList")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("denied readlist row should insert for content restriction seed");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-1")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("denied readlist membership should insert for content restriction seed");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for readlists content-restriction seed");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+                .bind("readlist-2")
+                .bind("Denied ReadList")
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("denied readlist row should insert for content restriction seed");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("denied readlist membership should insert for content restriction seed");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -172,60 +178,63 @@ async fn router_readlists_apply_content_restrictions_and_filtered_flags_like_kot
             .all(|entry| entry.get("id") != Some(&json!("readlist-2"))),
         "fully hidden readlist should be omitted",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlists_library_filter_and_content_restriction_exclude_nonmatching_mixed_readlists_like_kotlin()
  {
-    let paths = new_router_fixture("router-readlists-library-filter-content-restriction").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        15,
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlists-library-filter-content-restriction")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                15,
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for readlists library-filter restriction seed");
-    sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("Requested Library Hidden")
-        .bind(2_i64)
-        .execute(&pool)
-        .await
-        .expect("mixed-library restricted readlist row should insert");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-2")
-        .bind(0_i64)
-        .execute(&pool)
-        .await
-        .expect("requested-library restricted book should insert");
-    sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind("readlist-2")
-        .bind("book-3")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("other-library visible book should insert");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for readlists library-filter restriction seed");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+                .bind("readlist-2")
+                .bind("Requested Library Hidden")
+                .bind(2_i64)
+                .execute(&pool)
+                .await
+                .expect("mixed-library restricted readlist row should insert");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-2")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("requested-library restricted book should insert");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-3")
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("other-library visible book should insert");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -249,6 +258,4 @@ async fn router_readlists_library_filter_and_content_restriction_exclude_nonmatc
             .all(|entry| entry.get("id") != Some(&json!("readlist-2"))),
         "readlist should be excluded when requested-library books are all restricted",
     );
-
-    cleanup_router_fixture(paths);
 }

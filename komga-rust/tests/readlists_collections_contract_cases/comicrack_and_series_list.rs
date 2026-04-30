@@ -19,15 +19,18 @@ fn assert_spring_bad_request(payload: &Value, message: &str, path: &str) {
 
 #[tokio::test]
 async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches() {
-    let paths = new_router_fixture("router-readlist-match-comicrack").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::builder("router-readlist-match-comicrack")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let missing_file_part_body = "--komga-rust-comicrack-boundary\r\nContent-Disposition: form-data; name=\"upload\"; filename=\"list.cbl\"\r\nContent-Type: application/xml\r\n\r\n<ReadingList />\r\n--komga-rust-comicrack-boundary--\r\n".to_string();
-    let missing_file_part = app
+    let missing_file_part = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -51,7 +54,8 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
         "/api/v1/readlists/match/comicrack",
     );
 
-    let malformed_multipart = app
+    let malformed_multipart = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -79,7 +83,8 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
     );
 
     let (invalid_content_type, invalid_body) = comicrack_multipart_body("<ReadingList>");
-    let invalid_xml = app
+    let invalid_xml = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -103,7 +108,8 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
     let (missing_books_content_type, missing_books_body) = comicrack_multipart_body(
         r#"<?xml version="1.0"?><ReadingList><Name>RL</Name><Books></Books></ReadingList>"#,
     );
-    let missing_books = app
+    let missing_books = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -126,7 +132,9 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
 
     let xml = r#"<ReadingList><Name>ReadList 1</Name><Books><Book Series="Series 2" Number="002" /></Books></ReadingList>"#;
     let (valid_content_type, valid_body) = comicrack_multipart_body_with_quoted_boundary(xml);
-    let valid = app
+    let valid = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -180,21 +188,17 @@ async fn router_readlist_match_comicrack_rejects_invalid_xml_and_reports_matches
             .and_then(Value::as_str),
         Some("book-2"),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_metadata_and_collection_filters_in_runtime_owned_mode()
  {
-    let paths =
-        new_router_fixture("router-discovery-series-list-strict-metadata-and-collection").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-metadata-and-collection").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let genre_match = app
+    let genre_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -219,7 +223,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series genre match payload should expose content array");
     assert_eq!(genre_match_content.len(), 1);
 
-    let genre_miss = app
+    let genre_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -244,7 +249,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series genre miss payload should expose content array");
     assert_eq!(genre_miss_content.len(), 0);
 
-    let collection_match = app
+    let collection_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -269,7 +275,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series collection match payload should expose content array");
     assert_eq!(collection_match_content.len(), 1);
 
-    let collection_miss = app
+    let collection_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -294,7 +301,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series collection miss payload should expose content array");
     assert_eq!(collection_miss_content.len(), 0);
 
-    let language_match = app
+    let language_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -319,7 +327,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series language match payload should expose content array");
     assert_eq!(language_match_content.len(), 1);
 
-    let language_is_not_excluded = app
+    let language_is_not_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -344,7 +353,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series language isNot excluded payload should expose content array");
     assert_eq!(language_is_not_excluded_content.len(), 0);
 
-    let language_is_not_kept = app
+    let language_is_not_kept = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -369,7 +379,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series language isNot kept payload should expose content array");
     assert_eq!(language_is_not_kept_content.len(), 1);
 
-    let publisher_match = app
+    let publisher_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -394,7 +405,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series publisher match payload should expose content array");
     assert_eq!(publisher_match_content.len(), 1);
 
-    let publisher_is_not_excluded = app
+    let publisher_is_not_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -419,7 +431,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series publisher isNot excluded payload should expose content array");
     assert_eq!(publisher_is_not_excluded_content.len(), 0);
 
-    let publisher_is_not_kept = app
+    let publisher_is_not_kept = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -444,7 +457,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series publisher isNot kept payload should expose content array");
     assert_eq!(publisher_is_not_kept_content.len(), 1);
 
-    let age_rating_match = app
+    let age_rating_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -511,7 +525,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
             1_usize,
         ),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -538,7 +553,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         );
     }
 
-    let sharing_label_match = app
+    let sharing_label_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -574,7 +590,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         ("SharingLabel", "isNull", 0_usize),
         ("SharingLabel", "isNotNull", 1_usize),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -622,7 +639,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         );
     }
 
-    let author_match = app
+    let author_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -647,7 +665,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series author match payload should expose content array");
     assert_eq!(author_match_content.len(), 1);
 
-    let author_role_match = app
+    let author_role_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -681,7 +700,8 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .expect("strict series author role match payload should expose content array");
     assert_eq!(author_role_match_content.len(), 1);
 
-    let author_role_miss = app
+    let author_role_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -714,6 +734,4 @@ async fn router_discovery_series_list_supports_metadata_and_collection_filters_i
         .and_then(Value::as_array)
         .expect("strict series author role miss payload should expose content array");
     assert_eq!(author_role_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

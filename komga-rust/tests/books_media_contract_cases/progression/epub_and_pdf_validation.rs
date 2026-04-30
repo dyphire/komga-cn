@@ -2,13 +2,13 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_progression_put_rejects_epub_locator_without_progression() {
-    let paths = new_router_fixture("router-book-progression-put-epub-missing-progression").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-missing-progression").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -40,19 +40,17 @@ async fn router_book_progression_put_rejects_epub_locator_without_progression() 
             "location.progression is required".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_rejects_epub_locator_when_extension_is_missing() {
-    let paths = new_router_fixture("router-book-progression-put-epub-missing-extension").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-missing-extension").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -82,16 +80,13 @@ async fn router_book_progression_put_rejects_epub_locator_when_extension_is_miss
         payload.get("error"),
         Some(&Value::String("Epub extension not found".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href() {
-    let paths = new_router_fixture("router-book-progression-put-epub-bad-href").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-bad-href").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for progression bad-href seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -103,10 +98,11 @@ async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href
         .expect("epub extension positions should be seeded for progression bad-href test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -138,16 +134,13 @@ async fn router_book_progression_put_rejects_epub_locator_with_non_existing_href
             "Resource does not exist in book: ch5.xhtml".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_accepts_pdf_position_payload() {
-    let paths = new_router_fixture("router-book-progression-put-pdf-position").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-pdf-position").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -155,8 +148,7 @@ async fn router_book_progression_put_accepts_pdf_position_payload() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -167,7 +159,8 @@ async fn router_book_progression_put_accepts_pdf_position_payload() {
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -182,7 +175,9 @@ async fn router_book_progression_put_accepts_pdf_position_payload() {
         .expect("pdf progression put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -198,16 +193,13 @@ async fn router_book_progression_put_accepts_pdf_position_payload() {
     assert_eq!(payload.get("modified"), progression.get("modified"));
     assert_eq!(payload.get("device"), progression.get("device"));
     assert_eq!(payload.get("locator"), progression.get("locator"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
-    let paths = new_router_fixture("router-book-progression-put-pdf-out-of-range").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-pdf-out-of-range").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -215,9 +207,10 @@ async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let response = app
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -249,6 +242,4 @@ async fn router_book_progression_put_rejects_pdf_position_beyond_page_count() {
             "Page argument (2) must be within 1 and book page count (1)".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }

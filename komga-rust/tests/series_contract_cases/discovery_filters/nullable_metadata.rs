@@ -3,13 +3,14 @@ use super::*;
 #[tokio::test]
 async fn router_discovery_series_list_supports_nullable_metadata_operators_with_null_rows_in_runtime_owned_mode()
  {
-    let paths =
-        new_router_fixture("router-discovery-series-list-strict-nullable-metadata-positive").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_contract_nullable_samples(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx =
+        TestFixture::builder("router-discovery-series-list-strict-nullable-metadata-positive")
+            .with_seed(|paths| async move {
+                seed_router_contract_nullable_samples(&paths).await;
+            })
+            .build()
+            .await;
+    let auth_token = ctx.login_admin().await;
 
     for (condition_type, operator, expected_id) in [
         ("Tag", "is", "series-1"),
@@ -49,7 +50,8 @@ async fn router_discovery_series_list_supports_nullable_metadata_operators_with_
             .to_string()
         };
 
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -80,6 +82,4 @@ async fn router_discovery_series_list_supports_nullable_metadata_operators_with_
             "unexpected series nullable metadata id for type={condition_type}, operator={operator}",
         );
     }
-
-    cleanup_router_fixture(paths);
 }

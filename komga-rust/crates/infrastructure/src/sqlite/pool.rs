@@ -314,6 +314,12 @@ impl SqliteTempPool {
 
     pub async fn cleanup(self) {
         let Self { pool, db_path } = self;
+
+        let shared_pools = evict_shared_pools_for_paths(std::slice::from_ref(&db_path));
+        for shared_pool in shared_pools {
+            shared_pool.close().await;
+        }
+
         pool.close().await;
         drop(pool);
 

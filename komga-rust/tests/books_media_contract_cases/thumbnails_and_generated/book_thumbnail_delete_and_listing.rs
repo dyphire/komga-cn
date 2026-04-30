@@ -2,16 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
-    let paths = new_router_fixture("router-book-thumbnail-by-id-missing-path-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-by-id-missing-path-book").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -32,7 +31,9 @@ async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exi
         .expect("book thumbnail upload should return thumbnail id")
         .to_string();
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -47,22 +48,19 @@ async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exi
         .expect("book thumbnail missing path request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_exists() {
-    let paths = new_router_fixture("router-book-thumbnail-delete-missing-path-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-delete-missing-path-book").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -83,7 +81,9 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
         .expect("book thumbnail upload should return thumbnail id")
         .to_string();
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -99,7 +99,7 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for missing path delete verification");
     let remaining = sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE ID = ?")
@@ -110,17 +110,14 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
         .get::<i64, _>("COUNT");
     verify_pool.close().await;
     assert_eq!(remaining, 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
-    let paths = new_router_fixture("router-book-thumbnail-delete-generated").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-book-thumbnail-delete-generated").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -130,14 +127,14 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
         .expect("existing thumbnails should be deleted before generated delete test");
     cleanup_pool.close().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
     generate_book_thumbnail(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before delete test");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail lookup");
     let generated_thumbnail_id = sqlx::query(
@@ -150,9 +147,10 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     .get::<String, _>("ID");
     verify_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let response = app
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -167,16 +165,13 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
         .expect("generated book thumbnail delete request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selected_one_is_removed() {
-    let paths = new_router_fixture("router-book-thumbnail-delete-reselects-remaining").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-delete-reselects-remaining").await;
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for book thumbnail delete cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -186,15 +181,15 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         .expect("existing book-1 thumbnails should be deleted before delete reselect test");
     cleanup_pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
 
     let mut selected_thumbnail_id = String::new();
     for (selected, name) in [(true, "selected.png"), (false, "other.png")] {
         let (content_type, body) =
             multipart_image_upload_body("file", name, "image/png", selected, &image_bytes);
-        let upload = app
+        let upload = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -219,7 +214,8 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         }
     }
 
-    let delete = app
+    let delete = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -235,7 +231,9 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         .expect("book selected thumbnail delete request should complete");
     assert_eq!(delete.status(), StatusCode::ACCEPTED);
 
-    let list = app
+    let list = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -253,22 +251,19 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
         .expect("book thumbnail list response should be an array");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
     let _guard = thumbnail_runtime_sse_guard().await;
-    let paths = new_router_fixture("router-book-thumbnail-select-sse").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-select-sse").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -289,7 +284,9 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
         .to_string();
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let select = app
+    let select = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -325,22 +322,19 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
         thumbnail_event.payload.get("seriesId"),
         Some(&Value::String("series-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
     let _guard = thumbnail_runtime_sse_guard().await;
-    let paths = new_router_fixture("router-book-thumbnail-delete-sse").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-delete-sse").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "cover.png", "image/png", true, &image_bytes);
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -361,7 +355,9 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         .to_string();
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let delete = app
+    let delete = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -395,20 +391,22 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         thumbnail_event.payload.get("seriesId"),
         Some(&Value::String("series-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnails_returns_empty_array_for_existing_book_without_posters() {
-    let paths = new_router_fixture("router-book-thumbnails-empty-array").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-book-thumbnails-empty-array")
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -423,16 +421,13 @@ async fn router_book_thumbnails_returns_empty_array_for_existing_book_without_po
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, json!([]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_returns_not_found_for_existing_single_image_without_poster() {
-    let paths = new_router_fixture("router-book-thumbnail-single-image-no-poster").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-thumbnail-single-image-no-poster").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image thumbnail fixture");
     sqlx::query(
@@ -471,17 +466,18 @@ async fn router_book_thumbnail_returns_not_found_for_existing_single_image_witho
     .expect("single-image book metadata row should be inserted");
     pool.close().await;
 
-    let image_path = paths.config_dir.join("books/cover.png");
+    let image_path = ctx.paths().config_dir.join("books/cover.png");
     if let Some(parent) = image_path.parent() {
         std::fs::create_dir_all(parent).expect("single-image parent directory should be created");
     }
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -494,6 +490,4 @@ async fn router_book_thumbnail_returns_not_found_for_existing_single_image_witho
         .expect("single-image thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }

@@ -2,12 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn router_referential_facets_support_repeated_library_id() {
-    let paths = new_router_fixture("router-referential-facets-repeated-library-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-referential-facets-repeated-library-id")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let cases = [
         (
@@ -50,7 +52,8 @@ async fn router_referential_facets_support_repeated_library_id() {
     ];
 
     for (route, expected) in cases {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -67,17 +70,17 @@ async fn router_referential_facets_support_repeated_library_id() {
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-referential-facets-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-referential-facets-basic-auth-compat")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -89,7 +92,8 @@ async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients
         "/api/v1/tags/series?library_id=library-1&library_id=library-2",
         "/api/v1/tags/book?readlist_id=readlist-1",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -105,31 +109,28 @@ async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_referential_facets_filter_repeated_library_scope_to_authorized_libraries() {
-    let paths = new_router_fixture("router-referential-facets-authorized-library-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-referential-facets-authorized-library-scope")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
     let cases = [
         (
@@ -167,7 +168,8 @@ async fn router_referential_facets_filter_repeated_library_scope_to_authorized_l
     ];
 
     for (route, expected) in cases {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -184,31 +186,33 @@ async fn router_referential_facets_filter_repeated_library_scope_to_authorized_l
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_genres_deduplicates_shared_values_across_series() {
-    let paths = new_router_fixture("router-genres-deduplicates-shared-values").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-genres-deduplicates-shared-values")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("genres dedup db should open");
-    sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
-        .bind("series-2")
-        .bind("SciFi")
-        .execute(&pool)
-        .await
-        .expect("duplicate genre row should be inserted");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("genres dedup db should open");
+            sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+                .bind("series-2")
+                .bind("SciFi")
+                .execute(&pool)
+                .await
+                .expect("duplicate genre row should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -223,40 +227,39 @@ async fn router_genres_deduplicates_shared_values_across_series() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, json!(["Drama", "SciFi"]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_referential_facets_handle_empty_and_null_series_metadata_values() {
-    let paths =
-        new_router_fixture("router-referential-facets-empty-and-null-series-metadata-values").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::builder("router-referential-facets-empty-and-null-series-metadata-values")
+            .with_seed(|paths| async move {
+                let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                    .await
+                    .expect("referential facets metadata db should open");
+                sqlx::query("UPDATE SERIES_METADATA SET LANGUAGE = ? WHERE SERIES_ID = ?")
+                    .bind("")
+                    .bind("series-1")
+                    .execute(&pool)
+                    .await
+                    .expect("series language should update to empty string for facet test");
+                sqlx::query("UPDATE SERIES_METADATA SET PUBLISHER = ? WHERE SERIES_ID = ?")
+                    .bind("")
+                    .bind("series-1")
+                    .execute(&pool)
+                    .await
+                    .expect("series publisher should update to empty string for facet test");
+                sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = NULL WHERE SERIES_ID = ?")
+                    .bind("series-1")
+                    .execute(&pool)
+                    .await
+                    .expect("series age rating should update to null for facet test");
+                pool.close().await;
+            })
+            .build()
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("referential facets metadata db should open");
-    sqlx::query("UPDATE SERIES_METADATA SET LANGUAGE = ? WHERE SERIES_ID = ?")
-        .bind("")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series language should update to empty string for facet test");
-    sqlx::query("UPDATE SERIES_METADATA SET PUBLISHER = ? WHERE SERIES_ID = ?")
-        .bind("")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series publisher should update to empty string for facet test");
-    sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = NULL WHERE SERIES_ID = ?")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series age rating should update to null for facet test");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let cases = [
         ("/api/v1/languages", json!([])),
@@ -265,7 +268,8 @@ async fn router_referential_facets_handle_empty_and_null_series_metadata_values(
     ];
 
     for (route, expected) in cases {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -282,20 +286,22 @@ async fn router_referential_facets_handle_empty_and_null_series_metadata_values(
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sharing_labels_prefers_library_scope_over_collection_scope() {
-    let paths = new_router_fixture("router-sharing-labels-library-wins-over-collection").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-sharing-labels-library-wins-over-collection")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -310,21 +316,22 @@ async fn router_sharing_labels_prefers_library_scope_over_collection_scope() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, json!(["Friends"]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_release_dates_prefers_library_scope_over_collection_scope() {
-    let paths =
-        new_router_fixture("router-series-release-dates-library-wins-over-collection").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-series-release-dates-library-wins-over-collection")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -339,16 +346,13 @@ async fn router_series_release_dates_prefers_library_scope_over_collection_scope
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, json!(["2025"]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_release_dates_uses_series_aggregated_release_date() {
-    let paths = new_router_fixture("router-series-release-dates-uses-aggregation").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-release-dates-uses-aggregation").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series release dates aggregation db should open");
     sqlx::query(
@@ -384,10 +388,11 @@ async fn router_series_release_dates_uses_series_aggregated_release_date() {
         .expect("series aggregation release date should be updated");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -402,32 +407,29 @@ async fn router_series_release_dates_uses_series_aggregated_release_date() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, json!(["2024"]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_tags_scope_rules_match_visible_libraries() {
-    let paths = new_router_fixture("router-book-tags-scope-rules").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-book-tags-scope-rules")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let admin_token = ctx.login_admin().await;
+    let restricted_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
     let cases = [
         (
@@ -463,7 +465,8 @@ async fn router_book_tags_scope_rules_match_visible_libraries() {
     ];
 
     for (token, route, expected) in cases {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -480,18 +483,18 @@ async fn router_book_tags_scope_rules_match_visible_libraries() {
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_referential_facets_support_collection_id_scope() {
-    let paths = new_router_fixture("router-referential-facets-collection-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_facet_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-referential-facets-collection-scope")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let cases = [
         (
@@ -529,7 +532,8 @@ async fn router_referential_facets_support_collection_id_scope() {
     ];
 
     for (route, expected) in cases {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -546,6 +550,4 @@ async fn router_referential_facets_support_collection_id_scope() {
         let payload = response_json(response).await;
         assert_eq!(payload, expected, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }

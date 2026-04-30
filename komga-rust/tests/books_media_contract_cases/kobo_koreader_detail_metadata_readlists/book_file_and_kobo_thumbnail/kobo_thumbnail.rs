@@ -51,15 +51,20 @@ async fn seed_kobo_thumbnail_sidecar_url(
 
 #[tokio::test]
 async fn router_kobo_thumbnail_exact_id_local_response_is_jpeg() {
-    let paths = new_router_fixture("router-kobo-thumbnail-local-jpeg").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    seed_kobo_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes()).await;
+    let ctx = TestFixture::builder("router-kobo-thumbnail-local-jpeg")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            seed_kobo_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &fixture_png_bytes())
+                .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -86,22 +91,24 @@ async fn router_kobo_thumbnail_exact_id_local_response_is_jpeg() {
         image::guess_format(body.as_ref()).expect("kobo thumbnail local body should decode"),
         image::ImageFormat::Jpeg
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_thumbnail_redirects_to_kobo_cdn_when_exact_thumbnail_is_missing_and_proxy_enabled()
  {
-    let paths = new_router_fixture("router-kobo-thumbnail-redirects-to-cdn").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-thumbnail-redirects-to-cdn")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -121,21 +128,23 @@ async fn router_kobo_thumbnail_redirects_to_kobo_cdn_when_exact_thumbnail_is_mis
             .and_then(|value| value.to_str().ok()),
         Some("https://cdn.kobo.com/book-images/book-1/800/800/false/image.jpg")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_thumbnail_returns_not_found_when_exact_thumbnail_is_missing_and_proxy_disabled()
  {
-    let paths = new_router_fixture("router-kobo-thumbnail-missing-local").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-thumbnail-missing-local")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -148,18 +157,19 @@ async fn router_kobo_thumbnail_returns_not_found_when_exact_thumbnail_is_missing
         .expect("kobo thumbnail missing local request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_thumbnail_exact_id_sidecar_stays_local_when_proxy_enabled() {
-    let paths = new_router_fixture("router-kobo-thumbnail-sidecar-local").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-thumbnail-sidecar-local")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
     seed_kobo_thumbnail_sidecar_url(
-        &paths,
+        ctx.paths(),
         "thumb-book-1",
         "image/png",
         "covers/thumb-book-1.png",
@@ -167,10 +177,11 @@ async fn router_kobo_thumbnail_exact_id_sidecar_stays_local_when_proxy_enabled()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -201,6 +212,4 @@ async fn router_kobo_thumbnail_exact_id_sidecar_stays_local_when_proxy_enabled()
         image::guess_format(body.as_ref()).expect("kobo thumbnail sidecar body should decode"),
         image::ImageFormat::Jpeg
     );
-
-    cleanup_router_fixture(paths);
 }

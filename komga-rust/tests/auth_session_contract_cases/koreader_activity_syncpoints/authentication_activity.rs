@@ -6,10 +6,9 @@ use std::net::SocketAddr;
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_id_as_filter() {
-    let paths = new_router_fixture("router-user-latest-auth-activity-blank-apikey-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-user-latest-auth-activity-blank-apikey-id").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for latest auth activity seed");
     sqlx::query(
@@ -31,8 +30,8 @@ async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_i
     .expect("authentication activity row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -47,19 +46,16 @@ async fn router_users_by_id_authentication_activity_latest_treats_blank_apikey_i
         .expect("latest auth activity blank-apikey request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_matches_email_only_activity_rows() {
-    let paths = new_router_fixture("router-user-latest-auth-activity-email-fallback").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-user-latest-auth-activity-email-fallback").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for email-only latest auth activity seed");
     sqlx::query(
@@ -103,19 +99,16 @@ async fn router_users_by_id_authentication_activity_latest_matches_email_only_ac
         payload.get("dateTime"),
         Some(&Value::String("2030-01-03T04:05:06Z".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for_koreader_api_key_auth()
  {
-    let paths =
-        new_router_fixture("router-user-latest-auth-activity-koreader-api-key-connect-info").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("router-user-latest-auth-activity-koreader-api-key-connect-info").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -191,19 +184,16 @@ async fn router_users_by_id_authentication_activity_latest_uses_connect_info_for
         json!("router-contract-koreader-device")
     );
     assert_eq!(payload["source"], json!("ApiKey"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_tracks_koreader_progress_api_key_auth() {
-    let paths =
-        new_router_fixture("router-user-latest-auth-activity-koreader-progress-api-key").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, false).await;
+    let ctx = TestFixture::new("router-user-latest-auth-activity-koreader-progress-api-key").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    seed_router_read_progress(ctx.paths(), false).await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -282,19 +272,16 @@ async fn router_users_by_id_authentication_activity_latest_tracks_koreader_progr
         json!("router-contract-koreader-progress-device")
     );
     assert_eq!(payload["source"], json!("ApiKey"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_authentication_activity_honors_page_and_date_time_sort() {
-    let paths = new_router_fixture("router-users-me-auth-activity-page-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-auth-activity-page-sort").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for current-user auth activity seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE USER_ID = ?")
@@ -347,18 +334,15 @@ async fn router_users_me_authentication_activity_honors_page_and_date_time_sort(
         payload["content"][0]["dateTime"],
         json!("2030-01-02T00:00:00Z")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_by_id_authentication_activity_latest_returns_successful_kobo_path_api_key_auth()
  {
-    let paths =
-        new_router_fixture("router-user-latest-auth-activity-kobo-path-api-key-success").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-user-latest-auth-activity-kobo-path-api-key-success").await;
+
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "kobo-user",
         "kobo@example.org",
         "router-contract-kobo-123",
@@ -366,15 +350,12 @@ async fn router_users_by_id_authentication_activity_latest_returns_successful_ko
         &["USER", "KOBO_SYNC"],
     )
     .await;
-    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-user").await;
+    seed_kobo_sync_api_key(ctx.paths(), "validkobotoken", "kobo-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "kobo@example.org",
-        "router-contract-kobo-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials("kobo@example.org", "router-contract-kobo-123")
+        .await;
 
     let ping_response = app
         .clone()
@@ -414,19 +395,16 @@ async fn router_users_by_id_authentication_activity_latest_returns_successful_ko
     assert_eq!(payload["ip"], json!("203.0.113.44"));
     assert_eq!(payload["userAgent"], json!("router-contract-kobo-device"));
     assert_eq!(payload["source"], json!("ApiKey"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_authentication_activity_includes_email_only_rows() {
-    let paths = new_router_fixture("router-users-me-auth-activity-email-fallback").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-auth-activity-email-fallback").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for current-user email-fallback seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY")
@@ -489,16 +467,13 @@ async fn router_users_me_authentication_activity_includes_email_only_rows() {
         payload["content"][0]["dateTime"],
         json!("2030-01-04T00:00:00Z")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
-    let paths = new_router_fixture("router-users-me-basic-records-request-metadata").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-basic-records-request-metadata").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -508,7 +483,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
         .expect("existing auth activity rows should delete");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
     let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
 
     let response = app
@@ -528,7 +503,7 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let (ip, user_agent, source): (Option<String>, Option<String>, Option<String>) =
@@ -544,17 +519,14 @@ async fn router_users_me_basic_auth_records_forwarded_ip_and_user_agent() {
     assert_eq!(ip.as_deref(), Some("203.0.113.10"));
     assert_eq!(user_agent.as_deref(), Some("router-contract-agent"));
     assert_eq!(source.as_deref(), Some("Password"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback() {
-    let paths = new_router_fixture("router-users-me-api-keys-list-connect-info").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-api-keys-list-connect-info").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -579,7 +551,7 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
         .expect("api key create payload should expose key")
         .to_string();
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -608,7 +580,7 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let (ip, user_agent, source, api_key_comment): (
@@ -632,16 +604,13 @@ async fn router_users_me_api_keys_list_api_key_auth_uses_connect_info_fallback()
     );
     assert_eq!(source.as_deref(), Some("ApiKey"));
     assert_eq!(api_key_comment.as_deref(), Some("Helper connect info"));
-
-    cleanup_router_fixture(paths);
 }
 
 pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refactor() {
-    let paths = new_router_fixture("router-api-key-login-records-kotlin-source").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-api-key-login-records-kotlin-source").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -666,7 +635,7 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
         .expect("api key create payload should expose key")
         .to_string();
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -690,7 +659,7 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth activity assertion");
     let source = sqlx::query_scalar::<_, Option<String>>(
@@ -703,8 +672,6 @@ pub(crate) async fn verify_api_key_login_records_apikey_source_after_auth_refact
     pool.close().await;
 
     assert_eq!(source.as_deref(), Some("ApiKey"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -714,10 +681,10 @@ async fn api_key_login_records_apikey_source_after_auth_refactor() {
 
 #[tokio::test]
 async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
-    let paths = new_router_fixture("router-users-auth-activity-unpaged-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-auth-activity-unpaged-sort").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -725,10 +692,10 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for admin auth activity seed");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY")
@@ -782,16 +749,13 @@ async fn router_users_authentication_activity_honors_unpaged_date_time_sort() {
         payload["content"][1]["dateTime"],
         json!("2030-01-02T00:00:00Z")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet() {
-    let paths = new_router_fixture("router-users-me-invalid-basic-auth-failure-gap").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-invalid-basic-auth-failure-gap").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for failure-gap auth activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -801,7 +765,7 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
         .expect("existing auth activity rows should delete");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
     let basic_token = STANDARD.encode("admin@example.org:wrong-password");
 
     let response = app
@@ -818,7 +782,7 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for failure-gap auth activity assertion");
     let row_count = sqlx::query_scalar::<_, i64>(
@@ -834,6 +798,4 @@ async fn router_users_me_invalid_basic_auth_does_not_record_failure_activity_yet
         row_count, 0,
         "Rust still leaves authentication failure activity persistence as an explicit parity gap"
     );
-
-    cleanup_router_fixture(paths);
 }

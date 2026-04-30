@@ -6,13 +6,11 @@ mod string_ops;
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_release_date_is_and_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-release-date").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-release-date").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let matched_response = app
+    let matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -43,7 +41,8 @@ async fn router_discovery_series_list_supports_release_date_is_and_is_not_in_run
         .expect("strict series release-date is payload should expose content array");
     assert_eq!(matched_content.len(), 1);
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -74,7 +73,8 @@ async fn router_discovery_series_list_supports_release_date_is_and_is_not_in_run
         .expect("strict series release-date isNot excluded payload should expose content array");
     assert_eq!(excluded_content.len(), 0);
 
-    let kept_response = app
+    let kept_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -104,19 +104,15 @@ async fn router_discovery_series_list_supports_release_date_is_and_is_not_in_run
         .and_then(Value::as_array)
         .expect("strict series release-date isNot kept payload should expose content array");
     assert_eq!(kept_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_release_date_null_operators_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-release-date-null").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-release-date-null").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let is_null_response = app
+    let is_null_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -146,7 +142,8 @@ async fn router_discovery_series_list_supports_release_date_null_operators_in_ru
         .expect("strict series release-date isNull payload should expose content array");
     assert_eq!(is_null_content.len(), 0);
 
-    let is_not_null_response = app
+    let is_not_null_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -175,20 +172,16 @@ async fn router_discovery_series_list_supports_release_date_null_operators_in_ru
         .and_then(Value::as_array)
         .expect("strict series release-date isNotNull payload should expose content array");
     assert_eq!(is_not_null_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_release_date_greater_than_and_less_than_in_runtime_owned_mode()
  {
-    let paths = new_router_fixture("router-discovery-series-list-strict-release-date-range").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-release-date-range").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let gt_matched_response = app
+    let gt_matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -219,7 +212,8 @@ async fn router_discovery_series_list_supports_release_date_greater_than_and_les
         .expect("strict series release-date greaterThan match payload should expose content array");
     assert_eq!(gt_matched_content.len(), 1);
 
-    let gt_missing_response = app
+    let gt_missing_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -252,7 +246,8 @@ async fn router_discovery_series_list_supports_release_date_greater_than_and_les
         );
     assert_eq!(gt_missing_content.len(), 0);
 
-    let lt_matched_response = app
+    let lt_matched_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -283,7 +278,8 @@ async fn router_discovery_series_list_supports_release_date_greater_than_and_les
         .expect("strict series release-date lessThan match payload should expose content array");
     assert_eq!(lt_matched_content.len(), 1);
 
-    let lt_missing_response = app
+    let lt_missing_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -313,6 +309,4 @@ async fn router_discovery_series_list_supports_release_date_greater_than_and_les
         .and_then(Value::as_array)
         .expect("strict series release-date lessThan missing payload should expose content array");
     assert_eq!(lt_missing_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

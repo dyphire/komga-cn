@@ -47,14 +47,6 @@ fn cookie_max_age_seconds(cookie: &str) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
-fn one_second_session_runtime_config(
-    paths: &RuntimeDbPaths,
-) -> komga_config::env_config::RuntimeConfig {
-    let mut config = runtime_config_for_paths(paths);
-    config.session_max_inactive_seconds = 1;
-    config
-}
-
 async fn login_with_basic_and_remember_me(
     app: axum::Router,
     email: &str,
@@ -120,13 +112,13 @@ async fn get_server_settings(app: axum::Router, admin_token: &str) -> axum::resp
 #[tokio::test]
 async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookies() {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-remember-me-basic-login-cookies").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response =
-        login_with_basic_and_remember_me(app, "admin@example.org", "router-contract-admin-123")
-            .await;
+    let ctx = TestFixture::new("router-remember-me-basic-login-cookies").await;
+    let response = login_with_basic_and_remember_me(
+        ctx.app().clone(),
+        "admin@example.org",
+        "router-contract-admin-123",
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let cookies = response_cookies(&response);
@@ -138,20 +130,19 @@ async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookie
         cookie_value(&cookies, "komga-remember-me").is_some(),
         "remember-me basic login should issue komga-remember-me cookie: {cookies:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
     let _guard = lock_remember_me_contract().await;
 
-    let paths = new_router_fixture("router-remember-me-session-expiry-reauth").await;
-    seed_router_contract_data(&paths).await;
-
-    let config = one_second_session_runtime_config(&paths);
-    let app = build_router_with_config(&config).await;
+    let ctx = TestFixture::builder("router-remember-me-session-expiry-reauth")
+        .with_config(|config| {
+            config.session_max_inactive_seconds = 1;
+        })
+        .build()
+        .await;
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -166,12 +157,18 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let expired_session_response =
-        users_me_with_cookie(app.clone(), &format!("KOMGA-SESSION={session_cookie}")).await;
+    let expired_session_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("KOMGA-SESSION={session_cookie}"),
+    )
+    .await;
     assert_eq!(expired_session_response.status(), StatusCode::UNAUTHORIZED);
 
-    let remember_only_response =
-        users_me_with_cookie(app, &format!("komga-remember-me={remember_me_cookie}")).await;
+    let remember_only_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("komga-remember-me={remember_me_cookie}"),
+    )
+    .await;
 
     assert_eq!(remember_only_response.status(), StatusCode::OK);
     let remember_payload = response_json(remember_only_response).await;
@@ -179,17 +176,19 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
         remember_payload.get("email"),
         Some(&json!("admin@example.org"))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     let _guard = lock_remember_me_contract().await;
 
-    let paths = new_router_fixture("router-remember-me-auto-login-records-source").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-remember-me-auto-login-records-source")
+        .with_config(|config| {
+            config.session_max_inactive_seconds = 1;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for remember-me activity cleanup");
     sqlx::query("DELETE FROM AUTHENTICATION_ACTIVITY WHERE EMAIL = ?")
@@ -199,10 +198,8 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
         .expect("existing authentication activity rows should delete");
     pool.close().await;
 
-    let config = one_second_session_runtime_config(&paths);
-    let app = build_router_with_config(&config).await;
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -215,12 +212,15 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let remember_only_response =
-        users_me_with_cookie(app, &format!("komga-remember-me={remember_me_cookie}")).await;
+    let remember_only_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("komga-remember-me={remember_me_cookie}"),
+    )
+    .await;
 
     assert_eq!(remember_only_response.status(), StatusCode::OK);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for remember-me activity assertion");
     let source = sqlx::query_scalar::<_, Option<String>>(
@@ -233,19 +233,14 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
     pool.close().await;
 
     assert_eq!(source.as_deref(), Some("RememberMe"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn logout_clears_session_and_remember_me_replay() {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-logout-clears-session-and-remember-me-replay").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-logout-clears-session-and-remember-me-replay").await;
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -258,7 +253,8 @@ async fn logout_clears_session_and_remember_me_replay() {
     let remember_me_cookie = cookie_value(&login_cookies, "komga-remember-me")
         .expect("remember-me login should issue remember-me cookie");
 
-    let logout_response = app
+    let logout_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -291,37 +287,36 @@ async fn logout_clears_session_and_remember_me_replay() {
         "logout should expire the remember-me cookie: {logout_cookies:?}"
     );
 
-    let replay_session_response =
-        users_me_with_cookie(app.clone(), &format!("KOMGA-SESSION={session_cookie}")).await;
+    let replay_session_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("KOMGA-SESSION={session_cookie}"),
+    )
+    .await;
     assert_eq!(replay_session_response.status(), StatusCode::UNAUTHORIZED);
 
-    let replay_remember_me_response =
-        users_me_with_cookie(app, &format!("komga-remember-me={remember_me_cookie}")).await;
+    let replay_remember_me_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("komga-remember-me={remember_me_cookie}"),
+    )
+    .await;
     assert_eq!(replay_remember_me_response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn malformed_remember_me_cookie_is_rejected() {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-malformed-remember-me-cookie-rejected").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = users_me_with_cookie(app, "komga-remember-me=not-a-valid-token").await;
+    let ctx = TestFixture::new("router-malformed-remember-me-cookie-rejected").await;
+    let response =
+        users_me_with_cookie(ctx.app().clone(), "komga-remember-me=not-a-valid-token").await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn auth_resolution_priority_prefers_header_then_session_cookie_then_remember_me() {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-auth-resolution-priority").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-auth-resolution-priority").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -329,10 +324,9 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let admin_token = ctx.login_admin().await;
     let member_login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "member@example.org",
         "router-contract-member-123",
     )
@@ -344,7 +338,8 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
     let member_remember_me_cookie = cookie_value(&member_cookies, "komga-remember-me")
         .expect("member remember-me login should issue remember-me cookie");
 
-    let header_wins_response = app
+    let header_wins_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -369,7 +364,8 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
         Some(&json!("admin@example.org"))
     );
 
-    let session_wins_response = app
+    let session_wins_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -393,7 +389,9 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
         Some(&json!("member@example.org"))
     );
 
-    let remember_only_response = app
+    let remember_only_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -413,22 +411,17 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
         remember_payload.get("email"),
         Some(&json!("member@example.org"))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_cookie_ttl_changes()
 {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-remember-me-settings-restart-only").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-remember-me-settings-restart-only").await;
 
-    let config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let admin_token = ctx.login_admin().await;
 
     let patch_response = patch_server_settings(
-        app.clone(),
+        ctx.app().clone(),
         &admin_token,
         json!({
             "rememberMeDurationDays": 15
@@ -438,11 +431,11 @@ pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_
 
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_server_setting(&paths, "REMEMBER_ME_DURATION").await,
+        load_server_setting(ctx.paths(), "REMEMBER_ME_DURATION").await,
         Some("15".to_string())
     );
 
-    let settings_response = get_server_settings(app.clone(), &admin_token).await;
+    let settings_response = get_server_settings(ctx.app().clone(), &admin_token).await;
     assert_eq!(settings_response.status(), StatusCode::OK);
     let settings_payload = response_json(settings_response).await;
     assert_eq!(
@@ -451,7 +444,7 @@ pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_
     );
 
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -466,7 +459,7 @@ pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_
         "remember-me duration should stay on the current runtime value until restart: {current_runtime_cookie}"
     );
 
-    let restarted_app = build_router_with_config(&config).await;
+    let restarted_app = komga_server::app::build_router_with_config(ctx.config()).await;
     let restarted_login_response = login_with_basic_and_remember_me(
         restarted_app,
         "admin@example.org",
@@ -482,8 +475,6 @@ pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_
         Some(15 * 24 * 60 * 60),
         "remember-me duration should switch to the persisted value after restart: {restarted_cookie}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -493,14 +484,16 @@ async fn remember_me_duration_setting_requires_restart_before_cookie_ttl_changes
 
 pub(crate) async fn verify_remember_me_cold_start_uses_persisted_runtime_settings() {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-remember-me-cold-start-runtime-settings").await;
-    seed_router_contract_data(&paths).await;
-    upsert_server_setting(&paths, "REMEMBER_ME_KEY", "cold-start-remember-key").await;
-    upsert_server_setting(&paths, "REMEMBER_ME_DURATION", "15").await;
+    let ctx = TestFixture::builder("router-remember-me-cold-start-runtime-settings")
+        .with_seed(|paths| async move {
+            upsert_server_setting(&paths, "REMEMBER_ME_KEY", "cold-start-remember-key").await;
+            upsert_server_setting(&paths, "REMEMBER_ME_DURATION", "15").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -519,7 +512,7 @@ pub(crate) async fn verify_remember_me_cold_start_uses_persisted_runtime_setting
     let remember_me_cookie_value = cookie_value(&cookies, "komga-remember-me")
         .expect("cold-start remember-me login should issue remember-me cookie value");
     let replay_response = users_me_with_cookie(
-        app,
+        ctx.app().clone(),
         &format!("komga-remember-me={remember_me_cookie_value}"),
     )
     .await;
@@ -528,8 +521,6 @@ pub(crate) async fn verify_remember_me_cold_start_uses_persisted_runtime_setting
         StatusCode::OK,
         "cold-start remember-me replay should succeed without first touching /api/v1/settings"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -540,14 +531,10 @@ async fn remember_me_cold_start_uses_persisted_runtime_settings() {
 pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_existing_cookie_is_invalidated()
  {
     let _guard = lock_remember_me_contract().await;
-    let paths = new_router_fixture("router-remember-me-key-rotation-restart-only").await;
-    seed_router_contract_data(&paths).await;
-
-    let config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-remember-me-key-rotation-restart-only").await;
+    let admin_token = ctx.login_admin().await;
     let login_response = login_with_basic_and_remember_me(
-        app.clone(),
+        ctx.app().clone(),
         "admin@example.org",
         "router-contract-admin-123",
     )
@@ -559,7 +546,7 @@ pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_exis
         .expect("remember-me login should issue remember-me cookie before rotation");
 
     let patch_response = patch_server_settings(
-        app.clone(),
+        ctx.app().clone(),
         &admin_token,
         json!({
             "renewRememberMeKey": true
@@ -568,7 +555,7 @@ pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_exis
     .await;
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let persisted_key = load_server_setting(&paths, "REMEMBER_ME_KEY")
+    let persisted_key = load_server_setting(ctx.paths(), "REMEMBER_ME_KEY")
         .await
         .expect("renewRememberMeKey should persist a new remember-me key");
     assert!(
@@ -576,11 +563,11 @@ pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_exis
         "renewRememberMeKey should persist a non-empty remember-me key"
     );
 
-    let settings_response = get_server_settings(app.clone(), &admin_token).await;
+    let settings_response = get_server_settings(ctx.app().clone(), &admin_token).await;
     assert_eq!(settings_response.status(), StatusCode::OK);
 
     let replay_response = users_me_with_cookie(
-        app.clone(),
+        ctx.app().clone(),
         &format!("komga-remember-me={remember_me_cookie}"),
     )
     .await;
@@ -590,7 +577,7 @@ pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_exis
         "renewRememberMeKey should not invalidate existing remember-me cookies until restart"
     );
 
-    let restarted_app = build_router_with_config(&config).await;
+    let restarted_app = komga_server::app::build_router_with_config(ctx.config()).await;
     let restarted_replay_response = users_me_with_cookie(
         restarted_app,
         &format!("komga-remember-me={remember_me_cookie}"),
@@ -601,8 +588,6 @@ pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_exis
         StatusCode::UNAUTHORIZED,
         "renewRememberMeKey should invalidate existing remember-me cookies after restart"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]

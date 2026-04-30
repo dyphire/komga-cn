@@ -2,15 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtime_owned_mode() {
-    let paths =
-        new_router_fixture("router-discovery-books-list-strict-tag-author-media-profile").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-tag-author-media-profile").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let tag_match = app
-        .clone()
+    let tag_match = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -34,7 +30,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books tag match payload should expose content array");
     assert_eq!(tag_match_content.len(), 1);
 
-    let tag_miss = app
+    let tag_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -59,8 +56,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books tag miss payload should expose content array");
     assert_eq!(tag_miss_content.len(), 0);
 
-    let tag_is_not = app
-        .clone()
+    let tag_is_not = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -84,7 +80,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books tag isNot payload should expose content array");
     assert_eq!(tag_is_not_content.len(), 0);
 
-    let tag_is_null = app
+    let tag_is_null = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -108,7 +105,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books tag isNull payload should expose content array");
     assert_eq!(tag_is_null_content.len(), 0);
 
-    let tag_is_not_null = app
+    let tag_is_not_null = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -132,8 +130,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books tag isNotNull payload should expose content array");
     assert_eq!(tag_is_not_null_content.len(), 1);
 
-    let author_match = app
-        .clone()
+    let author_match = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -157,8 +154,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books author match payload should expose content array");
     assert_eq!(author_match_content.len(), 1);
 
-    let author_miss = app
-        .clone()
+    let author_miss = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -182,7 +178,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books author miss payload should expose content array");
     assert_eq!(author_miss_content.len(), 0);
 
-    let author_role_match = app
+    let author_role_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -216,7 +213,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books author role match payload should expose content array");
     assert_eq!(author_role_match_content.len(), 1);
 
-    let author_role_miss = app
+    let author_role_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -250,7 +248,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books author role miss payload should expose content array");
     assert_eq!(author_role_miss_content.len(), 0);
 
-    let poster_match = app
+    let poster_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -284,7 +283,8 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books poster match payload should expose content array");
     assert_eq!(poster_match_content.len(), 1);
 
-    let poster_excluded = app
+    let poster_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -318,8 +318,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books poster excluded payload should expose content array");
     assert_eq!(poster_excluded_content.len(), 0);
 
-    let media_profile_match = app
-        .clone()
+    let media_profile_match = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -343,8 +342,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books media profile match payload should expose content array");
     assert_eq!(media_profile_match_content.len(), 1);
 
-    let media_profile_miss = app
-        .clone()
+    let media_profile_miss = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -368,8 +366,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books media profile miss payload should expose content array");
     assert_eq!(media_profile_miss_content.len(), 0);
 
-    let media_profile_is_not_excluded = app
-        .clone()
+    let media_profile_is_not_excluded = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -393,8 +390,7 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books media profile isNot excluded payload should expose content array");
     assert_eq!(media_profile_is_not_excluded_content.len(), 0);
 
-    let media_profile_is_not_kept = app
-        .clone()
+    let media_profile_is_not_kept = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -417,6 +413,4 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .and_then(Value::as_array)
         .expect("strict books media profile isNot kept payload should expose content array");
     assert_eq!(media_profile_is_not_kept_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }

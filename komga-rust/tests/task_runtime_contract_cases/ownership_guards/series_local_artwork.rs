@@ -16,15 +16,14 @@ async fn enqueue_refresh_series_local_artwork(scheduler: &mut TaskQueueScheduler
 #[tokio::test]
 async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_artwork_is_disabled()
 {
-    let paths = new_router_fixture("runtime-skip-series-local-artwork-when-import-disabled").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-skip-series-local-artwork-when-import-disabled").await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("series artwork fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series local artwork disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 0 WHERE ID = ?")
@@ -39,14 +38,14 @@ async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_ar
         .expect("existing series thumbnails should be cleared before local artwork gating test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series local artwork disabled verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -63,21 +62,18 @@ async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_ar
         sidecar_thumbnail_count, 0,
         "runtime must not import series local artwork when library.importLocalArtwork is disabled",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
-    let paths = new_router_fixture("runtime-skip-series-local-artwork-for-oneshot").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-skip-series-local-artwork-for-oneshot").await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("series artwork fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series oneshot artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -97,7 +93,7 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
         .expect("existing series thumbnails should be cleared before oneshot skip test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
@@ -105,7 +101,7 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
         .await
         .expect("series local artwork refresh should skip oneshot series cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot series local artwork verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -122,20 +118,16 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
         sidecar_thumbnail_count, 0,
         "runtime must not import series local artwork for oneshot series",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_only_one_when_none_exists()
  {
-    let paths = new_router_fixture(
-        "runtime-imports-multiple-filesystem-series-local-artworks-none-selected",
-    )
-    .await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-imports-multiple-filesystem-series-local-artworks-none-selected")
+            .await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("primary series local artwork should be written");
@@ -144,7 +136,7 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
     std::fs::write(series_dir.join("banner.png"), fixture_png_bytes())
         .expect("non-matching series local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-series-artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -164,14 +156,14 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
         .expect("existing series thumbnails should be cleared for multi-artwork import test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should import multiple filesystem candidates cleanly",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-series-artwork verification");
     let rows = sqlx::query(
@@ -214,25 +206,22 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
         selected_count, 1,
         "runtime should select exactly one imported series local artwork when no thumbnail was previously selected",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_preserves_existing_non_generated_selection_when_importing_series_local_artworks() {
-    let paths =
-        new_router_fixture("runtime-preserves-non-generated-selection-for-series-local-artworks")
+    let ctx =
+        TestFixture::new("runtime-preserves-non-generated-selection-for-series-local-artworks")
             .await;
-    seed_router_contract_data(&paths).await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("primary series local artwork should be written");
     std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
         .expect("secondary series local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated series selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -259,14 +248,14 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_serie
     .expect("existing non-generated selected series thumbnail should be seeded");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should preserve existing non-generated selections cleanly",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated series selection verification");
     let rows = sqlx::query(
@@ -308,24 +297,21 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_serie
             .all(|row| !row.get::<bool, _>("SELECTED")),
         "runtime should not override an existing non-generated selected series thumbnail when importing local artworks",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_replaces_generated_selection_when_importing_series_local_artworks() {
-    let paths =
-        new_router_fixture("runtime-replaces-generated-selection-for-series-local-artworks").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-replaces-generated-selection-for-series-local-artworks").await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("primary series local artwork should be written");
     std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
         .expect("secondary series local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated series selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -352,7 +338,7 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
     .expect("generated selected series thumbnail should be seeded");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
@@ -360,7 +346,7 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
         .await
         .expect("series local artwork refresh should replace generated selection cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated series selection verification");
     let rows = sqlx::query(
@@ -405,24 +391,21 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
         !generated_rows[0].get::<bool, _>("SELECTED"),
         "runtime should unselect previously selected GENERATED series thumbnails when the first local artwork is imported",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_events() {
     let _guard = runtime_sse_contract_guard().await;
-    let paths = new_router_fixture("runtime-series-local-artwork-sse-events").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-series-local-artwork-sse-events").await;
 
-    let series_dir = paths.config_dir.join("series/series-1");
+    let series_dir = ctx.paths().config_dir.join("series/series-1");
     std::fs::create_dir_all(&series_dir).expect("series artwork directory should exist");
     std::fs::write(series_dir.join("cover.png"), fixture_png_bytes())
         .expect("primary series artwork should be written");
     std::fs::write(series_dir.join("poster.jpg"), fixture_png_bytes())
         .expect("secondary series artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series local artwork sse fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -443,7 +426,7 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
@@ -481,6 +464,4 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
         std::collections::BTreeSet::from([false, true]),
         "series local artwork refresh should emit both selected and unselected ThumbnailSeriesAdded event states",
     );
-
-    cleanup_router_fixture(paths);
 }

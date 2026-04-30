@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn router_put_page_hash_normalizes_negative_size_to_null() {
-    let paths = new_router_fixture("router-put-page-hash-negative-size-null").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-negative-size-null").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -25,20 +24,17 @@ async fn router_put_page_hash_normalizes_negative_size_to_null() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
-        load_page_hash_size(&paths, "negative-size-hash").await,
+        load_page_hash_size(ctx.paths(), "negative-size-hash").await,
         None
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_preserves_whitespace_padded_hash() {
-    let paths = new_router_fixture("router-put-page-hash-whitespace-hash").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-whitespace-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -57,20 +53,17 @@ async fn router_put_page_hash_preserves_whitespace_padded_hash() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
-        load_page_hash_size(&paths, " negative-size-hash ").await,
+        load_page_hash_size(ctx.paths(), " negative-size-hash ").await,
         Some(1)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_rejects_blank_only_hash() {
-    let paths = new_router_fixture("router-put-page-hash-blank-only-hash").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-blank-only-hash").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -86,17 +79,14 @@ async fn router_put_page_hash_rejects_blank_only_hash() {
         .expect("page hash put request with blank-only hash should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_rejects_whitespace_padded_action() {
-    let paths = new_router_fixture("router-put-page-hash-whitespace-action").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-whitespace-action").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -114,17 +104,14 @@ async fn router_put_page_hash_rejects_whitespace_padded_action() {
         .expect("page hash put request with whitespace action should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_rejects_non_integer_size_values() {
-    let paths = new_router_fixture("router-put-page-hash-non-integer-size").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-non-integer-size").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -143,22 +130,19 @@ async fn router_put_page_hash_rejects_non_integer_size_values() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(
-        load_page_hash_record(&paths, "typed-size-hash")
+        load_page_hash_record(ctx.paths(), "typed-size-hash")
             .await
             .is_none()
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_preserves_existing_size_on_update() {
-    let paths = new_router_fixture("router-put-page-hash-preserve-existing-size").await;
-    seed_router_contract_data(&paths).await;
-    seed_page_hash_row(&paths, "existing-size-hash", Some(5), "IGNORE").await;
+    let ctx = TestFixture::new("router-put-page-hash-preserve-existing-size").await;
+    seed_page_hash_row(ctx.paths(), "existing-size-hash", Some(5), "IGNORE").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -177,19 +161,16 @@ async fn router_put_page_hash_preserves_existing_size_on_update() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
-        load_page_hash_record(&paths, "existing-size-hash").await,
+        load_page_hash_record(ctx.paths(), "existing-size-hash").await,
         Some((Some(5), "DELETE_AUTO".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_put_page_hash_persists_known_thumbnail_so_it_survives_source_removal() {
-    let paths = new_router_fixture("router-put-page-hash-persists-thumbnail").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-put-page-hash-persists-thumbnail").await;
     let source_path = seed_page_hash_image_source(
-        &paths,
+        ctx.paths(),
         "book-page-hash-thumb",
         "known-thumb-hash",
         "images/known-thumb-source.png",
@@ -197,8 +178,8 @@ async fn router_put_page_hash_persists_known_thumbnail_so_it_survives_source_rem
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let put_response = app
         .clone()
@@ -243,6 +224,4 @@ async fn router_put_page_hash_persists_known_thumbnail_so_it_survives_source_rem
         .await
         .expect("known page hash thumbnail response body should be readable");
     assert!(body.starts_with(&[0xFF, 0xD8]));
-
-    cleanup_router_fixture(paths);
 }

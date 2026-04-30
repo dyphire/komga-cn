@@ -144,26 +144,25 @@ async fn rewrite_router_book_to_legacy_file_urls(
 
 #[tokio::test]
 async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
-    let paths = new_router_fixture("router-book-pages-inline-disposition").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-pages-inline-disposition").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
         "Readable Page Title",
     )
     .await;
-    update_router_book_name(&paths, "book-pdf-1", "Readable Page Title").await;
+    update_router_book_name(ctx.paths(), "book-pdf-1", "Readable Page Title").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for route in [
         "/api/v1/books/book-pdf-1/pages/1",
         "/api/v1/books/book-pdf-1/pages/1/raw",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -191,16 +190,13 @@ async fn router_book_pages_and_raw_pages_include_inline_content_disposition() {
             "route: {route}, disposition: {disposition}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-page-routes-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-routes-basic-auth-compat").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -208,7 +204,6 @@ async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -217,7 +212,8 @@ async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
         "/api/v1/books/book-pdf-1/pages/1",
         "/api/v1/books/book-pdf-1/pages/1/thumbnail",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -233,16 +229,13 @@ async fn router_book_page_routes_accept_basic_auth_like_kotlin_clients() {
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
-    let paths = new_router_fixture("router-persisted-cbz-pages-one-based").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-persisted-cbz-pages-one-based").await;
     let (first_page, second_page) = seed_router_persisted_two_page_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-cbz-persisted-1",
         "series-1",
         "persisted-pages.cbz",
@@ -250,10 +243,10 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let pages_response = app
+    let pages_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -275,7 +268,8 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
     assert_eq!(rows[1].get("number"), Some(&json!(2)));
 
     for (page_number, expected_bytes) in [(1_u64, first_page), (2_u64, second_page)] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -301,7 +295,8 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
         );
     }
 
-    let invalid_response = app
+    let invalid_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -319,16 +314,13 @@ async fn router_persisted_cbz_pages_follow_kotlin_one_based_numbering() {
         invalid_payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
-    let paths = new_router_fixture("router-persisted-cbz-legacy-file-url-page-route").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-persisted-cbz-legacy-file-url-page-route").await;
     let (_, second_page) = seed_router_persisted_two_page_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-cbz-legacy-url-1",
         "series-1",
         "persisted legacy pages.cbz",
@@ -336,16 +328,16 @@ async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
     )
     .await;
     rewrite_router_book_to_legacy_file_urls(
-        &paths,
+        ctx.paths(),
         "book-cbz-legacy-url-1",
         "persisted legacy pages.cbz",
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let pages_response = app
+    let pages_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -359,7 +351,9 @@ async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
         .expect("legacy file url pages request should complete");
     assert_eq!(pages_response.status(), StatusCode::OK);
 
-    let page_response = app
+    let page_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -376,16 +370,13 @@ async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
         .await
         .expect("legacy file url single page body should read");
     assert_eq!(body.as_ref(), second_page.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
-    let paths = new_router_fixture("router-book-page-thumbnail-300px").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-thumbnail-300px").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -393,10 +384,10 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let pages_response = app
+    let pages_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -424,7 +415,9 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
                 .expect("book page metadata should expose height"),
         );
 
-    let thumbnail_response = app
+    let thumbnail_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -450,16 +443,13 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
     assert_eq!(thumbnail_max_dimension, 300);
     assert!(u64::from(thumbnail_image.width()) <= page_max_dimension);
     assert!(u64::from(thumbnail_image.height()) <= page_max_dimension);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_page_thumbnail_returns_bad_request_for_missing_page_number() {
-    let paths = new_router_fixture("router-book-page-thumbnail-missing-page-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-thumbnail-missing-page-number").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -467,14 +457,14 @@ async fn router_book_page_thumbnail_returns_bad_request_for_missing_page_number(
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for route in [
         "/api/v1/books/book-pdf-1/pages/0/thumbnail",
         "/api/v1/books/book-pdf-1/pages/2/thumbnail",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -495,6 +485,4 @@ async fn router_book_page_thumbnail_returns_bad_request_for_missing_page_number(
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }

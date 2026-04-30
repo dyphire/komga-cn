@@ -6,10 +6,9 @@ fn expected_open_dyslexic_css() -> &'static str {
 
 #[tokio::test]
 async fn router_get_font_file_downloads_embedded_font_without_auth_like_kotlin() {
-    let paths = new_router_fixture("router-get-font-file-embedded-anonymous").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-font-file-embedded-anonymous").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -38,16 +37,13 @@ async fn router_get_font_file_downloads_embedded_font_without_auth_like_kotlin()
         .await
         .expect("embedded font file response body should read");
     assert!(!bytes.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_font_family_css_downloads_embedded_css_without_auth_like_kotlin() {
-    let paths = new_router_fixture("router-get-font-css-embedded-anonymous").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-font-css-embedded-anonymous").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -77,16 +73,13 @@ async fn router_get_font_family_css_downloads_embedded_css_without_auth_like_kot
         .expect("embedded font css response body should read");
     let css = String::from_utf8(bytes.to_vec()).expect("embedded font css should be utf-8");
     assert_eq!(css, expected_open_dyslexic_css());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_kotlin() {
-    let paths = new_router_fixture("router-get-font-css-filesystem-anonymous").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-font-css-filesystem-anonymous").await;
 
-    let family_dir = paths.config_dir.join("fonts").join("Custom Family");
+    let family_dir = ctx.paths().config_dir.join("fonts").join("Custom Family");
     std::fs::create_dir_all(&family_dir).expect("custom css family dir should be created");
     std::fs::write(family_dir.join("Custom-BoldItalic.woff"), b"font-bytes")
         .expect("custom bold italic woff should be written");
@@ -95,7 +88,7 @@ async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_k
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom regular ttf should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -128,21 +121,18 @@ async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_k
         css,
         "@font-face {\n    font-family: 'Custom Family';\n    src: url('Custom-BoldItalic.woff') format('woff'),url('Custom-BoldItalic.woff2') format('woff2');\n    font-weight: bold;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'Custom Family';\n    src: url('Custom-Regular.ttf') format('truetype');\n    font-weight: normal;\n    font-style: normal;\n}\n"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin() {
-    let paths = new_router_fixture("router-get-font-file-filesystem-anonymous").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-font-file-filesystem-anonymous").await;
 
-    let family_dir = paths.config_dir.join("fonts").join("Custom Family");
+    let family_dir = ctx.paths().config_dir.join("fonts").join("Custom Family");
     std::fs::create_dir_all(&family_dir).expect("custom font family dir should be created");
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom font file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -171,16 +161,13 @@ async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin
         .await
         .expect("filesystem font file response body should read");
     assert_eq!(bytes.as_ref(), b"font-bytes");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_fonts_families_requires_auth_like_kotlin() {
-    let paths = new_router_fixture("router-get-fonts-families-requires-auth").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-fonts-families-requires-auth").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -194,16 +181,13 @@ async fn router_get_fonts_families_requires_auth_like_kotlin() {
         .expect("get fonts families anonymous request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_get_fonts_families_returns_embedded_and_filesystem_families_like_kotlin() {
-    let paths = new_router_fixture("router-get-fonts-families-embedded-and-filesystem").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-get-fonts-families-embedded-and-filesystem").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "fonts-user",
         "fonts@example.org",
         "router-contract-fonts-123",
@@ -211,18 +195,15 @@ async fn router_get_fonts_families_returns_embedded_and_filesystem_families_like
     )
     .await;
 
-    let family_dir = paths.config_dir.join("fonts").join("Custom Family");
+    let family_dir = ctx.paths().config_dir.join("fonts").join("Custom Family");
     std::fs::create_dir_all(&family_dir).expect("custom font family dir should be created");
     std::fs::write(family_dir.join("Custom-Regular.ttf"), b"font-bytes")
         .expect("custom font file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "fonts@example.org",
-        "router-contract-fonts-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials("fonts@example.org", "router-contract-fonts-123")
+        .await;
 
     let response = app
         .oneshot(
@@ -251,6 +232,4 @@ async fn router_get_fonts_families_returns_embedded_and_filesystem_families_like
         .collect::<Vec<_>>();
     assert!(families.contains(&"OpenDyslexic".to_string()));
     assert!(families.contains(&"Custom Family".to_string()));
-
-    cleanup_router_fixture(paths);
 }

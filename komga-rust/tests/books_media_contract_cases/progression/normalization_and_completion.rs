@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_progression_put_accepts_url_encoded_epub_href() {
-    let paths = new_router_fixture("router-book-progression-put-epub-url-encoded-href").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-url-encoded-href").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for url-encoded href seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -17,10 +16,11 @@ async fn router_book_progression_put_accepts_url_encoded_epub_href() {
         .expect("epub extension positions should be seeded for url-encoded href test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -45,16 +45,13 @@ async fn router_book_progression_put_accepts_url_encoded_epub_href() {
         .expect("url-encoded href progression request should complete");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-progression-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-basic-auth-compat").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -66,7 +63,6 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
         .expect("epub extension positions should be seeded for basic-auth progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let progression = json!({
@@ -79,7 +75,8 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -95,7 +92,9 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
         .expect("basic-auth progression put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -108,16 +107,13 @@ async fn router_book_progression_routes_accept_basic_auth_like_kotlin_clients() 
         .await
         .expect("basic-auth progression get request should complete");
     assert_eq!(get_response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_normalizes_epub_locator_from_matching_position() {
-    let paths = new_router_fixture("router-book-progression-put-epub-normalizes-locator").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-normalizes-locator").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub progression normalization seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -129,8 +125,7 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         .expect("epub extension positions should be seeded for progression normalization test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -144,7 +139,8 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -159,7 +155,9 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         .expect("epub progression normalization put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -185,7 +183,7 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
         }))
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for normalized progression verification");
     let progression_row = sqlx::query(
@@ -199,16 +197,13 @@ async fn router_book_progression_put_normalizes_epub_locator_from_matching_posit
     verify_pool.close().await;
     assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
     assert!(!progression_row.get::<bool, _>("COMPLETED"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_rejects_invalid_epub_progression_between_positions() {
-    let paths = new_router_fixture("router-book-progression-put-epub-invalid-progression").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-invalid-progression").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid epub progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -220,9 +215,10 @@ async fn router_book_progression_put_rejects_invalid_epub_progression_between_po
         .expect("epub extension positions should be seeded for invalid progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let response = app
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -254,17 +250,14 @@ async fn router_book_progression_put_rejects_invalid_epub_progression_between_po
         payload.get("error"),
         Some(&Value::String("Invalid progression".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_accepts_fixed_layout_epub_single_position() {
-    let paths =
-        new_router_fixture("router-book-progression-put-epub-fixed-layout-single-position").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("router-book-progression-put-epub-fixed-layout-single-position").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for fixed-layout progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -276,8 +269,7 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
         .expect("fixed-layout epub extension should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -288,7 +280,8 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -303,7 +296,9 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
         .expect("fixed-layout progression put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -328,17 +323,13 @@ async fn router_book_progression_put_accepts_fixed_layout_epub_single_position()
             "koboSpan": "fixed-span"
         }))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_uses_total_progression_to_round_epub_page() {
-    let paths =
-        new_router_fixture("router-book-progression-put-epub-rounds-total-progression").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-rounds-total-progression").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub page-rounding seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -350,8 +341,7 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         .expect("epub extension positions should be seeded for page-rounding test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -362,7 +352,8 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -377,7 +368,7 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
         .expect("epub page-rounding put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for page-rounding verification");
     let progression_row = sqlx::query(
@@ -391,17 +382,13 @@ async fn router_book_progression_put_uses_total_progression_to_round_epub_page()
     verify_pool.close().await;
     assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
     assert!(!progression_row.get::<bool, _>("COMPLETED"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_ignores_epub_locator_position_when_persisting_page() {
-    let paths =
-        new_router_fixture("router-book-progression-put-epub-ignores-locator-position").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-ignores-locator-position").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub conflicting-position seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -413,8 +400,7 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         .expect("epub extension positions should be seeded for conflicting-position test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -428,7 +414,8 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -443,7 +430,7 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
         .expect("epub conflicting-position put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for conflicting-position verification");
     let progression_row = sqlx::query(
@@ -457,16 +444,13 @@ async fn router_book_progression_put_ignores_epub_locator_position_when_persisti
     verify_pool.close().await;
     assert_eq!(progression_row.get::<i64, _>("PAGE"), 2);
     assert!(!progression_row.get::<bool, _>("COMPLETED"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_marks_completed_when_total_progression_is_above_threshold() {
-    let paths = new_router_fixture("router-book-progression-put-epub-completed-threshold").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-epub-completed-threshold").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub completion-threshold seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -478,8 +462,7 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
         .expect("epub extension positions should be seeded for completion-threshold test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": { "id": "reader-9", "name": "Kobo Libra" },
@@ -490,7 +473,8 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -505,7 +489,7 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
         .expect("epub completion-threshold put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for completion-threshold verification");
     let progression_row = sqlx::query(
@@ -519,6 +503,4 @@ async fn router_book_progression_put_marks_completed_when_total_progression_is_a
     verify_pool.close().await;
     assert_eq!(progression_row.get::<i64, _>("PAGE"), 10);
     assert!(progression_row.get::<bool, _>("COMPLETED"));
-
-    cleanup_router_fixture(paths);
 }

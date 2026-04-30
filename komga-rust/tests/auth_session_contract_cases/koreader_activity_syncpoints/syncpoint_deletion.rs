@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_without_key_id_deletes_all_syncpoints_for_current_user() {
-    let paths = new_router_fixture("router-delete-syncpoints-me-all").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-all").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "admin-user", Some("key-2")),
@@ -16,10 +15,11 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_all_syncpoints_for_c
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -32,18 +32,18 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_all_syncpoints_for_c
         .expect("syncpoints delete-all request should complete");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert_eq!(load_syncpoint_ids(&paths).await, vec!["sp-4".to_string()]);
-
-    cleanup_router_fixture(paths);
+    assert_eq!(
+        load_syncpoint_ids(ctx.paths()).await,
+        vec!["sp-4".to_string()]
+    );
 }
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_with_repeated_key_id_deletes_only_matching_keys() {
-    let paths = new_router_fixture("router-delete-syncpoints-me-many-keys").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-many-keys").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "admin-user", Some("key-2")),
@@ -53,10 +53,11 @@ async fn router_delete_syncpoints_me_with_repeated_key_id_deletes_only_matching_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -70,20 +71,17 @@ async fn router_delete_syncpoints_me_with_repeated_key_id_deletes_only_matching_
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_syncpoint_ids(&paths).await,
+        load_syncpoint_ids(ctx.paths()).await,
         vec!["sp-2".to_string(), "sp-4".to_string()],
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_with_comma_delimited_single_key_id_deletes_matching_keys() {
-    let paths = new_router_fixture("router-delete-syncpoints-me-comma-key-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-comma-key-id").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "admin-user", Some("key-2")),
@@ -93,10 +91,11 @@ async fn router_delete_syncpoints_me_with_comma_delimited_single_key_id_deletes_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -110,20 +109,17 @@ async fn router_delete_syncpoints_me_with_comma_delimited_single_key_id_deletes_
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_syncpoint_ids(&paths).await,
+        load_syncpoint_ids(ctx.paths()).await,
         vec!["sp-2".to_string(), "sp-4".to_string()],
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not_delete_anything() {
-    let paths = new_router_fixture("router-delete-syncpoints-me-whitespace-key-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-whitespace-key-id").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "admin-user", Some("key-2")),
@@ -133,10 +129,11 @@ async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -150,7 +147,7 @@ async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_syncpoint_ids(&paths).await,
+        load_syncpoint_ids(ctx.paths()).await,
         vec![
             "sp-1".to_string(),
             "sp-2".to_string(),
@@ -158,31 +155,29 @@ async fn router_delete_syncpoints_me_with_whitespace_only_single_key_id_does_not
             "sp-4".to_string()
         ],
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows_for_current_user()
 {
-    let paths = new_router_fixture("router-delete-syncpoints-me-all-subentities").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-all-subentities").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "other-user", Some("key-2")),
         ],
     )
     .await;
-    seed_syncpoint_children(&paths, "sp-1").await;
-    seed_syncpoint_children(&paths, "sp-2").await;
+    seed_syncpoint_children(ctx.paths(), "sp-1").await;
+    seed_syncpoint_children(ctx.paths(), "sp-2").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -195,27 +190,27 @@ async fn router_delete_syncpoints_me_without_key_id_deletes_syncpoint_child_rows
         .expect("syncpoints delete-all with subentities request should complete");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert_eq!(load_syncpoint_ids(&paths).await, vec!["sp-2".to_string()]);
     assert_eq!(
-        load_syncpoint_child_counts(&paths, "sp-1").await,
+        load_syncpoint_ids(ctx.paths()).await,
+        vec!["sp-2".to_string()]
+    );
+    assert_eq!(
+        load_syncpoint_child_counts(ctx.paths(), "sp-1").await,
         [0, 0, 0, 0, 0]
     );
     assert_eq!(
-        load_syncpoint_child_counts(&paths, "sp-2").await,
+        load_syncpoint_child_counts(ctx.paths(), "sp-2").await,
         [1, 1, 1, 1, 1]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_only_for_matching_keys()
  {
-    let paths = new_router_fixture("router-delete-syncpoints-me-key-subentities").await;
-    seed_router_contract_data(&paths).await;
-    seed_syncpoint_user(&paths, "other-user", "other@example.org").await;
+    let ctx = TestFixture::new("router-delete-syncpoints-me-key-subentities").await;
+    seed_syncpoint_user(ctx.paths(), "other-user", "other@example.org").await;
     seed_syncpoints(
-        &paths,
+        ctx.paths(),
         &[
             ("sp-1", "admin-user", Some("key-1")),
             ("sp-2", "admin-user", Some("key-2")),
@@ -223,14 +218,15 @@ async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_on
         ],
     )
     .await;
-    seed_syncpoint_children(&paths, "sp-1").await;
-    seed_syncpoint_children(&paths, "sp-2").await;
-    seed_syncpoint_children(&paths, "sp-3").await;
+    seed_syncpoint_children(ctx.paths(), "sp-1").await;
+    seed_syncpoint_children(ctx.paths(), "sp-2").await;
+    seed_syncpoint_children(ctx.paths(), "sp-3").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -244,21 +240,19 @@ async fn router_delete_syncpoints_me_with_key_id_deletes_syncpoint_child_rows_on
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
-        load_syncpoint_ids(&paths).await,
+        load_syncpoint_ids(ctx.paths()).await,
         vec!["sp-2".to_string(), "sp-3".to_string()],
     );
     assert_eq!(
-        load_syncpoint_child_counts(&paths, "sp-1").await,
+        load_syncpoint_child_counts(ctx.paths(), "sp-1").await,
         [0, 0, 0, 0, 0]
     );
     assert_eq!(
-        load_syncpoint_child_counts(&paths, "sp-2").await,
+        load_syncpoint_child_counts(ctx.paths(), "sp-2").await,
         [1, 1, 1, 1, 1]
     );
     assert_eq!(
-        load_syncpoint_child_counts(&paths, "sp-3").await,
+        load_syncpoint_child_counts(ctx.paths(), "sp-3").await,
         [1, 1, 1, 1, 1]
     );
-
-    cleanup_router_fixture(paths);
 }

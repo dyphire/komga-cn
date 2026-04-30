@@ -40,10 +40,9 @@ async fn runtime_sse_contract_guard() -> MutexGuard<'static, ()> {
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
-    let paths = new_router_fixture("runtime-executes-kotlin-refresh-book-metadata-task").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-task").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     std::fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -51,7 +50,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     )
     .expect("book metadata sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -73,7 +72,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     .expect("book metadata sidecar row should be inserted for Kotlin persisted task test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for Kotlin persisted metadata task setup");
     sqlx::query(
@@ -111,14 +110,14 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     .expect("Kotlin persisted metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should execute Kotlin persisted RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted metadata verification");
     let metadata =
@@ -134,16 +133,13 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
         metadata.get::<String, _>("SUMMARY"),
         "Kotlin Refresh Summary"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
-    let paths = new_router_fixture("runtime-refresh-series-metadata-oneshot-provider").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-series-metadata-oneshot-provider").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot series metadata fixture setup");
     sqlx::query(
@@ -208,17 +204,17 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     .expect("oneshot book metadata row should be inserted for series metadata fixture");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -236,7 +232,7 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
         .await
         .expect("oneshot refresh-series-metadata task should process successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot series metadata verification");
     let metadata = sqlx::query(
@@ -256,16 +252,13 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     );
     assert_eq!(metadata.get::<String, _>("SUMMARY"), "OneShot Book Summary");
     assert_eq!(metadata.get::<i64, _>("TOTAL_BOOK_COUNT"), 1_i64);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_default_capabilities() {
-    let paths = new_router_fixture("runtime-executes-kotlin-refresh-book-metadata-defaults").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-defaults").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     std::fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -273,7 +266,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     )
     .expect("book metadata sidecar fixture should be written for default capability restore");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for default-capability metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -295,7 +288,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     .expect("book metadata sidecar row should be inserted for default-capability task test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for default-capability metadata task setup");
     sqlx::query(
@@ -320,13 +313,13 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     .expect("Kotlin persisted metadata task row without capabilities should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime).await
         .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for default-capability metadata verification");
     let metadata =
@@ -344,22 +337,19 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
         metadata.get::<String, _>("SUMMARY"),
         "Kotlin Default Summary"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_repair_extension_task() {
-    let paths = new_router_fixture("runtime-executes-kotlin-repair-extension-task").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-executes-kotlin-repair-extension-task").await;
 
-    std::fs::create_dir_all(paths.config_dir.join("books"))
+    std::fs::create_dir_all(ctx.paths().config_dir.join("books"))
         .expect("book directory should exist for Kotlin persisted repair-extension task");
-    let source_path = paths.config_dir.join("books/repair-book.bin");
+    let source_path = ctx.paths().config_dir.join("books/repair-book.bin");
     std::fs::write(&source_path, b"kotlin-repair-extension")
         .expect("repair-extension source should be written for Kotlin persisted task");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted repair-extension fixture setup");
     sqlx::query("UPDATE LIBRARY SET REPAIR_EXTENSIONS = 1 WHERE ID = ?")
@@ -391,7 +381,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
         .expect("repair-extension fixture media row should be inserted for Kotlin persisted task");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for Kotlin persisted repair-extension task setup");
     sqlx::query(
@@ -416,14 +406,14 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     .expect("Kotlin persisted repair-extension task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should execute Kotlin persisted RepairExtension tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted repair-extension verification");
     let url = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
@@ -435,8 +425,11 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     verify_pool.close().await;
 
     assert_eq!(url, "books/repair-book.pdf");
-    assert!(paths.config_dir.join("books/repair-book.pdf").exists());
+    assert!(
+        ctx.paths()
+            .config_dir
+            .join("books/repair-book.pdf")
+            .exists()
+    );
     assert!(!source_path.exists());
-
-    cleanup_router_fixture(paths);
 }

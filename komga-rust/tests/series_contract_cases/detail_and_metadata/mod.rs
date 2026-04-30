@@ -1,17 +1,17 @@
 use super::*;
 
-mod metadata_update;
-
 #[tokio::test]
 async fn router_discovery_series_detail_uses_persisted_title_sort_value() {
-    let paths = new_router_fixture("router-discovery-series-detail-title-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_title_sort(&paths, "series-1", "Series Sort 1").await;
+    let ctx = TestFixture::builder("router-discovery-series-detail-title-sort")
+        .with_seed(|paths| async move {
+            seed_router_series_title_sort(&paths, "series-1", "Series Sort 1").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -32,23 +32,22 @@ async fn router_discovery_series_detail_uses_persisted_title_sort_value() {
             .and_then(|metadata| metadata.get("titleSort")),
         Some(&Value::String("Series Sort 1".to_string())),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_detail_includes_persisted_metadata_and_aggregates() {
-    let paths =
-        new_router_fixture("router-discovery-series-detail-persisted-metadata-aggregates").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_counts(&paths, 1, Some(5)).await;
-    seed_router_series_read_progress(&paths, 1, 0).await;
-    seed_router_series_aggregated_tag(&paths, "series-1", "aggregated-tag").await;
+    let ctx = TestFixture::builder("router-discovery-series-detail-persisted-metadata-aggregates")
+        .with_seed(|paths| async move {
+            seed_router_series_counts(&paths, 1, Some(5)).await;
+            seed_router_series_read_progress(&paths, 1, 0).await;
+            seed_router_series_aggregated_tag(&paths, "series-1", "aggregated-tag").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -105,16 +104,13 @@ async fn router_discovery_series_detail_includes_persisted_metadata_and_aggregat
         payload.get("booksUnreadCount"),
         Some(&Value::Number(0.into()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level_name() {
-    let paths = new_router_fixture("router-discovery-series-detail-uses-series-name").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-detail-uses-series-name").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series detail name parity db should open");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")
@@ -131,10 +127,11 @@ async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level
         .expect("series metadata title should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -158,20 +155,20 @@ async fn router_discovery_series_detail_uses_persisted_series_name_for_top_level
             .and_then(|metadata| metadata.get("title")),
         Some(&Value::String("Series Metadata Title".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_detail_id_bridge_preserves_real_library_id() {
-    let paths = new_router_fixture("router-discovery-series-detail-id-bridge-library-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
+    let ctx = TestFixture::builder("router-discovery-series-detail-id-bridge-library-id")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -194,19 +191,16 @@ async fn router_discovery_series_detail_id_bridge_preserves_real_library_id() {
         payload.get("libraryId"),
         Some(&Value::String("library-1".to_string())),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_parameters() {
-    let paths = new_router_fixture("router-discovery-series-detail-oneshot-query-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-detail-oneshot-query-shape").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -231,6 +225,4 @@ async fn router_discovery_series_detail_accepts_oneshot_true_with_extra_query_pa
         payload.get("_diagnostics").is_none(),
         "accepted oneshot=true detail requests should not emit unsupported diagnostics",
     );
-
-    cleanup_router_fixture(paths);
 }

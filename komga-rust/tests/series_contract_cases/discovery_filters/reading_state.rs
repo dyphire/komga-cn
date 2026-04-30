@@ -2,15 +2,17 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-read-status").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_counts(&paths, 1, Some(1)).await;
-    seed_router_series_read_progress(&paths, 1, 0).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-strict-read-status")
+        .with_seed(|paths| async move {
+            seed_router_series_counts(&paths, 1, Some(1)).await;
+            seed_router_series_read_progress(&paths, 1, 0).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let matched_read_response = app
+    let matched_read_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -41,7 +43,8 @@ async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runt
         .expect("strict series read-status is=READ payload should expose content array");
     assert_eq!(matched_read_content.len(), 1);
 
-    let unmatched_unread_response = app
+    let unmatched_unread_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -72,7 +75,8 @@ async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runt
         .expect("strict series read-status is=UNREAD payload should expose content array");
     assert_eq!(unmatched_unread_content.len(), 0);
 
-    let excluded_read_response = app
+    let excluded_read_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -103,7 +107,8 @@ async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runt
         .expect("strict series read-status isNot=READ payload should expose content array");
     assert_eq!(excluded_read_content.len(), 0);
 
-    let kept_not_unread_response = app
+    let kept_not_unread_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -133,20 +138,20 @@ async fn router_discovery_series_list_supports_read_status_is_and_is_not_in_runt
         .and_then(Value::as_array)
         .expect("strict series read-status isNot=UNREAD payload should expose content array");
     assert_eq!(kept_not_unread_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-series-list-strict-complete").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_series_counts(&paths, 1, Some(1)).await;
+    let ctx = TestFixture::builder("router-discovery-series-list-strict-complete")
+        .with_seed(|paths| async move {
+            seed_router_series_counts(&paths, 1, Some(1)).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let complete_true_response = app
+    let complete_true_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -176,7 +181,8 @@ async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() 
         .expect("strict series complete isTrue payload should expose content array");
     assert_eq!(complete_true_content.len(), 1);
 
-    let complete_false_response = app
+    let complete_false_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -206,9 +212,10 @@ async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() 
         .expect("strict series complete isFalse payload should expose content array");
     assert_eq!(complete_false_content.len(), 0);
 
-    seed_router_series_counts(&paths, 1, Some(2)).await;
+    seed_router_series_counts(ctx.paths(), 1, Some(2)).await;
 
-    let incomplete_false_response = app
+    let incomplete_false_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -238,9 +245,11 @@ async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() 
         .expect("strict series complete isFalse (incomplete) payload should expose content array");
     assert_eq!(incomplete_false_content.len(), 1);
 
-    seed_router_series_counts(&paths, 1, None).await;
+    seed_router_series_counts(ctx.paths(), 1, None).await;
 
-    let null_total_false_response = app
+    let null_total_false_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -268,6 +277,4 @@ async fn router_discovery_series_list_supports_complete_in_runtime_owned_mode() 
         .and_then(Value::as_array)
         .expect("strict series complete isFalse (null total) payload should expose content array");
     assert_eq!(null_total_false_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

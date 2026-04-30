@@ -33,15 +33,17 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-state-update-proxy-missing-book").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-state-update-proxy-missing-book")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -83,7 +85,6 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
         })
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -93,14 +94,16 @@ async fn router_kobo_state_update_proxies_missing_book_when_kobo_proxy_enabled()
 
 #[tokio::test]
 async fn router_kobo_state_update_returns_not_found_for_missing_book_when_proxy_disabled() {
-    let paths = new_router_fixture("router-kobo-state-update-missing-book-local").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-missing-book-local")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -129,33 +132,32 @@ async fn router_kobo_state_update_returns_not_found_for_missing_book_when_proxy_
         .expect("kobo state update missing-book request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_update() {
-    let paths = new_router_fixture("router-kobo-state-update-api-key-identity").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-api-key-identity")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-state-user",
+                "kobo-state@example.org",
+                "router-contract-kobo-state-123",
+                0,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-state-user").await;
+        })
+        .build()
+        .await;
     seed_kobo_state_epub_extension(
-        &paths,
+        ctx.paths(),
         fixture_epub_positions_extension_blob_total_progression_021(),
     )
     .await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "kobo-state-user",
-        "kobo-state@example.org",
-        "router-contract-kobo-state-123",
-        0,
-        &["USER", "KOBO_SYNC"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-state-user").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -188,7 +190,7 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for path token state update assertion");
     let row = sqlx::query(
@@ -225,21 +227,21 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
         Some(&Value::String("kobo.5.1".to_string()))
     );
     pool.close().await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression() {
-    let paths = new_router_fixture("router-kobo-state-update-invalid-epub-progression").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-invalid-epub-progression")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -282,7 +284,7 @@ async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression()
         })
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for invalid epub progression verification");
     let row = sqlx::query("SELECT 1 FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1")
@@ -293,25 +295,25 @@ async fn router_kobo_state_update_returns_failure_for_invalid_epub_progression()
         .expect("invalid epub progression verification query should succeed");
     assert!(row.is_none());
     pool.close().await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_and_completion() {
-    let paths = new_router_fixture("router-kobo-state-update-matched-total-progression").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-matched-total-progression")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
     seed_kobo_state_epub_extension(
-        &paths,
+        ctx.paths(),
         fixture_epub_positions_extension_blob_total_progression_021(),
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -346,7 +348,7 @@ async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_a
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for matched total progression verification");
     let row = sqlx::query(
@@ -372,25 +374,25 @@ async fn router_kobo_state_update_uses_matched_epub_total_progression_for_page_a
     );
     assert_eq!(locator.pointer("/locations/position"), None);
     pool.close().await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
-    let paths = new_router_fixture("router-kobo-state-update-finished-last-position").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-finished-last-position")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
     seed_kobo_state_epub_extension(
-        &paths,
+        ctx.paths(),
         fixture_epub_positions_extension_blob_fixed_layout_single_position(),
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -425,7 +427,7 @@ async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
         Some(&Value::String("Success".to_string()))
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for finished state verification");
     let row = sqlx::query(
@@ -450,18 +452,19 @@ async fn router_kobo_state_update_finished_uses_last_epub_position_semantics() {
         Some(&json!(0.2))
     );
     pool.close().await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_update_returns_failure_for_older_progression() {
-    let paths = new_router_fixture("router-kobo-state-update-older-progression").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
+    let ctx = TestFixture::builder("router-kobo-state-update-older-progression")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            seed_kobo_state_epub_extension(&paths, fixture_epub_positions_extension_blob()).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for older progression seed");
     sqlx::query(
@@ -490,10 +493,9 @@ async fn router_kobo_state_update_returns_failure_for_older_progression() {
     .expect("older progression row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx.app().clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -535,6 +537,4 @@ async fn router_kobo_state_update_returns_failure_for_older_progression() {
             }]
         })
     );
-
-    cleanup_router_fixture(paths);
 }

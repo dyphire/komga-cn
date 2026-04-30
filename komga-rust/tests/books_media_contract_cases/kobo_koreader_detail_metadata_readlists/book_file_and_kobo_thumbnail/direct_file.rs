@@ -2,19 +2,19 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_file_direct_route_returns_attachment_headers_and_body() {
-    let paths = new_router_fixture("router-book-file-direct-route").await;
-    seed_router_contract_data(&paths).await;
-    let books_dir = paths.config_dir.join("books");
+    let ctx = TestFixture::new("router-book-file-direct-route").await;
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for direct file route test");
     let expected_body = b"router-book-file-direct-content";
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -60,23 +60,21 @@ async fn router_book_file_direct_route_returns_attachment_headers_and_body() {
         .await
         .expect("direct book file response body should be readable");
     assert_eq!(body.as_ref(), expected_body);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_direct_route_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-file-direct-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    let books_dir = paths.config_dir.join("books");
+    let ctx = TestFixture::new("router-book-file-direct-basic-auth-compat").await;
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for basic-auth direct file route test");
     let expected_body = b"router-book-file-basic-auth-content";
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for basic-auth direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -100,25 +98,23 @@ async fn router_book_file_direct_route_accepts_basic_auth_like_kotlin_clients() 
         .await
         .expect("basic-auth direct book file response body should be readable");
     assert_eq!(body.as_ref(), expected_body);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_direct_route_ignores_range_and_returns_full_body() {
-    let paths = new_router_fixture("router-book-file-direct-route-ignores-range").await;
-    seed_router_contract_data(&paths).await;
-    let books_dir = paths.config_dir.join("books");
+    let ctx = TestFixture::new("router-book-file-direct-route-ignores-range").await;
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for range-ignoring file route test");
     let expected_body = b"router-book-file-range-ignored";
     std::fs::write(books_dir.join("book-1.epub"), expected_body)
         .expect("book fixture file should be written for range-ignoring file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -144,19 +140,17 @@ async fn router_book_file_direct_route_ignores_range_and_returns_full_body() {
         .await
         .expect("range direct book file response body should be readable");
     assert_eq!(body.as_ref(), expected_body);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_direct_route_returns_not_found_with_message_when_file_is_missing() {
-    let paths = new_router_fixture("router-book-file-direct-route-missing-file").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-file-direct-route-missing-file").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -176,16 +170,13 @@ async fn router_book_file_direct_route_returns_not_found_with_message_when_file_
             "File not found, it may have moved".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_direct_route_uses_persisted_media_type_for_comic_archives() {
-    let paths = new_router_fixture("router-book-file-direct-route-comic-archive-type").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-file-direct-route-comic-archive-type").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for direct comic archive file route fixture");
     sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")
@@ -203,17 +194,18 @@ async fn router_book_file_direct_route_uses_persisted_media_type_for_comic_archi
         .expect("media type should update for direct comic archive file route fixture");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for direct comic archive file route test");
     let expected_body = b"router-book-file-comic-archive-content";
     std::fs::write(books_dir.join("book-1.cbz"), expected_body)
         .expect("comic archive fixture file should be written for direct file route test");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -237,17 +229,14 @@ async fn router_book_file_direct_route_uses_persisted_media_type_for_comic_archi
         .await
         .expect("direct comic archive book file response body should be readable");
     assert_eq!(body.as_ref(), expected_body);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_file_direct_route_percent_encodes_unicode_attachment_name() {
-    let paths = new_router_fixture("router-book-file-direct-route-unicode-name").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-file-direct-route-unicode-name").await;
     let unicode_file_name = "アキラ.epub";
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for unicode direct file route fixture");
     sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")
@@ -259,16 +248,17 @@ async fn router_book_file_direct_route_percent_encodes_unicode_attachment_name()
         .expect("book file name should update for unicode direct file route fixture");
     pool.close().await;
 
-    let books_dir = paths.config_dir.join("books");
+    let books_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&books_dir)
         .expect("books directory should be created for unicode direct file route test");
     std::fs::write(books_dir.join(unicode_file_name), b"unicode-book-file")
         .expect("unicode book fixture file should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -290,6 +280,4 @@ async fn router_book_file_direct_route_percent_encodes_unicode_attachment_name()
         content_disposition.contains("filename*=UTF-8''%E3%82%A2%E3%82%AD%E3%83%A9.epub"),
         "unicode attachment header should percent-encode filename*: {content_disposition}"
     );
-
-    cleanup_router_fixture(paths);
 }

@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_genre_condition_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-filter-combo").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-filter-combo").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -43,19 +42,17 @@ async fn router_discovery_books_list_supports_genre_condition_in_runtime_owned_m
         content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-unknown-condition").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-unknown-condition").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -79,19 +76,17 @@ async fn router_discovery_books_list_rejects_unknown_condition_type_in_runtime_o
         .expect("strict books/list unknown-condition request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_rejects_unknown_operator_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-unknown-operator").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-unknown-operator").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -114,24 +109,21 @@ async fn router_discovery_books_list_rejects_unknown_operator_in_runtime_owned_m
         .expect("strict books/list unknown-operator request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_series_metadata_conditions_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-series-metadata").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-series-metadata").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for condition in [
         json!({ "type": "Language", "operator": "is", "value": "EN" }),
         json!({ "type": "Publisher", "operator": "is", "value": "PubHouse" }),
         json!({ "type": "AgeRating", "operator": "is", "value": 16 }),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -158,20 +150,17 @@ async fn router_discovery_books_list_supports_series_metadata_conditions_in_runt
             Some(&Value::String("book-1".to_string()))
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_series_id_with_query_is_not_silent_empty_in_runtime_owned_mode()
  {
-    let paths = new_router_fixture("router-discovery-books-list-strict-seriesid-query").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-seriesid-query").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -207,7 +196,9 @@ async fn router_discovery_books_list_series_id_with_query_is_not_silent_empty_in
         Some(&Value::String("book-1".to_string()))
     );
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -237,19 +228,16 @@ async fn router_discovery_books_list_series_id_with_query_is_not_silent_empty_in
         .and_then(Value::as_array)
         .expect("strict seriesId isNot request should expose content array");
     assert_eq!(excluded_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-anyof-allof").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-anyof-allof").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let all_of_match_response = app
+    let all_of_match_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -282,7 +270,8 @@ async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_m
         .expect("strict books allOf match payload should expose content array");
     assert_eq!(all_of_match_content.len(), 1);
 
-    let all_of_miss_response = app
+    let all_of_miss_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -315,7 +304,8 @@ async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_m
         .expect("strict books allOf miss payload should expose content array");
     assert_eq!(all_of_miss_content.len(), 0);
 
-    let any_of_match_response = app
+    let any_of_match_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -348,7 +338,9 @@ async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_m
         .expect("strict books anyOf match payload should expose content array");
     assert_eq!(any_of_match_content.len(), 1);
 
-    let any_of_miss_response = app
+    let any_of_miss_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -379,6 +371,4 @@ async fn router_discovery_books_list_supports_anyof_and_allof_in_runtime_owned_m
         .and_then(Value::as_array)
         .expect("strict books anyOf miss payload should expose content array");
     assert_eq!(any_of_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

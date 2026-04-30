@@ -2,37 +2,37 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlist_and_collection_media_assets_hide_age_restricted_content() {
-    let paths = new_router_fixture("router-readlist-collection-media-assets-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        12,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
-    write_router_epub_resource(
-        &paths,
-        "books/book-1.epub",
-        "OEBPS/chapter.xhtml",
-        br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
-    );
+    let ctx = TestFixture::builder("router-readlist-collection-media-assets-restricted")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                12,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+            write_router_epub_resource(
+                &paths,
+                "books/book-1.epub",
+                "OEBPS/chapter.xhtml",
+                br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
+            );
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let admin_token = ctx.login_admin().await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
     let image_bytes = fixture_png_bytes();
 
     let (readlist_content_type, readlist_body) =
         multipart_image_upload_body("file", "readlist.png", "image/png", true, &image_bytes);
-    let readlist_upload = app
+    let readlist_upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -55,7 +55,8 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
 
     let (collection_content_type, collection_body) =
         multipart_image_upload_body("file", "collection.png", "image/png", true, &image_bytes);
-    let collection_upload = app
+    let collection_upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -82,7 +83,8 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
         "/api/v1/collections/collection-1/thumbnails",
         "/api/v1/collections/collection-1/thumbnail",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -102,7 +104,8 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
         format!("/api/v1/readlists/readlist-1/thumbnails/{readlist_thumbnail_id}"),
         format!("/api/v1/collections/collection-1/thumbnails/{collection_thumbnail_id}"),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -117,33 +120,32 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {}", route);
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-tachiyomi-content-restrictions").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        12,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-content-restrictions")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                12,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -166,34 +168,33 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_ko
             "lastReadContinuousIndex": 0,
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
-    let paths = new_router_fixture("router-readlist-detail-partially-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "partially-restricted-user",
-        "partial@example.org",
-        "router-contract-partial-123",
-        15,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-detail-partially-restricted")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "partially-restricted-user",
+                "partial@example.org",
+                "router-contract-partial-123",
+                15,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "partial@example.org",
-        "router-contract-partial-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("partial@example.org", "router-contract-partial-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -209,34 +210,33 @@ async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
     let payload = response_json(response).await;
     assert_eq!(payload.get("filtered"), Some(&Value::Bool(true)));
     assert_eq!(payload.get("bookIds"), Some(&json!(["book-3"])));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-tachiyomi-partially-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "partially-restricted-user",
-        "partial@example.org",
-        "router-contract-partial-123",
-        15,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-partially-restricted")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "partially-restricted-user",
+                "partial@example.org",
+                "router-contract-partial-123",
+                15,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "partial@example.org",
-        "router-contract-partial-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("partial@example.org", "router-contract-partial-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -259,33 +259,32 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_
             "lastReadContinuousIndex": 0,
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_restricted_user() {
-    let paths = new_router_fixture("router-readlist-tachiyomi-library-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-library-restricted")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -308,33 +307,32 @@ async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_res
             "lastReadContinuousIndex": 0,
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_returns_not_found_when_library_sharing_has_no_matches()
 {
-    let paths = new_router_fixture("router-readlist-tachiyomi-no-shared-libraries").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "no-library-user",
-        "nolib@example.org",
-        "router-contract-nolib-123",
-        &[],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-no-shared-libraries")
+        .with_seed(|paths| async move {
+            seed_router_library_restricted_user(
+                &paths,
+                "no-library-user",
+                "nolib@example.org",
+                "router-contract-nolib-123",
+                &[],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "nolib@example.org",
-        "router-contract-nolib-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("nolib@example.org", "router-contract-nolib-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -347,33 +345,32 @@ async fn router_readlist_tachiyomi_progress_returns_not_found_when_library_shari
         .expect("hidden-library readlist tachiyomi get request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_sharing_has_no_matches()
  {
-    let paths = new_router_fixture("router-readlist-tachiyomi-put-no-shared-libraries").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "no-library-user",
-        "nolib@example.org",
-        "router-contract-nolib-123",
-        &[],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-put-no-shared-libraries")
+        .with_seed(|paths| async move {
+            seed_router_library_restricted_user(
+                &paths,
+                "no-library-user",
+                "nolib@example.org",
+                "router-contract-nolib-123",
+                &[],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "nolib@example.org",
-        "router-contract-nolib-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("nolib@example.org", "router-contract-nolib-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -388,7 +385,7 @@ async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_s
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for no-shared-libraries verification");
     let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
@@ -398,33 +395,32 @@ async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_s
         .expect("no-shared-libraries read progress rows should be queryable");
     pool.close().await;
     assert!(writes.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-tachiyomi-put-content-restrictions").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        12,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-put-content-restrictions")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                12,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -439,7 +435,7 @@ async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_lik
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for content-restricted verification");
     let writes = sqlx::query("SELECT BOOK_ID FROM READ_PROGRESS WHERE USER_ID = ?")
@@ -449,34 +445,33 @@ async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_lik
         .expect("content-restricted read progress rows should be queryable");
     pool.close().await;
     assert!(writes.is_empty());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_restricted_user() {
-    let paths = new_router_fixture("router-readlist-tachiyomi-put-partially-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "partially-restricted-user",
-        "partial@example.org",
-        "router-contract-partial-123",
-        15,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-readlist-tachiyomi-put-partially-restricted")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "partially-restricted-user",
+                "partial@example.org",
+                "router-contract-partial-123",
+                15,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "partial@example.org",
-        "router-contract-partial-123",
-    )
-    .await;
+    let restricted_token = ctx
+        .login_with_credentials("partial@example.org", "router-contract-partial-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -491,7 +486,7 @@ async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_res
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for partially restricted put verification");
     let rows = sqlx::query(
@@ -514,51 +509,51 @@ async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_res
         })
         .collect::<Vec<_>>();
     assert_eq!(persisted, vec![("book-3".to_string(), 12, 1)]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_media_assets_allow_partially_visible_restricted_readlist() {
-    let paths = new_router_fixture("router-readlist-media-assets-partially-restricted").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "partially-restricted-user",
-        "partial@example.org",
-        "router-contract-partial-123",
-        15,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
-    for (relative_path, chapter) in [
-        ("books/book-1.epub", "book-1"),
-        ("books/book-2.epub", "book-2"),
-        ("library-2/books/book-3.epub", "book-3"),
-    ] {
-        write_router_epub_resource(
-            &paths,
-            relative_path,
-            "OEBPS/chapter.xhtml",
-            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
-                .as_bytes(),
-        );
-    }
+    let ctx = TestFixture::builder("router-readlist-media-assets-partially-restricted")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "partially-restricted-user",
+                "partial@example.org",
+                "router-contract-partial-123",
+                15,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+            for (relative_path, chapter) in [
+                ("books/book-1.epub", "book-1"),
+                ("books/book-2.epub", "book-2"),
+                ("library-2/books/book-3.epub", "book-3"),
+            ] {
+                write_router_epub_resource(
+                    &paths,
+                    relative_path,
+                    "OEBPS/chapter.xhtml",
+                    format!(
+                        "<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>"
+                    )
+                    .as_bytes(),
+                );
+            }
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "partial@example.org",
-        "router-contract-partial-123",
-    )
-    .await;
+    let admin_token = ctx.login_admin().await;
+    let restricted_token = ctx
+        .login_with_credentials("partial@example.org", "router-contract-partial-123")
+        .await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "readlist.png", "image/png", true, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -573,7 +568,8 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
         .expect("partially restricted readlist thumbnail upload request should complete");
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let thumbnails = app
+    let thumbnails = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -594,7 +590,8 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
         "partially visible readlist should still expose its thumbnail list"
     );
 
-    let archive = app
+    let archive = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -630,33 +627,37 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
             "3 - book-3.epub".to_string(),
         ]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_file_uses_deflated_zip_entries() {
-    let paths = new_router_fixture("router-readlist-file-deflated-zip").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    for (relative_path, chapter) in [
-        ("books/book-1.epub", "book-1"),
-        ("books/book-2.epub", "book-2"),
-        ("library-2/books/book-3.epub", "book-3"),
-    ] {
-        write_router_epub_resource(
-            &paths,
-            relative_path,
-            "OEBPS/chapter.xhtml",
-            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
-                .as_bytes(),
-        );
-    }
+    let ctx = TestFixture::builder("router-readlist-file-deflated-zip")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            for (relative_path, chapter) in [
+                ("books/book-1.epub", "book-1"),
+                ("books/book-2.epub", "book-2"),
+                ("library-2/books/book-3.epub", "book-3"),
+            ] {
+                write_router_epub_resource(
+                    &paths,
+                    relative_path,
+                    "OEBPS/chapter.xhtml",
+                    format!(
+                        "<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>"
+                    )
+                    .as_bytes(),
+                );
+            }
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let archive = app
+    let archive = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -676,33 +677,37 @@ async fn router_readlist_file_uses_deflated_zip_entries() {
     let mut zip = zip::ZipArchive::new(cursor).expect("readlist archive should parse as zip");
     let entry = zip.by_index(0).expect("zip entry should open");
     assert_eq!(entry.compression(), CompressionMethod::Deflated);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_file_emits_zip64_records() {
-    let paths = new_router_fixture("router-readlist-file-zip64-records").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
-    for (relative_path, chapter) in [
-        ("books/book-1.epub", "book-1"),
-        ("books/book-2.epub", "book-2"),
-        ("library-2/books/book-3.epub", "book-3"),
-    ] {
-        write_router_epub_resource(
-            &paths,
-            relative_path,
-            "OEBPS/chapter.xhtml",
-            format!("<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>")
-                .as_bytes(),
-        );
-    }
+    let ctx = TestFixture::builder("router-readlist-file-zip64-records")
+        .with_seed(|paths| async move {
+            seed_readlist_endpoint_variants(&paths).await;
+            for (relative_path, chapter) in [
+                ("books/book-1.epub", "book-1"),
+                ("books/book-2.epub", "book-2"),
+                ("library-2/books/book-3.epub", "book-3"),
+            ] {
+                write_router_epub_resource(
+                    &paths,
+                    relative_path,
+                    "OEBPS/chapter.xhtml",
+                    format!(
+                        "<html xmlns='http://www.w3.org/1999/xhtml'><body>{chapter}</body></html>"
+                    )
+                    .as_bytes(),
+                );
+            }
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let archive = app
+    let archive = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -728,6 +733,4 @@ async fn router_readlist_file_emits_zip64_records() {
             .any(|window| window == [0x50, 0x4b, 0x06, 0x07]),
         "readlist file should include zip64 locator signature"
     );
-
-    cleanup_router_fixture(paths);
 }

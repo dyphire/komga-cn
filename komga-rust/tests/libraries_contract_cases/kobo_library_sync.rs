@@ -94,14 +94,16 @@ async fn update_series_read_progress_date(
 
 #[tokio::test]
 async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
-    let paths = new_router_fixture("router-kobo-library-sync-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-shape")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -137,7 +139,8 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
     assert!(entitlement.get("BookMetadata").is_some());
     assert!(entitlement.get("ReadingState").is_some());
 
-    let second_response = app
+    let second_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -151,119 +154,120 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
         .await
         .expect("kobo library sync continuation request should complete");
     assert_eq!(second_response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_respects_shared_library_scope() {
-    let paths = new_router_fixture("router-kobo-library-sync-library-scope").await;
-    seed_router_contract_data(&paths).await;
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("secondary kobo library db should open");
-    sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
-        .bind("library-2")
-        .bind("Library 2")
-        .bind(paths.config_dir.to_string_lossy().to_string())
-        .execute(&pool)
-        .await
-        .expect("secondary library should be inserted");
-    sqlx::query(
-        "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("series-2")
-    .bind(0_i64)
-    .bind("Series 2")
-    .bind("series/series-2")
-    .bind("library-2")
-    .execute(&pool)
-    .await
-    .expect("secondary series should be inserted");
-    sqlx::query(
-        "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("ONGOING")
-    .bind("Series 2")
-    .bind("Series 2")
-    .bind("AltPub")
-    .bind("EN")
-    .bind(12_i64)
-    .bind("series-2")
-    .execute(&pool)
-    .await
-    .expect("secondary series metadata should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("book-2")
-    .bind(0_i64)
-    .bind("book-2.epub")
-    .bind("books/book-2.epub")
-    .bind("series-2")
-    .bind(2_048_i64)
-    .bind(1_i64)
-    .bind("library-2")
-    .execute(&pool)
-    .await
-    .expect("secondary book should be inserted");
-    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("application/epub+zip")
-        .bind("READY")
-        .bind("book-2")
-        .bind(12_i64)
-        .execute(&pool)
-        .await
-        .expect("secondary media should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("1")
-    .bind(1.0_f64)
-    .bind("Book 2")
-    .bind("2024-01-16")
-    .bind("book-2")
-    .execute(&pool)
-    .await
-    .expect("secondary book metadata should be inserted");
-    sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
-        .bind("book-2")
-        .bind("Morgan Else")
-        .bind("writer")
-        .execute(&pool)
-        .await
-        .expect("secondary book author should be inserted");
-    pool.close().await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-library-scope")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("secondary kobo library db should open");
+            sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+                .bind("library-2")
+                .bind("Library 2")
+                .bind(paths.config_dir.to_string_lossy().to_string())
+                .execute(&pool)
+                .await
+                .expect("secondary library should be inserted");
+            sqlx::query(
+                "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind("series-2")
+            .bind(0_i64)
+            .bind("Series 2")
+            .bind("series/series-2")
+            .bind("library-2")
+            .execute(&pool)
+            .await
+            .expect("secondary series should be inserted");
+            sqlx::query(
+                "INSERT INTO SERIES_METADATA (STATUS, TITLE, TITLE_SORT, PUBLISHER, LANGUAGE, AGE_RATING, SERIES_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("ONGOING")
+            .bind("Series 2")
+            .bind("Series 2")
+            .bind("AltPub")
+            .bind("EN")
+            .bind(12_i64)
+            .bind("series-2")
+            .execute(&pool)
+            .await
+            .expect("secondary series metadata should be inserted");
+            sqlx::query(
+                "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("book-2")
+            .bind(0_i64)
+            .bind("book-2.epub")
+            .bind("books/book-2.epub")
+            .bind("series-2")
+            .bind(2_048_i64)
+            .bind(1_i64)
+            .bind("library-2")
+            .execute(&pool)
+            .await
+            .expect("secondary book should be inserted");
+            sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+                .bind("application/epub+zip")
+                .bind("READY")
+                .bind("book-2")
+                .bind(12_i64)
+                .execute(&pool)
+                .await
+                .expect("secondary media should be inserted");
+            sqlx::query(
+                "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind("1")
+            .bind(1.0_f64)
+            .bind("Book 2")
+            .bind("2024-01-16")
+            .bind("book-2")
+            .execute(&pool)
+            .await
+            .expect("secondary book metadata should be inserted");
+            sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+                .bind("book-2")
+                .bind("Morgan Else")
+                .bind("writer")
+                .execute(&pool)
+                .await
+                .expect("secondary book author should be inserted");
+            pool.close().await;
 
-    seed_router_library_restricted_user(
-        &paths,
-        "kobo-library-user",
-        "kobo-library@example.org",
-        "router-contract-kobo-library-123",
-        &["library-1"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "any-token", "kobo-library-user").await;
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("user role seed db should open");
-    sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
-        .bind("kobo-library-user")
-        .bind("KOBO_SYNC")
-        .execute(&pool)
-        .await
-        .expect("user role should be inserted");
-    pool.close().await;
+            seed_router_library_restricted_user(
+                &paths,
+                "kobo-library-user",
+                "kobo-library@example.org",
+                "router-contract-kobo-library-123",
+                &["library-1"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "any-token", "kobo-library-user").await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("user role seed db should open");
+            sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+                .bind("kobo-library-user")
+                .bind("KOBO_SYNC")
+                .execute(&pool)
+                .await
+                .expect("user role should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "kobo-library@example.org",
+            "router-contract-kobo-library-123",
+        )
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "kobo-library@example.org",
-        "router-contract-kobo-library-123",
-    )
-    .await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -293,21 +297,22 @@ async fn router_kobo_library_sync_respects_shared_library_scope() {
         !entitlement_ids.contains(&"book-2"),
         "kobo sync should exclude books outside the user's shared libraries"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_uses_kobo_port_when_host_omits_port() {
-    let paths = new_router_fixture("router-kobo-library-sync-kobo-port").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-kobo-port")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            upsert_server_setting(&paths, "KOBO_PORT", "8085").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -336,34 +341,32 @@ async fn router_kobo_library_sync_uses_kobo_port_when_host_omits_port() {
         download_url,
         Some("http://localhost:8085/kobo/any-token/v1/books/book-1/file/epub")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_respects_age_restrictions() {
-    let paths = new_router_fixture("router-kobo-library-sync-age-restriction").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "kobo-age-user",
-        "kobo-age@example.org",
-        "router-contract-kobo-age-123",
-        13,
-        &["USER", "KOBO_SYNC"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "any-token", "kobo-age-user").await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-age-restriction")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-age-user",
+                "kobo-age@example.org",
+                "router-contract-kobo-age-123",
+                13,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "any-token", "kobo-age-user").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx
+        .login_with_credentials("kobo-age@example.org", "router-contract-kobo-age-123")
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "kobo-age@example.org",
-        "router-contract-kobo-age-123",
-    )
-    .await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -388,20 +391,21 @@ async fn router_kobo_library_sync_respects_age_restrictions() {
         !has_entitlements,
         "kobo sync should exclude books blocked by the user's age restriction"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_excludes_regular_readlist_tags_without_ondeck() {
-    let paths = new_router_fixture("router-kobo-library-sync-excludes-regular-readlist-tags").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-excludes-regular-readlist-tags")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -432,25 +436,31 @@ async fn router_kobo_library_sync_excludes_regular_readlist_tags_without_ondeck(
         !has_regular_readlist_tag,
         "kobo sync should not expose persisted readlists; Kotlin only seeds synthetic On Deck"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_uses_series_read_date_for_ondeck_last_modified() {
-    let paths = new_router_fixture("router-kobo-library-sync-ondeck-last-modified").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    seed_second_book_in_primary_series(&paths).await;
-    seed_router_read_progress(&paths, true).await;
-    seed_router_series_read_progress(&paths, 1, 0).await;
-    update_series_read_progress_date(&paths, "series-1", "admin-user", "2026-01-05T00:00:00Z")
+    let ctx = TestFixture::builder("router-kobo-library-sync-ondeck-last-modified")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            seed_second_book_in_primary_series(&paths).await;
+            seed_router_read_progress(&paths, true).await;
+            seed_router_series_read_progress(&paths, 1, 0).await;
+            update_series_read_progress_date(
+                &paths,
+                "series-1",
+                "admin-user",
+                "2026-01-05T00:00:00Z",
+            )
+            .await;
+        })
+        .build()
         .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -495,28 +505,29 @@ async fn router_kobo_library_sync_uses_series_read_date_for_ondeck_last_modified
             .and_then(Value::as_str),
         Some("2026-01-05T00:00:00Z")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_persists_api_key_id_in_sync_point_state() {
-    let paths = new_router_fixture("router-kobo-library-sync-api-key-ownership").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "kobo-sync-user",
-        "kobo-sync@example.org",
-        "router-contract-kobo-sync-123",
-        0,
-        &["USER", "KOBO_SYNC"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-api-key-ownership")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-sync-user",
+                "kobo-sync@example.org",
+                "router-contract-kobo-sync-123",
+                0,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -528,37 +539,35 @@ async fn router_kobo_library_sync_persists_api_key_id_in_sync_point_state() {
         .expect("kobo library sync path-token request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let (user_id, api_key_id) = load_first_kobo_sync_point_row(&paths).await;
+    let (user_id, api_key_id) = load_first_kobo_sync_point_row(ctx.paths()).await;
     assert_eq!(user_id, "kobo-sync-user");
     assert_eq!(api_key_id.as_deref(), Some("api-key-validkobotoken"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_uses_request_api_key_identity_when_session_authenticated() {
-    let paths = new_router_fixture("router-kobo-library-sync-session-api-key-identity").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "kobo-sync-user",
-        "kobo-sync@example.org",
-        "router-contract-kobo-sync-123",
-        0,
-        &["USER", "KOBO_SYNC"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-session-api-key-identity")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-sync-user",
+                "kobo-sync@example.org",
+                "router-contract-kobo-sync-123",
+                0,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx
+        .login_with_credentials("kobo-sync@example.org", "router-contract-kobo-sync-123")
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "kobo-sync@example.org",
-        "router-contract-kobo-sync-123",
-    )
-    .await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -572,23 +581,23 @@ async fn router_kobo_library_sync_uses_request_api_key_identity_when_session_aut
         .expect("session-authenticated kobo sync request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let (user_id, api_key_id) = load_first_kobo_sync_point_row(&paths).await;
+    let (user_id, api_key_id) = load_first_kobo_sync_point_row(ctx.paths()).await;
     assert_eq!(user_id, "kobo-sync-user");
     assert_eq!(api_key_id.as_deref(), Some("api-key-validkobotoken"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() {
-    let paths = new_router_fixture("router-kobo-library-sync-bare-base64-komga-token").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-bare-base64-komga-token")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -620,7 +629,9 @@ async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() 
         .strip_prefix("KOMGA.")
         .expect("initial sync token should use KOMGA prefix");
 
-    let second_response = app
+    let second_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -642,20 +653,20 @@ async fn router_kobo_library_sync_rejects_bare_base64_komga_tokens_as_invalid() 
             .iter()
             .any(|event| event.get("NewEntitlement").is_some())
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metadata() {
-    let paths = new_router_fixture("router-kobo-library-sync-removed-book-metadata").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-removed-book-metadata")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let initial_response = app
+    let initial_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -676,7 +687,7 @@ async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metada
         .map(str::to_string)
         .expect("initial sync response should include x-kobo-synctoken");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("kobo removed metadata db should open");
     sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
@@ -687,7 +698,9 @@ async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metada
         .expect("book should be soft deleted");
     pool.close().await;
 
-    let removed_response = app
+    let removed_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -731,38 +744,40 @@ async fn router_kobo_library_sync_removed_book_matches_kotlin_placeholder_metada
         removed.pointer("/BookMetadata/Language"),
         Some(&Value::String("en".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existing_state() {
-    let paths = new_router_fixture("router-kobo-library-sync-no-api-key-backfill").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "kobo-sync-user",
-        "kobo-sync@example.org",
-        "router-contract-kobo-sync-123",
-        0,
-        &["USER", "KOBO_SYNC"],
-    )
-    .await;
-    seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+    let ctx = TestFixture::builder("router-kobo-library-sync-no-api-key-backfill")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-sync-user",
+                "kobo-sync@example.org",
+                "router-contract-kobo-sync-123",
+                0,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "validkobotoken", "kobo-sync-user").await;
+
+            let ongoing_sync_point_id = "existing-sync-point";
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("kobo sync point seed db should open");
+            sqlx::query("INSERT INTO SYNC_POINT (ID, USER_ID, API_KEY_ID) VALUES (?, ?, ?)")
+                .bind(ongoing_sync_point_id)
+                .bind("kobo-sync-user")
+                .bind(Option::<String>::None)
+                .execute(&pool)
+                .await
+                .expect("kobo sync point row should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
     let ongoing_sync_point_id = "existing-sync-point";
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("kobo sync point seed db should open");
-    sqlx::query("INSERT INTO SYNC_POINT (ID, USER_ID, API_KEY_ID) VALUES (?, ?, ?)")
-        .bind(ongoing_sync_point_id)
-        .bind("kobo-sync-user")
-        .bind(Option::<String>::None)
-        .execute(&pool)
-        .await
-        .expect("kobo sync point row should be inserted");
-    pool.close().await;
-
     let sync_token_payload = json!({
         "version": 1,
         "rawKoboSyncToken": "",
@@ -775,8 +790,9 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
         STANDARD_NO_PAD.encode(sync_token_payload.as_bytes())
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -789,7 +805,7 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
         .expect("existing-state kobo library sync request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("kobo sync point db should open");
     let row = sqlx::query("SELECT API_KEY_ID FROM SYNC_POINT WHERE ID = ? LIMIT 1")
@@ -801,6 +817,4 @@ async fn router_kobo_library_sync_does_not_backfill_missing_api_key_id_on_existi
     pool.close().await;
 
     assert_eq!(api_key_id, None);
-
-    cleanup_router_fixture(paths);
 }

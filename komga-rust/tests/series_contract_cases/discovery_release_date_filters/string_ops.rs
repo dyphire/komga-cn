@@ -2,14 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_release_date_string_ops_in_runtime_owned_mode() {
-    let paths =
-        new_router_fixture("router-discovery-series-list-strict-release-date-string-ops").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-release-date-string-ops").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let begins_with_match = app
+    let begins_with_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -40,7 +37,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         .expect("strict series release-date beginsWith match payload should expose content array");
     assert_eq!(begins_with_match_content.len(), 1);
 
-    let begins_with_miss = app
+    let begins_with_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -71,7 +69,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         .expect("strict series release-date beginsWith miss payload should expose content array");
     assert_eq!(begins_with_miss_content.len(), 0);
 
-    let ends_with_match = app
+    let ends_with_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -102,7 +101,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         .expect("strict series release-date endsWith match payload should expose content array");
     assert_eq!(ends_with_match_content.len(), 1);
 
-    let ends_with_miss = app
+    let ends_with_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -133,7 +133,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         .expect("strict series release-date endsWith miss payload should expose content array");
     assert_eq!(ends_with_miss_content.len(), 0);
 
-    let does_not_contain_match = app
+    let does_not_contain_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -166,7 +167,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         );
     assert_eq!(does_not_contain_match_content.len(), 1);
 
-    let does_not_contain_excluded = app
+    let does_not_contain_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -201,7 +203,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         );
     assert_eq!(does_not_contain_excluded_content.len(), 0);
 
-    let does_not_begin_with_keep = app
+    let does_not_begin_with_keep = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -236,7 +239,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         );
     assert_eq!(does_not_begin_with_keep_content.len(), 1);
 
-    let does_not_begin_with_excluded = app
+    let does_not_begin_with_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -273,7 +277,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         );
     assert_eq!(does_not_begin_with_excluded_content.len(), 0);
 
-    let does_not_end_with_keep = app
+    let does_not_end_with_keep = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -306,7 +311,8 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
         );
     assert_eq!(does_not_end_with_keep_content.len(), 1);
 
-    let does_not_end_with_excluded = app
+    let does_not_end_with_excluded = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -340,6 +346,4 @@ async fn router_discovery_series_list_supports_release_date_string_ops_in_runtim
             "strict series release-date doesNotEndWith excluded payload should expose content array",
         );
     assert_eq!(does_not_end_with_excluded_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

@@ -5,6 +5,9 @@ use komga_infrastructure::sqlite::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
 
+use super::super::support::fixture::TestDbFixture;
+use super::super::support::persistence_contract_fixture::RuntimeDbPaths;
+
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct PersistenceSnapshot {
     pub(super) library_rows: i64,
@@ -23,22 +26,23 @@ pub(super) struct TaskSnapshot {
 }
 
 pub(super) struct ScannerPersistenceFixture {
-    pub(super) paths: persistence_contract_fixture::RuntimeDbPaths,
+    _db: TestDbFixture,
+    pub(super) paths: RuntimeDbPaths,
     pub(super) library_root: PathBuf,
     pub(super) config: RuntimeConfig,
 }
 
 impl ScannerPersistenceFixture {
     pub(super) async fn new(case_id: &str) -> anyhow::Result<Self> {
-        let paths = persistence_contract_fixture::new_runtime_db_paths(case_id)?;
-        persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db).await?;
-        persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db).await?;
+        let db = TestDbFixture::new(case_id).await;
+        let paths = db.paths().clone();
 
         let library_root = create_scannable_library_root(&paths.config_dir)?;
         seed_library_row(&paths.main_db, "library-1", &library_root).await?;
 
-        let config = runtime_config_for_paths(&paths);
+        let config = build_scanner_config(&paths.main_db, &paths.tasks_db, &paths.config_dir);
         Ok(Self {
+            _db: db,
             paths,
             library_root,
             config,
@@ -46,7 +50,7 @@ impl ScannerPersistenceFixture {
     }
 
     pub(super) fn cleanup(self) {
-        persistence_contract_fixture::cleanup(self.paths);
+        // TestDbFixture::Drop handles cleanup
     }
 }
 
@@ -373,21 +377,23 @@ pub(super) async fn assert_persisted_task_shape(
     assert_eq!(stored_payload, payload);
 }
 
-pub(super) fn runtime_config_for_paths(
-    paths: &persistence_contract_fixture::RuntimeDbPaths,
+fn build_scanner_config(
+    main_db: &std::path::Path,
+    tasks_db: &std::path::Path,
+    config_dir: &std::path::Path,
 ) -> RuntimeConfig {
     let mut env = BTreeMap::new();
     env.insert(
         "KOMGA_CONFIG_DIR".to_string(),
-        paths.config_dir.to_string_lossy().to_string(),
+        config_dir.to_string_lossy().to_string(),
     );
     env.insert(
         "KOMGA_DATABASE_FILE".to_string(),
-        paths.main_db.to_string_lossy().to_string(),
+        main_db.to_string_lossy().to_string(),
     );
     env.insert(
         "KOMGA_TASKS_DB_FILE".to_string(),
-        paths.tasks_db.to_string_lossy().to_string(),
+        tasks_db.to_string_lossy().to_string(),
     );
 
     RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)

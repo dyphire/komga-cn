@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_progression_put_returns_conflict_for_older_progression() {
-    let paths = new_router_fixture("router-book-progression-put-conflict").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-conflict").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for progression conflict seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -41,10 +40,11 @@ async fn router_book_progression_put_returns_conflict_for_older_progression() {
     .expect("existing read progress row for progression conflict should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -83,16 +83,13 @@ async fn router_book_progression_put_returns_conflict_for_older_progression() {
             "Progression is older than existing".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_returns_conflict_for_same_modified_retry() {
-    let paths = new_router_fixture("router-book-progression-put-same-modified-conflict").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-same-modified-conflict").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for same-modified retry seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -104,8 +101,7 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
         .expect("epub extension positions should be seeded for same-modified retry test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
         "device": {
@@ -124,7 +120,8 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
         }
     });
 
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -139,7 +136,8 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
         .expect("same-modified first request should complete");
     assert_eq!(first_response.status(), StatusCode::NO_CONTENT);
 
-    let retry_response = app
+    let retry_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -161,18 +159,15 @@ async fn router_book_progression_put_returns_conflict_for_same_modified_retry() 
             "Progression is older than existing".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_persists_modified_device_and_locator() {
-    let paths = new_router_fixture("router-book-progression-put-persists-full-payload").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-put-persists-full-payload").await;
 
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for progression full-payload seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -184,8 +179,7 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
         .expect("epub extension positions should be seeded for progression full-payload test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -205,7 +199,8 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -220,7 +215,9 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
         .expect("book progression full-payload put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -236,15 +233,13 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
     assert_eq!(payload.get("modified"), progression.get("modified"));
     assert_eq!(payload.get("device"), progression.get("device"));
     assert_eq!(payload.get("locator"), progression.get("locator"));
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
-    let paths = new_router_fixture("router-book-progression-opds-v2-roundtrip").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-opds-v2-roundtrip").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for opds progression seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -256,8 +251,7 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
         .expect("epub extension positions should be seeded for opds progression test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let progression = json!({
         "modified": "2024-01-04T05:06:07Z",
@@ -277,7 +271,8 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
         }
     });
 
-    let put_response = app
+    let put_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -292,7 +287,9 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
         .expect("opds progression put request should complete");
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -308,6 +305,4 @@ async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
     assert_eq!(payload.get("modified"), progression.get("modified"));
     assert_eq!(payload.get("device"), progression.get("device"));
     assert_eq!(payload.get("locator"), progression.get("locator"));
-
-    cleanup_router_fixture(paths);
 }

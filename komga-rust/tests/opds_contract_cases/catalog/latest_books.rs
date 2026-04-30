@@ -2,12 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_latest_books_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-latest-books-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-latest-books-unauthorized-auth-doc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -19,18 +18,15 @@ async fn router_opds_v2_latest_books_unauthorized_returns_opds_auth_document() {
         .expect("opds v2 latest-books unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_books_uses_kotlin_shape_and_visible_results() {
-    let paths = new_router_fixture("router-opds-v2-latest-books-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-latest-books-shape").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2",
         "series-2",
         "library-2",
@@ -39,13 +35,14 @@ async fn router_opds_v2_latest_books_uses_kotlin_shape_and_visible_results() {
         "2024-03-01 00:00:00",
     )
     .await;
-    update_router_book_created_date(&paths, "book-1", "2024-01-01 00:00:00").await;
-    update_router_book_isbn(&paths, "book-library-2", "9780000000003").await;
+    update_router_book_created_date(ctx.paths(), "book-1", "2024-01-01 00:00:00").await;
+    update_router_book_isbn(ctx.paths(), "book-library-2", "9780000000003").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -122,18 +119,15 @@ async fn router_opds_v2_latest_books_uses_kotlin_shape_and_visible_results() {
             .and_then(Value::as_str),
         Some("urn:isbn:9780000000003")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_latest_books_filters_results_for_restricted_user() {
-    let paths = new_router_fixture("router-opds-v2-latest-books-restricted-results").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-latest-books-restricted-results").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2",
         "series-2",
         "library-2",
@@ -143,7 +137,7 @@ async fn router_opds_v2_latest_books_filters_results_for_restricted_user() {
     )
     .await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -151,15 +145,13 @@ async fn router_opds_v2_latest_books_filters_results_for_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -192,19 +184,15 @@ async fn router_opds_v2_latest_books_filters_results_for_restricted_user() {
             .and_then(Value::as_str),
         Some("Book 1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_latest_books_unauthorized_returns_opds_auth_document() {
-    let paths =
-        new_router_fixture("router-opds-v2-library-latest-books-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-library-latest-books-unauthorized-auth-doc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -216,17 +204,14 @@ async fn router_opds_v2_library_latest_books_unauthorized_returns_opds_auth_docu
         .expect("opds v2 library latest-books unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_latest_books_respects_kotlin_library_scope_statuses() {
-    let paths = new_router_fixture("router-opds-v2-library-latest-books-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
+    let ctx = TestFixture::new("router-opds-v2-library-latest-books-scope").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -234,15 +219,13 @@ async fn router_opds_v2_library_latest_books_respects_kotlin_library_scope_statu
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let forbidden_response = app
+    let forbidden_response = ctx
+        .app()
+        .clone()
         .clone()
         .oneshot(
             Request::builder()
@@ -256,7 +239,9 @@ async fn router_opds_v2_library_latest_books_respects_kotlin_library_scope_statu
         .expect("forbidden latest-books request should complete");
     assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -268,18 +253,15 @@ async fn router_opds_v2_library_latest_books_respects_kotlin_library_scope_statu
         .await
         .expect("missing-library latest-books request should complete");
     assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_latest_books_uses_kotlin_shape_and_unscoped_results() {
-    let paths = new_router_fixture("router-opds-v2-library-latest-books-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-library-latest-books-shape").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2",
         "series-2",
         "library-2",
@@ -288,14 +270,15 @@ async fn router_opds_v2_library_latest_books_uses_kotlin_shape_and_unscoped_resu
         "2024-03-01 00:00:00",
     )
     .await;
-    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
-    update_router_book_created_date(&paths, "book-1", "2024-01-01 00:00:00").await;
-    update_router_book_isbn(&paths, "book-library-2", "9780000000003").await;
+    update_router_library_last_modified(ctx.paths(), "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_created_date(ctx.paths(), "book-1", "2024-01-01 00:00:00").await;
+    update_router_book_isbn(ctx.paths(), "book-library-2", "9780000000003").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -446,6 +429,4 @@ async fn router_opds_v2_library_latest_books_uses_kotlin_shape_and_unscoped_resu
             .is_some_and(|images| !images.is_empty()),
         "latest-books publication should expose images"
     );
-
-    cleanup_router_fixture(paths);
 }

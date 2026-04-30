@@ -1,14 +1,5 @@
 use super::*;
 
-async fn build_library_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
-    // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
-    // background consumer can claim and delete the rows before the assertions inspect them.
-    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
-        paths,
-    ))
-    .await
-}
-
 async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 {
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
@@ -72,11 +63,10 @@ async fn assert_single_scan_task(
 
 #[tokio::test]
 async fn router_api_libraries_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-api-libraries-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let ctx = TestFixture::new("router-api-libraries-basic-auth-compat").await;
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -103,19 +93,15 @@ async fn router_api_libraries_accepts_basic_auth_like_kotlin_clients() {
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["library-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_headers() {
-    let paths = new_router_fixture("router-api-libraries-kotlin-cache-headers").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-api-libraries-kotlin-cache-headers").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let first_response = app
+    let first_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -144,7 +130,8 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
         .map(str::to_string)
         .expect("libraries response should include etag");
 
-    let second_response = app
+    let second_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -168,7 +155,9 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
     );
     assert!(second_response.headers().contains_key(header::ETAG));
 
-    let head_response = app
+    let head_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("HEAD")
@@ -187,16 +176,13 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
         "Kotlin conditional libraries head does not emit Cache-Control on 304"
     );
     assert!(head_response.headers().contains_key(header::ETAG));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clear() {
-    let paths = new_router_fixture("router-api-library-patch-null-exclusions").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-api-library-patch-null-exclusions").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for library exclusions seed");
     sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?), (?, ?)")
@@ -209,10 +195,10 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
         .expect("library exclusions should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let patch_response = app
+    let patch_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -229,7 +215,9 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
         .expect("library patch request should complete");
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let get_response = app
+    let get_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -247,26 +235,28 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
         Some(&json!([])),
         "PATCH null scanDirectoryExclusions should clear exclusions like Kotlin"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
-    let paths = new_router_fixture("router-api-library-create-enqueues-scan").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-create-enqueues-scan")
+        .without_runtime_workers()
+        .build()
+        .await;
 
-    let new_root = paths
+    let new_root = ctx
+        .paths()
         .config_dir
         .parent()
         .expect("fixture config dir should have a parent")
         .join("created-library-root");
     std::fs::create_dir_all(&new_root).expect("created library root should be creatable");
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -293,7 +283,7 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
         .expect("created library response should include id");
 
     assert_single_scan_task(
-        &paths,
+        ctx.paths(),
         format!("ScanLibrary_{library_id}_DEEP_false"),
         library_id,
         4,
@@ -301,15 +291,17 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
     )
     .await;
 
-    cleanup_router_fixture(paths);
+    drop(ctx);
 
-    let paths = new_router_fixture("router-api-library-scan-task-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-scan-task-shape")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -324,26 +316,26 @@ async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     assert_single_scan_task(
-        &paths,
+        ctx.paths(),
         "ScanLibrary_library-1_DEEP_true".to_string(),
         "library-1",
         8,
         true,
     )
     .await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_scan_returns_not_found_for_missing_library() {
-    let paths = new_router_fixture("router-api-library-scan-missing-library").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-scan-missing-library")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -357,21 +349,21 @@ async fn router_api_library_scan_returns_not_found_for_missing_library() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let rows = load_task_rows(&paths, "SELECT COUNT(*) AS COUNT FROM TASK").await;
+    let rows = load_task_rows(ctx.paths(), "SELECT COUNT(*) AS COUNT FROM TASK").await;
     assert_eq!(rows[0].get::<i64, _>("COUNT"), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_series_id() {
-    let paths = new_router_fixture("router-api-library-analyze-task-groups").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-analyze-task-groups")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -386,7 +378,7 @@ async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_serie
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     let rows = load_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY FROM TASK ORDER BY ID ASC",
     )
     .await;
@@ -399,19 +391,19 @@ async fn router_api_library_analyze_enqueues_analyze_book_tasks_grouped_by_serie
         Some("series-1".to_string())
     );
     assert_eq!(rows[0].get::<i32, _>("PRIORITY"), 6);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungrouped() {
-    let paths = new_router_fixture("router-api-library-metadata-refresh-task-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-metadata-refresh-task-shape")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -426,7 +418,7 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     let rows = load_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
     )
     .await;
@@ -452,19 +444,19 @@ async fn router_api_library_metadata_refresh_leaves_series_local_artwork_ungroup
     );
     assert_eq!(rows[2].get::<Option<String>, _>("GROUP_ID"), None);
     assert_eq!(rows[2].get::<i32, _>("PRIORITY"), 6);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
-    let paths = new_router_fixture("router-api-library-empty-trash-task-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-api-library-empty-trash-task-shape")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_library_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -479,7 +471,7 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     let rows = load_task_rows(
-        &paths,
+        ctx.paths(),
         "SELECT ID, SIMPLE_TYPE, GROUP_ID, PRIORITY, PAYLOAD FROM TASK ORDER BY ID ASC",
     )
     .await;
@@ -500,8 +492,6 @@ async fn router_api_library_empty_trash_enqueues_ungrouped_task() {
         }),
         "library empty-trash route should persist the Kotlin-compatible payload shape consumed by legacy readers",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -535,28 +525,27 @@ async fn router_api_library_delete_rejects_invalid_access_paths() {
     ];
 
     for (fixture_name, uri, auth_mode, expected_status) in cases {
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
-
+        let mut builder = TestFixture::builder(fixture_name);
         if matches!(auth_mode, DeleteAuth::NonAdmin) {
-            seed_router_age_exclude_user_with_roles(
-                &paths,
-                "non-admin-user",
-                "non-admin@example.org",
-                "router-contract-non-admin-123",
-                18,
-                &["USER"],
-            )
-            .await;
+            builder = builder.with_seed(|paths| async move {
+                seed_router_age_exclude_user_with_roles(
+                    &paths,
+                    "non-admin-user",
+                    "non-admin@example.org",
+                    "router-contract-non-admin-123",
+                    18,
+                    &["USER"],
+                )
+                .await;
+            });
         }
+        let ctx = builder.build().await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
         let auth_token = match auth_mode {
             DeleteAuth::None => None,
-            DeleteAuth::Admin => Some(login_with_basic_and_get_token(app.clone()).await),
+            DeleteAuth::Admin => Some(ctx.login_admin().await),
             DeleteAuth::NonAdmin => Some(
-                login_with_basic_credentials_and_get_token(
-                    app.clone(),
+                ctx.login_with_credentials(
                     "non-admin@example.org",
                     "router-contract-non-admin-123",
                 )
@@ -569,7 +558,9 @@ async fn router_api_library_delete_rejects_invalid_access_paths() {
             request = request.header("x-auth-token", auth_token);
         }
 
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .oneshot(
                 request
                     .body(Body::empty())
@@ -583,20 +574,17 @@ async fn router_api_library_delete_rejects_invalid_access_paths() {
             expected_status,
             "unexpected status for {fixture_name}"
         );
-
-        cleanup_router_fixture(paths);
     }
 }
 
 #[tokio::test]
 async fn router_api_library_put_route_is_removed() {
-    let paths = new_router_fixture("router-api-library-put-route-removed").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-api-library-put-route-removed").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -610,16 +598,13 @@ async fn router_api_library_put_route_is_removed() {
         .expect("removed library put request should complete");
 
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
-    let paths = new_router_fixture("router-api-library-delete-cascade").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-api-library-delete-cascade").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("library delete cascade seed db should open");
     sqlx::query("INSERT INTO LIBRARY_EXCLUSIONS (LIBRARY_ID, EXCLUSION) VALUES (?, ?)")
@@ -652,10 +637,11 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
         .expect("aggregation tag should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -670,7 +656,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM LIBRARY WHERE ID = ?",
             "library-1",
         )
@@ -679,7 +665,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM SERIES WHERE LIBRARY_ID = ?",
             "library-1",
         )
@@ -688,7 +674,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM BOOK WHERE LIBRARY_ID = ?",
             "library-1",
         )
@@ -697,7 +683,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM LIBRARY_EXCLUSIONS WHERE LIBRARY_ID = ?",
             "library-1",
         )
@@ -706,7 +692,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM SIDECAR WHERE LIBRARY_ID = ?",
             "library-1",
         )
@@ -715,7 +701,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM USER_LIBRARY_SHARING WHERE LIBRARY_ID = ?",
             "library-1",
         )
@@ -724,7 +710,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM BOOK_METADATA_AGGREGATION WHERE SERIES_ID = ?",
             "series-1",
         )
@@ -733,7 +719,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM BOOK_METADATA_AGGREGATION_AUTHOR WHERE SERIES_ID = ?",
             "series-1",
         )
@@ -742,7 +728,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM BOOK_METADATA_AGGREGATION_TAG WHERE SERIES_ID = ?",
             "series-1",
         )
@@ -751,7 +737,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?",
             "book-1",
         )
@@ -760,7 +746,7 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM READLIST_BOOK WHERE BOOK_ID = ?",
             "book-1",
         )
@@ -769,15 +755,13 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
     );
     assert_eq!(
         count_query_rows(
-            &paths,
+            ctx.paths(),
             "SELECT COUNT(*) AS COUNT FROM COLLECTION_SERIES WHERE SERIES_ID = ?",
             "series-1",
         )
         .await,
         0
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -824,13 +808,12 @@ async fn router_api_library_patch_rejects_blank_fields_with_kotlin_validation_pa
             }),
         ),
     ] {
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
+        let ctx = TestFixture::new(fixture_name).await;
+        let auth_token = ctx.login_admin().await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-        let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-        let patch_response = app
+        let patch_response = ctx
+            .app()
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("PATCH")
@@ -850,7 +833,5 @@ async fn router_api_library_patch_rejects_blank_fields_with_kotlin_validation_pa
         );
         let payload = response_json(patch_response).await;
         assert_eq!(payload, expected_payload, "case: {fixture_name}");
-
-        cleanup_router_fixture(paths);
     }
 }

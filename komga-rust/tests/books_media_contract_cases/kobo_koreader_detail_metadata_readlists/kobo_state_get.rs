@@ -4,14 +4,18 @@ use super::*;
 
 #[tokio::test]
 async fn router_kobo_state_empty_payload_omits_progress_fields_and_location() {
-    let paths = new_router_fixture("router-kobo-state-empty-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-empty-shape")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -43,17 +47,18 @@ async fn router_kobo_state_empty_payload_omits_progress_fields_and_location() {
             .and_then(|value| value.get("Status")),
         Some(&Value::String("ReadyToRead".to_string())),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_existing_progress_without_locator_omits_progress_fields_and_location() {
-    let paths = new_router_fixture("router-kobo-state-missing-locator").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-missing-locator")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for missing locator state test");
     sqlx::query(
@@ -73,10 +78,11 @@ async fn router_kobo_state_existing_progress_without_locator_omits_progress_fiel
     .expect("read progress row without locator should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -111,17 +117,18 @@ async fn router_kobo_state_existing_progress_without_locator_omits_progress_fiel
             .and_then(|value| value.get("Status")),
         Some(&Value::String("Reading".to_string())),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fields() {
-    let paths = new_router_fixture("router-kobo-state-empty-string-locator").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-empty-string-locator")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for empty-string locator state test");
     sqlx::query(
@@ -146,10 +153,11 @@ async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fiel
     .expect("read progress row with empty-string locator should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -183,8 +191,6 @@ async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fiel
         Some(&Value::String("KoboSpan".to_string()))
     );
     assert_eq!(location.get("Value"), Some(&Value::String(String::new())));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -204,15 +210,19 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
     }
 
-    let paths = new_router_fixture("router-kobo-state-proxy-missing-book").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
-    upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+    let ctx = TestFixture::builder("router-kobo-state-proxy-missing-book")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -230,7 +240,6 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
         json!([{"StatusInfo":{"Status":"Reading"},"CurrentBookmark":{"ProgressPercent":12.5}}])
     );
 
-    cleanup_router_fixture(paths);
     restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
     server
         .join
@@ -240,14 +249,18 @@ async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
 
 #[tokio::test]
 async fn router_kobo_state_returns_not_found_for_missing_book_when_proxy_disabled() {
-    let paths = new_router_fixture("router-kobo-state-missing-book-local").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-state-missing-book-local")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -260,6 +273,4 @@ async fn router_kobo_state_returns_not_found_for_missing_book_when_proxy_disable
         .expect("kobo missing book state request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }

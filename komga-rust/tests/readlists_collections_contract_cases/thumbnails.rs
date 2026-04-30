@@ -2,16 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_flag() {
-    let paths = new_router_fixture("router-readlist-thumbnail-upload-multipart").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-upload-multipart").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -47,7 +45,8 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
     assert_eq!(payload.get("width"), Some(&json!(1)));
     assert_eq!(payload.get("height"), Some(&json!(1)));
 
-    let thumbnails = app
+    let thumbnails = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -86,7 +85,9 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
     assert_eq!(rows[0].get("width"), Some(&json!(1)));
     assert_eq!(rows[0].get("height"), Some(&json!(1)));
 
-    let route_thumbnail = app
+    let route_thumbnail = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -118,22 +119,18 @@ async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_fl
         .expect("readlist thumbnail route body should be readable");
     assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
     assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
-    let paths = new_router_fixture("router-readlist-thumbnail-delete-success").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-delete-success").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -154,7 +151,8 @@ async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
         .expect("uploaded readlist thumbnail should expose id")
         .to_string();
 
-    let delete = app
+    let delete = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -170,7 +168,9 @@ async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
         .expect("readlist thumbnail delete request should complete");
     assert_eq!(delete.status(), StatusCode::ACCEPTED);
 
-    let list = app
+    let list = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -183,22 +183,18 @@ async fn router_readlist_thumbnail_delete_removes_uploaded_thumbnail() {
         .expect("readlist thumbnail list request should complete");
     assert_eq!(list.status(), StatusCode::OK);
     assert_eq!(response_json(list).await, json!([]));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
-    let paths = new_router_fixture("router-readlist-thumbnail-select-success").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-select-success").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -219,7 +215,8 @@ async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
         .expect("uploaded readlist thumbnail should expose id")
         .to_string();
 
-    let select = app
+    let select = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -235,7 +232,9 @@ async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
         .expect("readlist thumbnail select request should complete");
     assert_eq!(select.status(), StatusCode::ACCEPTED);
 
-    let list = app
+    let list = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -254,20 +253,17 @@ async fn router_readlist_thumbnail_select_marks_uploaded_thumbnail_selected() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("id"), Some(&Value::String(thumbnail_id)));
     assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_readlist_exists()
  {
-    let paths = new_router_fixture("router-readlist-thumbnail-select-missing-thumbnail").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-select-missing-thumbnail").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -280,19 +276,16 @@ async fn router_readlist_thumbnail_select_returns_accepted_when_thumbnail_is_mis
         .expect("readlist thumbnail select missing-thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_thumbnail_select_returns_not_found_when_path_readlist_missing() {
-    let paths = new_router_fixture("router-readlist-thumbnail-select-missing-path-readlist").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-select-missing-path-readlist").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -305,22 +298,18 @@ async fn router_readlist_thumbnail_select_returns_not_found_when_path_readlist_m
         .expect("readlist thumbnail select missing-path request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_flag() {
-    let paths = new_router_fixture("router-collection-thumbnail-upload-multipart").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-collection-thumbnail-upload-multipart").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -360,7 +349,8 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
         .get("id")
         .and_then(Value::as_str)
         .expect("collection thumbnail upload should return thumbnail id");
-    let stored = app
+    let stored = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -384,7 +374,9 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
         Some("image/png")
     );
 
-    let route_thumbnail = app
+    let route_thumbnail = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -416,23 +408,18 @@ async fn router_collection_thumbnail_upload_parses_multipart_image_and_selected_
         .expect("collection thumbnail route body should be readable");
     assert_ne!(route_thumbnail_body.as_ref(), image_bytes.as_slice());
     assert_eq!(&route_thumbnail_body[..3], &[0xFF, 0xD8, 0xFF]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_thumbnail_select_returns_not_found_when_path_collection_missing() {
-    let paths =
-        new_router_fixture("router-collection-thumbnail-select-missing-path-collection").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-collection-thumbnail-select-missing-path-collection").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -453,7 +440,9 @@ async fn router_collection_thumbnail_select_returns_not_found_when_path_collecti
         .expect("uploaded collection thumbnail should expose id")
         .to_string();
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -468,20 +457,17 @@ async fn router_collection_thumbnail_select_returns_not_found_when_path_collecti
         .expect("collection thumbnail select missing-path request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_missing_but_collection_exists()
  {
-    let paths = new_router_fixture("router-collection-thumbnail-select-missing-thumbnail").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-collection-thumbnail-select-missing-thumbnail").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -494,22 +480,18 @@ async fn router_collection_thumbnail_select_returns_accepted_when_thumbnail_is_m
         .expect("collection thumbnail select missing-thumbnail request should complete");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_delete_removes_persisted_thumbnails() {
-    let paths = new_router_fixture("router-collection-delete-removes-thumbnails").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-collection-delete-removes-thumbnails").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -524,7 +506,9 @@ async fn router_collection_delete_removes_persisted_thumbnails() {
         .expect("collection thumbnail upload request should complete");
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let delete = app
+    let delete = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -537,7 +521,7 @@ async fn router_collection_delete_removes_persisted_thumbnails() {
         .expect("collection delete request should complete");
     assert_eq!(delete.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for collection thumbnail verification");
     let remaining =
@@ -550,23 +534,19 @@ async fn router_collection_delete_removes_persisted_thumbnails() {
     verify_pool.close().await;
 
     assert_eq!(remaining, 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persisted_thumbnail_exists()
 {
-    let paths = new_router_fixture("router-readlist-thumbnail-mosaic-fallback").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-readlist-thumbnail-mosaic-fallback").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "book.png", "image/png", true, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -581,7 +561,8 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
         .expect("book thumbnail upload request should complete");
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -616,37 +597,35 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
         !body.is_empty(),
         "readlist mosaic thumbnail should not be empty"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_thumbnails_allow_partially_visible_collection() {
-    let paths = new_router_fixture("router-collection-thumbnails-partially-visible").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-collection-thumbnails-partially-visible")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let admin_token = ctx.login_admin().await;
+    let restricted_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "collection.png", "image/png", true, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -661,7 +640,9 @@ async fn router_collection_thumbnails_allow_partially_visible_collection() {
         .expect("partially visible collection thumbnail upload request should complete");
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -680,23 +661,19 @@ async fn router_collection_thumbnails_allow_partially_visible_collection() {
         payload[0].get("collectionId").and_then(Value::as_str),
         Some("collection-1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persisted_thumbnail_exists()
  {
-    let paths = new_router_fixture("router-collection-thumbnail-mosaic-fallback").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-collection-thumbnail-mosaic-fallback").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -711,7 +688,8 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
         .expect("series thumbnail upload request should complete");
     assert_eq!(upload.status(), StatusCode::OK);
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -746,6 +724,4 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
         !body.is_empty(),
         "collection mosaic thumbnail should not be empty"
     );
-
-    cleanup_router_fixture(paths);
 }

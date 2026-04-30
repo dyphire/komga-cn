@@ -3,14 +3,18 @@ use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchInde
 
 #[tokio::test]
 async fn router_collections_supports_search_library_id_and_unpaged() {
-    let paths = new_router_fixture("router-collections-search-library-unpaged").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_listing_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collections-search-library-unpaged")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_collection_listing_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -41,55 +45,62 @@ async fn router_collections_supports_search_library_id_and_unpaged() {
             .and_then(Value::as_bool),
         Some(true)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
-    let paths = new_router_fixture("router-collections-search-relevance-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_listing_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collections-search-relevance-order")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_collection_listing_variants(&paths).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for collections search relevance seed");
-    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
-        .bind("Collection Collection 2")
-        .bind("collection-2")
-        .execute(&pool)
-        .await
-        .expect("collection-2 name should update for collections search relevance seed");
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("collection-3")
-        .bind("Collection 3")
-        .bind(false)
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("collection-3 row should insert for collections search relevance seed");
-    sqlx::query(
-        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
-    )
-    .bind("collection-3")
-    .bind("series-1")
-    .bind(0_i64)
-    .execute(&pool)
-    .await
-    .expect("collection-3 series membership should insert for collections search relevance seed");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for collections search relevance seed");
+            sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+                .bind("Collection Collection 2")
+                .bind("collection-2")
+                .execute(&pool)
+                .await
+                .expect("collection-2 name should update for collections search relevance seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("Collection 3")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-3 row should insert for collections search relevance seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("series-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect(
+                "collection-3 series membership should insert for collections search relevance seed",
+            );
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let config = search_ready_runtime_config_for_paths(&paths).await;
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let expected_ids = SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
-        .expect("collections search relevance index should bootstrap")
-        .search_ids("collection", SearchEntityType::Collection, 10)
-        .expect("collections search relevance query should succeed");
+    let expected_ids =
+        SearchIndexLifecycle::bootstrap(ctx.config().lucene_data_directory.as_path())
+            .expect("collections search relevance index should bootstrap")
+            .search_ids("collection", SearchEntityType::Collection, 10)
+            .expect("collections search relevance query should succeed");
     assert_eq!(expected_ids.len(), 3);
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -118,26 +129,29 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
         })
         .collect::<Vec<_>>();
     assert_eq!(ids, expected_ids);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_missing_search_index_returns_empty_results_like_kotlin() {
-    let paths = new_router_fixture("router-collections-search-missing-index-empty").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_listing_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collections-search-missing-index-empty")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_collection_listing_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let config = search_ready_runtime_config_for_paths(&paths).await;
+    let config = ctx.config();
     if config.lucene_data_directory.exists() {
         std::fs::remove_dir_all(&config.lucene_data_directory)
             .expect("collections search index fixture should be removable");
     }
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -160,64 +174,65 @@ async fn router_collections_missing_search_index_returns_empty_results_like_kotl
         !config.lucene_data_directory.exists(),
         "query-only collection search must not recreate the missing index directory",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_default_name_order_and_filtered_flags_match_kotlin() {
-    let paths = new_router_fixture("router-collections-default-order-filtered-flags").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-collections-default-order-filtered-flags")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for collections default-order filtered seed");
-    sqlx::query("UPDATE COLLECTION SET NAME = ?, SERIES_COUNT = ? WHERE ID = ?")
-        .bind("Gamma Collection")
-        .bind(2_i64)
-        .bind("collection-1")
-        .execute(&pool)
-        .await
-        .expect("collection-1 should update for collections default-order filtered seed");
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("collection-3")
-        .bind("Alpha Collection")
-        .bind(false)
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("collection-3 row should insert for collections default-order filtered seed");
-    sqlx::query(
-        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
-    )
-    .bind("collection-3")
-    .bind("series-1")
-    .bind(0_i64)
-    .execute(&pool)
-    .await
-    .expect(
-        "collection-3 series membership should insert for collections default-order filtered seed",
-    );
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for collections default-order filtered seed");
+            sqlx::query("UPDATE COLLECTION SET NAME = ?, SERIES_COUNT = ? WHERE ID = ?")
+                .bind("Gamma Collection")
+                .bind(2_i64)
+                .bind("collection-1")
+                .execute(&pool)
+                .await
+                .expect("collection-1 should update for collections default-order filtered seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("Alpha Collection")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-3 row should insert for collections default-order filtered seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("series-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect(
+                "collection-3 series membership should insert for collections default-order filtered seed",
+            );
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -252,64 +267,69 @@ async fn router_collections_default_name_order_and_filtered_flags_match_kotlin()
         content[1].get("filtered").and_then(Value::as_bool),
         Some(true)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_default_name_order_uses_unicode_collation_like_kotlin() {
-    let paths = new_router_fixture("router-collections-default-unicode-order").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-collections-default-unicode-order")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for collections unicode-order seed");
+            sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+                .bind("Éclair Collection")
+                .bind("collection-1")
+                .execute(&pool)
+                .await
+                .expect("collection-1 name should update for collections unicode-order seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("Zulu Collection")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-3 row should insert for collections unicode-order seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-3")
+            .bind("series-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-3 membership should insert for collections unicode-order seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("collection-4")
+            .bind("Alpha Collection")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-4 row should insert for collections unicode-order seed");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-4")
+            .bind("series-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("collection-4 membership should insert for collections unicode-order seed");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for collections unicode-order seed");
-    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
-        .bind("Éclair Collection")
-        .bind("collection-1")
-        .execute(&pool)
-        .await
-        .expect("collection-1 name should update for collections unicode-order seed");
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("collection-3")
-        .bind("Zulu Collection")
-        .bind(false)
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("collection-3 row should insert for collections unicode-order seed");
-    sqlx::query(
-        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
-    )
-    .bind("collection-3")
-    .bind("series-1")
-    .bind(0_i64)
-    .execute(&pool)
-    .await
-    .expect("collection-3 membership should insert for collections unicode-order seed");
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("collection-4")
-        .bind("Alpha Collection")
-        .bind(false)
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("collection-4 row should insert for collections unicode-order seed");
-    sqlx::query(
-        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
-    )
-    .bind("collection-4")
-    .bind("series-1")
-    .bind(0_i64)
-    .execute(&pool)
-    .await
-    .expect("collection-4 membership should insert for collections unicode-order seed");
-    pool.close().await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -345,21 +365,23 @@ async fn router_collections_default_name_order_uses_unicode_collation_like_kotli
             "collection-3".to_string(),
         ]
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_library_id_does_not_filter_series_ids_for_all_library_user_like_kotlin()
 {
-    let paths = new_router_fixture("router-collections-library-id-all-library-user").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collections-library-id-all-library-user")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -390,36 +412,38 @@ async fn router_collections_library_id_does_not_filter_series_ids_for_all_librar
         content[0].get("filtered").and_then(Value::as_bool),
         Some(false)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranked_hits_like_kotlin()
 {
-    let paths =
-        new_router_fixture("router-collections-search-visible-hits-after-hidden-ranked").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_listing_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
+    let ctx = TestFixture::builder(
+        "router-collections-search-visible-hits-after-hidden-ranked",
     )
-    .await;
+    .with_search_index()
+    .with_seed(|paths| async move {
+        seed_collection_listing_variants(&paths).await;
+        seed_router_library_restricted_user(
+            &paths,
+            "library-1-user",
+            "library1@example.org",
+            "router-contract-library1-123",
+            &["library-1"],
+        )
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for collections hidden-ranked search seed");
-    sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
-        .bind("Collection Collection 2")
-        .bind("collection-2")
-        .execute(&pool)
-        .await
-        .expect("collection-2 should update for collections hidden-ranked search seed");
-    sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("main db should open for collections hidden-ranked search seed");
+        sqlx::query("UPDATE COLLECTION SET NAME = ? WHERE ID = ?")
+            .bind("Collection Collection 2")
+            .bind("collection-2")
+            .execute(&pool)
+            .await
+            .expect("collection-2 should update for collections hidden-ranked search seed");
+        sqlx::query(
+            "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+        )
         .bind("collection-3")
         .bind("Collection 3")
         .bind(false)
@@ -427,29 +451,27 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
         .execute(&pool)
         .await
         .expect("collection-3 row should insert for collections hidden-ranked search seed");
-    sqlx::query(
-        "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
-    )
-    .bind("collection-3")
-    .bind("series-1")
-    .bind(0_i64)
-    .execute(&pool)
-    .await
-    .expect(
-        "collection-3 series membership should insert for collections hidden-ranked search seed",
-    );
-    pool.close().await;
-
-    let config = search_ready_runtime_config_for_paths(&paths).await;
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
+        sqlx::query(
+            "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+        )
+        .bind("collection-3")
+        .bind("series-1")
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .expect(
+            "collection-3 series membership should insert for collections hidden-ranked search seed",
+        );
+        pool.close().await;
+    })
+    .build()
     .await;
 
-    let ranked_ids = SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
+
+    let ranked_ids = SearchIndexLifecycle::bootstrap(ctx.config().lucene_data_directory.as_path())
         .expect("collections hidden-ranked search index should bootstrap")
         .search_ids("collection", SearchEntityType::Collection, 10)
         .expect("collections hidden-ranked search query should succeed");
@@ -463,7 +485,9 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
         vec!["collection-1".to_string(), "collection-3".to_string()]
     );
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -492,6 +516,4 @@ async fn router_collections_search_does_not_drop_visible_hits_after_hidden_ranke
         })
         .collect::<Vec<_>>();
     assert_eq!(ids, expected_visible_ids);
-
-    cleanup_router_fixture(paths);
 }

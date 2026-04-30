@@ -2,15 +2,14 @@ use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
 use komga_infrastructure::sqlite::connect_test_pool;
-use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 mod support;
 
+use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, log_capture::*, media_file_fixtures::*,
-    response_helpers::*, user_auth::*,
+    RuntimeDbPaths, log_capture::*, media_file_fixtures::*, response_helpers::*,
 };
 
 use komga_interfaces::access_log as access_log_impl;
@@ -166,37 +165,35 @@ fn assert_logs_omit_values(logs: &str, values: &[&str], context: &str) {
 #[test]
 fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
     {
-        let paths = tokio::runtime::Builder::new_current_thread()
+        let ctx = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("search webui access log test runtime should build")
             .block_on(async {
-                let paths = new_router_fixture("router-access-log-queryless-path-contract").await;
-                seed_router_contract_data(&paths).await;
-                seed_router_pdf_book(
-                    &paths,
-                    "book-pdf-access-log",
-                    "series-1",
-                    "access-log.pdf",
-                    "Access Log PDF",
-                )
-                .await;
-                paths
+                TestFixture::builder("router-access-log-queryless-path-contract")
+                    .with_seed(|paths| async move {
+                        seed_router_pdf_book(
+                            &paths,
+                            "book-pdf-access-log",
+                            "series-1",
+                            "access-log.pdf",
+                            "Access Log PDF",
+                        )
+                        .await;
+                    })
+                    .build()
+                    .await
             });
-        let config = runtime_config_for_paths(&paths);
+        let config = ctx.config().clone();
         let auth_token = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("search webui access log auth runtime should build")
-            .block_on(async {
-                let app = build_router_with_config(&config).await;
-                login_with_basic_and_get_token(app).await
-            });
+            .block_on(async { ctx.login_admin().await });
         let (logs, response) = capture_router_logs_async_result(&config, {
-            let config = config.clone();
             let auth_token = auth_token.clone();
             async move {
-                let app = build_router_with_config(&config).await;
+                let app = ctx.app().clone();
 
                 let request_body_marker = "super-secret-body-marker";
                 let response = app
@@ -259,25 +256,20 @@ fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
             ],
             "access logs",
         );
-
-        cleanup_router_fixture(paths);
     }
 
     {
-        let paths = tokio::runtime::Builder::new_current_thread()
+        let ctx = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("search webui anonymous access log test runtime should build")
             .block_on(async {
-                let paths = new_router_fixture("router-access-log-anonymous-user-contract").await;
-                seed_router_contract_data(&paths).await;
-                paths
+                TestFixture::new("router-access-log-anonymous-user-contract").await
             });
-        let config = runtime_config_for_paths(&paths);
+        let config = ctx.config().clone();
         let (logs, response) = capture_router_logs_async_result(&config, {
-            let config = config.clone();
             async move {
-                let app = build_router_with_config(&config).await;
+                let app = ctx.app().clone();
 
                 app.oneshot(
                     Request::builder()
@@ -318,8 +310,6 @@ fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
             ],
             "anonymous access logs",
         );
-
-        cleanup_router_fixture(paths);
     }
 }
 
@@ -360,14 +350,17 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
     }
 
     {
-        let paths = tokio::runtime::Builder::new_current_thread()
+        let ctx = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("deferred stream access log test runtime should build")
             .block_on(async {
-                new_router_fixture("router-access-log-deferred-error-contract").await
+                TestFixture::builder("router-access-log-deferred-error-contract")
+                    .without_standard_seed()
+                    .build()
+                    .await
             });
-        let config = runtime_config_for_paths(&paths);
+        let config = ctx.config().clone();
 
         let (logs, read_result) = capture_router_logs_async_result(&config, async move {
             let metrics = HttpServerRequestsState::default();
@@ -424,43 +417,38 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
             field_u64(&fields, "first_byte_ms").is_some(),
             "expected deferred stream error to keep first_byte_ms when first data already flushed: {fields:?}"
         );
-
-        cleanup_router_fixture(paths);
     }
 
     {
-        let paths = tokio::runtime::Builder::new_current_thread()
+        let ctx = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("search webui download access log test runtime should build")
             .block_on(async {
-                let paths =
-                    new_router_fixture("router-access-log-download-first-byte-contract").await;
-                seed_router_contract_data(&paths).await;
-                seed_router_pdf_book(
-                    &paths,
-                    "book-pdf-first-byte",
-                    "series-1",
-                    "first-byte.pdf",
-                    "First Byte PDF",
-                )
-                .await;
-                paths
+                TestFixture::builder("router-access-log-download-first-byte-contract")
+                    .with_seed(|paths| async move {
+                        seed_router_pdf_book(
+                            &paths,
+                            "book-pdf-first-byte",
+                            "series-1",
+                            "first-byte.pdf",
+                            "First Byte PDF",
+                        )
+                        .await;
+                    })
+                    .build()
+                    .await
             });
-        let config = runtime_config_for_paths(&paths);
+        let config = ctx.config().clone();
         let auth_token = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("search webui download access log auth runtime should build")
-            .block_on(async {
-                let app = build_router_with_config(&config).await;
-                login_with_basic_and_get_token(app).await
-            });
+            .block_on(async { ctx.login_admin().await });
         let (logs, response) = capture_router_logs_async_result(&config, {
-            let config = config.clone();
             let auth_token = auth_token.clone();
             async move {
-                let app = build_router_with_config(&config).await;
+                let app = ctx.app().clone();
 
                 let response = app
                     .oneshot(
@@ -510,21 +498,23 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
             first_byte_ms <= latency_ms,
             "first byte should not exceed total latency: {fields:?}"
         );
-
-        cleanup_router_fixture(paths);
     }
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_webui_returns_book_contract_fields() {
-    let paths = new_router_fixture("router-discovery-books-list-webui-book-contract-fields").await;
-    seed_router_contract_data(&paths).await;
-    enrich_book_contract_fixture(&paths).await;
+    let ctx = TestFixture::builder("router-discovery-books-list-webui-book-contract-fields")
+        .with_seed(|paths| async move {
+            enrich_book_contract_fixture(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -582,6 +572,4 @@ async fn router_discovery_books_list_webui_returns_book_contract_fields() {
     ] {
         assert_eq!(first.pointer(path), Some(&expected), "path: {path}");
     }
-
-    cleanup_router_fixture(paths);
 }

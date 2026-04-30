@@ -18,13 +18,12 @@ mod book_route_auth;
 
 #[tokio::test]
 async fn router_opds_v1_catalog_route_returns_atom_feed() {
-    let paths = new_router_fixture("router-opds-v1-catalog-route").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-catalog-route").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -43,19 +42,16 @@ async fn router_opds_v1_catalog_route_returns_atom_feed() {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     assert!(content_type.contains("application/atom+xml"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_catalog_includes_search_and_opds_v2_alternate_links() {
-    let paths = new_router_fixture("router-opds-v1-catalog-links").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-catalog-links").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -79,18 +75,15 @@ async fn router_opds_v1_catalog_includes_search_and_opds_v2_alternate_links() {
             && body.contains("/opds/v2/catalog"),
         "OPDS v1 catalog must include OPDS v2 alternate link, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_libraries_unauthorized_includes_basic_challenge() {
-    let paths = new_router_fixture("router-opds-v1-libraries-basic-challenge").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-libraries-basic-challenge").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -109,21 +102,19 @@ async fn router_opds_v1_libraries_unauthorized_includes_basic_challenge() {
             .and_then(|value| value.to_str().ok()),
         Some("Basic realm=\"Realm\"")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_libraries_preserves_kotlin_dao_iteration_order() {
-    let paths = new_router_fixture("router-opds-v1-libraries-dao-order").await;
-    seed_router_contract_data(&paths).await;
-    update_router_library_name(&paths, "library-1", "Z Library").await;
-    seed_router_library(&paths, "library-2", "A Library").await;
+    let ctx = TestFixture::new("router-opds-v1-libraries-dao-order").await;
+    update_router_library_name(ctx.paths(), "library-1", "Z Library").await;
+    seed_router_library(ctx.paths(), "library-2", "A Library").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -147,8 +138,6 @@ async fn router_opds_v1_libraries_preserves_kotlin_dao_iteration_order() {
         library_1_pos < library_2_pos,
         "OPDS v1 libraries should keep Kotlin DAO iteration order instead of name-sorting, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 async fn clear_router_collections_and_readlists(paths: &RuntimeDbPaths) {
@@ -246,13 +235,12 @@ async fn seed_router_readlist_book_entry(
 
 #[tokio::test]
 async fn router_opds_v2_catalog_uses_kotlin_top_level_links_when_authenticated() {
-    let paths = new_router_fixture("router-opds-v2-catalog-self-link").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-catalog-self-link").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -333,19 +321,16 @@ async fn router_opds_v2_catalog_uses_kotlin_top_level_links_when_authenticated()
             })
         });
     assert_eq!(recommended_href, Some("http://localhost/opds/v2/libraries"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_libraries_uses_kotlin_top_level_links_when_authenticated() {
-    let paths = new_router_fixture("router-opds-v2-libraries-top-level-links").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-libraries-top-level-links").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -425,21 +410,19 @@ async fn router_opds_v2_libraries_uses_kotlin_top_level_links_when_authenticated
         browse_link.get("href").and_then(Value::as_str),
         Some("http://localhost/opds/v2/libraries/browse")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_catalog_latest_books_publication_uses_webpub_like_shape() {
-    let paths = new_router_fixture("router-opds-v2-catalog-publication-shape").await;
-    seed_router_contract_data(&paths).await;
-    update_router_book_isbn(&paths, "book-1", "9781234567890").await;
-    update_router_book_number_metadata(&paths, "book-1", "Special", 10.0).await;
+    let ctx = TestFixture::new("router-opds-v2-catalog-publication-shape").await;
+    update_router_book_isbn(ctx.paths(), "book-1", "9781234567890").await;
+    update_router_book_number_metadata(ctx.paths(), "book-1", "Special", 10.0).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -596,17 +579,14 @@ async fn router_opds_v2_catalog_latest_books_publication_uses_webpub_like_shape(
         images[0].get("type").and_then(Value::as_str),
         Some("image/jpeg")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_restricted_user() {
-    let paths = new_router_fixture("router-opds-v2-catalog-latest-books-prefiltered").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Hidden Series", "library-2").await;
-    update_router_book_created_date(&paths, "book-1", "2024-01-01 00:00:00").await;
+    let ctx = TestFixture::new("router-opds-v2-catalog-latest-books-prefiltered").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Hidden Series", "library-2").await;
+    update_router_book_created_date(ctx.paths(), "book-1", "2024-01-01 00:00:00").await;
 
     for (index, created_date) in [
         "2024-02-05 00:00:00",
@@ -620,7 +600,7 @@ async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_re
     {
         let book_id = format!("hidden-book-{}", index + 1);
         seed_catalog_book(
-            &paths,
+            ctx.paths(),
             &book_id,
             "series-2",
             "library-2",
@@ -632,7 +612,7 @@ async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_re
     }
 
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "library-user-pass-123",
@@ -640,15 +620,13 @@ async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_re
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "library-user-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "library-user-pass-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -695,8 +673,6 @@ async fn router_opds_v2_catalog_latest_books_filters_before_limit_for_library_re
             .and_then(Value::as_str),
         Some("Book 1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 async fn seed_router_read_progress_entry(

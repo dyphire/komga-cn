@@ -2,13 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_refreshes_series_last_modified() {
-    let paths = new_router_fixture("router-discovery-series-metadata-refresh").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-metadata-refresh").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let before_response = app
+    let before_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -30,7 +28,8 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
 
     sleep(Duration::from_millis(1100)).await;
 
-    let patch_response = app
+    let patch_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -50,7 +49,8 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
         .expect("series metadata patch request should complete");
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let after_response = app
+    let after_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -77,19 +77,15 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
             "Updated summary from series contract".to_string()
         )),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_supports_extended_field_coverage() {
-    let paths = new_router_fixture("router-discovery-series-metadata-extended-fields").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-metadata-extended-fields").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch_response = app
+    let patch_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -141,7 +137,8 @@ async fn router_discovery_series_metadata_update_supports_extended_field_coverag
         .expect("extended series metadata patch request should complete");
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let detail_response = app
+    let detail_response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -234,17 +231,12 @@ async fn router_discovery_series_metadata_update_supports_extended_field_coverag
     );
     assert_eq!(metadata.get("totalBookCount"), Some(&json!(7)));
     assert_eq!(metadata.get("totalBookCountLock"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values() {
-    let paths = new_router_fixture("router-discovery-series-metadata-invalid-scalars").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-scalars").await;
+    let auth_token = ctx.login_admin().await;
 
     for payload in [
         json!({ "status": "BROKEN_STATUS" }),
@@ -255,7 +247,8 @@ async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values()
         json!({ "totalBookCount": 2147483648u64 }),
         json!({ "language": "en_US" }),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -271,17 +264,12 @@ async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values()
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_rejects_invalid_structured_values() {
-    let paths = new_router_fixture("router-discovery-series-metadata-invalid-structured").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-structured").await;
+    let auth_token = ctx.login_admin().await;
 
     for payload in [
         json!({
@@ -305,7 +293,8 @@ async fn router_discovery_series_metadata_update_rejects_invalid_structured_valu
             ]
         }),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -321,20 +310,16 @@ async fn router_discovery_series_metadata_update_rejects_invalid_structured_valu
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_accepts_large_age_rating_within_kotlin_int_range()
 {
-    let paths = new_router_fixture("router-discovery-series-metadata-large-age-rating").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-metadata-large-age-rating").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch_response = app
+    let patch_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -349,7 +334,8 @@ async fn router_discovery_series_metadata_update_accepts_large_age_rating_within
         .expect("large age rating patch request should complete");
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let detail_response = app
+    let detail_response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -368,35 +354,35 @@ async fn router_discovery_series_metadata_update_accepts_large_age_rating_within
             .and_then(|metadata| metadata.get("ageRating")),
         Some(&json!(70000))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to_kotlin_int_range()
 {
-    let paths =
-        new_router_fixture("router-discovery-series-metadata-clamps-legacy-numeric-values").await;
-    seed_router_contract_data(&paths).await;
-
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("legacy numeric parity db should open");
-    sqlx::query(
-        "UPDATE SERIES_METADATA SET AGE_RATING = ?, TOTAL_BOOK_COUNT = ? WHERE SERIES_ID = ?",
+    let ctx = TestFixture::builder(
+        "router-discovery-series-metadata-clamps-legacy-numeric-values",
     )
-    .bind(3_000_000_000_i64)
-    .bind(3_000_000_000_i64)
-    .bind("series-1")
-    .execute(&pool)
-    .await
-    .expect("legacy numeric parity values should be written");
-    pool.close().await;
+    .with_seed(|paths| async move {
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("legacy numeric parity db should open");
+        sqlx::query(
+            "UPDATE SERIES_METADATA SET AGE_RATING = ?, TOTAL_BOOK_COUNT = ? WHERE SERIES_ID = ?",
+        )
+        .bind(3_000_000_000_i64)
+        .bind(3_000_000_000_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("legacy numeric parity values should be written");
+        pool.close().await;
+    })
+    .build()
+    .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch_response = app
+    let patch_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -413,7 +399,8 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
         .expect("legacy numeric clamp patch request should complete");
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
-    let detail_response = app
+    let detail_response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -434,6 +421,4 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
         metadata.get("totalBookCount"),
         Some(&json!(2_147_483_647u32))
     );
-
-    cleanup_router_fixture(paths);
 }

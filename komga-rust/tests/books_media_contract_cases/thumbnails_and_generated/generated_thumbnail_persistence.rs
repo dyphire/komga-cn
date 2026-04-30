@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
-    let paths = new_router_fixture("router-generate-book-thumbnail-epub").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-generate-book-thumbnail-epub").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub thumbnail cleanup");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
@@ -19,7 +18,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     let media = BookMediaRecord {
         library_id: "library-1".to_string(),
         media_type: "application/epub+zip".to_string(),
-        file_path: paths.config_dir.join("books/book-1.epub"),
+        file_path: ctx.paths().config_dir.join("books/book-1.epub"),
         file_name: "book-1.epub".to_string(),
         page_count: 10,
     };
@@ -29,7 +28,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     assert!(!cover_bytes.is_empty());
     assert_eq!(cover_media_type, "image/png");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for thumbnail generation");
     generate_book_thumbnail(&pool, "book-1")
@@ -37,7 +36,7 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
         .expect("generate_book_thumbnail should execute successfully for epub cover");
     pool.close().await;
 
-    let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let main_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub generated thumbnail verification");
     let generated = sqlx::query(
@@ -55,11 +54,10 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
         .expect("epub generated thumbnail row should exist");
     assert_eq!(generated_row.get::<String, _>("MEDIA_TYPE"), "image/jpeg");
 
-    let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let after = app
+    let after = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -80,7 +78,9 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
         Some("image/jpeg")
     );
 
-    let thumbnails = app
+    let thumbnails = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -100,16 +100,13 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
             .and_then(|item| item.get("type")),
         Some(&Value::String("GENERATED".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
-    let paths = new_router_fixture("router-generate-book-thumbnail-pdf").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-generate-book-thumbnail-pdf").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -117,14 +114,14 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
     generate_book_thumbnail(&pool, "book-pdf-1")
         .await
         .expect("generate_book_thumbnail should execute successfully for pdf");
 
-    let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let main_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for pdf generated thumbnail verification");
     let generated = sqlx::query(
@@ -144,11 +141,10 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     assert!(generated_row.get::<i64, _>("WIDTH") > 0);
     assert!(generated_row.get::<i64, _>("HEIGHT") > 0);
 
-    let runtime_config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&runtime_config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let after = app
+    let after = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -169,7 +165,9 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
         Some("image/jpeg")
     );
 
-    let thumbnails = app
+    let thumbnails = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -189,19 +187,16 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
             .and_then(|item| item.get("type")),
         Some(&Value::String("GENERATED".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
     let _guard = thumbnail_runtime_sse_guard().await;
     let book_id = "book-generated-thumbnail-sse";
-    let paths = new_router_fixture("router-generate-book-thumbnail-sse").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-generated-thumbnail-sse.epub");
+    let ctx = TestFixture::new("router-generate-book-thumbnail-sse").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-generated-thumbnail-sse.epub");
 
-    let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let cleanup_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail sse cleanup");
     sqlx::query(
@@ -246,7 +241,7 @@ async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
     cleanup_pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
     generate_book_thumbnail(&pool, book_id)
@@ -283,6 +278,4 @@ async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
         Some(&Value::Bool(true)),
         "generated book thumbnail event should reflect the selected generated thumbnail",
     );
-
-    cleanup_router_fixture(paths);
 }

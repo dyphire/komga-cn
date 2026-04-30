@@ -2,15 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artwork_is_disabled() {
-    let paths = new_router_fixture("runtime-skip-book-local-artwork-when-import-disabled").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-skip-book-local-artwork-when-import-disabled").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork sidecar directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("book artwork sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for local artwork disabled fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 0 WHERE ID = ?")
@@ -35,7 +34,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
     .expect("book artwork sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
@@ -48,7 +47,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
         "book local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for local artwork disabled verification");
     let sidecar_thumbnail_count = sqlx::query(
@@ -65,21 +64,18 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
         sidecar_thumbnail_count, 0,
         "runtime must not import book local artwork when library.importLocalArtwork is disabled",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
-    let paths = new_router_fixture("runtime-executes-kotlin-refresh-book-local-artwork-task").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-local-artwork-task").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork sidecar directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("book artwork sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted local artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -104,7 +100,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     .expect("book artwork sidecar row should be inserted for Kotlin persisted task test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for Kotlin persisted local artwork task setup");
     sqlx::query(
@@ -129,13 +125,13 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     .expect("Kotlin persisted local artwork task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler.process_available(&runtime).await.expect(
         "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for Kotlin persisted local artwork verification");
     let row = sqlx::query(
@@ -153,19 +149,16 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
         row.get::<bool, _>("SELECTED"),
         "executed Kotlin persisted local artwork task should import a selected SIDECAR thumbnail",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_only_one_when_none_exists()
  {
-    let paths =
-        new_router_fixture("runtime-imports-multiple-filesystem-book-local-artworks-none-selected")
+    let ctx =
+        TestFixture::new("runtime-imports-multiple-filesystem-book-local-artworks-none-selected")
             .await;
-    seed_router_contract_data(&paths).await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("primary local artwork should be written");
@@ -174,7 +167,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
     std::fs::write(sidecar_dir.join("book-12.png"), fixture_png_bytes())
         .expect("non-matching artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-artwork fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -189,7 +182,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         .expect("existing thumbnails should be cleared for multi-artwork import test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -202,7 +195,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         .await
         .expect("book local artwork refresh should import multiple filesystem candidates cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for multi-artwork verification");
     let rows = sqlx::query(
@@ -245,25 +238,21 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         selected_count, 1,
         "runtime should select exactly one imported local artwork when no thumbnail was previously selected",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_preserves_existing_non_generated_selection_when_importing_book_local_artworks() {
-    let paths =
-        new_router_fixture("runtime-preserves-non-generated-selection-for-book-local-artworks")
-            .await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-preserves-non-generated-selection-for-book-local-artworks").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("primary local artwork should be written");
     std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
         .expect("secondary local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -280,7 +269,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
         );
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -292,7 +281,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
         "book local artwork refresh should preserve existing non-generated selections cleanly",
     );
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for non-generated selection verification");
     let rows = sqlx::query(
@@ -331,24 +320,21 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
             .all(|row| !row.get::<bool, _>("SELECTED")),
         "runtime should not override an existing non-generated selected thumbnail when importing local artworks",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_replaces_generated_selection_when_importing_book_local_artworks() {
-    let paths =
-        new_router_fixture("runtime-replaces-generated-selection-for-book-local-artworks").await;
-    seed_router_contract_data(&paths).await;
+    let ctx =
+        TestFixture::new("runtime-replaces-generated-selection-for-book-local-artworks").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("primary local artwork should be written");
     std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
         .expect("secondary local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated selection fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -375,7 +361,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
     .expect("generated selected thumbnail should be seeded for local artwork selection test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -388,7 +374,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
         .await
         .expect("book local artwork refresh should replace generated selection cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for generated selection verification");
     let rows = sqlx::query(
@@ -433,24 +419,21 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
         !generated_rows[0].get::<bool, _>("SELECTED"),
         "runtime should unselect previously selected GENERATED thumbnails when the first local artwork is imported",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() {
     let _guard = runtime_sse_contract_guard().await;
-    let paths = new_router_fixture("runtime-book-local-artwork-sse-events").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-book-local-artwork-sse-events").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book artwork directory should exist");
     std::fs::write(sidecar_dir.join("book-1.png"), fixture_png_bytes())
         .expect("primary local artwork should be written");
     std::fs::write(sidecar_dir.join("book-1-1.jpg"), fixture_png_bytes())
         .expect("secondary local artwork should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for local artwork sse fixture setup");
     sqlx::query("UPDATE LIBRARY SET IMPORT_LOCAL_ARTWORK = 1 WHERE ID = ?")
@@ -466,7 +449,7 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -512,6 +495,4 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
         std::collections::BTreeSet::from([false, true]),
         "book local artwork refresh should emit both selected and unselected ThumbnailBookAdded event states",
     );
-
-    cleanup_router_fixture(paths);
 }

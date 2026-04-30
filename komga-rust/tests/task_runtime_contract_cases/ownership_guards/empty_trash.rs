@@ -17,10 +17,9 @@ async fn run_empty_trash(paths: &RuntimeDbPaths) {
 
 #[tokio::test]
 async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_series_books() {
-    let paths = new_router_fixture("runtime-empty-trash-natural-name-sort").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-empty-trash-natural-name-sort").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash natural-sort fixture setup");
 
@@ -88,9 +87,9 @@ async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_se
         .expect("trashed book should be marked deleted for natural-sort fixture");
     pool.close().await;
 
-    run_empty_trash(&paths).await;
+    run_empty_trash(ctx.paths()).await;
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash natural-sort verification");
     let remaining = sqlx::query(
@@ -123,16 +122,13 @@ async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_se
     assert_eq!(remaining[1].get::<i64, _>("BOOK_NUMBER"), 2);
     assert_eq!(remaining[1].get::<String, _>("METADATA_NUMBER"), "2");
     assert_eq!(remaining[1].get::<f64, _>("METADATA_NUMBER_SORT"), 2.0_f64);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_empty_series() {
-    let paths = new_router_fixture("runtime-empty-trash-deletes-series-dependents").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-empty-trash-deletes-series-dependents").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash series dependency fixture setup");
     sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)")
@@ -164,9 +160,9 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
         .expect("seeded book should be soft-deleted before empty-trash");
     pool.close().await;
 
-    run_empty_trash(&paths).await;
+    run_empty_trash(ctx.paths()).await;
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-trash series dependency verification");
     let series_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES WHERE ID = ?")
@@ -181,16 +177,13 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
         series_rows, 0,
         "empty-trash must hard-delete deleted series even when read progress and aggregation rows exist"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_empty_trash_keeps_active_series_even_when_its_last_trashed_book_is_removed() {
-    let paths = new_router_fixture("runtime-empty-trash-keeps-active-empty-series").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-empty-trash-keeps-active-empty-series").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for active-series empty-trash fixture setup");
     sqlx::query("UPDATE SERIES SET BOOK_COUNT = ?, DELETED_DATE = NULL WHERE ID = ?")
@@ -206,9 +199,9 @@ async fn runtime_empty_trash_keeps_active_series_even_when_its_last_trashed_book
         .expect("seeded last book should be soft-deleted before empty-trash");
     pool.close().await;
 
-    run_empty_trash(&paths).await;
+    run_empty_trash(ctx.paths()).await;
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for active-series empty-trash verification");
     let series = sqlx::query(
@@ -251,16 +244,13 @@ async fn runtime_empty_trash_keeps_active_series_even_when_its_last_trashed_book
         collection_rows, 1,
         "empty-trash must keep collection membership for an active empty series like Kotlin"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_order() {
-    let paths = new_router_fixture("runtime-empty-trash-cleans-empty-sets-with-thumbnails").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-empty-trash-cleans-empty-sets-with-thumbnails").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-set thumbnail cleanup fixture setup");
     sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
@@ -309,9 +299,9 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
     .expect("readlist thumbnail should be inserted for empty-set cleanup verification");
     pool.close().await;
 
-    run_empty_trash(&paths).await;
+    run_empty_trash(ctx.paths()).await;
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for empty-set thumbnail cleanup verification");
     let collection_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM COLLECTION WHERE ID = ?")
@@ -336,6 +326,4 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
         readlist_rows, 0,
         "empty-trash must delete empty readlists when enabled"
     );
-
-    cleanup_router_fixture(paths);
 }

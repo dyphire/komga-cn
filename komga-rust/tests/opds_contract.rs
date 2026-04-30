@@ -1,15 +1,15 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_infrastructure::sqlite::connect_test_pool;
-use komga_server::app::build_router_with_config;
 use serde_json::Value;
 use tower::util::ServiceExt;
 
 mod support;
 
+use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
-    RuntimeDbPaths, contract_seed::*, fixture_bootstrap::*, media_file_fixtures::*,
-    metadata_series_seeding::*, response_helpers::*, user_auth::*,
+    RuntimeDbPaths, media_file_fixtures::*, metadata_series_seeding::*, response_helpers::*,
+    user_auth::*,
 };
 
 mod opds_contract_cases;

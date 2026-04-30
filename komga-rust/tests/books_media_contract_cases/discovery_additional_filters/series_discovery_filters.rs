@@ -2,11 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn router_series_latest_excludes_deleted_series_by_default() {
-    let paths = new_router_fixture("router-series-latest-default-deleted-hidden").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
+    let ctx = TestFixture::builder("router-series-latest-default-deleted-hidden")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
+                .await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series latest default deleted db should open");
     sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
@@ -17,10 +21,11 @@ async fn router_series_latest_excludes_deleted_series_by_default() {
         .expect("series latest default deleted date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -42,17 +47,19 @@ async fn router_series_latest_excludes_deleted_series_by_default() {
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["series-1"]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_latest_supports_deleted_filter() {
-    let paths = new_router_fixture("router-series-latest-deleted-filter").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1").await;
+    let ctx = TestFixture::builder("router-series-latest-deleted-filter")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
+                .await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series latest deleted db should open");
     sqlx::query("UPDATE SERIES SET DELETED_DATE = ? WHERE ID = ?")
@@ -63,10 +70,10 @@ async fn router_series_latest_supports_deleted_filter() {
         .expect("series deleted date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let deleted_true_response = app
+    let deleted_true_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -90,7 +97,9 @@ async fn router_series_latest_supports_deleted_filter() {
         Some(&json!("series-deleted"))
     );
 
-    let deleted_false_response = app
+    let deleted_false_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -109,16 +118,13 @@ async fn router_series_latest_supports_deleted_filter() {
         .expect("series latest deleted=false payload should expose content array");
     assert_eq!(deleted_false_content.len(), 1);
     assert_eq!(deleted_false_content[0].get("id"), Some(&json!("series-1")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_latest_supports_oneshot_filter() {
-    let paths = new_router_fixture("router-series-latest-oneshot-filter").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-latest-oneshot-filter").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series latest oneshot db should open");
     sqlx::query(
@@ -148,10 +154,10 @@ async fn router_series_latest_supports_oneshot_filter() {
         .expect("oneshot series metadata should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let oneshot_true_response = app
+    let oneshot_true_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -175,7 +181,9 @@ async fn router_series_latest_supports_oneshot_filter() {
         Some(&json!("series-oneshot"))
     );
 
-    let oneshot_false_response = app
+    let oneshot_false_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -194,17 +202,18 @@ async fn router_series_latest_supports_oneshot_filter() {
         .expect("series latest oneshot=false payload should expose content array");
     assert_eq!(oneshot_false_content.len(), 1);
     assert_eq!(oneshot_false_content[0].get("id"), Some(&json!("series-1")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_new_sorts_by_created_desc() {
-    let paths = new_router_fixture("router-series-new-created-desc").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+    let ctx = TestFixture::builder("router-series-new-created-desc")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series new created-desc db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -223,10 +232,11 @@ async fn router_series_new_sorts_by_created_desc() {
         .expect("new series timestamps should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -246,17 +256,18 @@ async fn router_series_new_sorts_by_created_desc() {
     assert_eq!(content.len(), 2);
     assert_eq!(content[0].get("id"), Some(&json!("series-new")));
     assert_eq!(content[1].get("id"), Some(&json!("series-1")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_updated_excludes_newly_added_series() {
-    let paths = new_router_fixture("router-series-updated-excludes-newly-added").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+    let ctx = TestFixture::builder("router-series-updated-excludes-newly-added")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series updated db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -275,10 +286,11 @@ async fn router_series_updated_excludes_newly_added_series() {
         .expect("newly added series timestamps should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -297,17 +309,18 @@ async fn router_series_updated_excludes_newly_added_series() {
         .expect("series updated payload should expose content array");
     assert_eq!(content.len(), 1);
     assert_eq!(content[0].get("id"), Some(&json!("series-1")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_updated_unpaged_keeps_kotlin_page_shape() {
-    let paths = new_router_fixture("router-series-updated-unpaged-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+    let ctx = TestFixture::builder("router-series-updated-unpaged-shape")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "series-new", "New Series", "library-1").await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series updated unpaged db should open");
     sqlx::query("UPDATE SERIES SET LAST_MODIFIED_DATE = ?, CREATED_DATE = ? WHERE ID = ?")
@@ -326,10 +339,11 @@ async fn router_series_updated_unpaged_keeps_kotlin_page_shape() {
         .expect("newly added series timestamps should update for unpaged shape test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -359,19 +373,16 @@ async fn router_series_updated_unpaged_keeps_kotlin_page_shape() {
     assert_eq!(pageable.get("pageNumber"), Some(&json!(0)));
     assert_eq!(pageable.get("paged"), Some(&json!(true)));
     assert_eq!(pageable.get("unpaged"), Some(&json!(false)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_latest_rejects_malformed_boolean_filters() {
-    let paths = new_router_fixture("router-series-latest-invalid-boolean-filter").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-latest-invalid-boolean-filter").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let invalid_deleted_response = app
+    let invalid_deleted_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -385,7 +396,9 @@ async fn router_series_latest_rejects_malformed_boolean_filters() {
         .expect("series latest invalid deleted filter request should complete");
     assert_eq!(invalid_deleted_response.status(), StatusCode::BAD_REQUEST);
 
-    let invalid_oneshot_response = app
+    let invalid_oneshot_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -397,6 +410,4 @@ async fn router_series_latest_rejects_malformed_boolean_filters() {
         .await
         .expect("series latest invalid oneshot filter request should complete");
     assert_eq!(invalid_oneshot_response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }

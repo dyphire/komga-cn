@@ -2,14 +2,18 @@ use super::*;
 
 #[tokio::test]
 async fn router_collection_series_supports_kotlin_style_query_filters() {
-    let paths = new_router_fixture("router-collection-series-query-filters").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collection-series-query-filters")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -40,20 +44,22 @@ async fn router_collection_series_supports_kotlin_style_query_filters() {
             .and_then(Value::as_bool),
         Some(true)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_series_ignores_search_query_like_kotlin() {
-    let paths = new_router_fixture("router-collection-series-ignore-search-query").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collection-series-ignore-search-query")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -82,45 +88,46 @@ async fn router_collection_series_ignores_search_query_like_kotlin() {
         })
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["series-1".to_string(), "series-2".to_string()]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_series_uses_collection_order_for_ordered_collection_like_kotlin() {
-    let paths = new_router_fixture("router-collection-series-ordered-collection-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collection-series-ordered-collection-order")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for ordered collection series alignment");
-    sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
-        .bind(true)
-        .bind(2_i64)
-        .bind("collection-1")
-        .execute(&pool)
-        .await
-        .expect("collection-1 should become ordered for collection series alignment");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Zeta Series")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series-1 titleSort should update for ordered collection series alignment");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Alpha Series")
-        .bind("series-2")
-        .execute(&pool)
-        .await
-        .expect("series-2 titleSort should update for ordered collection series alignment");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for ordered collection series alignment");
+            sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
+                .bind(true)
+                .bind(2_i64)
+                .bind("collection-1")
+                .execute(&pool)
+                .await
+                .expect("collection-1 should become ordered for collection series alignment");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Zeta Series")
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("series-1 titleSort should update for ordered collection series alignment");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Alpha Series")
+                .bind("series-2")
+                .execute(&pool)
+                .await
+                .expect("series-2 titleSort should update for ordered collection series alignment");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
-        .oneshot(
+    let response = ctx
+        .app().clone()
+.oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/api/v1/collections/collection-1/series?sort=metadata.titleSort,asc&unpaged=true")
@@ -148,44 +155,46 @@ async fn router_collection_series_uses_collection_order_for_ordered_collection_l
         })
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["series-1".to_string(), "series-2".to_string()]);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_series_paginates_after_ordering_for_ordered_collection_like_kotlin() {
-    let paths = new_router_fixture("router-collection-series-ordered-pagination").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
+    let ctx = TestFixture::builder("router-collection-series-ordered-pagination")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for ordered collection pagination alignment");
-    sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
-        .bind(true)
-        .bind(2_i64)
-        .bind("collection-1")
-        .execute(&pool)
-        .await
-        .expect("collection-1 should become ordered for ordered collection pagination");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Zeta Series")
-        .bind("series-1")
-        .execute(&pool)
-        .await
-        .expect("series-1 titleSort should update for ordered collection pagination");
-    sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
-        .bind("Alpha Series")
-        .bind("series-2")
-        .execute(&pool)
-        .await
-        .expect("series-2 titleSort should update for ordered collection pagination");
-    pool.close().await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for ordered collection pagination alignment");
+            sqlx::query("UPDATE COLLECTION SET ORDERED = ?, SERIES_COUNT = ? WHERE ID = ?")
+                .bind(true)
+                .bind(2_i64)
+                .bind("collection-1")
+                .execute(&pool)
+                .await
+                .expect("collection-1 should become ordered for ordered collection pagination");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Zeta Series")
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("series-1 titleSort should update for ordered collection pagination");
+            sqlx::query("UPDATE SERIES_METADATA SET TITLE_SORT = ? WHERE SERIES_ID = ?")
+                .bind("Alpha Series")
+                .bind("series-2")
+                .execute(&pool)
+                .await
+                .expect("series-2 titleSort should update for ordered collection pagination");
+            pool.close().await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -211,33 +220,32 @@ async fn router_collection_series_paginates_after_ordering_for_ordered_collectio
     assert_eq!(payload.get("totalElements"), Some(&json!(2)));
     assert_eq!(payload.get("totalPages"), Some(&json!(2)));
     assert_eq!(payload.get("number"), Some(&json!(1)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_series_filters_invisible_series_for_partially_visible_user() {
-    let paths = new_router_fixture("router-collection-series-partially-visible").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-collection-series-partially-visible")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -260,33 +268,32 @@ async fn router_collection_series_filters_invisible_series_for_partially_visible
         content[0].get("id").and_then(Value::as_str),
         Some("series-1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_collection_series_returns_not_found_for_fully_hidden_collection_like_kotlin() {
-    let paths = new_router_fixture("router-collection-series-fully-hidden").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_listing_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-collection-series-fully-hidden")
+        .with_seed(|paths| async move {
+            seed_collection_listing_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -299,33 +306,32 @@ async fn router_collection_series_returns_not_found_for_fully_hidden_collection_
         .expect("fully hidden collection series request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_collections_filter_series_ids_for_partially_visible_user() {
-    let paths = new_router_fixture("router-series-collections-partially-visible").await;
-    seed_router_contract_data(&paths).await;
-    seed_collection_series_variants(&paths).await;
-    seed_router_library_restricted_user(
-        &paths,
-        "library-1-user",
-        "library1@example.org",
-        "router-contract-library1-123",
-        &["library-1"],
-    )
-    .await;
+    let ctx = TestFixture::builder("router-series-collections-partially-visible")
+        .with_seed(|paths| async move {
+            seed_collection_series_variants(&paths).await;
+            seed_router_library_restricted_user(
+                &paths,
+                "library-1-user",
+                "library1@example.org",
+                "router-contract-library1-123",
+                &["library-1"],
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library1@example.org",
-        "router-contract-library1-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library1@example.org", "router-contract-library1-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -349,16 +355,13 @@ async fn router_series_collections_filter_series_ids_for_partially_visible_user(
     );
     assert_eq!(collections[0].get("filtered"), Some(&Value::Bool(true)));
     assert_eq!(collections[0].get("seriesIds"), Some(&json!(["series-1"])));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_collections_does_not_accept_sorted_position_series_alias() {
-    let paths = new_router_fixture("router-series-collections-no-id-bridge").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-collections-no-id-bridge").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("router contract db should open for series alias test");
 
@@ -415,10 +418,11 @@ async fn router_series_collections_does_not_accept_sorted_position_series_alias(
 
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -431,6 +435,4 @@ async fn router_series_collections_does_not_accept_sorted_position_series_alias(
         .expect("series collections alias request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }

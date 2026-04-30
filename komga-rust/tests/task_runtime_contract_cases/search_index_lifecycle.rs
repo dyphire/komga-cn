@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn isolated_runtime_keeps_search_index_external_owned() {
-    let paths = new_router_fixture("isolated-runtime-external-search-index").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("isolated-runtime-external-search-index").await;
 
-    let mut config = runtime_config_for_paths(&paths);
+    let mut config = ctx.config().clone();
     config.mode = RuntimeMode::Isolated;
     config.writer_ownership_policy = WriterOwnershipPolicy {
-        isolation_root: Some(paths.config_dir.clone()),
+        isolation_root: Some(ctx.paths().config_dir.clone()),
         allow_isolated_writes: true,
     };
 
@@ -35,16 +34,13 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
         hits.is_empty(),
         "isolated runtime should leave external-owned search index untouched",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
-    let paths = new_router_fixture("runtime-executes-legacy-upgrade-index-task-noop").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-executes-legacy-upgrade-index-task-noop").await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("UpgradeIndex", 1_000, None))
@@ -58,16 +54,13 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
         processed, 1,
         "legacy upgrade index task should still be consumed once so persisted compatibility rows do not get stuck in the queue",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_metadata_refresh() {
-    let paths = new_router_fixture("runtime-incremental-index-sync-contract").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-incremental-index-sync-contract").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for incremental index sync fixture setup");
     sqlx::query(
@@ -142,7 +135,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     .expect("oneshot media row should be inserted");
     pool.close().await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -155,7 +148,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
 
     write_stale_analyzer_version_marker(config.lucene_data_directory.as_path());
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series metadata update fixture");
     sqlx::query(
@@ -185,8 +178,8 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         .await
         .expect("refresh-series-metadata task should process for incremental sync contract");
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let search_hits = |query: &str, entity_type: SearchEntityType| -> Vec<String> {
         SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
@@ -378,16 +371,13 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         search_hits("Task6 ReadList Updated", SearchEntityType::ReadList).is_empty(),
         "readlist delete should remove search document",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_comicinfo_import() {
-    let paths = new_router_fixture("runtime-refresh-book-metadata-readlist-search-sync").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-book-metadata-readlist-search-sync").await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -410,7 +400,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         "fixture sanity: readlist should not exist in search before ComicInfo import",
     );
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
     fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -418,7 +408,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     )
     .expect("book metadata sidecar fixture for readlist search sync should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist search sync fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -479,7 +469,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         .await
         .expect("readlist-only metadata refresh should sync readlist search document");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for readlist search sync verification");
     let readlist_id = sqlx::query("SELECT ID FROM READLIST WHERE NAME = ? LIMIT 1")
@@ -495,16 +485,13 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         vec![readlist_id],
         "ComicInfo readlist import should upsert the readlist search document like normal readlist mutations",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() {
-    let paths = new_router_fixture("runtime-rebuild-index-scoped-entities").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-rebuild-index-scoped-entities").await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     let runtime = runtime_task_context_from_config(&config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -533,7 +520,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         "fixture sanity: initial rebuild should index seeded collection documents",
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for scoped rebuild fixture updates");
     sqlx::query("UPDATE BOOK_METADATA SET TITLE = ? WHERE BOOK_ID = ?")
@@ -583,18 +570,15 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         search_hits("Scoped Book Updated", SearchEntityType::Book).is_empty(),
         "collection-scoped rebuild must not behave like a full rebuild for book documents",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_delete_sync_recovers_from_analyzer_drift_before_removing_search_document() {
-    let paths = new_router_fixture("runtime-delete-sync-analyzer-drift").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-delete-sync-analyzer-drift").await;
 
-    let config = runtime_config_for_paths(&paths);
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let config = ctx.config().clone();
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_collection_response = app
         .clone()
@@ -665,6 +649,4 @@ async fn runtime_delete_sync_recovers_from_analyzer_drift_before_removing_search
         search_analyzer_version().to_string(),
         "runtime-owned delete sync should restore the current analyzer version marker after rebuilding a drifted index",
     );
-
-    cleanup_router_fixture(paths);
 }

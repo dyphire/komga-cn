@@ -2,11 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() {
-    let paths = new_router_fixture("router-opds-v2-search-group-contract").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-opds-v2-search-group-contract")
+        .with_search_index()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
     let expectations = [
         (
@@ -22,7 +22,8 @@ async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() 
     ];
 
     for (uri, expected_group_titles, context) in expectations {
-        let response = app
+        let response = ctx
+            .app().clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -53,20 +54,20 @@ async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() 
 
         assert_eq!(group_titles, expected_group_titles, "{context}: {payload}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
-    let paths = new_router_fixture("router-opds-v2-search-fielded-query").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-opds-v2-search-fielded-query")
+        .with_search_index()
+        .build()
+        .await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -118,23 +119,25 @@ async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
             && !rendered.contains("book-3/manifest"),
         "OPDS v2 fielded search should keep non-matching entities out of groups: {payload}",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_queries() {
-    let paths = new_router_fixture("router-opds-v2-search-excludes-one-shots").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(
-        &paths,
-        "series-oneshot-search",
-        "One Shot Search",
-        "library-1",
-    )
-    .await;
+    let ctx = TestFixture::builder("router-opds-v2-search-excludes-one-shots")
+        .with_search_index()
+        .with_seed(|paths| async move {
+            seed_router_custom_series(
+                &paths,
+                "series-oneshot-search",
+                "One Shot Search",
+                "library-1",
+            )
+            .await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 search one-shot db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -145,8 +148,7 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
         .expect("opds v2 search one-shot series should update");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let expectations = [
         (
@@ -160,7 +162,8 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
     ];
 
     for (uri, context) in expectations {
-        let response = app
+        let response = ctx
+            .app().clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -181,16 +184,16 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
             "{context}: {payload}",
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
-    let paths = new_router_fixture("router-opds-v2-search-book-publication-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-opds-v2-search-book-publication-shape")
+        .with_search_index()
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v2 search publication db should open");
     sqlx::query(
@@ -218,10 +221,10 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
         .expect("opds v2 search tag should seed");
     pool.close().await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -343,17 +346,17 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
             .and_then(Value::as_str),
         Some("http://localhost/opds/v2/books/book-1/thumbnail")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_search_hides_unauthorized_library_results() {
-    let paths = new_router_fixture("router-opds-v2-search-library-visibility").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-opds-v2-search-library-visibility")
+        .with_search_index()
+        .build()
+        .await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-restricted-user-v2",
         "library.restricted.v2@example.org",
         "router-contract-library-restricted-v2-123",
@@ -361,15 +364,15 @@ async fn router_opds_v2_search_hides_unauthorized_library_results() {
     )
     .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library.restricted.v2@example.org",
-        "router-contract-library-restricted-v2-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "library.restricted.v2@example.org",
+            "router-contract-library-restricted-v2-123",
+        )
+        .await;
 
-    let response = app
+    let response = ctx
+        .app().clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -391,16 +394,16 @@ async fn router_opds_v2_search_hides_unauthorized_library_results() {
         groups.is_empty(),
         "OPDS v2 search must omit unauthorized-only results instead of returning empty groups: {payload}",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
-    let paths = new_router_fixture("router-opds-v2-search-age-restricted").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-opds-v2-search-age-restricted")
+        .with_search_index()
+        .build()
+        .await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "search-restricted-user",
         "search.restricted@example.org",
         "router-contract-search-restricted-123",
@@ -408,16 +411,16 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&search_ready_runtime_config_for_paths(&paths).await).await;
-    let restricted_auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "search.restricted@example.org",
-        "router-contract-search-restricted-123",
-    )
-    .await;
+    let restricted_auth_token = ctx
+        .login_with_credentials(
+            "search.restricted@example.org",
+            "router-contract-search-restricted-123",
+        )
+        .await;
 
     for uri in ["/opds/v2/search?query=1", "/opds/v2/search"] {
-        let restricted_response = app
+        let restricted_response = ctx
+            .app().clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -441,6 +444,4 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
             "age-exclude restricted OPDS search should hide restricted groups for {uri}: {restricted_payload}",
         );
     }
-
-    cleanup_router_fixture(paths);
 }

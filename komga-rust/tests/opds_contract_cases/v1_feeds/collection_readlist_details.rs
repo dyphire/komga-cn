@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v1_collection_detail_returns_empty_feed_when_visible_page_is_empty() {
-    let paths = new_router_fixture("router-opds-v1-collection-detail-empty-feed").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_age_rating(&paths, "series-1", 21).await;
+    let ctx = TestFixture::new("router-opds-v1-collection-detail-empty-feed").await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 21).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -14,15 +13,13 @@ async fn router_opds_v1_collection_detail_returns_empty_feed_when_visible_page_i
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -44,16 +41,13 @@ async fn router_opds_v1_collection_detail_returns_empty_feed_when_visible_page_i
     assert!(!body.contains("<entry>"));
     assert!(!body.contains("rel=\"previous\""));
     assert!(!body.contains("rel=\"next\""));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collection_detail_uses_collection_and_series_last_modified_timestamps() {
-    let paths = new_router_fixture("router-opds-v1-collection-detail-updated").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collection-detail-updated").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail updated db should open");
     sqlx::query("UPDATE COLLECTION SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -70,10 +64,11 @@ async fn router_opds_v1_collection_detail_uses_collection_and_series_last_modifi
         .expect("series last modified should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -90,19 +85,18 @@ async fn router_opds_v1_collection_detail_uses_collection_and_series_last_modifi
     assert!(body.contains("<updated>2024-01-20T01:02:03Z</updated>"));
     assert!(body.contains("<updated>2024-01-21T02:03:04Z</updated>"));
     assert!(body.contains("/opds/v1.2/series/series-1"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collection_detail_orders_unordered_entries_by_title_sort() {
-    let paths = new_router_fixture("router-opds-v1-collection-detail-unordered-title-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "series-2", "Alpha Display", "library-1").await;
-    update_router_series_metadata_titles(&paths, "series-1", "Zeta Display", "Zulu Sort").await;
-    update_router_series_metadata_titles(&paths, "series-2", "Alpha Display", "Alpha Sort").await;
+    let ctx = TestFixture::new("router-opds-v1-collection-detail-unordered-title-sort").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Alpha Display", "library-1").await;
+    update_router_series_metadata_titles(ctx.paths(), "series-1", "Zeta Display", "Zulu Sort")
+        .await;
+    update_router_series_metadata_titles(ctx.paths(), "series-2", "Alpha Display", "Alpha Sort")
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail order db should open");
     sqlx::query("UPDATE COLLECTION SET ORDERED = ? WHERE ID = ?")
@@ -131,10 +125,11 @@ async fn router_opds_v1_collection_detail_orders_unordered_entries_by_title_sort
     .expect("first series collection number should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -158,19 +153,15 @@ async fn router_opds_v1_collection_detail_orders_unordered_entries_by_title_sort
         alpha_pos < zeta_pos,
         "unordered OPDS v1 collection detail must order by Kotlin titleSort semantics, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_outside_shared_libraries()
  {
-    let paths =
-        new_router_fixture("router-opds-v1-collection-detail-library-scope-not-found").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-collection-detail-library-scope-not-found").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "router-contract-library-123",
@@ -178,7 +169,7 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 collection detail library-scope db should open");
     sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
@@ -200,15 +191,13 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
     .expect("library-scoped collection series should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "router-contract-library-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "router-contract-library-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -221,17 +210,14 @@ async fn router_opds_v1_collection_detail_returns_not_found_when_collection_is_o
         .expect("opds v1 collection detail library-scope request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_returns_empty_feed_when_visible_page_is_empty() {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-empty-feed").await;
-    seed_router_contract_data(&paths).await;
-    update_router_series_age_rating(&paths, "series-1", 21).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-empty-feed").await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 21).await;
     seed_router_age_exclude_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -239,15 +225,13 @@ async fn router_opds_v1_readlist_detail_returns_empty_feed_when_visible_page_is_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -268,18 +252,15 @@ async fn router_opds_v1_readlist_detail_returns_empty_feed_when_visible_page_is_
     assert!(!body.contains("<entry>"));
     assert!(!body.contains("rel=\"previous\""));
     assert!(!body.contains("rel=\"next\""));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outside_shared_libraries()
  {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-library-scope-not-found").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-library-scope-not-found").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "library-user",
         "library-user@example.org",
         "router-contract-library-123",
@@ -287,7 +268,7 @@ async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outsi
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail library-scope db should open");
     sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
@@ -307,15 +288,13 @@ async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outsi
         .expect("library-scoped readlist book should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "library-user@example.org",
-        "router-contract-library-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("library-user@example.org", "router-contract-library-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -328,17 +307,14 @@ async fn router_opds_v1_readlist_detail_returns_not_found_when_readlist_is_outsi
         .expect("opds v1 readlist detail library-scope request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_orders_unordered_entries_by_release_date() {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-unordered-release-date").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-unordered-release-date").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail order db should open");
     sqlx::query("UPDATE READLIST SET ORDERED = ?, BOOK_COUNT = ? WHERE ID = ?")
@@ -377,10 +353,11 @@ async fn router_opds_v1_readlist_detail_orders_unordered_entries_by_release_date
         .expect("book-2 release date should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -404,16 +381,13 @@ async fn router_opds_v1_readlist_detail_orders_unordered_entries_by_release_date
         earlier_pos < later_pos,
         "unordered OPDS v1 readlist detail must order by Kotlin releaseDate semantics, body={body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_uses_readlist_and_book_last_modified_timestamps() {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-updated").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-updated").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail updated db should open");
     sqlx::query("UPDATE READLIST SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -430,10 +404,11 @@ async fn router_opds_v1_readlist_detail_uses_readlist_and_book_last_modified_tim
         .expect("book last modified should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -450,19 +425,16 @@ async fn router_opds_v1_readlist_detail_uses_readlist_and_book_last_modified_tim
     assert!(body.contains("<updated>2024-01-22T01:02:03Z</updated>"));
     assert!(body.contains("<updated>2024-01-23T02:03:04Z</updated>"));
     assert!(body.contains("<id>book-1</id>"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_uses_kotlin_acquisition_entry_shape() {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-entry-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-entry-shape").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -479,18 +451,15 @@ async fn router_opds_v1_readlist_detail_uses_kotlin_acquisition_entry_shape() {
     assert!(body.contains("<title>Series 1 1: Book 1</title>"));
     assert!(body.contains("<content>epub - 1024</content>"));
     assert!(body.contains("<author><name>Jane Writer</name></author>"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v1_readlist_detail_filters_non_ready_books_without_turning_empty_scope_into_not_found()
  {
-    let paths = new_router_fixture("router-opds-v1-readlist-detail-ready-only").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::new("router-opds-v1-readlist-detail-ready-only").await;
+    seed_router_authors_scope_variants(ctx.paths()).await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("opds v1 readlist detail ready-only db should open");
     sqlx::query("UPDATE READLIST SET ORDERED = ?, BOOK_COUNT = ? WHERE ID = ?")
@@ -523,10 +492,11 @@ async fn router_opds_v1_readlist_detail_filters_non_ready_books_without_turning_
         .expect("book-2 should be attached to readlist-1");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -543,6 +513,4 @@ async fn router_opds_v1_readlist_detail_filters_non_ready_books_without_turning_
     assert!(body.contains("<id>readlist-1</id>"));
     assert!(body.contains("<id>book-2</id>"));
     assert!(!body.contains("<id>book-1</id>"));
-
-    cleanup_router_fixture(paths);
 }

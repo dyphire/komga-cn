@@ -2,13 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_media_status_begins_with_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-operator").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-operator").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -43,19 +42,16 @@ async fn router_discovery_books_list_supports_media_status_begins_with_in_runtim
         content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_media_status_is_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-media-status").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-media-status").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -90,19 +86,16 @@ async fn router_discovery_books_list_supports_media_status_is_in_runtime_owned_m
         content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_media_status_is_not_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-media-status-is-not").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-media-status-is-not").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -133,7 +126,8 @@ async fn router_discovery_books_list_supports_media_status_is_not_in_runtime_own
         .expect("strict media-status isNot excluded payload should expose content array");
     assert_eq!(excluded_content.len(), 0);
 
-    let kept_response = app
+    let kept_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -163,6 +157,4 @@ async fn router_discovery_books_list_supports_media_status_is_not_in_runtime_own
         .and_then(Value::as_array)
         .expect("strict media-status isNot kept payload should expose content array");
     assert_eq!(kept_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }

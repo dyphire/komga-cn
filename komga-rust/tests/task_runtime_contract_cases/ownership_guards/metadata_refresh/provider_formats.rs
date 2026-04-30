@@ -165,12 +165,10 @@ fn render_ean13_png_bytes(digits: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_capability_matches() {
-    let paths =
-        new_router_fixture("runtime-refresh-book-metadata-applies-epub-provider-patch").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-book-metadata-applies-epub-provider-patch").await;
 
     write_router_epub_with_package_document(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         r##"<?xml version="1.0" encoding="UTF-8"?>
         <package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf" unique-identifier="bookid">
@@ -194,7 +192,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         </package>"##,
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB metadata fixture setup");
     sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
@@ -225,7 +223,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         .expect("existing metadata authors should be cleared before EPUB metadata refresh test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for EPUB metadata task setup");
     sqlx::query(
@@ -251,14 +249,14 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
     .expect("EPUB metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should process EPUB RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for EPUB metadata verification");
     let metadata = sqlx::query(
@@ -298,16 +296,13 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         ],
         "EPUB provider should map OPF creator roles and replace authors when provider capabilities match",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books() {
-    let paths = new_router_fixture("runtime-refresh-book-metadata-applies-barcode-isbn").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-refresh-book-metadata-applies-barcode-isbn").await;
     seed_router_cbz_book(
-        &paths,
+        ctx.paths(),
         "book-barcode-1",
         "series-1",
         "barcode-book.cbz",
@@ -315,13 +310,13 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     )
     .await;
     write_router_cbz_with_single_page(
-        &paths,
+        ctx.paths(),
         "books/barcode-book.cbz",
         "page-1.png",
         &render_ean13_png_bytes("9780306406157"),
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for barcode metadata fixture setup");
     sqlx::query(
@@ -339,7 +334,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
         .expect("book metadata isbn should be reset before barcode refresh test");
     pool.close().await;
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for barcode metadata task setup");
     sqlx::query(
@@ -365,14 +360,14 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     .expect("barcode metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths).await;
+    let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
         .expect("runtime should process barcode RefreshBookMetadata tasks successfully");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for barcode metadata verification");
     let metadata = sqlx::query("SELECT ISBN FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -383,6 +378,4 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     verify_pool.close().await;
 
     assert_eq!(metadata.get::<String, _>("ISBN"), "9780306406157");
-
-    cleanup_router_fixture(paths);
 }

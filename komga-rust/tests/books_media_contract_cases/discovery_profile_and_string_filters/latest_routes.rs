@@ -2,11 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modified_desc() {
-    let paths = new_router_fixture("router-discovery-books-latest-strict-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book").await;
+    let ctx = TestFixture::builder("router-discovery-books-latest-strict-sort")
+        .with_seed(|paths| async move {
+            seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book")
+                .await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books latest sort parity db should open");
     sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -23,10 +27,10 @@ async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modifie
         .expect("book-2 lastModified should update for latest sort parity");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -49,17 +53,15 @@ async fn router_discovery_books_latest_ignores_sort_query_and_stays_last_modifie
     assert_eq!(content.len(), 2);
     assert_eq!(content[0].get("id"), Some(&json!("book-1")));
     assert_eq!(content[1].get("id"), Some(&json!("book-2")));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_latest_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-discovery-books-latest-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-latest-basic-auth-compat").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -80,20 +82,22 @@ async fn router_discovery_books_latest_accepts_basic_auth_like_kotlin_clients() 
         .expect("books/latest basic-auth request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_latest_unpaged_keeps_kotlin_page_shape() {
-    let paths = new_router_fixture("router-discovery-books-latest-unpaged-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book").await;
+    let ctx = TestFixture::builder("router-discovery-books-latest-unpaged-shape")
+        .with_seed(|paths| async move {
+            seed_router_primary_series_cbz_book(&paths, "book-2", "book-2.cbz", "Another Book")
+                .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -122,6 +126,4 @@ async fn router_discovery_books_latest_unpaged_keeps_kotlin_page_shape() {
     assert_eq!(payload.pointer("/pageable/pageNumber"), Some(&json!(0)));
     assert_eq!(payload.pointer("/pageable/paged"), Some(&json!(true)));
     assert_eq!(payload.pointer("/pageable/unpaged"), Some(&json!(false)));
-
-    cleanup_router_fixture(paths);
 }

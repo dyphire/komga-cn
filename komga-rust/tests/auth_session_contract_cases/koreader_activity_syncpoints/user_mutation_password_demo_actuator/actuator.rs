@@ -177,11 +177,10 @@ fn assert_admin_actuator_health_payload(
 
 #[tokio::test]
 async fn router_actuator_root_exposes_spring_boot_style_discovery_links() {
-    let paths = new_router_fixture("router-actuator-root-spring-boot-discovery-links").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-root-spring-boot-discovery-links").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -235,16 +234,13 @@ async fn router_actuator_root_exposes_spring_boot_style_discovery_links() {
             .and_then(Value::as_bool),
         Some(true)
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_root_returns_unauthorized_for_anonymous() {
-    let paths = new_router_fixture("router-actuator-root-anonymous-unauthorized").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-root-anonymous-unauthorized").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -258,16 +254,14 @@ async fn router_actuator_root_returns_unauthorized_for_anonymous() {
         .expect("anonymous actuator root request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
-    let paths = new_router_fixture("router-actuator-root-non-admin-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-root-non-admin-forbidden").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "user-actuator-root-1",
         "actuator-root-user@example.org",
         "router-contract-user-123",
@@ -275,13 +269,10 @@ async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "actuator-root-user@example.org",
-        "router-contract-user-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials("actuator-root-user@example.org", "router-contract-user-123")
+        .await;
 
     let response = app
         .clone()
@@ -297,17 +288,14 @@ async fn router_actuator_root_returns_forbidden_for_authenticated_non_admin() {
         .expect("non-admin actuator root request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
-    let paths = new_router_fixture("router-actuator-info-build-and-os").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-info-build-and-os").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -403,16 +391,13 @@ async fn router_actuator_info_returns_build_and_os_metadata_for_admin() {
         "actuator info process.pid should be positive: {payload:?}"
     );
     assert!(process.get("memory").and_then(Value::as_object).is_some());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_logfile_returns_unauthorized_for_anonymous() {
-    let paths = new_router_fixture("router-actuator-logfile-anonymous-unauthorized").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-logfile-anonymous-unauthorized").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -426,16 +411,14 @@ async fn router_actuator_logfile_returns_unauthorized_for_anonymous() {
         .expect("anonymous actuator logfile request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_logfile_returns_forbidden_for_authenticated_non_admin() {
-    let paths = new_router_fixture("router-actuator-logfile-non-admin-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-logfile-non-admin-forbidden").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "user-actuator-logfile-1",
         "actuator-logfile-user@example.org",
         "router-contract-user-123",
@@ -443,13 +426,13 @@ async fn router_actuator_logfile_returns_forbidden_for_authenticated_non_admin()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "actuator-logfile-user@example.org",
-        "router-contract-user-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials(
+            "actuator-logfile-user@example.org",
+            "router-contract-user-123",
+        )
+        .await;
 
     let response = app
         .oneshot(
@@ -464,16 +447,13 @@ async fn router_actuator_logfile_returns_forbidden_for_authenticated_non_admin()
         .expect("non-admin actuator logfile request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
-    let paths = new_router_fixture("router-actuator-logfile-admin-plaintext").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-logfile-admin-plaintext").await;
 
-    let config = runtime_config_for_paths(&paths);
+    let config = ctx.config().clone();
     std::fs::create_dir_all(
         config
             .log_file
@@ -484,8 +464,8 @@ async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
     std::fs::write(&config.log_file, b"first line\nsecond line\n")
         .expect("actuator logfile fixture should be writable");
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -511,22 +491,16 @@ async fn router_actuator_logfile_returns_plaintext_body_for_admin() {
         .await
         .expect("actuator logfile response body should be readable");
     assert_eq!(String::from_utf8_lossy(&body), "first line\nsecond line\n");
-
-    cleanup_router_fixture(paths);
 }
 
 #[test]
 fn router_access_log_skips_actuator_and_sse_noise_routes() {
-    let paths = tokio::runtime::Builder::new_current_thread()
+    let ctx = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("noise access log test runtime should build")
-        .block_on(async {
-            let paths = new_router_fixture("router-access-log-skip-noise-routes").await;
-            seed_router_contract_data(&paths).await;
-            paths
-        });
-    let config = runtime_config_for_paths(&paths);
+        .block_on(async { TestFixture::new("router-access-log-skip-noise-routes").await });
+    let config = ctx.config().clone();
     std::fs::create_dir_all(
         config
             .log_file
@@ -543,7 +517,7 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
         .expect("noise auth runtime should build")
         .block_on(async {
             seed_router_age_exclude_user_with_roles(
-                &paths,
+                ctx.paths(),
                 "access-log-noise-admin",
                 "access-log-noise-admin@example.org",
                 "router-contract-access-log-noise-123",
@@ -551,9 +525,8 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
                 &["USER", "ADMIN", "FILE_DOWNLOAD", "PAGE_STREAMING"],
             )
             .await;
-            let app = build_router_with_config(&config).await;
-            login_with_basic_credentials_and_get_token(
-                app,
+            let _app = ctx.app().clone();
+            ctx.login_with_credentials(
                 "access-log-noise-admin@example.org",
                 "router-contract-access-log-noise-123",
             )
@@ -561,10 +534,10 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
         });
 
     let (logs, statuses) = capture_router_logs_async_result(&config, {
-        let config = config.clone();
+        let _config = config.clone();
         let auth_token = auth_token.clone();
         async move {
-            let app = build_router_with_config(&config).await;
+            let app = ctx.app().clone();
 
             let health = app
                 .clone()
@@ -617,16 +590,13 @@ fn router_access_log_skips_actuator_and_sse_noise_routes() {
         access_events.is_empty(),
         "actuator and SSE should be skipped by access logging noise policy: {logs}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_logfile_reads_current_active_file_after_rotation_compatible_writes() {
-    let paths = new_router_fixture("router-actuator-logfile-admin-active-after-rotation").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-logfile-admin-active-after-rotation").await;
+    let config = ctx.config().clone();
 
-    let config = runtime_config_for_paths(&paths);
     let initial_period = OffsetDateTime::parse(
         "2026-04-08T10:15:00Z",
         &time::format_description::well_known::Rfc3339,
@@ -670,8 +640,8 @@ async fn router_actuator_logfile_reads_current_active_file_after_rotation_compat
         .expect("second period write should succeed");
     writer.flush().expect("second period flush should succeed");
 
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -712,16 +682,13 @@ async fn router_actuator_logfile_reads_current_active_file_after_rotation_compat
         std::fs::read_to_string(&archive_path).expect("archive logfile should be readable"),
         "archived line\n",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metrics_returns_unauthorized_for_anonymous() {
-    let paths = new_router_fixture("router-actuator-metrics-anonymous-unauthorized").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metrics-anonymous-unauthorized").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -735,16 +702,14 @@ async fn router_actuator_metrics_returns_unauthorized_for_anonymous() {
         .expect("anonymous actuator metrics request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metrics_returns_forbidden_for_authenticated_non_admin() {
-    let paths = new_router_fixture("router-actuator-metrics-non-admin-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metrics-non-admin-forbidden").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "user-actuator-metrics-1",
         "actuator-metrics-user@example.org",
         "router-contract-user-123",
@@ -752,13 +717,13 @@ async fn router_actuator_metrics_returns_forbidden_for_authenticated_non_admin()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "actuator-metrics-user@example.org",
-        "router-contract-user-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials(
+            "actuator-metrics-user@example.org",
+            "router-contract-user-123",
+        )
+        .await;
 
     let response = app
         .oneshot(
@@ -773,17 +738,14 @@ async fn router_actuator_metrics_returns_forbidden_for_authenticated_non_admin()
         .expect("non-admin actuator metrics request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metrics_returns_metric_names_for_admin() {
-    let paths = new_router_fixture("router-actuator-metrics-admin-names").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metrics-admin-names").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -833,17 +795,14 @@ async fn router_actuator_metrics_returns_metric_names_for_admin() {
             .any(|value| value.as_str() == Some("logback.events")),
         "actuator metrics names should not include removed logback.events metric: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
-    let paths = new_router_fixture("router-actuator-metric-detail-base-unit").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-base-unit").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -888,17 +847,14 @@ async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
         }),
         "actuator metric detail should expose library tag values: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-runtime-startup-timings").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-runtime-startup-timings").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let started_response = app
         .clone()
@@ -939,17 +895,14 @@ async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() 
         ready_seconds >= started_seconds,
         "application.ready.time should be >= application.started.time: started={started_seconds}, ready={ready_seconds}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-runtime-process-cpu").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-runtime-process-cpu").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -981,27 +934,25 @@ async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin(
             "process.cpu.usage should track /proc-derived process cpu usage: actual={cpu_usage}, expected={expected}, payload={payload:?}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-datasource-tags").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-datasource-tags").await;
 
-    let _main_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&paths.main_db, 1)
+    let _main_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().main_db, 1)
         .await
         .expect("main shared sqlx pool with max=1 should open");
-    let _main_pool_two = komga_infrastructure::sqlite::connect_shared_pool(&paths.main_db, 2)
+    let _main_pool_two = komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().main_db, 2)
         .await
         .expect("main shared sqlx pool with max=2 should open");
-    let _tasks_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&paths.tasks_db, 1)
-        .await
-        .expect("tasks shared sqlx pool with max=1 should open");
+    let _tasks_pool_one =
+        komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().tasks_db, 1)
+            .await
+            .expect("tasks shared sqlx pool with max=1 should open");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .clone()
@@ -1065,17 +1016,14 @@ async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
             })),
         "filtered datasource metric detail should reflect the real sqlx pool max_connections: {filtered_payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_exposes_task_timer_shape_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-task-timer-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-task-timer-shape").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1113,17 +1061,14 @@ async fn router_actuator_metric_detail_exposes_task_timer_shape_for_admin() {
             .any(|tag| tag.get("tag").and_then(Value::as_str) == Some("type")),
         "task execution metric should expose type tag: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_exposes_task_failure_tags_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-task-failure-tags").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-task-failure-tags").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1153,17 +1098,14 @@ async fn router_actuator_metric_detail_exposes_task_failure_tags_for_admin() {
         }),
         "task failure metric should expose type tag values: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_reflects_real_http_requests_for_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-real-http-requests").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-real-http-requests").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let info_response = app
         .clone()
@@ -1241,16 +1183,13 @@ async fn router_actuator_metric_detail_reflects_real_http_requests_for_admin() {
         1.0,
         "http.server.requests should count the real anonymous /actuator request: {unauthorized_metric_payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_returns_unauthorized_for_anonymous() {
-    let paths = new_router_fixture("router-actuator-metric-detail-anonymous-unauthorized").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-anonymous-unauthorized").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -1264,16 +1203,14 @@ async fn router_actuator_metric_detail_returns_unauthorized_for_anonymous() {
         .expect("anonymous actuator metric detail request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_metric_detail_returns_forbidden_for_authenticated_non_admin() {
-    let paths = new_router_fixture("router-actuator-metric-detail-non-admin-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-metric-detail-non-admin-forbidden").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "user-actuator-metric-detail-1",
         "actuator-metric-detail-user@example.org",
         "router-contract-user-123",
@@ -1281,13 +1218,13 @@ async fn router_actuator_metric_detail_returns_forbidden_for_authenticated_non_a
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "actuator-metric-detail-user@example.org",
-        "router-contract-user-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials(
+            "actuator-metric-detail-user@example.org",
+            "router-contract-user-123",
+        )
+        .await;
 
     let response = app
         .oneshot(
@@ -1302,16 +1239,13 @@ async fn router_actuator_metric_detail_returns_forbidden_for_authenticated_non_a
         .expect("non-admin actuator metric detail request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_is_public_and_hides_details_for_anonymous() {
-    let paths = new_router_fixture("router-actuator-health-public-status-only").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-health-public-status-only").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -1331,16 +1265,14 @@ async fn router_actuator_health_is_public_and_hides_details_for_anonymous() {
         payload.get("components").is_none(),
         "anonymous actuator health should not expose component details: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_hides_details_for_authenticated_non_admin() {
-    let paths = new_router_fixture("router-actuator-health-non-admin-status-only").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-health-non-admin-status-only").await;
+
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "user-health-1",
         "health-user@example.org",
         "router-contract-user-123",
@@ -1348,13 +1280,10 @@ async fn router_actuator_health_hides_details_for_authenticated_non_admin() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "health-user@example.org",
-        "router-contract-user-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials("health-user@example.org", "router-contract-user-123")
+        .await;
 
     let response = app
         .oneshot(
@@ -1375,17 +1304,14 @@ async fn router_actuator_health_hides_details_for_authenticated_non_admin() {
         payload.get("components").is_none(),
         "non-admin actuator health should not expose component details: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_exposes_spring_style_components_for_admin() {
-    let paths = new_router_fixture("router-actuator-health-admin-components").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-health-admin-components").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1402,16 +1328,13 @@ async fn router_actuator_health_exposes_spring_style_components_for_admin() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_exposes_details_for_admin_basic_auth_like_kotlin() {
-    let paths = new_router_fixture("router-actuator-health-admin-basic-auth").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-health-admin-basic-auth").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -1430,17 +1353,15 @@ async fn router_actuator_health_exposes_details_for_admin_basic_auth_like_kotlin
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_exposes_details_for_admin_api_key_like_kotlin() {
-    let paths = new_router_fixture("router-actuator-health-admin-api-key").await;
-    seed_router_contract_data(&paths).await;
-    seed_kobo_sync_api_key(&paths, "actuator-health-admin-api-key", "admin-user").await;
+    let ctx = TestFixture::new("router-actuator-health-admin-api-key").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    seed_kobo_sync_api_key(ctx.paths(), "actuator-health-admin-api-key", "admin-user").await;
+
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -1457,19 +1378,16 @@ async fn router_actuator_health_exposes_details_for_admin_api_key_like_kotlin() 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_admin_actuator_health_payload(&payload, "UP", "UP", "UP");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_health_aggregates_down_when_database_file_is_missing() {
-    let paths = new_router_fixture("router-actuator-health-down-when-db-missing").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-health-down-when-db-missing").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    close_router_fixture_shared_pools(&paths).await;
-    std::fs::remove_file(&paths.tasks_db)
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+    ctx.close_shared_pools().await;
+    std::fs::remove_file(&ctx.paths().tasks_db)
         .expect("tasks db should be removable for health down test");
 
     let response = app
@@ -1487,16 +1405,13 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_admin_actuator_health_payload(&payload, "DOWN", "UP", "DOWN");
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_shutdown_requires_admin_authentication() {
-    let paths = new_router_fixture("router-actuator-shutdown-auth").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-shutdown-auth").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -1519,17 +1434,14 @@ async fn router_actuator_shutdown_requires_admin_authentication() {
         "unexpected actuator shutdown status={status}, body={}",
         String::from_utf8_lossy(&body),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_actuator_shutdown_returns_ok_message_for_admin() {
-    let paths = new_router_fixture("router-actuator-shutdown-admin-success").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-actuator-shutdown-admin-success").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -1549,6 +1461,4 @@ async fn router_actuator_shutdown_returns_ok_message_for_admin() {
         payload.get("message").and_then(Value::as_str),
         Some("Shutting down, bye...")
     );
-
-    cleanup_router_fixture(paths);
 }

@@ -2,10 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_pages_single_image_fallback_includes_dimensions() {
-    let paths = new_router_fixture("router-book-pages-single-image-dimensions").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-pages-single-image-dimensions").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image page fixture");
     sqlx::query(
@@ -44,17 +43,18 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     .expect("single-image book metadata row should be inserted");
     pool.close().await;
 
-    let image_path = paths.config_dir.join("books/cover.png");
+    let image_path = ctx.paths().config_dir.join("books/cover.png");
     if let Some(parent) = image_path.parent() {
         std::fs::create_dir_all(parent).expect("single-image parent directory should be created");
     }
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -74,16 +74,13 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("width"), Some(&json!(1)));
     assert_eq!(rows[0].get("height"), Some(&json!(1)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
-    let paths = new_router_fixture("router-book-positions-basic-auth-visibility").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-positions-basic-auth-visibility").await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "router-contract-restricted-123",
@@ -92,7 +89,7 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
     )
     .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth positions seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -104,9 +101,8 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
         .expect("epub positions extension should be seeded for positions auth test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let admin_response = app
+    let admin_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -127,7 +123,9 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
         .expect("admin basic-auth positions request should complete");
     assert_eq!(admin_response.status(), StatusCode::OK);
 
-    let restricted_response = app
+    let restricted_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -146,16 +144,13 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
         .await
         .expect("restricted basic-auth positions request should complete");
     assert_eq!(restricted_response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media() {
-    let paths = new_router_fixture("router-book-raw-page-single-image").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-single-image").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw fixture");
     sqlx::query(
@@ -194,7 +189,7 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
     .expect("single-image raw metadata row should be inserted");
     pool.close().await;
 
-    let image_path = paths.config_dir.join("books/cover-raw.png");
+    let image_path = ctx.paths().config_dir.join("books/cover-raw.png");
     if let Some(parent) = image_path.parent() {
         std::fs::create_dir_all(parent)
             .expect("single-image raw parent directory should be created");
@@ -202,10 +197,11 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
     let image_bytes = fixture_png_bytes();
     std::fs::write(&image_path, &image_bytes).expect("single-image raw fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -225,16 +221,13 @@ async fn router_book_raw_page_returns_bad_request_with_message_for_non_pdf_media
             "Extractor does not support raw extraction of pages".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_not_ready() {
-    let paths = new_router_fixture("router-book-raw-page-single-image-not-ready").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-single-image-not-ready").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw not-ready fixture");
     sqlx::query(
@@ -273,7 +266,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_no
     .expect("single-image raw not-ready metadata row should be inserted");
     pool.close().await;
 
-    let image_path = paths.config_dir.join("books/cover-raw-not-ready.png");
+    let image_path = ctx.paths().config_dir.join("books/cover-raw-not-ready.png");
     if let Some(parent) = image_path.parent() {
         std::fs::create_dir_all(parent)
             .expect("single-image raw not-ready parent directory should be created");
@@ -281,10 +274,11 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_no
     std::fs::write(&image_path, fixture_png_bytes())
         .expect("single-image raw not-ready fixture should be written");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -304,16 +298,13 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_even_when_no
             "Extractor does not support raw extraction of pages".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missing_file() {
-    let paths = new_router_fixture("router-book-raw-page-single-image-file-missing").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-raw-page-single-image-file-missing").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for single-image raw missing-file fixture");
     sqlx::query(
@@ -352,10 +343,11 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missi
     .expect("single-image raw missing-file metadata row should be inserted");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -375,16 +367,13 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missi
             "Extractor does not support raw extraction of pages".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
-    let paths = new_router_fixture("router-book-pages-pdf-dimensions").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-pages-pdf-dimensions").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -392,10 +381,11 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -425,16 +415,13 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     assert!(rows[0].get("height").is_some_and(|value| !value.is_null()));
     assert!(rows[0].get("sizeBytes").is_some_and(Value::is_null));
     assert_eq!(rows[0].get("size"), Some(&Value::String(String::new())));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_number() {
-    let paths = new_router_fixture("router-book-page-missing-pdf-page-nonraw").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-missing-pdf-page-nonraw").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -442,10 +429,11 @@ async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -463,18 +451,14 @@ async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_
         payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_page_pdf_negotiation_returns_bad_request_with_message_for_missing_pdf_page_number()
  {
-    let paths =
-        new_router_fixture("router-book-page-missing-pdf-page-nonraw-pdf-negotiation").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-page-missing-pdf-page-nonraw-pdf-negotiation").await;
     seed_router_pdf_book(
-        &paths,
+        ctx.paths(),
         "book-pdf-1",
         "series-1",
         "fixture-page.pdf",
@@ -482,10 +466,11 @@ async fn router_book_page_pdf_negotiation_returns_bad_request_with_message_for_m
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -504,18 +489,17 @@ async fn router_book_page_pdf_negotiation_returns_bad_request_with_message_for_m
         payload.get("error"),
         Some(&Value::String("Page number does not exist".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
+
 #[tokio::test]
 async fn router_book_positions_returns_not_found_without_epub_extension_positions() {
-    let paths = new_router_fixture("router-book-positions-no-extension").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-positions-no-extension").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -528,20 +512,18 @@ async fn router_book_positions_returns_not_found_without_epub_extension_position
         .expect("book positions request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_positions_does_not_return_not_modified_when_positions_are_missing() {
-    let paths = new_router_fixture("router-book-positions-no-extension-not-modified").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-book-positions-no-extension-not-modified").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -555,14 +537,11 @@ async fn router_book_positions_does_not_return_not_modified_when_positions_are_m
         .expect("book positions conditional missing request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_progression_get_returns_full_r2_progression_shape() {
-    let paths = new_router_fixture("router-book-progression-get-full-shape").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-progression-get-full-shape").await;
 
     let locator = json!({
         "href": "/book-1.xhtml#kobo.2.1",
@@ -579,7 +558,7 @@ async fn router_book_progression_get_returns_full_r2_progression_shape() {
         "koboSpan": "kobo-span-2"
     });
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for progression shape seed");
     sqlx::query(
@@ -599,10 +578,11 @@ async fn router_book_progression_get_returns_full_r2_progression_shape() {
     .expect("read progress row for progression shape should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -628,15 +608,12 @@ async fn router_book_progression_get_returns_full_r2_progression_shape() {
         }))
     );
     assert_eq!(payload.get("locator"), Some(&locator));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_positions_returns_epub_extension_positions_and_supports_not_modified() {
-    let paths = new_router_fixture("router-book-positions-epub-extension").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-book-positions-epub-extension").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
     let positions = json!([
         {
@@ -660,7 +637,7 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
     ]);
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub extension positions seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -672,10 +649,10 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
         .expect("epub extension positions should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let initial = app
+    let initial = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -706,7 +683,9 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
     assert_eq!(payload.get("total"), Some(&Value::from(2)));
     assert_eq!(payload.get("positions"), Some(&positions));
 
-    let not_modified = app
+    let not_modified = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -727,28 +706,31 @@ async fn router_book_positions_returns_epub_extension_positions_and_supports_not
             .and_then(|value| value.to_str().ok()),
         Some(last_modified.as_str())
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_pages_persisted_pdf_rows_match_kotlin_dynamic_page_shape() {
-    let paths = new_router_fixture("router-book-pages-persisted-pdf-dynamic-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(
-        &paths,
-        "book-pdf-1",
-        "series-1",
-        "fixture-page.pdf",
-        "Fixture PDF",
-    )
-    .await;
-    seed_router_persisted_pdf_page(&paths, "book-pdf-1", 1, "page-1.pdf", 612, 866, None).await;
+    let ctx = TestFixture::builder("router-book-pages-persisted-pdf-dynamic-shape")
+        .with_seed(|paths| async move {
+            seed_router_pdf_book(
+                &paths,
+                "book-pdf-1",
+                "series-1",
+                "fixture-page.pdf",
+                "Fixture PDF",
+            )
+            .await;
+            seed_router_persisted_pdf_page(&paths, "book-pdf-1", 1, "page-1.pdf", 612, 866, None)
+                .await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -778,6 +760,4 @@ async fn router_book_pages_persisted_pdf_rows_match_kotlin_dynamic_page_shape() 
     assert_eq!(rows[0].get("height"), Some(&json!(4528)));
     assert!(rows[0].get("sizeBytes").is_some_and(Value::is_null));
     assert_eq!(rows[0].get("size"), Some(&Value::String(String::new())));
-
-    cleanup_router_fixture(paths);
 }

@@ -21,16 +21,14 @@ async fn seed_book_thumbnail_bytes(
 
 #[tokio::test]
 async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag() {
-    let paths = new_router_fixture("router-series-thumbnail-upload-multipart").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-series-thumbnail-upload-multipart").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -70,7 +68,8 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
         .get("id")
         .and_then(Value::as_str)
         .expect("series thumbnail upload should return thumbnail id");
-    let stored = app
+    let stored = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -88,16 +87,13 @@ async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag
         .await
         .expect("series thumbnail fetch body should be readable");
     assert_eq!(stored_body.as_ref(), image_bytes.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_upload_rejects_oneshot_series() {
-    let paths = new_router_fixture("router-series-thumbnail-upload-oneshot-rejected").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-thumbnail-upload-oneshot-rejected").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series thumbnail oneshot db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -108,13 +104,13 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
         .expect("series oneshot flag should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -130,7 +126,7 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
 
     assert_eq!(upload.status(), StatusCode::BAD_REQUEST);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series thumbnail oneshot verify db should open");
     let count =
@@ -142,22 +138,18 @@ async fn router_series_thumbnail_upload_rejects_oneshot_series() {
     pool.close().await;
 
     assert_eq!(count, 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
-    let paths = new_router_fixture("router-series-thumbnail-select-success").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-series-thumbnail-select-success").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -179,7 +171,8 @@ async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
         .expect("series thumbnail upload should return thumbnail id")
         .to_string();
 
-    let select = app
+    let select = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -195,7 +188,9 @@ async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
         .expect("series thumbnail select request should complete");
     assert_eq!(select.status(), StatusCode::ACCEPTED);
 
-    let list = app
+    let list = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -214,17 +209,14 @@ async fn router_series_thumbnail_select_marks_uploaded_thumbnail_selected() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("id"), Some(&Value::String(thumbnail_id)));
     assert_eq!(rows[0].get("selected"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
-    let paths = new_router_fixture("router-oneshot-series-thumbnail-fallback-book-thumbnail").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-oneshot-series-thumbnail-fallback-book-thumbnail").await;
 
     let png_bytes = fixture_png_bytes();
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("oneshot series thumbnail db should open");
     sqlx::query("UPDATE SERIES SET ONESHOT = ? WHERE ID = ?")
@@ -246,11 +238,12 @@ async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
         .expect("series thumbnails should be removed for oneshot fallback");
     pool.close().await;
 
-    seed_book_thumbnail_bytes(&paths, "thumb-book-1", "image/png", &png_bytes).await;
+    seed_book_thumbnail_bytes(ctx.paths(), "thumb-book-1", "image/png", &png_bytes).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-    let response = app
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -274,20 +267,17 @@ async fn router_oneshot_series_thumbnail_falls_back_to_book_thumbnail() {
         .await
         .expect("oneshot series thumbnail fallback body should be readable");
     assert_eq!(body.as_ref(), png_bytes.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
-    let paths = new_router_fixture("router-series-thumbnail-by-id-sidecar-file").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-thumbnail-by-id-sidecar-file").await;
 
     let sidecar_bytes = fixture_png_bytes();
-    let sidecar_path = paths.config_dir.join("series-sidecar.png");
+    let sidecar_path = ctx.paths().config_dir.join("series-sidecar.png");
     std::fs::write(&sidecar_path, &sidecar_bytes).expect("series sidecar image should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series sidecar db should open");
     sqlx::query(
@@ -308,10 +298,11 @@ async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
     .expect("series sidecar thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -335,19 +326,16 @@ async fn router_series_thumbnail_by_id_reads_sidecar_thumbnail_file() {
         .await
         .expect("series sidecar thumbnail by-id body should be readable");
     assert_eq!(body.as_ref(), sidecar_bytes.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sidecar_file_is_missing()
 {
-    let paths = new_router_fixture("router-series-thumbnail-by-id-missing-sidecar-file").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-thumbnail-by-id-missing-sidecar-file").await;
 
-    let missing_sidecar_path = paths.config_dir.join("series-missing-sidecar.png");
+    let missing_sidecar_path = ctx.paths().config_dir.join("series-missing-sidecar.png");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series missing-sidecar db should open");
     sqlx::query(
@@ -368,10 +356,11 @@ async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sideca
     .expect("series missing-sidecar thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -384,22 +373,18 @@ async fn router_series_thumbnail_by_id_returns_internal_server_error_when_sideca
         .expect("series missing-sidecar thumbnail by-id request should complete");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestricted_user() {
-    let paths = new_router_fixture("router-series-thumbnail-by-id-missing-path-series").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::new("router-series-thumbnail-by-id-missing-path-series").await;
+    let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", false, &image_bytes);
 
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -420,7 +405,9 @@ async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestrict
         .expect("series thumbnail upload should return thumbnail id")
         .to_string();
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -439,16 +426,13 @@ async fn router_series_thumbnail_by_id_allows_missing_path_series_for_unrestrict
         .await
         .expect("series thumbnail missing path series body should be readable");
     assert_eq!(body.as_ref(), image_bytes.as_slice());
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
-    let paths = new_router_fixture("router-series-thumbnail-delete-generated-rejected").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-thumbnail-delete-generated-rejected").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series generated thumbnail delete db should open");
     sqlx::query(
@@ -469,10 +453,10 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
     .expect("generated series thumbnail row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -487,7 +471,7 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("series generated thumbnail verify db should open");
     let remaining = sqlx::query_scalar::<_, i64>(
@@ -501,6 +485,4 @@ async fn router_series_thumbnail_delete_rejects_non_user_uploaded_thumbnail() {
     pool.close().await;
 
     assert_eq!(remaining, 1);
-
-    cleanup_router_fixture(paths);
 }

@@ -2,14 +2,16 @@ use super::*;
 
 #[tokio::test]
 async fn router_kobo_catch_all_returns_empty_json_when_proxy_disabled() {
-    let paths = new_router_fixture("router-kobo-catch-all-disabled").await;
-    seed_router_contract_data(&paths).await;
-    seed_admin_kobo_path_token(&paths).await;
+    let ctx = TestFixture::builder("router-kobo-catch-all-disabled")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -25,6 +27,4 @@ async fn router_kobo_catch_all_returns_empty_json_when_proxy_disabled() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload, serde_json::json!({}));
-
-    cleanup_router_fixture(paths);
 }

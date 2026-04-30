@@ -3,11 +3,9 @@ use super::*;
 #[tokio::test]
 async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_in_runtime_owned_mode()
  {
-    let paths = new_router_fixture("router-discovery-books-list-strict-sort-modes").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-sort-modes").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for sort in [
         "metadata.title,asc",
@@ -21,7 +19,8 @@ async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_
         "metadata.releaseDate,desc",
         "seriesId,asc",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -47,7 +46,9 @@ async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    let unsupported_response = app
+    let unsupported_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -76,17 +77,18 @@ async fn router_discovery_books_list_applies_default_sort_for_unknown_sort_mode_
         .and_then(Value::as_array)
         .expect("strict books unsupported sort payload should expose content array");
     assert_eq!(unsupported_content.len(), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progress_dates() {
-    let paths = new_router_fixture("router-discovery-books-list-runtime-read-progress-sort").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-discovery-books-list-runtime-read-progress-sort")
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books runtime read-progress sort db should open");
     for (book_id, read_date, last_modified) in [
@@ -112,8 +114,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progres
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for (sort, expected_ids) in [
         ("readProgress.readDate,asc", vec!["book-1", "book-2"]),
@@ -121,7 +122,8 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progres
         ("readProgress.lastModified,asc", vec!["book-2", "book-1"]),
         ("readProgress.lastModified,desc", vec!["book-1", "book-2"]),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -155,18 +157,19 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_read_progres
             .collect::<Vec<_>>();
         assert_eq!(ids, expected_ids, "sort: {sort}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_series_id_and_alias_dates()
  {
-    let paths = new_router_fixture("router-discovery-books-list-runtime-sort-order").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_authors_scope_variants(&paths).await;
+    let ctx = TestFixture::builder("router-discovery-books-list-runtime-sort-order")
+        .with_seed(|paths| async move {
+            seed_router_authors_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("books runtime sort db should open");
     for (book_id, title, created, last_modified) in [
@@ -207,8 +210,7 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_serie
     }
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for (sort, expected_ids) in [
         ("metadata.title,asc", vec!["book-2", "book-1"]),
@@ -220,7 +222,8 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_serie
         ("created,desc", vec!["book-2", "book-1"]),
         ("lastModified,desc", vec!["book-2", "book-1"]),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -254,6 +257,4 @@ async fn router_discovery_books_list_sorts_runtime_owned_results_by_number_serie
             .collect::<Vec<_>>();
         assert_eq!(ids, expected_ids, "sort: {sort}");
     }
-
-    cleanup_router_fixture(paths);
 }

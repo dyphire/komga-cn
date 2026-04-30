@@ -19,10 +19,9 @@ fn assert_spring_forbidden(payload: &Value, message: &str, path: &str) {
 
 #[tokio::test]
 async fn router_koreader_user_auth_rejects_valid_x_auth_user_api_key_without_koreader_sync_role() {
-    let paths = new_router_fixture("router-koreader-user-auth-missing-sync-role").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-missing-sync-role").await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "member-no-koreader-sync",
         "member-no-koreader-sync@example.org",
         "member-no-koreader-sync-123",
@@ -31,13 +30,13 @@ async fn router_koreader_user_auth_rejects_valid_x_auth_user_api_key_without_kor
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member-no-koreader-sync@example.org",
-        "member-no-koreader-sync-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials(
+            "member-no-koreader-sync@example.org",
+            "member-no-koreader-sync-123",
+        )
+        .await;
 
     let create_response = app
         .clone()
@@ -75,16 +74,13 @@ async fn router_koreader_user_auth_rejects_valid_x_auth_user_api_key_without_kor
         .expect("koreader users auth valid-api-key request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_create_returns_unauthorized_for_invalid_x_auth_user() {
-    let paths = new_router_fixture("router-koreader-user-create-invalid-auth-header").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-create-invalid-auth-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -99,16 +95,13 @@ async fn router_koreader_user_create_returns_unauthorized_for_invalid_x_auth_use
         .expect("koreader users create request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_create_ignores_invalid_x_api_key_for_koreader_auth() {
-    let paths = new_router_fixture("router-koreader-user-create-invalid-x-api-key").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-create-invalid-x-api-key").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -123,16 +116,13 @@ async fn router_koreader_user_create_ignores_invalid_x_api_key_for_koreader_auth
         .expect("koreader users create x-api-key request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_create_returns_forbidden_without_x_auth_user_or_session() {
-    let paths = new_router_fixture("router-koreader-user-create-missing-header").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-create-missing-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -153,17 +143,14 @@ async fn router_koreader_user_create_returns_forbidden_without_x_auth_user_or_se
         body.is_empty(),
         "security gate should reject before disabled payload"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_koreader_sync_role()
 {
-    let paths = new_router_fixture("router-koreader-user-create-missing-sync-role").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-create-missing-sync-role").await;
     seed_router_age_exclude_user_with_roles(
-        &paths,
+        ctx.paths(),
         "member-no-koreader-sync",
         "member-no-koreader-sync@example.org",
         "member-no-koreader-sync-123",
@@ -172,13 +159,13 @@ async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_k
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member-no-koreader-sync@example.org",
-        "member-no-koreader-sync-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let auth_token = ctx
+        .login_with_credentials(
+            "member-no-koreader-sync@example.org",
+            "member-no-koreader-sync-123",
+        )
+        .await;
 
     let create_response = app
         .clone()
@@ -223,17 +210,14 @@ async fn router_koreader_user_create_rejects_valid_x_auth_user_api_key_without_k
         body.is_empty(),
         "role gate should reject before disabled payload"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_create_returns_spring_forbidden_payload_when_creation_is_disabled() {
-    let paths = new_router_fixture("router-koreader-user-create-disabled-spring-error").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-create-disabled-spring-error").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -298,15 +282,12 @@ async fn router_koreader_user_create_returns_spring_forbidden_payload_when_creat
         "User creation is disabled",
         "/koreader/users/create",
     );
-
-    cleanup_router_fixture(paths);
 }
 #[tokio::test]
 async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
-    let paths = new_router_fixture("router-koreader-user-auth-missing-header").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-missing-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
 
     let response = app
         .oneshot(
@@ -320,17 +301,14 @@ async fn router_koreader_user_auth_returns_forbidden_without_x_auth_user() {
         .expect("koreader users auth missing-header request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_auth_accepts_koreader_sync_session_without_x_auth_user() {
-    let paths = new_router_fixture("router-koreader-user-auth-session-success").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-session-success").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -346,17 +324,14 @@ async fn router_koreader_user_auth_accepts_koreader_sync_session_without_x_auth_
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_auth_rejects_empty_x_auth_user_even_with_koreader_sync_session() {
-    let paths = new_router_fixture("router-koreader-user-auth-empty-header").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-empty-header").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let response = app
         .oneshot(
@@ -372,17 +347,14 @@ async fn router_koreader_user_auth_rejects_empty_x_auth_user_even_with_koreader_
         .expect("koreader users auth empty-header request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_auth_accepts_valid_x_auth_user_api_key() {
-    let paths = new_router_fixture("router-koreader-user-auth-valid-api-key").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-valid-api-key").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -421,17 +393,14 @@ async fn router_koreader_user_auth_accepts_valid_x_auth_user_api_key() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_koreader_user_auth_accepts_application_json_accept_header() {
-    let paths = new_router_fixture("router-koreader-user-auth-application-json").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-koreader-user-auth-application-json").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -478,17 +447,14 @@ async fn router_koreader_user_auth_accepts_application_json_accept_header() {
         Some("application/json")
     );
     assert_eq!(response_json(response).await, json!({ "authorized": "OK" }));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
-    let paths = new_router_fixture("router-users-me-api-keys-roundtrip-fields").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-api-keys-roundtrip-fields").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -544,7 +510,7 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
         "api key create payload should expose lastModifiedDate: {created:?}"
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for api key timestamp override");
     sqlx::query("UPDATE USER_API_KEY SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
@@ -593,17 +559,14 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
         Some(created_created_date.as_str()),
         "api key list entry should mirror Kotlin's createdDate-backed lastModifiedDate: {entry:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_users_me_api_keys_delete_is_scoped_to_current_user() {
-    let paths = new_router_fixture("router-users-me-api-keys-delete-scope").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-users-me-api-keys-delete-scope").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let create_response = app
         .clone()
@@ -652,6 +615,4 @@ async fn router_users_me_api_keys_delete_is_scoped_to_current_user() {
         .await
         .expect("api key delete owned request should complete");
     assert_eq!(owned_delete.status(), StatusCode::NO_CONTENT);
-
-    cleanup_router_fixture(paths);
 }

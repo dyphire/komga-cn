@@ -2,11 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap() {
-    let paths = new_router_fixture("router-book-read-progress-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-basic-auth-compat").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
@@ -29,7 +29,7 @@ async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap(
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for basic-auth read-progress verification");
     let row = sqlx::query(
@@ -44,16 +44,13 @@ async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap(
 
     assert_eq!(row.get::<i64, _>("PAGE"), 10);
     assert!(row.get::<bool, _>("COMPLETED"));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_forbids_basic_auth_user_without_library_access() {
-    let paths = new_router_fixture("router-book-read-progress-basic-auth-forbidden").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-basic-auth-forbidden").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-user-password",
@@ -61,8 +58,9 @@ async fn router_book_read_progress_forbids_basic_auth_user_without_library_acces
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
@@ -84,17 +82,13 @@ async fn router_book_read_progress_forbids_basic_auth_user_without_library_acces
         .expect("forbidden book read-progress basic-auth request should complete");
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_requires_page_when_completed_is_false_or_missing() {
-    let paths = new_router_fixture("router-book-read-progress-requires-page").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-requires-page").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for body in [
         json!({}),
@@ -102,7 +96,8 @@ async fn router_book_read_progress_requires_page_when_completed_is_false_or_miss
         json!({ "page": Value::Null }),
         json!({ "page": Value::Null, "completed": false }),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -120,24 +115,21 @@ async fn router_book_read_progress_requires_page_when_completed_is_false_or_miss
         let payload = response_json(response).await;
         assert_eq!(payload.get("violations"), Some(&json!([])));
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_rejects_non_positive_page_with_validation_payload() {
-    let paths = new_router_fixture("router-book-read-progress-non-positive-page").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-non-positive-page").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for body in [
         json!({ "page": 0 }),
         json!({ "page": -1 }),
         json!({ "page": 0, "completed": true }),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -163,20 +155,17 @@ async fn router_book_read_progress_rejects_non_positive_page_with_validation_pay
             ]))
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_completed_true_ignores_positive_page_and_marks_completed() {
-    let paths = new_router_fixture("router-book-read-progress-completed-true-ignores-page").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-completed-true-ignores-page").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for page in [5, 999] {
-        let update = app
+        let update = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -194,7 +183,8 @@ async fn router_book_read_progress_completed_true_ignores_positive_page_and_mark
 
         assert_eq!(update.status(), StatusCode::NO_CONTENT, "page={page}");
 
-        let detail = app
+        let detail = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -224,19 +214,16 @@ async fn router_book_read_progress_completed_true_ignores_positive_page_and_mark
             "page={page}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_rejects_page_beyond_page_count_with_specific_error() {
-    let paths = new_router_fixture("router-book-read-progress-page-out-of-range").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-page-out-of-range").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -258,19 +245,16 @@ async fn router_book_read_progress_rejects_page_beyond_page_count_with_specific_
             "Page argument (999) must be within 1 and book page count (10)".to_string()
         ))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_marks_completed_when_page_equals_last_page() {
-    let paths = new_router_fixture("router-book-read-progress-last-page-completes").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-last-page-completes").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -286,7 +270,9 @@ async fn router_book_read_progress_marks_completed_when_page_equals_last_page() 
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let detail = app
+    let detail = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -312,17 +298,14 @@ async fn router_book_read_progress_marks_completed_when_page_equals_last_page() 
             .and_then(|value| value.get("completed")),
         Some(&Value::Bool(true))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_page_updates() {
-    let paths = new_router_fixture("router-book-read-progress-refreshes-read-date").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-refreshes-read-date").await;
 
     let old_read_date = "2000-01-01 00:00:00";
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for read-progress refresh seed");
     sqlx::query(
@@ -351,10 +334,10 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
     .expect("existing series read progress aggregate row should insert");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -370,7 +353,7 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for read-progress refresh verification");
     let book_row = sqlx::query(
@@ -401,14 +384,11 @@ async fn router_book_read_progress_refreshes_read_date_and_series_aggregate_on_p
     assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 0);
     assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 1);
     assert_eq!(refreshed_series_read_date, refreshed_book_read_date);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
-    let paths = new_router_fixture("router-book-read-progress-persists-epub-locator").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-read-progress-persists-epub-locator").await;
 
     let positions = json!([
         {
@@ -433,7 +413,7 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
 
     let extension_blob = fixture_epub_positions_extension_blob();
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub locator seed");
     sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
@@ -445,10 +425,10 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
         .expect("epub extension positions should be seeded for read-progress locator test");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -464,7 +444,7 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub locator verification");
     let locator_row =
@@ -487,8 +467,6 @@ async fn router_book_read_progress_persists_epub_locator_for_page_updates() {
         locator,
         positions.as_array().and_then(|items| items.get(1)).cloned()
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -497,15 +475,17 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
         ("router-book-read-progress-delete-clears-progress", false),
         ("router-book-read-progress-delete-oneshot-book", true),
     ] {
-        let paths = new_router_fixture(fixture_name).await;
-        seed_router_contract_data(&paths).await;
-        seed_read_progress_delete_fixture(&paths, fixture_epub_positions_extension_blob(), oneshot)
-            .await;
+        let ctx = TestFixture::new(fixture_name).await;
+        seed_read_progress_delete_fixture(
+            ctx.paths(),
+            fixture_epub_positions_extension_blob(),
+            oneshot,
+        )
+        .await;
+        let auth_token = ctx.login_admin().await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-        let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-        let update = app
+        let update = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -524,7 +504,8 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
             "fixture={fixture_name}"
         );
 
-        let delete = app
+        let delete = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -542,7 +523,8 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
             "fixture={fixture_name}"
         );
 
-        let detail = app
+        let detail = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -562,7 +544,9 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
             "fixture={fixture_name}"
         );
 
-        let koreader = app
+        let koreader = ctx
+            .app()
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -575,7 +559,7 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
             .expect("koreader progress after delete request should complete");
         assert_eq!(koreader.status(), StatusCode::OK, "fixture={fixture_name}");
 
-        let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+        let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for read-progress delete verification");
         let remaining = sqlx::query(
@@ -589,8 +573,6 @@ async fn router_book_read_progress_delete_clears_persisted_progress_and_koreader
         .get::<i64, _>("COUNT");
         verify_pool.close().await;
         assert_eq!(remaining, 0, "fixture={fixture_name}");
-
-        cleanup_router_fixture(paths);
     }
 }
 

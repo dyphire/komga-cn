@@ -2,24 +2,15 @@ use komga_infrastructure::sqlite::connect_main_write_context;
 use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 
-mod support {
-    pub mod persistence_contract_fixture;
-}
+mod support;
 
-use support::persistence_contract_fixture;
+use support::fixture::TestDbFixture;
 
 #[tokio::test]
 async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("settings-persistence-core")
-        .expect("settings persistence db paths should be created");
-    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
-        .await
-        .expect("main db flyway fixture should be created");
-    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
-        .await
-        .expect("tasks db flyway fixture should be created");
+    let ctx = TestDbFixture::new("settings-persistence-core").await;
 
-    let pool = connect_test_pool(&paths.main_db, 1)
+    let pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("main sqlite pool should open");
 
@@ -46,21 +37,13 @@ async fn server_settings_rows_persist_in_flyway_seeded_main_db() {
     assert_eq!(value, "4");
 
     pool.close().await;
-    persistence_contract_fixture::cleanup(paths);
 }
 
 #[tokio::test]
 async fn server_settings_store_round_trips_through_context_backed_path() {
-    let paths = persistence_contract_fixture::new_runtime_db_paths("settings-persistence-context")
-        .expect("settings persistence db paths should be created");
-    persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
-        .await
-        .expect("main db flyway fixture should be created");
-    persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
-        .await
-        .expect("tasks db flyway fixture should be created");
+    let ctx = TestDbFixture::new("settings-persistence-context").await;
 
-    let context = connect_main_write_context(&paths.main_db)
+    let context = connect_main_write_context(&ctx.paths().main_db)
         .await
         .expect("main sqlite write context should open");
     let store = ServerSettingsStore::from_context(context.clone());
@@ -84,5 +67,4 @@ async fn server_settings_store_round_trips_through_context_backed_path() {
     assert_eq!(persisted.get("KOBO_PORT"), None);
 
     context.pool().close().await;
-    persistence_contract_fixture::cleanup(paths);
 }

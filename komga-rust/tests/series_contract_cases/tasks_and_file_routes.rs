@@ -1,46 +1,36 @@
 use super::*;
 
-async fn build_series_task_contract_router(paths: &RuntimeDbPaths) -> axum::Router {
-    // These contracts assert queued TASK rows themselves, so runtime workers must stay off or the
-    // background consumer can claim and delete the rows before the assertions inspect them.
-    komga_server::app::build_router_without_runtime_workers_for_contract(&runtime_config_for_paths(
-        paths,
-    ))
-    .await
-}
-
 #[tokio::test]
 async fn router_series_media_assets_forbid_age_restricted_user() {
-    let paths = new_router_fixture("router-series-media-assets-restricted-user").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_age_exclude_user_with_roles(
-        &paths,
-        "restricted-user",
-        "restricted@example.org",
-        "router-contract-restricted-123",
-        12,
-        &["USER", "FILE_DOWNLOAD"],
-    )
-    .await;
-    write_router_epub_resource(
-        &paths,
-        "books/book-1.epub",
-        "OEBPS/chapter.xhtml",
-        br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
-    );
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let restricted_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "router-contract-restricted-123",
-    )
-    .await;
+    let ctx = TestFixture::builder("router-series-media-assets-restricted-user")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "restricted-user",
+                "restricted@example.org",
+                "router-contract-restricted-123",
+                12,
+                &["USER", "FILE_DOWNLOAD"],
+            )
+            .await;
+            write_router_epub_resource(
+                &paths,
+                "books/book-1.epub",
+                "OEBPS/chapter.xhtml",
+                br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Restricted</body></html>"#,
+            );
+        })
+        .build()
+        .await;
+    let admin_token = ctx.login_admin().await;
+    let restricted_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -67,7 +57,8 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         "/api/v1/series/series-1/file",
         "/api/v2/series/series-1/read-progress/tachiyomi",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -83,7 +74,8 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "route: {route}");
     }
 
-    let by_id = app
+    let by_id = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -99,7 +91,8 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
 
     for route in ["/api/v1/series/series-1/read-progress"] {
         for method in ["POST", "DELETE"] {
-            let response = app
+            let response = ctx
+                .app()
                 .clone()
                 .oneshot(
                     Request::builder()
@@ -115,7 +108,9 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         }
     }
 
-    let tachiyomi_put = app
+    let tachiyomi_put = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -133,29 +128,29 @@ async fn router_series_media_assets_forbid_age_restricted_user() {
         .await
         .expect("restricted series tachiyomi put request should complete");
     assert_eq!(tachiyomi_put.status(), StatusCode::FORBIDDEN);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-series-media-assets-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_resource(
-        &paths,
-        "books/book-1.epub",
-        "OEBPS/chapter.xhtml",
-        br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Series Direct Auth</body></html>"#,
-    );
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let ctx = TestFixture::builder("router-series-media-assets-basic-auth-compat")
+        .with_seed(|paths| async move {
+            write_router_epub_resource(
+                &paths,
+                "books/book-1.epub",
+                "OEBPS/chapter.xhtml",
+                br#"<html xmlns='http://www.w3.org/1999/xhtml'><body>Series Direct Auth</body></html>"#,
+            );
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
     let image_bytes = fixture_png_bytes();
     let (content_type, body) =
         multipart_image_upload_body("file", "series.png", "image/png", true, &image_bytes);
-    let upload = app
+    let upload = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -183,7 +178,8 @@ async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_c
         "/api/v1/series/series-1/file".to_string(),
         "/api/v2/series/series-1/read-progress/tachiyomi".to_string(),
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -201,7 +197,8 @@ async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_c
     }
 
     for method in ["POST", "DELETE"] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -222,7 +219,9 @@ async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_c
         );
     }
 
-    let tachiyomi_put = app
+    let tachiyomi_put = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -241,19 +240,15 @@ async fn router_series_media_assets_and_progress_accept_basic_auth_like_kotlin_c
         .await
         .expect("series basic-auth tachiyomi put should complete");
     assert_eq!(tachiyomi_put.status(), StatusCode::NO_CONTENT);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() {
-    let paths = new_router_fixture("router-series-tachiyomi-missing-series").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-tachiyomi-missing-series").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let get_response = app
+    let get_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -280,7 +275,9 @@ async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() 
         })
     );
 
-    let put_response = app
+    let put_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
@@ -297,7 +294,7 @@ async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() 
 
     assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for missing-series noop verification");
     let count = sqlx::query_scalar::<_, i64>(
@@ -311,30 +308,30 @@ async fn router_series_tachiyomi_missing_series_gets_zero_dto_and_put_is_noop() 
     pool.close().await;
 
     assert_eq!(count, 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_progress_counts_deleted_books_like_kotlin() {
-    let paths = new_router_fixture("router-series-tachiyomi-progress-counts-deleted-books").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-tachiyomi-progress-counts-deleted-books")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("series tachiyomi deleted-book db should open");
+            sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
+                .bind("2024-03-01T00:00:00")
+                .bind("book-1")
+                .execute(&pool)
+                .await
+                .expect("series tachiyomi deleted-book row should update");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("series tachiyomi deleted-book db should open");
-    sqlx::query("UPDATE BOOK SET DELETED_DATE = ? WHERE ID = ?")
-        .bind("2024-03-01T00:00:00")
-        .bind("book-1")
-        .execute(&pool)
-        .await
-        .expect("series tachiyomi deleted-book row should update");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -358,34 +355,34 @@ async fn router_series_tachiyomi_progress_counts_deleted_books_like_kotlin() {
             "maxNumberSort": 1.0,
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in_progress() {
-    let paths = new_router_fixture("router-series-tachiyomi-progress-page-zero-in-progress").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-tachiyomi-progress-page-zero-in-progress")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("series tachiyomi page-zero db should open");
+            sqlx::query(
+                "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+            )
+            .bind("book-1")
+            .bind("admin-user")
+            .bind(0_i64)
+            .bind(false)
+            .execute(&pool)
+            .await
+            .expect("series tachiyomi page-zero read progress row should insert");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("series tachiyomi page-zero db should open");
-    sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
-    )
-    .bind("book-1")
-    .bind("admin-user")
-    .bind(0_i64)
-    .bind(false)
-    .execute(&pool)
-    .await
-    .expect("series tachiyomi page-zero read progress row should insert");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -409,47 +406,47 @@ async fn router_series_tachiyomi_progress_counts_completed_false_page_zero_as_in
             "maxNumberSort": 1.0,
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_complete() {
-    let paths = new_router_fixture("router-series-tachiyomi-progress-refresh-read-date").await;
-    seed_router_contract_data(&paths).await;
-
     let old_read_date = "2000-01-01 00:00:00";
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for series tachiyomi read-date seed");
-    sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("book-1")
-    .bind("admin-user")
-    .bind(1_i64)
-    .bind(false)
-    .bind(old_read_date)
-    .execute(&pool)
-    .await
-    .expect("incomplete read progress row should insert");
-    sqlx::query(
-        "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("series-1")
-    .bind("admin-user")
-    .bind(0_i64)
-    .bind(1_i64)
-    .bind(old_read_date)
-    .execute(&pool)
-    .await
-    .expect("series read progress aggregate row should insert");
-    pool.close().await;
+    let ctx =
+        TestFixture::builder("router-series-tachiyomi-progress-refresh-read-date")
+            .with_seed(move |paths| async move {
+                let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                    .await
+                    .expect("main db should open for series tachiyomi read-date seed");
+                sqlx::query(
+                    "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind("book-1")
+                .bind("admin-user")
+                .bind(1_i64)
+                .bind(false)
+                .bind(old_read_date)
+                .execute(&pool)
+                .await
+                .expect("incomplete read progress row should insert");
+                sqlx::query(
+                    "INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE) VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind("series-1")
+                .bind("admin-user")
+                .bind(0_i64)
+                .bind(1_i64)
+                .bind(old_read_date)
+                .execute(&pool)
+                .await
+                .expect("series read progress aggregate row should insert");
+                pool.close().await;
+            })
+            .build()
+            .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -467,7 +464,7 @@ async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_comp
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for read-date refresh verification");
     let book_row = sqlx::query(
@@ -497,34 +494,34 @@ async fn router_series_tachiyomi_progress_refreshes_read_dates_when_marking_comp
     assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 1);
     assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 0);
     assert_eq!(refreshed_series_read_date, refreshed_book_read_date);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_zero_in_progress() {
-    let paths =
-        new_router_fixture("router-series-tachiyomi-progress-refresh-aggregate-page-zero").await;
-    seed_router_contract_data(&paths).await;
-
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for series aggregate seed");
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    let ctx = TestFixture::builder(
+        "router-series-tachiyomi-progress-refresh-aggregate-page-zero",
     )
-    .bind("book-2")
-    .bind(0_i64)
-    .bind("book-2.epub")
-    .bind("books/book-2.epub")
-    .bind("series-1")
-    .bind(2_048_i64)
-    .bind(2_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("second series book row should insert");
-    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+    .with_seed(|paths| async move {
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("main db should open for series aggregate seed");
+        sqlx::query(
+            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-2")
+        .bind(0_i64)
+        .bind("book-2.epub")
+        .bind("books/book-2.epub")
+        .bind("series-1")
+        .bind(2_048_i64)
+        .bind(2_i64)
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("second series book row should insert");
+        sqlx::query(
+            "INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)",
+        )
         .bind("application/epub+zip")
         .bind("READY")
         .bind("book-2")
@@ -532,34 +529,36 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
         .execute(&pool)
         .await
         .expect("second series media row should insert");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("2")
-    .bind(2.0_f64)
-    .bind("Book 2")
-    .bind("2024-01-16")
-    .bind("book-2")
-    .execute(&pool)
-    .await
-    .expect("second series book metadata row should insert");
-    sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("book-2")
-    .bind("admin-user")
-    .bind(0_i64)
-    .bind(false)
-    .bind("2000-01-01 00:00:00")
-    .execute(&pool)
-    .await
-    .expect("page-zero in-progress row should insert");
-    pool.close().await;
+        sqlx::query(
+            "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("2")
+        .bind(2.0_f64)
+        .bind("Book 2")
+        .bind("2024-01-16")
+        .bind("book-2")
+        .execute(&pool)
+        .await
+        .expect("second series book metadata row should insert");
+        sqlx::query(
+            "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("book-2")
+        .bind("admin-user")
+        .bind(0_i64)
+        .bind(false)
+        .bind("2000-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("page-zero in-progress row should insert");
+        pool.close().await;
+    })
+    .build()
+    .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -577,7 +576,7 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for series aggregate verification");
     let series_row = sqlx::query(
@@ -592,34 +591,33 @@ async fn router_series_tachiyomi_progress_refreshes_series_aggregate_for_page_ze
 
     assert_eq!(series_row.get::<i64, _>("READ_COUNT"), 1);
     assert_eq!(series_row.get::<i64, _>("IN_PROGRESS_COUNT"), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_books() {
-    let paths = new_router_fixture("router-series-tachiyomi-progress-skip-completed").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-tachiyomi-progress-skip-completed")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("main db should open for series tachiyomi completed seed");
+            sqlx::query(
+                "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
+            )
+            .bind("book-1")
+            .bind("admin-user")
+            .bind(3_i64)
+            .bind(true)
+            .execute(&pool)
+            .await
+            .expect("completed read progress row should insert");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
-        .await
-        .expect("main db should open for series tachiyomi completed seed");
-    sqlx::query(
-        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED) VALUES (?, ?, ?, ?)",
-    )
-    .bind("book-1")
-    .bind("admin-user")
-    .bind(3_i64)
-    .bind(true)
-    .execute(&pool)
-    .await
-    .expect("completed read progress row should insert");
-    pool.close().await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -637,7 +635,7 @@ async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_boo
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for completed-skip verification");
     let row = sqlx::query(
@@ -652,19 +650,16 @@ async fn router_series_tachiyomi_progress_does_not_rewrite_already_completed_boo
 
     assert_eq!(row.get::<i64, _>("PAGE"), 3);
     assert_eq!(row.get::<i64, _>("COMPLETED"), 1);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_file_returns_empty_zip_when_all_series_files_are_missing() {
-    let paths = new_router_fixture("router-series-file-empty-zip").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-series-file-empty-zip").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -690,19 +685,19 @@ async fn router_series_file_returns_empty_zip_when_all_series_files_are_missing(
     let archive = ZipArchive::new(Cursor::new(zip_body.to_vec()))
         .expect("series file body should be a readable zip archive");
     assert_eq!(archive.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
-    let paths = new_router_fixture("router-series-file-delete-group-null").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-file-delete-group-null")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_series_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -716,7 +711,7 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series delete verification");
     let rows =
@@ -741,19 +736,19 @@ async fn router_series_file_delete_enqueues_delete_series_without_group_id() {
         }),
         "series file delete route should persist the Kotlin-compatible DeleteSeries payload shape",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
-    let paths = new_router_fixture("router-series-analyze-group-series-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-analyze-group-series-id")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_series_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -767,7 +762,7 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series analyze verification");
     let rows = sqlx::query("SELECT SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")
@@ -782,19 +777,19 @@ async fn router_series_analyze_enqueues_book_tasks_grouped_by_series_id() {
         rows[0].get::<Option<String>, _>("GROUP_ID"),
         Some("series-1".to_string())
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
-    let paths = new_router_fixture("router-series-metadata-refresh-groups").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::builder("router-series-metadata-refresh-groups")
+        .without_runtime_workers()
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_series_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -808,7 +803,7 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series metadata refresh verification");
     let rows = sqlx::query("SELECT ID, GROUP_ID, PAYLOAD FROM TASK ORDER BY ID ASC")
@@ -857,20 +852,22 @@ async fn router_series_metadata_refresh_enqueues_kotlin_style_task_groups() {
             "uniqueId": "RefreshBookMetadata_book-1"
         })
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
-    let paths = new_router_fixture("router-series-metadata-refresh-no-canonicalize").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
+    let ctx = TestFixture::builder("router-series-metadata-refresh-no-canonicalize")
+        .without_runtime_workers()
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_series_task_contract_router(&paths).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -884,7 +881,7 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open for series metadata refresh alias verification");
     let rows = sqlx::query("SELECT ID, SIMPLE_TYPE, GROUP_ID FROM TASK ORDER BY ID ASC")
@@ -903,6 +900,4 @@ async fn router_series_metadata_refresh_does_not_canonicalize_series_id() {
         "RefreshSeriesLocalArtwork"
     );
     assert_eq!(rows[0].get::<Option<String>, _>("GROUP_ID"), None);
-
-    cleanup_router_fixture(paths);
 }

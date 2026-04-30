@@ -2,12 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_on_deck_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-on-deck-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-opds-v2-on-deck-unauthorized-auth-doc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -19,19 +18,23 @@ async fn router_opds_v2_on_deck_unauthorized_returns_opds_auth_document() {
         .expect("opds v2 on-deck unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
-    let paths = new_router_fixture("router-opds-v2-on-deck-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-on-deck-shape").await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf",
+        "series-1",
+        "book-pdf.pdf",
+        "Book PDF",
+    )
+    .await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2-read",
         "series-2",
         "library-2",
@@ -41,7 +44,7 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2-on-deck",
         "series-2",
         "library-2",
@@ -50,10 +53,10 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
         "2024-03-01 00:00:00",
     )
     .await;
-    update_router_book_isbn(&paths, "book-pdf", "9780000000002").await;
-    update_router_book_isbn(&paths, "book-library-2-on-deck", "9780000000006").await;
+    update_router_book_isbn(ctx.paths(), "book-pdf", "9780000000002").await;
+    update_router_book_isbn(ctx.paths(), "book-library-2-on-deck", "9780000000006").await;
     seed_router_read_progress_entry(
-        &paths,
+        ctx.paths(),
         "book-1",
         "admin-user",
         10,
@@ -62,7 +65,7 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
     seed_router_read_progress_entry(
-        &paths,
+        ctx.paths(),
         "book-library-2-read",
         "admin-user",
         10,
@@ -71,7 +74,7 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
     upsert_router_series_read_progress(
-        &paths,
+        ctx.paths(),
         "series-1",
         "admin-user",
         1,
@@ -80,7 +83,7 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
     upsert_router_series_read_progress(
-        &paths,
+        ctx.paths(),
         "series-2",
         "admin-user",
         1,
@@ -89,10 +92,11 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -187,19 +191,23 @@ async fn router_opds_v2_on_deck_uses_kotlin_shape_and_visible_results() {
             .and_then(Value::as_str),
         Some("Series 2")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
-    let paths = new_router_fixture("router-opds-v2-on-deck-restricted-results").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
-    seed_router_custom_series(&paths, "series-2", "Series 2", "library-2").await;
+    let ctx = TestFixture::new("router-opds-v2-on-deck-restricted-results").await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf",
+        "series-1",
+        "book-pdf.pdf",
+        "Book PDF",
+    )
+    .await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
+    seed_router_custom_series(ctx.paths(), "series-2", "Series 2", "library-2").await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2-read",
         "series-2",
         "library-2",
@@ -209,7 +217,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     seed_catalog_book(
-        &paths,
+        ctx.paths(),
         "book-library-2-on-deck",
         "series-2",
         "library-2",
@@ -219,7 +227,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -227,7 +235,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     seed_router_read_progress_entry(
-        &paths,
+        ctx.paths(),
         "book-1",
         "restricted-user",
         10,
@@ -236,7 +244,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     seed_router_read_progress_entry(
-        &paths,
+        ctx.paths(),
         "book-library-2-read",
         "restricted-user",
         10,
@@ -245,7 +253,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     upsert_router_series_read_progress(
-        &paths,
+        ctx.paths(),
         "series-1",
         "restricted-user",
         1,
@@ -254,7 +262,7 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
     upsert_router_series_read_progress(
-        &paths,
+        ctx.paths(),
         "series-2",
         "restricted-user",
         1,
@@ -263,15 +271,13 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -304,20 +310,24 @@ async fn router_opds_v2_on_deck_filters_results_for_restricted_user() {
             .and_then(Value::as_str),
         Some("Book PDF")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_on_deck_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-library-on-deck-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, true).await;
-    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
+    let ctx = TestFixture::new("router-opds-v2-library-on-deck-unauthorized-auth-doc").await;
+    seed_router_read_progress(ctx.paths(), true).await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf",
+        "series-1",
+        "book-pdf.pdf",
+        "Book PDF",
+    )
+    .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -329,17 +339,14 @@ async fn router_opds_v2_library_on_deck_unauthorized_returns_opds_auth_document(
         .expect("opds v2 library on-deck unauthorized request should complete");
 
     assert_unauthorized_opds_auth_document(response).await;
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses() {
-    let paths = new_router_fixture("router-opds-v2-library-on-deck-scope").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_library(&paths, "library-2", "Library 2").await;
+    let ctx = TestFixture::new("router-opds-v2-library-on-deck-scope").await;
+    seed_router_library(ctx.paths(), "library-2", "Library 2").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "restricted-user",
         "restricted@example.org",
         "restricted-pass-123",
@@ -347,15 +354,13 @@ async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses()
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "restricted@example.org",
-        "restricted-pass-123",
-    )
-    .await;
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "restricted-pass-123")
+        .await;
 
-    let forbidden_response = app
+    let forbidden_response = ctx
+        .app()
+        .clone()
         .clone()
         .oneshot(
             Request::builder()
@@ -369,7 +374,9 @@ async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses()
         .expect("forbidden on-deck request should complete");
     assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
 
-    let missing_response = app
+    let missing_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -381,23 +388,28 @@ async fn router_opds_v2_library_on_deck_respects_kotlin_library_scope_statuses()
         .await
         .expect("missing-library on-deck request should complete");
     assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_library_on_deck_uses_kotlin_shape() {
-    let paths = new_router_fixture("router-opds-v2-library-on-deck-shape").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, true).await;
-    seed_router_pdf_book(&paths, "book-pdf", "series-1", "book-pdf.pdf", "Book PDF").await;
-    update_router_library_last_modified(&paths, "library-1", "2024-02-03 04:05:06").await;
-    update_router_book_isbn(&paths, "book-pdf", "9780000000002").await;
+    let ctx = TestFixture::new("router-opds-v2-library-on-deck-shape").await;
+    seed_router_read_progress(ctx.paths(), true).await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf",
+        "series-1",
+        "book-pdf.pdf",
+        "Book PDF",
+    )
+    .await;
+    update_router_library_last_modified(ctx.paths(), "library-1", "2024-02-03 04:05:06").await;
+    update_router_book_isbn(ctx.paths(), "book-pdf", "9780000000002").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -547,6 +559,4 @@ async fn router_opds_v2_library_on_deck_uses_kotlin_shape() {
         images[0].get("href").and_then(Value::as_str),
         Some("http://localhost/opds/v2/books/book-pdf/thumbnail")
     );
-
-    cleanup_router_fixture(paths);
 }

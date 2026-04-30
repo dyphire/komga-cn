@@ -2,14 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_series_list_supports_release_date_date_style_ops_in_runtime_owned_mode() {
-    let paths =
-        new_router_fixture("router-discovery-series-list-strict-release-date-date-style").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-series-list-strict-release-date-date-style").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let after_match = app
+    let after_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -40,7 +37,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date after match payload should expose content array");
     assert_eq!(after_match_content.len(), 1);
 
-    let after_miss = app
+    let after_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -71,7 +69,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date after miss payload should expose content array");
     assert_eq!(after_miss_content.len(), 0);
 
-    let before_match = app
+    let before_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -102,7 +101,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date before match payload should expose content array");
     assert_eq!(before_match_content.len(), 1);
 
-    let before_miss = app
+    let before_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -133,7 +133,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date before miss payload should expose content array");
     assert_eq!(before_miss_content.len(), 0);
 
-    let is_in_the_last_match = app
+    let is_in_the_last_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -164,7 +165,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date isInTheLast match payload should expose content array");
     assert_eq!(is_in_the_last_match_content.len(), 1);
 
-    let is_in_the_last_miss = app
+    let is_in_the_last_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -195,7 +197,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         .expect("strict series release-date isInTheLast miss payload should expose content array");
     assert_eq!(is_in_the_last_miss_content.len(), 0);
 
-    let is_not_in_the_last_match = app
+    let is_not_in_the_last_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -230,7 +233,8 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
         );
     assert_eq!(is_not_in_the_last_match_content.len(), 1);
 
-    let is_not_in_the_last_miss = app
+    let is_not_in_the_last_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -262,6 +266,4 @@ async fn router_discovery_series_list_supports_release_date_date_style_ops_in_ru
             "strict series release-date isNotInTheLast miss payload should expose content array",
         );
     assert_eq!(is_not_in_the_last_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

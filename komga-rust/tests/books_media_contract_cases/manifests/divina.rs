@@ -22,14 +22,18 @@ fn overwrite_cbz_with_single_page(
 
 #[tokio::test]
 async fn router_book_manifest_dispatches_to_divina_profile_payload() {
-    let paths = new_router_fixture("router-book-manifest-default-uses-divina-profile").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    let ctx = TestFixture::builder("router-book-manifest-default-uses-divina-profile")
+        .with_seed(|paths| async move {
+            seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -57,22 +61,24 @@ async fn router_book_manifest_dispatches_to_divina_profile_payload() {
             .and_then(Value::as_str),
         Some("https://readium.org/webpub-manifest/profiles/divina")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() {
-    let paths = new_router_fixture("router-opds-v2-divina-manifest-page-media-type").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    let ctx = TestFixture::builder("router-opds-v2-divina-manifest-page-media-type")
+        .with_seed(|paths| async move {
+            seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+        })
+        .with_config(|config| {
+            config.mode = RuntimeMode::Isolated;
+        })
+        .build()
+        .await;
 
-    let mut config = runtime_config_for_paths(&paths);
-    config.mode = RuntimeMode::Isolated;
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -96,29 +102,30 @@ async fn router_opds_v2_divina_manifest_uses_page_media_type_in_reading_order() 
             .and_then(Value::as_str),
         Some("image/png")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_divina_manifest_exposes_jpeg_alternate_for_webp_pages() {
-    let paths = new_router_fixture("router-opds-v2-divina-manifest-webp-alternate").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-webp-1", "book-webp-1.cbz", "Book WEBP")
+    let ctx = TestFixture::builder("router-opds-v2-divina-manifest-webp-alternate")
+        .with_config(|config| {
+            config.mode = RuntimeMode::Isolated;
+        })
+        .build()
+        .await;
+    seed_router_primary_series_cbz_book(ctx.paths(), "book-webp-1", "book-webp-1.cbz", "Book WEBP")
         .await;
     overwrite_cbz_with_single_page(
-        &paths,
+        ctx.paths(),
         "books/book-webp-1.cbz",
         "page-1.webp",
         &fixture_png_bytes(),
     );
 
-    let mut config = runtime_config_for_paths(&paths);
-    config.mode = RuntimeMode::Isolated;
-    let app = build_router_with_config(&config).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -167,20 +174,21 @@ async fn router_opds_v2_divina_manifest_exposes_jpeg_alternate_for_webp_pages() 
             .and_then(Value::as_str),
         Some("image/jpeg")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_divina_uses_page_media_type_in_reading_order() {
-    let paths = new_router_fixture("router-book-manifest-divina-page-media-type").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+    let ctx = TestFixture::builder("router-book-manifest-divina-page-media-type")
+        .with_seed(|paths| async move {
+            seed_router_primary_series_cbz_book(&paths, "book-3", "book-3.cbz", "Book 3").await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -213,6 +221,4 @@ async fn router_book_manifest_divina_uses_page_media_type_in_reading_order() {
             .and_then(Value::as_str),
         Some("image/png")
     );
-
-    cleanup_router_fixture(paths);
 }

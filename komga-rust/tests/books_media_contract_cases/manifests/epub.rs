@@ -50,12 +50,16 @@ async fn seed_epub_manifest_media(
 
 #[tokio::test]
 async fn router_book_manifest_epub_exposes_epub_specific_shape() {
-    let paths = new_router_fixture("router-book-manifest-epub-specific-shape").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
-    seed_epub_manifest_media(&paths, "main db should open for epub manifest seed", false).await;
+    let ctx = TestFixture::builder("router-book-manifest-epub-specific-shape")
+        .with_seed(|paths| async move {
+            seed_epub_manifest_media(&paths, "main db should open for epub manifest seed", false)
+                .await;
+        })
+        .build()
+        .await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for epub manifest metadata seed");
     sqlx::query("UPDATE BOOK_METADATA SET SUMMARY = ?, ISBN = ? WHERE BOOK_ID = ?")
@@ -79,10 +83,11 @@ async fn router_book_manifest_epub_exposes_epub_specific_shape() {
         .expect("epub manifest reading direction should be seeded");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -253,23 +258,19 @@ async fn router_book_manifest_epub_exposes_epub_specific_shape() {
             .and_then(Value::as_str),
         Some("http://localhost/api/v1/books/book-1/resource/OEBPS/chapter.xhtml#page-1")
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-book-manifest-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-book-manifest-basic-auth-compat").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
     seed_epub_manifest_media(
-        &paths,
+        ctx.paths(),
         "main db should open for basic-auth epub manifest seed",
         false,
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
@@ -277,7 +278,8 @@ async fn router_book_manifest_routes_accept_basic_auth_like_kotlin_clients() {
         "/api/v1/books/book-1/manifest",
         "/api/v1/books/book-1/manifest/epub",
     ] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -293,26 +295,24 @@ async fn router_book_manifest_routes_accept_basic_auth_like_kotlin_clients() {
 
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_manifest_dispatches_to_epub_profile_payload() {
-    let paths = new_router_fixture("router-book-manifest-default-uses-epub-profile").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-book-manifest-default-uses-epub-profile").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
     seed_epub_manifest_media(
-        &paths,
+        ctx.paths(),
         "main db should open for generic epub manifest seed",
         true,
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -344,26 +344,24 @@ async fn router_book_manifest_dispatches_to_epub_profile_payload() {
             })),
         "generic epub manifest should expose divina alternate link when epub is compatible: {payload:?}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_divina_manifest_accepts_divina_compatible_epub() {
-    let paths = new_router_fixture("router-opds-v2-divina-manifest-compatible-epub").await;
-    seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    let ctx = TestFixture::new("router-opds-v2-divina-manifest-compatible-epub").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
     seed_epub_manifest_media(
-        &paths,
+        ctx.paths(),
         "main db should open for opds epub divina manifest seed",
         true,
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -409,6 +407,4 @@ async fn router_opds_v2_divina_manifest_accepts_divina_compatible_epub() {
             .and_then(Value::as_str),
         Some("image/png")
     );
-
-    cleanup_router_fixture(paths);
 }

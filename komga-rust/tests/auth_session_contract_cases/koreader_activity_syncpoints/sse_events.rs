@@ -191,10 +191,9 @@ async fn import_book_for_sse(
 #[tokio::test]
 async fn router_sse_events_requires_authenticated_user() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-auth-required").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-auth-required").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let app = ctx.app().clone();
     let response = app
         .oneshot(
             Request::builder()
@@ -207,18 +206,15 @@ async fn router_sse_events_requires_authenticated_user() {
         .expect("sse unauthorized request should complete");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-admin-task-heartbeat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-admin-task-heartbeat").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
     let response = app
         .oneshot(
             Request::builder()
@@ -255,18 +251,15 @@ async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() 
                 && event.payload.get("countByType").is_some()),
         "admin SSE should include TaskQueueStatus event: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_emit_library_changed_without_five_second_poll_delay() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-library-change").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-library-change").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
     let response = app
         .clone()
         .oneshot(
@@ -315,22 +308,19 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
         }),
         "SSE should emit LibraryChanged promptly after library update mutation: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-book-import-success").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-book-import-success").await;
     let source_file = temp_import_source_file(
         "router-sse-events-book-import-success",
         "import-success.cbz",
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
     let response = app
         .oneshot(
             Request::builder()
@@ -343,7 +333,7 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
         .await
         .expect("sse successful book import request should complete");
 
-    let update_main_db = paths.main_db.clone();
+    let update_main_db = ctx.paths().main_db.clone();
     let import_source = source_file.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
@@ -374,22 +364,19 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
         }),
         "admin SSE should emit BookImported for successful imports: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-book-import-failure").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-book-import-failure").await;
     let source_file = missing_import_source_file(
         "router-sse-events-book-import-failure",
         "missing-import.cbz",
     );
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
     let response = app
         .oneshot(
             Request::builder()
@@ -402,7 +389,7 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
         .await
         .expect("sse failed book import request should complete");
 
-    let update_main_db = paths.main_db.clone();
+    let update_main_db = ctx.paths().main_db.clone();
     let import_source = source_file.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
@@ -433,17 +420,14 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
         }),
         "admin SSE should emit failed BookImported events with error details: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-session-expired").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-session-expired").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -451,14 +435,11 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let response = app
         .clone()
@@ -507,18 +488,15 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
         }),
         "SSE should emit SessionExpired for invalidated sessions: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_rejects_new_connections_after_shutdown_with_internal_server_error() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-shutdown-rejects-new-connections").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-shutdown-rejects-new-connections").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
 
     let shutdown_response = app
         .clone()
@@ -547,17 +525,14 @@ async fn router_sse_events_rejects_new_connections_after_shutdown_with_internal_
         .expect("sse shutdown rejection request should complete");
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-session-expired-user-delete").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-session-expired-user-delete").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -565,14 +540,11 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let admin_token = login_with_basic_and_get_token(app.clone()).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let admin_token = ctx.login_admin().await;
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let response = app
         .clone()
@@ -618,17 +590,14 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
         }),
         "SSE should emit SessionExpired when admin deletes a user: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_password() {
     let _guard = auth_session_runtime_env_lock().lock().await;
-    let paths = new_router_fixture("router-sse-events-self-password-no-session-expired").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-sse-events-self-password-no-session-expired").await;
     seed_router_library_restricted_user(
-        &paths,
+        ctx.paths(),
         "member-user",
         "member@example.org",
         "router-contract-member-123",
@@ -636,13 +605,10 @@ async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_pas
     )
     .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let member_token = login_with_basic_credentials_and_get_token(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let app = ctx.app().clone();
+    let member_token = ctx
+        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .await;
 
     let response = app
         .clone()
@@ -693,6 +659,4 @@ async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_pas
             .all(|event| event.name != "SessionExpired"),
         "self password change must not emit SessionExpired SSE: {body}"
     );
-
-    cleanup_router_fixture(paths);
 }

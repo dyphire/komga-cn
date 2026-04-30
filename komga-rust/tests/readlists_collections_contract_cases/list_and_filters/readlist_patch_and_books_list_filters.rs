@@ -2,13 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlist_patch_preserves_unspecified_fields() {
-    let paths = new_router_fixture("router-readlist-patch-preserves-unspecified-fields").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-readlist-patch-preserves-unspecified-fields").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let patch = app
+    let patch = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -23,7 +21,9 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
         .expect("readlist patch request should complete");
     assert_eq!(patch.status(), StatusCode::NO_CONTENT);
 
-    let detail = app
+    let detail = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -40,20 +40,16 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
     assert_eq!(payload.get("summary"), Some(&json!("")));
     assert_eq!(payload.get("ordered"), Some(&json!(true)));
     assert_eq!(payload.get("bookIds"), Some(&json!(["book-1"])));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-readlist-admin-routes-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
-
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-readlist-admin-routes-basic-auth-compat").await;
     let authorization =
         basic_authorization_header_value("admin@example.org", "router-contract-admin-123");
 
-    let create = app
+    let create = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -81,7 +77,8 @@ async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
         .expect("readlist create basic-auth response should expose id")
         .to_string();
 
-    let patch = app
+    let patch = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -103,7 +100,8 @@ async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
         .expect("readlist patch basic-auth request should complete");
     assert_eq!(patch.status(), StatusCode::NO_CONTENT);
 
-    let delete = app
+    let delete = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -117,8 +115,6 @@ async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
         .await
         .expect("readlist delete basic-auth request should complete");
     assert_eq!(delete.status(), StatusCode::NO_CONTENT);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
@@ -156,13 +152,12 @@ async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
         ),
     ] {
         let fixture_name = format!("router-readlist-create-{fixture_suffix}");
-        let paths = new_router_fixture(&fixture_name).await;
-        seed_router_contract_data(&paths).await;
+        let ctx = TestFixture::new(&fixture_name).await;
+        let auth_token = ctx.login_admin().await;
 
-        let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-        let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -180,20 +175,17 @@ async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
             StatusCode::BAD_REQUEST,
             "fixture: {fixture_suffix}"
         );
-
-        cleanup_router_fixture(paths);
     }
 }
 
 #[tokio::test]
 async fn router_readlist_create_defaults_optional_fields_like_kotlin() {
-    let paths = new_router_fixture("router-readlist-create-defaults-optional-fields").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-readlist-create-defaults-optional-fields").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -218,19 +210,15 @@ async fn router_readlist_create_defaults_optional_fields_like_kotlin() {
     assert_eq!(payload.get("summary"), Some(&json!("")));
     assert_eq!(payload.get("ordered"), Some(&json!(true)));
     assert_eq!(payload.get("bookIds"), Some(&json!(["book-1"])));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_mode() {
-    let paths = new_router_fixture("router-discovery-books-list-strict-read-list-id").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-read-list-id").await;
+    let auth_token = ctx.login_admin().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
-
-    let read_list_is_match = app
+    let read_list_is_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -255,7 +243,8 @@ async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_
         .expect("strict books read-list is match payload should expose content array");
     assert_eq!(read_list_is_match_content.len(), 1);
 
-    let read_list_is_miss = app
+    let read_list_is_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -280,7 +269,8 @@ async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_
         .expect("strict books read-list is miss payload should expose content array");
     assert_eq!(read_list_is_miss_content.len(), 0);
 
-    let read_list_is_not_match = app
+    let read_list_is_not_match = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -305,7 +295,8 @@ async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_
         .expect("strict books read-list isNot match payload should expose content array");
     assert_eq!(read_list_is_not_match_content.len(), 1);
 
-    let read_list_is_not_miss = app
+    let read_list_is_not_miss = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -329,21 +320,17 @@ async fn router_discovery_books_list_supports_read_list_id_ops_in_runtime_owned_
         .and_then(Value::as_array)
         .expect("strict books read-list isNot miss payload should expose content array");
     assert_eq!(read_list_is_not_miss_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_books_list_supports_combined_read_list_id_filters_in_runtime_owned_mode()
 {
-    let paths =
-        new_router_fixture("router-discovery-books-list-strict-read-list-id-combined").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-books-list-strict-read-list-id-combined").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let included_response = app
+    let included_response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -376,7 +363,9 @@ async fn router_discovery_books_list_supports_combined_read_list_id_filters_in_r
         .expect("strict books combined read-list include payload should expose content array");
     assert_eq!(included_content.len(), 1);
 
-    let excluded_response = app
+    let excluded_response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -407,6 +396,4 @@ async fn router_discovery_books_list_supports_combined_read_list_id_filters_in_r
         .and_then(Value::as_array)
         .expect("strict books combined read-list exclude payload should expose content array");
     assert_eq!(excluded_content.len(), 0);
-
-    cleanup_router_fixture(paths);
 }

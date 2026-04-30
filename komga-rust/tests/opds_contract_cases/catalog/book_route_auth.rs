@@ -2,15 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn router_opds_v2_book_file_unauthorized_returns_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-book-file-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-opds-v2-book-file-unauthorized-auth-doc").await;
 
     for route in [
         "/opds/v2/books/book-1/file",
         "/opds/v2/books/book-1/file/book-1.epub",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -92,21 +92,19 @@ async fn router_opds_v2_book_file_unauthorized_returns_opds_auth_document() {
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_opds_v2_book_page_routes_unauthorized_return_opds_auth_document() {
-    let paths = new_router_fixture("router-opds-v2-book-page-unauthorized-auth-doc").await;
-    seed_router_contract_data(&paths).await;
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
+    let ctx = TestFixture::new("router-opds-v2-book-page-unauthorized-auth-doc").await;
 
     for route in [
         "/opds/v2/books/book-1/pages/1",
         "/opds/v2/books/book-1/pages/1/raw",
     ] {
-        let response = app
+        let response = ctx
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -188,6 +186,4 @@ async fn router_opds_v2_book_page_routes_unauthorized_return_opds_auth_document(
             "route: {route}"
         );
     }
-
-    cleanup_router_fixture(paths);
 }

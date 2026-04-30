@@ -2,14 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn router_readlists_library_id_does_not_filter_book_ids_for_all_library_user_like_kotlin() {
-    let paths = new_router_fixture("router-readlists-library-id-all-library-user").await;
-    seed_router_contract_data(&paths).await;
-    seed_readlist_endpoint_variants(&paths).await;
+    let ctx = TestFixture::new("router-readlists-library-id-all-library-user").await;
+    seed_readlist_endpoint_variants(ctx.paths()).await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -34,6 +34,4 @@ async fn router_readlists_library_id_does_not_filter_book_ids_for_all_library_us
         Some(&json!(["book-1", "book-2", "book-3"]))
     );
     assert_eq!(content[0].get("filtered"), Some(&Value::Bool(false)));
-
-    cleanup_router_fixture(paths);
 }

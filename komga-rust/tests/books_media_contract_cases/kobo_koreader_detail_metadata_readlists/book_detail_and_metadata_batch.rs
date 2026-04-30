@@ -2,14 +2,17 @@ use super::*;
 
 #[tokio::test]
 async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_progress() {
-    let paths = new_router_fixture("router-discovery-book-detail-persisted-metadata").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, true).await;
+    let ctx = TestFixture::builder("router-discovery-book-detail-persisted-metadata")
+        .with_seed(|paths| async move {
+            seed_router_read_progress(&paths, true).await;
+        })
+        .build()
+        .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -62,17 +65,15 @@ async fn router_discovery_book_detail_includes_persisted_authors_tags_and_read_p
             .and_then(|progress| progress.get("completed")),
         Some(&Value::Bool(true)),
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_accepts_basic_auth_like_kotlin_clients() {
-    let paths = new_router_fixture("router-discovery-book-detail-basic-auth-compat").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-detail-basic-auth-compat").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -92,16 +93,13 @@ async fn router_discovery_book_detail_accepts_basic_auth_like_kotlin_clients() {
         .expect("book detail basic-auth request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_rows() {
-    let paths = new_router_fixture("router-discovery-book-detail-oneshot-flag").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-detail-oneshot-flag").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book detail oneshot db should open");
     sqlx::query("UPDATE BOOK SET ONESHOT = ? WHERE ID = ?")
@@ -118,10 +116,11 @@ async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_r
         .expect("series oneshot flag should update for detail contract consistency");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -136,17 +135,18 @@ async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_r
 
     let payload = response_json(response).await;
     assert_eq!(payload.get("oneshot"), Some(&Value::Bool(true)));
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_preserves_empty_read_progress_device_fields() {
-    let paths = new_router_fixture("router-discovery-book-detail-empty-read-progress-device").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_read_progress(&paths, false).await;
+    let ctx = TestFixture::builder("router-discovery-book-detail-empty-read-progress-device")
+        .with_seed(|paths| async move {
+            seed_router_read_progress(&paths, false).await;
+        })
+        .build()
+        .await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book detail device parity db should open");
     sqlx::query(
@@ -159,10 +159,11 @@ async fn router_discovery_book_detail_preserves_empty_read_progress_device_field
     .expect("read progress device fields should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -188,16 +189,13 @@ async fn router_discovery_book_detail_preserves_empty_read_progress_device_field
             .and_then(|progress| progress.get("deviceName")),
         Some(&Value::String(String::new()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
-    let paths = new_router_fixture("router-discovery-book-detail-admin-url-path").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-detail-admin-url-path").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("book detail url parity db should open");
     sqlx::query("UPDATE BOOK SET URL = ? WHERE ID = ?")
@@ -208,10 +206,11 @@ async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
         .expect("book url should update");
     pool.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -229,19 +228,17 @@ async fn router_discovery_book_detail_converts_admin_url_to_file_path() {
         payload.get("url"),
         Some(&Value::String("/library root/books/book 1.cbz".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestamp() {
-    let paths = new_router_fixture("router-discovery-book-detail-file-last-modified-utc").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-discovery-book-detail-file-last-modified-utc").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -259,21 +256,24 @@ async fn router_discovery_book_detail_formats_file_last_modified_as_utc_timestam
         payload.get("fileLastModified"),
         Some(&Value::String("1970-01-01T00:00:00Z".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
-    let paths = new_router_fixture("router-discovery-book-detail-no-bridge-id").await;
-    seed_router_contract_data(&paths).await;
-    seed_router_primary_series_cbz_book(&paths, "book-z-2", "book-z-2.cbz", "Second Real Book")
-        .await;
+    let ctx = TestFixture::new("router-discovery-book-detail-no-bridge-id").await;
+    seed_router_primary_series_cbz_book(
+        ctx.paths(),
+        "book-z-2",
+        "book-z-2.cbz",
+        "Second Real Book",
+    )
+    .await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -286,17 +286,13 @@ async fn router_discovery_book_detail_does_not_bridge_missing_book_n_ids() {
         .expect("book detail bridge-id request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_batch_update_persists_title_and_updates_book_snapshot() {
-    let paths =
-        new_router_fixture("router-book-metadata-batch-update-persists-and-touches-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-batch-update-persists-and-touches-book").await;
 
-    let pool_before = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool_before = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open before metadata batch update");
     let last_modified_before = sqlx::query(
@@ -309,8 +305,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
     .get::<String, _>("LAST_MODIFIED");
     pool_before.close().await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     let patch = json!({
         "book-1": {
@@ -318,7 +313,8 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
         }
     });
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -334,7 +330,8 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
 
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let detail = app
+    let detail = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -354,7 +351,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
         Some(&Value::String("Updated Batch Title".to_string()))
     );
 
-    let pool_after = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool_after = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open after metadata batch update");
     let last_modified_after = sqlx::query(
@@ -367,19 +364,16 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
     .get::<String, _>("LAST_MODIFIED");
     pool_after.close().await;
     assert_ne!(last_modified_after, last_modified_before);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_batch_update_refreshes_book_search_results() {
-    let paths = new_router_fixture("router-book-metadata-batch-update-refreshes-search").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-batch-update-refreshes-search").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let initial_search = app
+    let initial_search = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -419,7 +413,8 @@ async fn router_book_metadata_batch_update_refreshes_book_search_results() {
             "title": "Updated Batch Title"
         }
     });
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -434,7 +429,9 @@ async fn router_book_metadata_batch_update_refreshes_book_search_results() {
         .expect("book metadata batch update request should complete");
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let updated_search = app
+    let updated_search = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -467,19 +464,16 @@ async fn router_book_metadata_batch_update_refreshes_book_search_results() {
         updated_content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
-    let paths = new_router_fixture("router-book-metadata-update-refreshes-search").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-refreshes-search").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let initial_search = app
+    let initial_search = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -506,7 +500,8 @@ async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
         .expect("initial single metadata search should expose content array");
     assert!(initial_content.is_empty());
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -526,7 +521,9 @@ async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
         .expect("single book metadata update request should complete");
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let updated_search = app
+    let updated_search = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -555,20 +552,17 @@ async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
         updated_content[0].get("id"),
         Some(&Value::String("book-1".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_rejects_invalid_isbn_values() {
-    let paths = new_router_fixture("router-book-metadata-update-invalid-isbn").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-invalid-isbn").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for invalid_isbn in ["1617290459", "978-123-456-789-6"] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -589,20 +583,17 @@ async fn router_book_metadata_update_rejects_invalid_isbn_values() {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_rejects_blank_title_and_number_values() {
-    let paths = new_router_fixture("router-book-metadata-update-blank-title-number").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-blank-title-number").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
     for payload in [json!({ "title": "" }), json!({ "number": "" })] {
-        let response = app
+        let response = ctx
+            .app()
             .clone()
             .oneshot(
                 Request::builder()
@@ -618,19 +609,17 @@ async fn router_book_metadata_update_rejects_blank_title_and_number_values() {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_returns_not_found_for_missing_book() {
-    let paths = new_router_fixture("router-book-metadata-update-missing-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-missing-book").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
@@ -644,19 +633,17 @@ async fn router_book_metadata_update_returns_not_found_for_missing_book() {
         .expect("missing book metadata update request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_rejects_invalid_link_urls() {
-    let paths = new_router_fixture("router-book-metadata-update-invalid-link-url").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-invalid-link-url").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let response = app
+    let response = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
@@ -680,19 +667,16 @@ async fn router_book_metadata_update_rejects_invalid_link_urls() {
         .expect("invalid link url metadata update request should complete");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn router_book_metadata_update_accepts_normalized_valid_isbn_13() {
-    let paths = new_router_fixture("router-book-metadata-update-valid-isbn-13").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("router-book-metadata-update-valid-isbn-13").await;
 
-    let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
-    let auth_token = login_with_basic_and_get_token(app.clone()).await;
+    let auth_token = ctx.login_admin().await;
 
-    let update = app
+    let update = ctx
+        .app()
         .clone()
         .oneshot(
             Request::builder()
@@ -712,7 +696,9 @@ async fn router_book_metadata_update_accepts_normalized_valid_isbn_13() {
         .expect("valid isbn metadata update request should complete");
     assert_eq!(update.status(), StatusCode::NO_CONTENT);
 
-    let detail = app
+    let detail = ctx
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -732,6 +718,4 @@ async fn router_book_metadata_update_accepts_normalized_valid_isbn_13() {
             .and_then(|metadata| metadata.get("isbn")),
         Some(&Value::String("9781617290459".to_string()))
     );
-
-    cleanup_router_fixture(paths);
 }

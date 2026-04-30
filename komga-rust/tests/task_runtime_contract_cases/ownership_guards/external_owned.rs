@@ -5,10 +5,9 @@ use komga_infrastructure::sqlite::{
 
 #[tokio::test]
 async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-auth-cleanup").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-auth-cleanup").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth-cleanup fixture setup");
     sqlx::query(
@@ -42,17 +41,17 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     .expect("authentication activity row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
         &runtime,
@@ -60,7 +59,7 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     .await
     .expect("auth cleanup should skip cleanly when main database is external-owned");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for auth-cleanup verification");
     let activity_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM AUTHENTICATION_ACTIVITY")
@@ -74,22 +73,19 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
         activity_rows, 1,
         "runtime must not delete authentication activity rows when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-analyze-book").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-analyze-book").await;
     write_router_epub_resource(
-        &paths,
+        ctx.paths(),
         "books/book-1.epub",
         "OEBPS/chapter.xhtml",
         br#"<html xmlns='http://www.w3.org/1999/xhtml'><body><p>Analyze Fixture</p></body></html>"#,
     );
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for analyze-book fixture setup");
     sqlx::query(
@@ -130,10 +126,10 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     .expect("stale media page row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
@@ -141,7 +137,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         owns_search_index: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -155,7 +151,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         .await
         .expect("blocked main-database analyze-book should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for analyze-book verification");
     let media_row = sqlx::query(
@@ -202,16 +198,13 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         stale_page_rows, 1,
         "runtime must not replace MEDIA_PAGE rows during analyze-book when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-sidecar-output").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-sidecar-output").await;
 
-    let sidecar_dir = paths.config_dir.join("books");
+    let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book sidecar directory should be created");
     std::fs::write(
         sidecar_dir.join("book-1.xml"),
@@ -219,7 +212,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     )
     .expect("book sidecar fixture should be written");
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for sidecar fixture setup");
     sqlx::query(
@@ -234,17 +227,17 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     .expect("book sidecar row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_sidecar_output: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -259,7 +252,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         .await
         .expect("blocked sidecar metadata refresh should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for verification");
     let title = sqlx::query("SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
@@ -274,16 +267,13 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         title, "Book 1",
         "runtime must not apply sidecar metadata when sidecar output is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-aggregation").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-aggregation").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for aggregation fixture setup");
     sqlx::query("UPDATE SERIES SET NAME = ? WHERE ID = ?")
@@ -305,17 +295,17 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
     .expect("series metadata title should be updated for aggregation fixture");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -333,7 +323,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         .await
         .expect("blocked main-database aggregation should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for aggregation verification");
     let row =
@@ -354,16 +344,13 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         "Original Aggregation Title",
         "runtime must not rewrite title sort when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
 
 #[tokio::test]
 async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned() {
-    let paths = new_router_fixture("runtime-blocked-main-database-empty-trash").await;
-    seed_router_contract_data(&paths).await;
+    let ctx = TestFixture::new("runtime-blocked-main-database-empty-trash").await;
 
-    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for cleanup fixture setup");
     sqlx::query("DELETE FROM COLLECTION_SERIES WHERE COLLECTION_ID = ?")
@@ -390,17 +377,17 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .expect("delete empty readlists setting should be enabled");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&paths.main_db)
+    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
         .await
         .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         task_write_pool,
         task_read_pool,
-        ..runtime_task_context(&paths).await
+        ..runtime_task_context(ctx.paths()).await
     };
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -414,7 +401,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .await
         .expect("blocked main-database cleanup should still drain cleanly");
 
-    let verify_pool = connect_test_pool(paths.main_db.as_path(), 1)
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for cleanup verification");
     let collection_rows = sqlx::query("SELECT COUNT(*) AS COUNT FROM COLLECTION WHERE ID = ?")
@@ -439,6 +426,4 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         readlist_rows, 1,
         "runtime must not delete empty readlists when main database is external-owned",
     );
-
-    cleanup_router_fixture(paths);
 }
