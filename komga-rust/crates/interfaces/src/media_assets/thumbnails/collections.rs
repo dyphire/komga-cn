@@ -11,11 +11,11 @@ pub async fn collection_thumbnail(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -60,11 +60,11 @@ pub async fn collection_thumbnails(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -108,11 +108,11 @@ pub async fn collection_thumbnail_by_id(
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -152,7 +152,7 @@ pub async fn collection_thumbnail_upload(
     Path(collection_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -203,7 +203,7 @@ pub async fn collection_thumbnail_select(
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -225,7 +225,7 @@ pub async fn collection_thumbnail_delete(
     headers: HeaderMap,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 

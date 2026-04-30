@@ -20,7 +20,7 @@ pub async fn book_analyze(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -51,7 +51,7 @@ pub async fn book_metadata_refresh(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -89,7 +89,7 @@ pub async fn book_metadata_update(
     Path(book_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -171,7 +171,7 @@ pub async fn book_metadata_batch_update(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -495,7 +495,7 @@ pub async fn books_thumbnails_regenerate(
     headers: HeaderMap,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -518,7 +518,7 @@ pub async fn series_file_delete(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -530,7 +530,7 @@ pub async fn series_analyze(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -565,7 +565,7 @@ pub async fn series_metadata_refresh(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -607,7 +607,7 @@ pub async fn book_file_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

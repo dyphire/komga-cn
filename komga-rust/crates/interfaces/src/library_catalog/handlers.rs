@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRecord};
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
-use std::path::Path as FsPath;
+
 use std::sync::Arc;
 
 use crate::discovery_auth::context::{
@@ -23,7 +23,7 @@ use super::response_mapping::{libraries_payload, library_payload};
 use super::task_mapping::{enqueue_task_records, enqueue_task_records_with_status};
 
 pub async fn libraries_route(State(app): State<Arc<HttpAppState>>, headers: HeaderMap) -> Response {
-    response(headers, &app, app.auth_db.db.database_file()).await
+    response(headers, &app).await
 }
 
 pub async fn library_detail_route(
@@ -31,7 +31,7 @@ pub async fn library_detail_route(
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    library_detail(headers, &app, app.auth_db.db.database_file(), path).await
+    library_detail(headers, &app, path).await
 }
 
 pub async fn library_create_route(
@@ -92,14 +92,14 @@ pub async fn library_empty_trash_route(
     library_empty_trash(headers, app, path).await
 }
 
-pub async fn response(headers: HeaderMap, app: &HttpAppState, database_file: &FsPath) -> Response {
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+pub async fn response(headers: HeaderMap, app: &HttpAppState) -> Response {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, database_file)
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -112,10 +112,9 @@ pub async fn response(headers: HeaderMap, app: &HttpAppState, database_file: &Fs
 pub async fn library_detail(
     headers: HeaderMap,
     app: &HttpAppState,
-    database_file: &FsPath,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -126,7 +125,11 @@ pub async fn library_detail(
 
     let context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .resolve_detail_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            &detail_context,
+        )
         .await
     {
         Ok(context) => context,
@@ -145,7 +148,7 @@ pub async fn library_update(
     Path(library_id): Path<String>,
     body: Value,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -169,7 +172,7 @@ pub async fn library_update(
 }
 
 pub async fn library_create(headers: HeaderMap, app: Arc<HttpAppState>, body: Value) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -194,7 +197,7 @@ pub async fn library_delete(
     app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -216,7 +219,7 @@ pub async fn library_scan(
     app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -237,7 +240,7 @@ pub async fn library_analyze(
     app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -257,7 +260,7 @@ pub async fn library_metadata_refresh(
     app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -277,7 +280,7 @@ pub async fn library_empty_trash(
     app: Arc<HttpAppState>,
     Path(library_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

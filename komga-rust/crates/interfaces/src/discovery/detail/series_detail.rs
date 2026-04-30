@@ -11,7 +11,7 @@ pub async fn series_detail(
     app: &HttpAppState,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -38,7 +38,11 @@ pub async fn series_detail(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .resolve_detail_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            &detail_context,
+        )
         .await
     {
         Ok(context) => context,
@@ -67,7 +71,7 @@ pub async fn series_collections(
     app: &HttpAppState,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -77,7 +81,7 @@ pub async fn series_collections(
 
     let Some(context) = app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, database_file)
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -99,7 +103,11 @@ pub async fn series_collections(
 
     match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .resolve_detail_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            &detail_context,
+        )
         .await
     {
         Ok(_) => match load_persisted_series_collections(app, &series_id).await {
@@ -138,7 +146,7 @@ pub async fn series_metadata_update(
     body: Value,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_admin(&headers, database_file).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 

@@ -293,7 +293,7 @@ pub async fn oauth2_login_code(
 
     let source = format!("OAuth2:{client_name}");
     let _ = persisted_record_successful_authentication_activity(
-        auth_db.db.database_file(),
+        &*app.services.runtime_identity,
         &user,
         authentication_activity_write_input(
             &authentication_activity_headers_metadata_with_remote_addr(
@@ -307,8 +307,11 @@ pub async fn oauth2_login_code(
     )
     .await;
 
-    let session_token =
-        session_token_for_user_with_runtime_key(&user, auth_db.session_runtime_key.as_str());
+    let session_token = session_token_for_user_with_runtime_key(
+        &*app.services.runtime_identity,
+        &user,
+        auth_db.session_runtime_key.as_str(),
+    );
     oauth2_login_success_redirect(session_token.as_str())
 }
 

@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::state::PersistedDiscoveryService;
-use std::path::Path;
 
 use super::common_helpers::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
@@ -840,7 +839,7 @@ pub async fn runtime_owned_books_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
-    database_file: &Path,
+    identity: &dyn crate::state::IdentityService,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     let query_string = uri.query().unwrap_or_default();
@@ -898,11 +897,7 @@ pub async fn runtime_owned_books_list_response(
         filters.criteria.library_ids.clone(),
     );
     let context = match auth_state
-        .resolve_query_context_with_persistence(
-            headers,
-            requested_library_ids.as_deref(),
-            database_file,
-        )
+        .resolve_query_context_with_persistence(identity, headers, requested_library_ids.as_deref())
         .await
     {
         Some(context) => context,

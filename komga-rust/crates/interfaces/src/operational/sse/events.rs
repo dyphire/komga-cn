@@ -39,7 +39,7 @@ pub(crate) async fn sse_events(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let authenticated_user_id = user_id(&user).to_string();

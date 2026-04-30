@@ -8,7 +8,7 @@ pub async fn book_detail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -31,9 +31,9 @@ pub async fn book_detail(
         let detail_query_context = match app
             .discovery_auth
             .resolve_detail_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 &detail_context,
-                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -62,7 +62,7 @@ pub async fn book_sibling_previous(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -87,9 +87,9 @@ pub async fn book_sibling_previous(
         let detail_query_context = match app
             .discovery_auth
             .resolve_detail_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 &detail_context,
-                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -119,7 +119,7 @@ pub async fn book_sibling_next(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -144,9 +144,9 @@ pub async fn book_sibling_next(
         let detail_query_context = match app
             .discovery_auth
             .resolve_detail_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 &detail_context,
-                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -176,7 +176,7 @@ pub async fn book_readlists(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -201,9 +201,9 @@ pub async fn book_readlists(
         let detail_query_context = match app
             .discovery_auth
             .resolve_detail_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 &detail_context,
-                app.auth_db.db.database_file(),
             )
             .await
         {

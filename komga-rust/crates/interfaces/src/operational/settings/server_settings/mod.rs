@@ -18,7 +18,7 @@ pub(crate) async fn get_server_settings(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -35,7 +35,7 @@ pub(crate) async fn update_server_settings(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

@@ -267,25 +267,24 @@ pub(super) async fn authenticated_user(
     connection_info: RequestConnectionInfo,
     app: &HttpAppState,
 ) -> Option<AuthUser> {
-    let auth_db = &app.auth_db;
+    let identity = &*app.services.runtime_identity;
     let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
         headers,
         connection_info.remote_addr(),
     );
 
-    match persisted_api_key_user(headers, auth_db.db.database_file())
+    match persisted_api_key_user(identity, headers)
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
-            let api_key_metadata =
-                persisted_api_key_metadata(headers, auth_db.db.database_file()).await;
+            let api_key_metadata = persisted_api_key_metadata(identity, headers).await;
             let (api_key_id, api_key_comment) = api_key_metadata
                 .as_ref()
                 .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
                 .unwrap_or((None, None));
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
@@ -301,17 +300,17 @@ pub(super) async fn authenticated_user(
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = resolved_auth_user(headers) {
+    if let Some(user) = resolved_auth_user(identity, headers) {
         return Some(user);
     }
 
-    match persisted_basic_user(headers, auth_db.db.database_file())
+    match persisted_basic_user(identity, headers)
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )

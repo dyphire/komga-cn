@@ -38,7 +38,7 @@ async fn opds_manifest_variant(
     book_id: &str,
     profile: Option<&str>,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

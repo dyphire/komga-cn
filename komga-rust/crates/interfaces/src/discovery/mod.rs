@@ -1,5 +1,4 @@
 use axum::extract::State;
-use std::path::Path as FsPath;
 use std::sync::Arc;
 
 use axum::Json;

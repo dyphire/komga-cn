@@ -41,11 +41,11 @@ pub async fn readlist_tachiyomi_read_progress_get(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -92,11 +92,11 @@ pub async fn readlist_tachiyomi_read_progress_put(
     Path(readlist_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };

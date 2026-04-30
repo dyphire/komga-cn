@@ -32,7 +32,7 @@ pub(crate) async fn get_page_hashes(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -120,7 +120,7 @@ pub(crate) async fn get_page_hashes_unknown(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -153,7 +153,7 @@ pub(crate) async fn get_page_hash_matches(
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -185,7 +185,7 @@ pub(crate) async fn get_page_hash_thumbnail(
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -209,7 +209,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -245,7 +245,7 @@ pub(crate) async fn put_page_hash(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -290,7 +290,7 @@ pub(crate) async fn post_page_hash_delete_all(
     headers: HeaderMap,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -343,7 +343,7 @@ pub(crate) async fn post_page_hash_delete_match(
     AxumPath(page_hash): AxumPath<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

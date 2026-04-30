@@ -24,7 +24,7 @@ pub(crate) async fn post_filesystem(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

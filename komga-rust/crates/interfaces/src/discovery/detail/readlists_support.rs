@@ -564,10 +564,9 @@ pub(super) async fn load_visible_persisted_readlist_books(
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
-    let database_file = app.auth_db.db.database_file();
     let auth_state = &app.discovery_auth;
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(headers, None, database_file)
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, headers, None)
         .await
     else {
         return Ok(None);
@@ -617,7 +616,11 @@ pub(super) async fn load_visible_persisted_readlist_books(
             }),
         };
         let detail_query_context = match auth_state
-            .resolve_detail_query_context_with_persistence(headers, &detail_context, database_file)
+            .resolve_detail_query_context_with_persistence(
+                &*app.services.runtime_identity,
+                headers,
+                &detail_context,
+            )
             .await
         {
             Ok(context) => context,

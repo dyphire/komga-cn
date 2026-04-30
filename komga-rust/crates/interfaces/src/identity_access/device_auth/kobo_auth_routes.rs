@@ -11,10 +11,10 @@ pub async fn kobo_ping(
     headers: HeaderMap,
 ) -> Response {
     match kobo_path_user_status(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.db.database_file(),
     )
     .await
     {
@@ -30,12 +30,11 @@ pub async fn kobo_initialization(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    let state = &app.operational;
     if let Err(status) = required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
     )
     .await
     {
@@ -149,12 +148,11 @@ pub async fn kobo_auth_device(
     uri: axum::http::Uri,
     body: Bytes,
 ) -> Response {
-    let state = &app.operational;
     if let Err(status) = required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        state.runtime.database_file.as_path(),
     )
     .await
     {
@@ -221,21 +219,21 @@ fn validated_kobo_auth_device_user_key(
 }
 
 async fn kobo_path_user_status(
+    identity: &dyn IdentityService,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
-    database_file: &FsPath,
 ) -> Result<AuthUser, StatusCode> {
     if !valid_kobo_path_token(auth_token) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    match persisted_api_key_user_by_token(auth_token, database_file).await {
+    match persisted_api_key_user_by_token(identity, auth_token).await {
         Some(AuthOutcome::Valid(user)) => {
             let _ = record_successful_api_key_authentication_by_token(
+                identity,
                 headers,
                 remote_addr,
-                database_file,
                 &user,
                 auth_token,
             )

@@ -225,7 +225,6 @@ pub(super) fn compose_operational_state(
     let build_metadata = current_build_metadata();
     OperationalState {
         runtime: RuntimeState {
-            database_file: config.database_file.clone(),
             tasks_db_file: config.tasks_db_file.clone(),
             lucene_data_directory: config.lucene_data_directory.clone(),
             fonts_data_directory: config.fonts_data_directory.clone(),

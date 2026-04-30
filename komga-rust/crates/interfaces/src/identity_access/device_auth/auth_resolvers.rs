@@ -1,24 +1,23 @@
 use super::*;
 use axum::http::{HeaderMap, StatusCode};
 use std::net::SocketAddr;
-use std::path::Path as FsPath;
 
 pub(super) async fn required_kobo_user(
+    identity: &dyn IdentityService,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
-    database_file: &FsPath,
 ) -> Result<AuthUser, StatusCode> {
     if !valid_kobo_path_token(auth_token) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    match persisted_api_key_user_by_token(auth_token, database_file).await {
+    match persisted_api_key_user_by_token(identity, auth_token).await {
         Some(AuthOutcome::Valid(user)) => {
             let _ = record_successful_api_key_authentication_by_token(
+                identity,
                 headers,
                 remote_addr,
-                database_file,
                 &user,
                 auth_token,
             )
@@ -42,12 +41,11 @@ pub(super) fn valid_kobo_path_token(token: &str) -> bool {
 }
 
 pub(super) async fn required_koreader_user(
+    identity: &dyn IdentityService,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
-    database_file: &FsPath,
 ) -> Result<AuthUser, StatusCode> {
-    if let Some(user) = presented_koreader_api_key_user(headers, remote_addr, database_file).await?
-    {
+    if let Some(user) = presented_koreader_api_key_user(identity, headers, remote_addr).await? {
         return if user_has_role(&user, "KOREADER_SYNC") {
             Ok(user)
         } else {
@@ -55,34 +53,34 @@ pub(super) async fn required_koreader_user(
         };
     }
 
-    session_user_with_role(headers, "KOREADER_SYNC")
+    session_user_with_role(identity, headers, "KOREADER_SYNC")
 }
 
 pub(super) async fn required_koreader_user_id(
+    identity: &dyn IdentityService,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
-    database_file: &FsPath,
 ) -> Result<String, StatusCode> {
-    required_koreader_user(headers, remote_addr, database_file)
+    required_koreader_user(identity, headers, remote_addr)
         .await
         .map(|user| user_id(&user).to_string())
 }
 
 pub(super) async fn presented_koreader_api_key_user(
+    identity: &dyn IdentityService,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
-    database_file: &FsPath,
 ) -> Result<Option<AuthUser>, StatusCode> {
     let Some(header_user) = raw_koreader_header_user(headers) else {
         return Ok(None);
     };
 
-    match persisted_api_key_user_by_token(header_user, database_file).await {
+    match persisted_api_key_user_by_token(identity, header_user).await {
         Some(AuthOutcome::Valid(user)) => {
             let _ = record_successful_api_key_authentication_by_token(
+                identity,
                 headers,
                 remote_addr,
-                database_file,
                 &user,
                 header_user,
             )
@@ -94,10 +92,11 @@ pub(super) async fn presented_koreader_api_key_user(
 }
 
 fn session_user_with_role(
+    identity: &dyn IdentityService,
     headers: &HeaderMap,
     required_role: &str,
 ) -> Result<AuthUser, StatusCode> {
-    match resolved_auth_user(headers) {
+    match resolved_auth_user(identity, headers) {
         Some(user) if user_has_role(&user, required_role) => Ok(user),
         Some(_) => Err(StatusCode::FORBIDDEN),
         None => Err(StatusCode::UNAUTHORIZED),

@@ -194,7 +194,7 @@ async fn series_feed(
     kotlin_unpaged_page_shape: bool,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -206,7 +206,11 @@ async fn series_feed(
     let library_ids = requested_query_values(query, "library_id");
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, library_ids.as_deref(), database_file)
+        .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            library_ids.as_deref(),
+        )
         .await
     {
         Some(context) => context,
@@ -283,7 +287,7 @@ pub async fn series_latest(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
 
 pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -328,7 +332,11 @@ pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppSt
     let search_regex = decoded_delimited_pair(query, "search_regex");
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, library_ids.as_deref(), database_file)
+        .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            library_ids.as_deref(),
+        )
         .await
     {
         Some(context) => context,
@@ -481,7 +489,7 @@ pub async fn series_alphabetical_groups(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -514,7 +522,7 @@ pub async fn series_alphabetical_groups(
 
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, database_file)
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -540,7 +548,7 @@ pub async fn series_list(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -563,7 +571,7 @@ pub async fn series_list(
             Some(&payload),
             full_text_search.clone(),
             &app.discovery_auth,
-            app.auth_db.db.database_file(),
+            &*app.services.runtime_identity,
             strict_runtime_shape,
         )
         .await

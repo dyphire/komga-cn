@@ -46,7 +46,7 @@ pub(crate) async fn post_transient_books(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -133,7 +133,7 @@ pub(crate) async fn post_transient_book_analyze(
     headers: HeaderMap,
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -197,7 +197,7 @@ pub(crate) async fn get_transient_book_page(
     headers: HeaderMap,
     AxumPath((transient_book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
     if page_number <= 0 {

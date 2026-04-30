@@ -1,7 +1,5 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::path::Path;
-
 use super::common_helpers::runtime_list_request;
 use crate::discovery_auth::state::DiscoveryAuthState;
 use crate::state::PersistedDiscoveryService;
@@ -107,7 +105,7 @@ pub async fn runtime_owned_series_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
-    database_file: &Path,
+    identity: &dyn crate::state::IdentityService,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     let query = uri.query().unwrap_or_default();
@@ -147,11 +145,7 @@ pub async fn runtime_owned_series_list_response(
         filters.criteria.library_ids.clone(),
     );
     let context = match auth_state
-        .resolve_query_context_with_persistence(
-            headers,
-            requested_library_ids.as_deref(),
-            database_file,
-        )
+        .resolve_query_context_with_persistence(identity, headers, requested_library_ids.as_deref())
         .await
     {
         Some(context) => context,

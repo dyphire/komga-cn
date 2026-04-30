@@ -488,19 +488,9 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
 
 #[tokio::test]
 async fn kobo_ping_rejects_requests_without_valid_auth() {
-    let auth_db = crate::state::AuthDatabaseState {
-        db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
-            unique_temp_path("komga-device-auth-ping"),
-            sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .expect("lazy in-memory pool should open"),
-        ),
-        demo_mode: false,
-        session_runtime_key: "test-session".to_string(),
-        remember_me_runtime_key: "test-remember-me".to_string(),
-    };
+    let identity = default_test_identity_service();
     let response = kobo_ping_for_tests(
-        auth_db.db.database_file(),
+        &*identity,
         "invalid-token",
         RequestConnectionInfo::default(),
         HeaderMap::new(),

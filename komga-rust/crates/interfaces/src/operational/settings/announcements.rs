@@ -18,11 +18,11 @@ pub(crate) async fn get_announcements(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -50,11 +50,11 @@ pub(crate) async fn put_announcements(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -98,7 +98,7 @@ pub(crate) async fn get_releases(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

@@ -1,6 +1,5 @@
 use axum::http::HeaderMap;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,6 +9,7 @@ use super::context::{
 use super::principal::{DiscoveryPrincipal, principal_from_user_payload};
 use super::utils::session_token_from_headers;
 use crate::identity_access::auth::{resolved_request_auth_user, user_payload_json};
+use crate::state::IdentityService;
 
 const DISCOVERY_PRINCIPAL_TTL_SECONDS: u64 = 30 * 60;
 const DISCOVERY_PRINCIPAL_CACHE_MAX_ENTRIES: usize = 1024;
@@ -121,10 +121,10 @@ impl DiscoveryAuthState {
 
     async fn request_principal(
         &self,
+        identity: &dyn IdentityService,
         headers: &HeaderMap,
-        database_file: &Path,
     ) -> Option<DiscoveryPrincipal> {
-        let user = resolved_request_auth_user(headers, database_file).await?;
+        let user = resolved_request_auth_user(identity, headers).await?;
         principal_from_user_payload(&user_payload_json(&user))
     }
 
@@ -137,23 +137,23 @@ impl DiscoveryAuthState {
 
     pub async fn resolve_query_context_with_persistence(
         &self,
+        identity: &dyn IdentityService,
         headers: &HeaderMap,
         requested_library_ids: Option<&[String]>,
-        database_file: &Path,
     ) -> Option<DiscoveryQueryContext> {
         if let Some(context) = self.resolve_query_context(headers, requested_library_ids) {
             return Some(context);
         }
 
-        let principal = self.request_principal(headers, database_file).await?;
+        let principal = self.request_principal(identity, headers).await?;
         Some(to_query_context(&principal, requested_library_ids))
     }
 
     pub async fn resolve_detail_query_context_with_persistence(
         &self,
+        identity: &dyn IdentityService,
         headers: &HeaderMap,
         detail: &DetailResourceContext,
-        database_file: &Path,
     ) -> Result<DiscoveryQueryContext, DetailAccessDenial> {
         match self.resolve_detail_query_context(headers, detail) {
             Ok(context) => return Ok(context),
@@ -162,7 +162,7 @@ impl DiscoveryAuthState {
         }
 
         let principal = self
-            .request_principal(headers, database_file)
+            .request_principal(identity, headers)
             .await
             .ok_or(DetailAccessDenial::Unauthorized)?;
 

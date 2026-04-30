@@ -30,7 +30,8 @@ use crate::request_urls::{request_base_url, request_base_url_with_port, request_
 #[cfg(test)]
 use crate::state::default_test_identity_service;
 use crate::state::{
-    HttpAppState, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
+    HttpAppState, IdentityService, KoreaderBookLookupError, KoreaderBookTarget,
+    PersistedReadProgressRecord,
 };
 
 mod auth_resolvers;
@@ -66,16 +67,16 @@ pub(crate) async fn load_koreader_book_target_for_tests(
 
 #[cfg(test)]
 pub(crate) async fn kobo_ping_for_tests(
-    database_file: &FsPath,
+    identity: &dyn crate::state::IdentityService,
     auth_token: &str,
     connection_info: RequestConnectionInfo,
     headers: HeaderMap,
 ) -> Response {
     match auth_resolvers::required_kobo_user(
+        identity,
         auth_token,
         &headers,
         connection_info.remote_addr(),
-        database_file,
     )
     .await
     {

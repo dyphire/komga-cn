@@ -15,7 +15,8 @@ pub(crate) async fn get_client_settings_global(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    let include_unauthorized_only = resolved_auth_user(&headers).is_none();
+    let include_unauthorized_only =
+        resolved_auth_user(&*app.services.runtime_identity, &headers).is_none();
     let settings = match app
         .services
         .operational_settings
@@ -32,10 +33,10 @@ pub(crate) async fn get_client_settings_user(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -56,7 +57,7 @@ pub(crate) async fn patch_client_settings_global(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -81,10 +82,10 @@ pub(crate) async fn patch_client_settings_user(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -109,7 +110,7 @@ pub(crate) async fn delete_client_settings_global(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -134,10 +135,10 @@ pub(crate) async fn delete_client_settings_user(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 

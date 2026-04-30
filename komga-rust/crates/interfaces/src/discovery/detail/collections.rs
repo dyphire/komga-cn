@@ -28,13 +28,13 @@ pub async fn collection_series(
     Path(collection_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -335,7 +335,7 @@ pub async fn collections(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -359,7 +359,7 @@ pub async fn collections(
 
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -390,9 +390,9 @@ pub async fn collections(
         match app
             .discovery_auth
             .resolve_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 Some(&requested_library_ids),
-                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -512,7 +512,7 @@ pub async fn collection_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -804,13 +804,13 @@ pub async fn collection_detail(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -854,7 +854,7 @@ pub async fn collection_update(
     Path(collection_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -915,7 +915,7 @@ pub async fn collection_delete(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 

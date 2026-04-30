@@ -110,9 +110,9 @@ pub async fn koreader_user_create(
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
     if let Err(status) = required_koreader_user(
+        &*app.services.runtime_identity,
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.db.database_file(),
     )
     .await
     {
@@ -142,9 +142,9 @@ pub async fn koreader_user_auth(
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
     match required_koreader_user(
+        &*app.services.runtime_identity,
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.db.database_file(),
     )
     .await
     {
@@ -171,9 +171,9 @@ pub async fn koreader_get_progress(
     headers: HeaderMap,
 ) -> Response {
     let user_id_value = match required_koreader_user_id(
+        &*app.services.runtime_identity,
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -224,14 +224,7 @@ pub async fn koreader_get_progress(
         .unwrap_or_else(|| {
             (progress.page.max(0) as f64 / target.page_count.max(1) as f64).clamp(0.0, 1.0)
         });
-    let progress_value = match koreader_epub_progress_value(
-        &app,
-        app.operational.runtime.database_file.as_path(),
-        &target.id,
-        &locator,
-    )
-    .await
-    {
+    let progress_value = match koreader_epub_progress_value(&app, &target.id, &locator).await {
         Some(progress_value) => progress_value,
         None => locator
             .get("koreaderProgress")
@@ -260,7 +253,6 @@ pub async fn koreader_get_progress(
 
 async fn koreader_epub_progress_value(
     app: &HttpAppState,
-    _database_file: &FsPath,
     book_id: &str,
     locator: &Value,
 ) -> Option<String> {
@@ -337,9 +329,9 @@ pub async fn koreader_put_progress(
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
 
     let user_id_value = match required_koreader_user_id(
+        &*app.services.runtime_identity,
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {

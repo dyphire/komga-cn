@@ -14,6 +14,7 @@ use komga_application::identity_access::AuthUser;
 
 use crate::OperationalState;
 use crate::identity_access::auth::session_token_for_user_with_runtime_key;
+use crate::state::default_test_identity_service;
 use crate::state::{
     BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices, LibraryCatalogService,
     OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
@@ -42,8 +43,9 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
     let settings_store = fake_settings_store(persisted_settings.clone(), persist_attempts.clone());
 
     let apply_count = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(database_file.clone(), fixture_root.clone());
+    let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
+        database_file.clone(),
         state,
         Box::new(FakeTaskQueueService {
             apply: {
@@ -100,8 +102,9 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     let apply_count = Arc::new(AtomicUsize::new(0));
     let applied_value = Arc::new(AtomicUsize::new(0));
 
-    let state = test_operational_state(database_file, fixture_root.clone());
+    let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
+        database_file,
         state,
         Box::new(FakeTaskQueueService {
             apply: {
@@ -152,8 +155,9 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     )])));
     let apply_count = Arc::new(AtomicUsize::new(0));
 
-    let state = test_operational_state(database_file, fixture_root.clone());
+    let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
+        database_file,
         state,
         Box::new(FakeTaskQueueService {
             apply: {
@@ -184,8 +188,9 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let persisted_settings = Arc::new(Mutex::new(HashMap::new()));
     let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
 
-    let state = test_operational_state(database_file, fixture_root.clone());
+    let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
+        database_file,
         state,
         Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
@@ -223,11 +228,12 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     )])));
     let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
 
-    let mut state = test_operational_state(database_file, fixture_root.clone());
+    let mut state = test_operational_state(fixture_root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     state.runtime.configuration_bind_address =
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
+        database_file,
         state,
         Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
         settings_store,
@@ -458,6 +464,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 }
 
 fn test_app_state(
+    database_file: PathBuf,
     operational: OperationalState,
     task_queue: Box<dyn TaskQueueService>,
     server_settings: Box<dyn ServerSettingsService>,
@@ -468,7 +475,7 @@ fn test_app_state(
         discovery_auth: crate::discovery_auth::state::DiscoveryAuthState::default(),
         auth_db: crate::state::AuthDatabaseState {
             db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
-                operational.runtime.database_file.clone(),
+                database_file,
                 sqlx::sqlite::SqlitePoolOptions::new()
                     .connect_lazy("sqlite::memory:")
                     .expect("lazy in-memory pool should open"),
@@ -494,10 +501,9 @@ fn test_app_state(
     }
 }
 
-fn test_operational_state(database_file: PathBuf, fixture_root: PathBuf) -> OperationalState {
+fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
     OperationalState {
         runtime: RuntimeState {
-            database_file,
             tasks_db_file: fixture_root.join("tasks.db"),
             lucene_data_directory: fixture_root.join("lucene"),
             fonts_data_directory: fixture_root.join("fonts"),
@@ -558,8 +564,12 @@ fn admin_headers(fixture_root: &Path) -> HeaderMap {
         labels_exclude: Vec::new(),
         age_restriction: None,
     };
-    let token =
-        session_token_for_user_with_runtime_key(&user, fixture_root.to_string_lossy().as_ref());
+    let identity = default_test_identity_service();
+    let token = session_token_for_user_with_runtime_key(
+        &*identity,
+        &user,
+        fixture_root.to_string_lossy().as_ref(),
+    );
     let mut headers = HeaderMap::new();
     headers.insert(
         header::HeaderName::from_static("x-auth-token"),

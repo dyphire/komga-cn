@@ -22,7 +22,7 @@ pub async fn readlists(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -63,9 +63,9 @@ pub async fn readlists(
     let requested_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
             &headers,
             library_ids.as_deref(),
-            app.auth_db.db.database_file(),
         )
         .await
     {
@@ -74,7 +74,7 @@ pub async fn readlists(
     };
     let visibility_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -325,7 +325,7 @@ pub async fn readlist_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -480,7 +480,7 @@ pub async fn readlist_match_comicrack(
     headers: HeaderMap,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -523,7 +523,7 @@ pub async fn readlist_update(
     Path(readlist_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -553,7 +553,7 @@ pub async fn readlist_delete(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -575,7 +575,7 @@ pub async fn readlist_books(
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -592,9 +592,9 @@ pub async fn readlist_books(
     let Some(context) = app
         .discovery_auth
         .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
             &headers,
             query.library_ids.as_deref(),
-            app.auth_db.db.database_file(),
         )
         .await
     else {
@@ -628,13 +628,13 @@ pub async fn readlist_detail(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -700,7 +700,7 @@ pub async fn readlist_book_sibling_previous(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -712,7 +712,7 @@ pub async fn readlist_book_sibling_next(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -726,7 +726,6 @@ async fn sibling_response(
     book_id: &str,
     next: bool,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     let auth_state = &app.discovery_auth;
     let query = PersistedReadlistBooksQuery {
         page: 0,
@@ -750,7 +749,7 @@ async fn sibling_response(
     };
 
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(headers, None, database_file)
+        .resolve_query_context_with_persistence(&*app.services.runtime_identity, headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();

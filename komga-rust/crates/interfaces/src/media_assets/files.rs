@@ -8,12 +8,12 @@ pub async fn readlist_file(
     Path(readlist_id): Path<String>,
 ) -> Response {
     if let Some(response) =
-        require_request_file_download(&headers, app.auth_db.db.database_file()).await
+        require_request_file_download(&*app.services.runtime_identity, &headers).await
     {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -88,12 +88,12 @@ pub async fn series_file(
     Path(series_id): Path<String>,
 ) -> Response {
     if let Some(response) =
-        require_request_file_download(&headers, app.auth_db.db.database_file()).await
+        require_request_file_download(&*app.services.runtime_identity, &headers).await
     {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -147,7 +147,8 @@ pub async fn book_resource(
 
     let is_font = is_font_resource_from_services(&app, resource_name);
     if !is_font
-        && let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await
+        && let Some(response) =
+            require_request_auth(&*app.services.runtime_identity, &headers).await
     {
         return response;
     }
@@ -170,7 +171,8 @@ pub async fn book_resource(
     }
 
     if !is_font {
-        let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+        let Some(user) =
+            resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -241,13 +243,13 @@ pub async fn book_file_with_suffix(
 
 async fn book_file_response(app: &HttpAppState, headers: &HeaderMap, book_id: &str) -> Response {
     if let Some(response) =
-        require_request_file_download(headers, app.auth_db.db.database_file()).await
+        require_request_file_download(&*app.services.runtime_identity, headers).await
     {
         return response;
     }
 
     if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
-        let Some(user) = resolved_request_auth_user(headers, app.auth_db.db.database_file()).await
+        let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };

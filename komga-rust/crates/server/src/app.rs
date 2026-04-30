@@ -84,6 +84,9 @@ pub async fn shutdown_runtime_for_contract() {
     start_server::shutdown_runtime_for_contract().await;
 }
 
-pub fn invalidate_sessions_for_user(user_id: &str) {
-    komga_interfaces::identity_access::auth::invalidate_user_sessions(user_id)
+pub fn invalidate_sessions_for_user(
+    identity: &dyn komga_interfaces::state::IdentityService,
+    user_id: &str,
+) {
+    komga_interfaces::identity_access::auth::invalidate_user_sessions(identity, user_id)
 }

@@ -22,7 +22,7 @@ pub(crate) async fn get_history(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -54,11 +54,11 @@ pub(crate) async fn delete_syncpoints_me(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(current_user) = resolved_auth_user(&headers) else {
+    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -123,7 +123,7 @@ pub(crate) async fn delete_tasks(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 

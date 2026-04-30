@@ -12,12 +12,13 @@ pub async fn book_thumbnail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
-        let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+        let Some(user) =
+            resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -55,7 +56,7 @@ async fn book_thumbnail_opds_response(
     book_id: &str,
 ) -> Response {
     if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
-        let Some(user) = resolved_request_auth_user(headers, app.auth_db.db.database_file()).await
+        let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -80,7 +81,7 @@ async fn book_thumbnail_opds_small_response(
     max_edge: u32,
 ) -> Response {
     if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
-        let Some(user) = resolved_request_auth_user(headers, app.auth_db.db.database_file()).await
+        let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -118,7 +119,7 @@ pub async fn book_thumbnail_opds(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -130,7 +131,7 @@ pub async fn book_thumbnail_opds_small(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -153,12 +154,13 @@ pub async fn book_thumbnail_by_id(
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
-        let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+        let Some(user) =
+            resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -179,12 +181,13 @@ pub async fn book_thumbnails(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
-        let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+        let Some(user) =
+            resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
         else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
@@ -236,7 +239,7 @@ pub async fn book_thumbnail_upload(
     Path(book_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -287,7 +290,7 @@ pub async fn book_thumbnail_select(
     headers: HeaderMap,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -307,7 +310,7 @@ pub async fn book_thumbnail_delete(
     headers: HeaderMap,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 

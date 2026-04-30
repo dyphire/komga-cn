@@ -29,8 +29,8 @@ use crate::identity_access::auth::{
 };
 use crate::operational::register_session_expired_event;
 use crate::state::{
-    AuthUserAgeRestrictionInput, CreateAuthUserInput, HttpAppState, SharedLibrariesInput,
-    UpdateAuthUserInput,
+    AuthUserAgeRestrictionInput, CreateAuthUserInput, HttpAppState, IdentityService,
+    SharedLibrariesInput, UpdateAuthUserInput,
 };
 
 mod activity_routes;
@@ -43,31 +43,35 @@ use activity_routes::{
 };
 use helpers::*;
 
-fn expire_user_sessions_for_runtime_key(user_id: &str, runtime_key: &str) {
-    invalidate_user_sessions_for_runtime_key(user_id, runtime_key);
+fn expire_user_sessions_for_runtime_key(
+    identity: &dyn IdentityService,
+    user_id: &str,
+    runtime_key: &str,
+) {
+    invalidate_user_sessions_for_runtime_key(identity, user_id, runtime_key);
     register_session_expired_event(user_id);
 }
 
 pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     let auth_db = &app.auth_db;
+    let identity = &*app.services.runtime_identity;
     let auth_state = &app.discovery_auth;
     let uri = request.uri().clone();
     let headers = request.headers().clone();
     let request_metadata = authentication_activity_request_metadata(&request);
 
-    match persisted_api_key_user(&headers, auth_db.db.database_file())
+    match persisted_api_key_user(identity, &headers)
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
-            let api_key_metadata =
-                persisted_api_key_metadata(&headers, auth_db.db.database_file()).await;
+            let api_key_metadata = persisted_api_key_metadata(identity, &headers).await;
             let (api_key_id, api_key_comment) = api_key_metadata
                 .as_ref()
                 .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
                 .unwrap_or((None, None));
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
@@ -78,6 +82,7 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
             )
             .await;
             let token = session_token_for_user_with_runtime_key(
+                identity,
                 &user,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -92,20 +97,24 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = resolved_auth_user(&headers) {
+    if let Some(user) = resolved_auth_user(identity, &headers) {
         let remember_me_cookie_present = CookieJar::from_headers(&headers)
             .get("komga-remember-me")
             .is_some_and(|cookie| !cookie.value().trim().is_empty());
         if session_token_from_headers(&headers).is_none() && remember_me_cookie_present {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(&request_metadata, "RememberMe", None, None),
             )
             .await;
         }
         let token = session_token_from_headers(&headers).unwrap_or_else(|| {
-            session_token_for_user_with_runtime_key(&user, auth_db.session_runtime_key.as_str())
+            session_token_for_user_with_runtime_key(
+                identity,
+                &user,
+                auth_db.session_runtime_key.as_str(),
+            )
         });
         let payload = crate::identity_access::auth::user_payload_json(&user);
         register_discovery_principal(auth_state, &payload, &token);
@@ -118,27 +127,29 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     // Kotlin persists both success and failure authentication events. This HTTP path only aligns
     // successful-source vocabulary for now; the remaining failure-persistence gap is documented by
     // the auth-session contract suite instead of being left implicit.
-    match persisted_basic_user(&headers, auth_db.db.database_file())
+    match persisted_basic_user(identity, &headers)
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) if remember_me_requested(&uri) => {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
             .await;
             let Some(remember_me_token) = remember_me_token_for_user_with_runtime_key(
+                identity,
                 &user,
                 auth_db.remember_me_runtime_key.as_str(),
             ) else {
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             };
             let remember_me_cookie_max_age_seconds =
-                remember_me_max_age_seconds(auth_db.remember_me_runtime_key.as_str());
+                remember_me_max_age_seconds(identity, auth_db.remember_me_runtime_key.as_str());
             if empty_auth_token_supplied(&headers) {
                 let token = session_token_for_user_with_runtime_key(
+                    identity,
                     &user,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -155,6 +166,7 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
                 )
             } else {
                 let token = session_token_for_user_with_runtime_key(
+                    identity,
                     &user,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -173,12 +185,13 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
         }
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.db.database_file(),
+                identity,
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
             .await;
             let token = session_token_for_user_with_runtime_key(
+                identity,
                 &user,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -198,8 +211,11 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     }
 }
 
-pub(super) async fn login_set_cookie(headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(&headers) {
+pub(super) async fn login_set_cookie(
+    identity: &dyn IdentityService,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_auth(identity, &headers) {
         return response;
     }
 
@@ -223,13 +239,12 @@ pub(super) async fn login_set_cookie(headers: HeaderMap) -> Response {
 }
 
 pub(super) async fn users_list(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    let identity = &*app.services.runtime_identity;
+    if let Some(response) = require_admin(identity, &headers) {
         return response;
     }
 
-    let users = persisted_users(app.auth_db.db.database_file())
-        .await
-        .unwrap_or_default();
+    let users = persisted_users(identity).await.unwrap_or_default();
 
     Json(users.iter().map(user_payload_json).collect::<Vec<_>>()).into_response()
 }
@@ -352,6 +367,7 @@ pub(super) async fn users_delete(
     {
         Ok(true) => {
             expire_user_sessions_for_runtime_key(
+                &*app.services.runtime_identity,
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -458,6 +474,7 @@ pub(super) async fn users_update(
         Ok(result) => {
             if result.expire_sessions {
                 expire_user_sessions_for_runtime_key(
+                    &*app.services.runtime_identity,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -468,13 +485,13 @@ pub(super) async fn users_update(
     }
 }
 
-pub(super) async fn logout(headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(&headers) {
+pub(super) async fn logout(identity: &dyn IdentityService, headers: HeaderMap) -> Response {
+    if let Some(response) = require_auth(identity, &headers) {
         return response;
     }
 
     if let Some(token) = session_token_from_headers(&headers) {
-        invalidate_session_token(&token);
+        invalidate_session_token(identity, &token);
     }
 
     let mut response = StatusCode::NO_CONTENT.into_response();
@@ -491,6 +508,7 @@ pub(super) async fn users_me_password(
     app: &HttpAppState,
 ) -> Response {
     let auth_db = &app.auth_db;
+    let identity = &*app.services.runtime_identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -502,13 +520,7 @@ pub(super) async fn users_me_password(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match persisted_update_password_by_user_id(
-        auth_db.db.database_file(),
-        user_id(&current_user),
-        password,
-    )
-    .await
-    {
+    match persisted_update_password_by_user_id(identity, user_id(&current_user), password).await {
         Some(true) => StatusCode::NO_CONTENT.into_response(),
         Some(false) => StatusCode::NOT_FOUND.into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -523,6 +535,7 @@ pub(super) async fn users_by_id_password(
     app: &HttpAppState,
 ) -> Response {
     let auth_db = &app.auth_db;
+    let identity = &*app.services.runtime_identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -537,16 +550,11 @@ pub(super) async fn users_by_id_password(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match persisted_update_password_by_user_id(
-        auth_db.db.database_file(),
-        &target_user_id,
-        password,
-    )
-    .await
-    {
+    match persisted_update_password_by_user_id(identity, &target_user_id, password).await {
         Some(true) => {
             if user_id(&current_user) != target_user_id {
                 expire_user_sessions_for_runtime_key(
+                    identity,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -673,10 +681,16 @@ pub(crate) async fn users_by_id_authentication_activity_latest_route(
     users_by_id_authentication_activity_latest(headers, connection_info, path, uri, &app).await
 }
 
-pub(crate) async fn login_set_cookie_route(headers: HeaderMap) -> Response {
-    login_set_cookie(headers).await
+pub(crate) async fn login_set_cookie_route(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    login_set_cookie(&*app.services.runtime_identity, headers).await
 }
 
-pub(crate) async fn logout_route(headers: HeaderMap) -> Response {
-    logout(headers).await
+pub(crate) async fn logout_route(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    logout(&*app.services.runtime_identity, headers).await
 }

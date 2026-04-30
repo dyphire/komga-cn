@@ -6,8 +6,12 @@ use super::*;
 use axum::extract::State;
 use std::sync::Arc;
 
-fn request_progress_token(headers: &HeaderMap, user: &AuthUser) -> String {
-    if resolved_auth_user(headers).is_some() {
+fn request_progress_token(
+    identity: &dyn crate::state::IdentityService,
+    headers: &HeaderMap,
+    user: &AuthUser,
+) -> String {
+    if resolved_auth_user(identity, headers).is_some() {
         let token = resolved_token(headers);
         if !token.trim().is_empty() {
             return token;
@@ -69,8 +73,7 @@ pub async fn book_read_progress(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -86,7 +89,8 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     };
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
@@ -99,7 +103,7 @@ pub async fn book_read_progress(
         Err(error) => return internal_error_response(error),
     };
 
-    let token = request_progress_token(&headers, &user);
+    let token = request_progress_token(&*app.services.runtime_identity, &headers, &user);
 
     let page_value = payload.get("page");
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
@@ -170,8 +174,7 @@ pub async fn book_read_progress_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -183,13 +186,14 @@ pub async fn book_read_progress_delete(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
-    let token = request_progress_token(&headers, &user);
+    let token = request_progress_token(&*app.services.runtime_identity, &headers, &user);
     {
         let mut all_progress = app
             .read_progress
@@ -219,8 +223,7 @@ pub async fn book_progression(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -231,7 +234,8 @@ pub async fn book_progression(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) = (match app
@@ -341,8 +345,7 @@ pub async fn book_progression_get(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -353,7 +356,8 @@ pub async fn book_progression_get(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) = (match app

@@ -21,16 +21,17 @@ pub(crate) async fn opds_v1_series_detail(
     app: &HttpAppState,
     series_id: &str,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let current_user_id = user_id(&user).to_string();
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -43,7 +44,7 @@ pub(crate) async fn opds_v1_series_detail(
     if !library_visible(&allowed_library_ids, &series.library_id) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
     if !content_allowed_by_restrictions(
         restrictions.as_ref(),
         series.age_rating,
@@ -113,11 +114,12 @@ pub(crate) async fn opds_v1_library_detail(
     app: &HttpAppState,
     library_id: &str,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(library) = load_library(app.services.opds_persisted.as_ref(), library_id)
@@ -139,7 +141,7 @@ pub(crate) async fn opds_v1_library_detail(
         .unwrap_or(20)
         .clamp(1, 100);
     let visible_offset = page.saturating_mul(size);
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
     let mut raw_offset = 0_i64;
     let batch_limit = (size + 1).max(20) as i64;
     let mut visible_seen = 0usize;
@@ -206,11 +208,12 @@ pub(crate) async fn opds_v1_collection_detail(
     app: &HttpAppState,
     collection_id: &str,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(collection) = load_collection(app.services.opds_persisted.as_ref(), collection_id)
@@ -219,7 +222,7 @@ pub(crate) async fn opds_v1_collection_detail(
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let visible_series = load_collection_series(
         app.services.opds_persisted.as_ref(),
@@ -279,11 +282,12 @@ pub(crate) async fn opds_v1_readlist_detail(
     app: &HttpAppState,
     readlist_id: &str,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = load_readlist(app.services.opds_persisted.as_ref(), readlist_id)
@@ -292,7 +296,7 @@ pub(crate) async fn opds_v1_readlist_detail(
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let visible_books = load_readlist_books(app.services.opds_persisted.as_ref(), readlist_id)
         .await

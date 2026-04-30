@@ -32,8 +32,11 @@ fn actuator_json(payload: Value) -> Response {
     ([(header::CONTENT_TYPE, ACTUATOR_V3_JSON)], Json(payload)).into_response()
 }
 
-pub(crate) async fn actuator_root(headers: HeaderMap) -> Response {
-    if let Some(response) = require_admin(&headers) {
+pub(crate) async fn actuator_root(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -96,7 +99,7 @@ pub(crate) async fn actuator_health(
     let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
 
     let request_auth_user =
-        resolved_request_auth_user(&headers, app.operational.runtime.database_file.as_path()).await;
+        resolved_request_auth_user(&*app.services.runtime_identity, &headers).await;
     if request_auth_user
         .as_ref()
         .is_none_or(|user| !user_is_admin(user))
@@ -128,7 +131,7 @@ fn component_status(is_up: bool) -> &'static str {
 }
 
 fn db_health_component(app: &HttpAppState) -> HealthComponentPayload {
-    let sqlite_rw_ready = app.operational.runtime.database_file.exists();
+    let sqlite_rw_ready = app.auth_db.db.database_file().exists();
     let sqlite_ro_ready = sqlite_rw_ready;
     let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
     let tasks_ro_ready = tasks_rw_ready;
@@ -210,9 +213,9 @@ fn disk_space_probe_path(app: &HttpAppState) -> std::path::PathBuf {
         .ok()
         .or_else(|| app.operational.runtime.config_dir.clone())
         .or_else(|| {
-            app.operational
-                .runtime
-                .database_file
+            app.auth_db
+                .db
+                .database_file()
                 .parent()
                 .map(Path::to_path_buf)
         })
@@ -285,7 +288,7 @@ pub(crate) async fn actuator_info(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -466,7 +469,7 @@ pub(crate) async fn actuator_logfile(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -496,7 +499,7 @@ pub(crate) async fn actuator_shutdown(
     State(app): State<Arc<HttpAppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -513,8 +516,11 @@ pub(crate) async fn actuator_shutdown(
     Json(json!({ "message": "Shutting down, bye..." })).into_response()
 }
 
-pub(crate) async fn actuator_metrics_index(headers: HeaderMap) -> Response {
-    if let Some(response) = require_admin(&headers) {
+pub(crate) async fn actuator_metrics_index(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -529,7 +535,7 @@ pub(crate) async fn actuator_metric_detail(
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -1185,7 +1191,7 @@ async fn jdbc_connections_metric(
         .services
         .operational_runtime
         .load_sqlite_pool_snapshots(vec![
-            app.operational.runtime.database_file.clone(),
+            app.auth_db.db.database_file().to_path_buf(),
             app.operational.runtime.tasks_db_file.clone(),
         ])
         .await?
@@ -1217,7 +1223,7 @@ async fn jdbc_connections_metric(
 }
 
 fn datasource_pool_name(app: &HttpAppState, pool_path: &Path, max_connections: u32) -> String {
-    let normalized_main_path = normalized_runtime_path(&app.operational.runtime.database_file);
+    let normalized_main_path = normalized_runtime_path(app.auth_db.db.database_file());
     let normalized_tasks_path = normalized_runtime_path(&app.operational.runtime.tasks_db_file);
     let normalized_pool_path = normalized_runtime_path(pool_path);
 

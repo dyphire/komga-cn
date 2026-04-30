@@ -61,19 +61,25 @@ pub(crate) async fn opds_v1_series_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
     v1::opds_v1_series(headers, uri, &app).await
 }
 
-pub(crate) async fn opds_v1_catalog_route(headers: HeaderMap) -> Response {
-    v1::opds_v1_catalog(headers).await
+pub(crate) async fn opds_v1_catalog_route(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    v1::opds_v1_catalog(&app, headers).await
 }
 
-pub(crate) async fn opds_v1_search_route(headers: HeaderMap) -> Response {
-    v1::opds_v1_search(headers).await
+pub(crate) async fn opds_v1_search_route(
+    State(app): State<Arc<HttpAppState>>,
+    headers: HeaderMap,
+) -> Response {
+    v1::opds_v1_search(&app, headers).await
 }
 
 pub(crate) async fn opds_v1_on_deck_route(
@@ -81,7 +87,7 @@ pub(crate) async fn opds_v1_on_deck_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -93,7 +99,7 @@ pub(crate) async fn opds_v1_keep_reading_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -113,7 +119,7 @@ pub(crate) async fn opds_v1_books_latest_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -132,7 +138,7 @@ pub(crate) async fn opds_v1_collections_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -144,7 +150,7 @@ pub(crate) async fn opds_v1_readlists_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -165,7 +171,7 @@ pub(crate) async fn opds_v1_series_detail_route(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -187,7 +193,7 @@ pub(crate) async fn opds_v1_collection_detail_route(
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -200,7 +206,7 @@ pub(crate) async fn opds_v1_readlist_detail_route(
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -220,7 +226,7 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -232,7 +238,7 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return v1::opds_v1_basic_unauthorized_response();
     }
 
@@ -244,7 +250,7 @@ pub(crate) async fn opds_v2_book_file_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
@@ -256,7 +262,7 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
     headers: HeaderMap,
     AxumPath((book_id, file_name)): AxumPath<(String, String)>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
@@ -274,7 +280,7 @@ pub(crate) async fn opds_v2_book_page_route(
     Query(query): Query<media_assets::handlers::BookPageQuery>,
     AxumPath((book_id, page_number)): AxumPath<(String, u32)>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
@@ -292,7 +298,7 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     headers: HeaderMap,
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
@@ -305,7 +311,7 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    if resolved_auth_user(&headers).is_none() {
+    if resolved_auth_user(&*app.services.runtime_identity, &headers).is_none() {
         return opds_catalog_unauthorized_response(&headers);
     }
 

@@ -29,8 +29,8 @@ fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     }
 }
 
-pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(&headers) {
+pub(crate) async fn opds_v1_catalog(app: &HttpAppState, headers: HeaderMap) -> Response {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
     let search_href = app_absolute_url(&headers, "/opds/v1.2/search");
@@ -111,8 +111,8 @@ pub(crate) async fn opds_v1_catalog(headers: HeaderMap) -> Response {
     )
 }
 
-pub(crate) async fn opds_v1_search(headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(&headers) {
+pub(crate) async fn opds_v1_search(app: &HttpAppState, headers: HeaderMap) -> Response {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -134,18 +134,19 @@ pub(crate) async fn opds_v1_search(headers: HeaderMap) -> Response {
 }
 
 pub(crate) async fn opds_v1_on_deck(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let user_id = user_id(&user).to_string();
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let books = app
         .services
@@ -187,18 +188,19 @@ pub(crate) async fn opds_v1_keep_reading(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let user_id = user_id(&user).to_string();
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let books = app
@@ -241,14 +243,15 @@ pub(crate) async fn opds_v1_series_latest(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let visible_offset = page.saturating_mul(size);
@@ -318,19 +321,20 @@ pub(crate) async fn opds_v1_books_latest(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let current_user_id = user_id(&user).to_string();
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let visible_offset = page.saturating_mul(size);
@@ -400,11 +404,12 @@ pub(crate) async fn opds_v1_books_latest(
 }
 
 pub(crate) async fn opds_v1_libraries(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if require_auth(&headers).is_some() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
         return opds_v1_basic_unauthorized_response();
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -440,11 +445,12 @@ pub(crate) async fn opds_v1_collections(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -495,11 +501,12 @@ pub(crate) async fn opds_v1_readlists(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -546,11 +553,12 @@ pub(crate) async fn opds_v1_publishers(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    if require_auth(&headers).is_some() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
         return opds_v1_basic_unauthorized_response();
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -580,11 +588,12 @@ pub(crate) async fn opds_v1_publishers(
 }
 
 pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_auth(&headers) {
+    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 

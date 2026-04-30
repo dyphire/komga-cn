@@ -20,7 +20,6 @@ pub struct AuthDatabaseState {
 
 #[derive(Clone)]
 pub struct RuntimeState {
-    pub database_file: PathBuf,
     pub tasks_db_file: PathBuf,
     pub lucene_data_directory: PathBuf,
     pub fonts_data_directory: PathBuf,

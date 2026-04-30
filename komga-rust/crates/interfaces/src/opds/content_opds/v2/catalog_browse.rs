@@ -4,7 +4,7 @@ use crate::state::{HttpAppState, OpdsBookFeedEntry, OpdsSeriesEntry};
 const RECOMMENDED_PAGE_SIZE: i64 = 100;
 
 pub(crate) async fn opds_catalog(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if require_auth(&headers).is_none() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_none() {
         return opds_v2_recommended(headers, app, None, "/opds/v2/libraries".to_string()).await;
     }
 
@@ -12,7 +12,7 @@ pub(crate) async fn opds_catalog(headers: HeaderMap, app: &HttpAppState) -> Resp
 }
 
 pub(crate) async fn opds_v2_libraries(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if require_auth(&headers).is_some() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
@@ -39,11 +39,12 @@ async fn opds_v2_recommended(
     library_id: Option<&str>,
     self_path: String,
 ) -> Response {
-    if require_auth(&headers).is_some() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return opds_catalog_unauthorized_response(&headers);
     };
 
@@ -70,7 +71,7 @@ async fn opds_v2_recommended(
         None
     };
 
-    let Some(user) = resolved_auth_user(&headers) else {
+    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
         return opds_catalog_unauthorized_response(&headers);
     };
     let user_id_value = user_id(&user).to_string();
@@ -80,7 +81,7 @@ async fn opds_v2_recommended(
         .map(|library| format!("/{}", library.id))
         .unwrap_or_default();
     let recommended_path = format!("/opds/v2/libraries{library_segment}");
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let mut keep_reading = app
         .services
@@ -518,11 +519,12 @@ pub(crate) async fn opds_v2_library_browse(
     app: &HttpAppState,
     library_id: Option<&str>,
 ) -> Response {
-    if require_auth(&headers).is_some() {
+    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
         return opds_catalog_unauthorized_response(&headers);
     }
 
-    let Some(allowed_library_ids) = allowed_library_ids(&headers) else {
+    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -549,7 +551,7 @@ pub(crate) async fn opds_v2_library_browse(
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
 
-    let restrictions = opds_restrictions(&headers);
+    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let browse_base_path = format!("/opds/v2/libraries{library_segment}/browse");

@@ -11,12 +11,12 @@ pub async fn series_thumbnail(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -55,11 +55,11 @@ pub async fn series_thumbnails(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -104,11 +104,11 @@ pub async fn series_thumbnail_by_id(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -150,7 +150,7 @@ pub async fn series_thumbnail_upload(
     Path(series_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -208,7 +208,7 @@ pub async fn series_thumbnail_select(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -225,7 +225,7 @@ pub async fn series_thumbnail_delete(
     headers: HeaderMap,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 

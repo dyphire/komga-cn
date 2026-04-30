@@ -25,8 +25,11 @@ use super::types::{
 
 mod catalog_queries;
 
-pub(super) fn allowed_library_ids(headers: &HeaderMap) -> Option<Option<HashSet<String>>> {
-    let user = resolved_auth_user(headers)?;
+pub(super) fn allowed_library_ids(
+    identity: &dyn crate::state::IdentityService,
+    headers: &HeaderMap,
+) -> Option<Option<HashSet<String>>> {
+    let user = resolved_auth_user(identity, headers)?;
     if user_shared_all_libraries(&user) {
         return Some(None);
     }
@@ -45,8 +48,11 @@ pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &st
     }
 }
 
-pub(super) fn opds_restrictions(headers: &HeaderMap) -> Option<OpdsRestrictions> {
-    let user = resolved_auth_user(headers)?;
+pub(super) fn opds_restrictions(
+    identity: &dyn crate::state::IdentityService,
+    headers: &HeaderMap,
+) -> Option<OpdsRestrictions> {
+    let user = resolved_auth_user(identity, headers)?;
     let payload = user_payload_json(&user);
 
     let age = payload

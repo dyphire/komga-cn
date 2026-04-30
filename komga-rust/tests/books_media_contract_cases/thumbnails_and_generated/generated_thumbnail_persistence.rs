@@ -189,22 +189,57 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
 #[tokio::test]
 async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
     let _guard = thumbnail_runtime_sse_guard().await;
+    let book_id = "book-generated-thumbnail-sse";
     let paths = new_router_fixture("router-generate-book-thumbnail-sse").await;
     seed_router_contract_data(&paths).await;
-    write_router_epub_with_cover(&paths, "books/book-1.epub");
+    write_router_epub_with_cover(&paths, "books/book-generated-thumbnail-sse.epub");
 
     let cleanup_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("main db should open for generated thumbnail sse cleanup");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(0_i64)
+    .bind("book-generated-thumbnail-sse.epub")
+    .bind("books/book-generated-thumbnail-sse.epub")
+    .bind("series-1")
+    .bind(1_024_i64)
+    .bind(42_i64)
+    .bind("library-1")
+    .execute(&cleanup_pool)
+    .await
+    .expect("unique generated-thumbnail SSE book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/epub+zip")
+        .bind("READY")
+        .bind(book_id)
+        .bind(10_i64)
+        .execute(&cleanup_pool)
+        .await
+        .expect("unique generated-thumbnail SSE media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("42")
+    .bind(42.0_f64)
+    .bind("Generated Thumbnail SSE Book")
+    .bind("2024-01-15")
+    .bind(book_id)
+    .execute(&cleanup_pool)
+    .await
+    .expect("unique generated-thumbnail SSE book metadata row should be inserted");
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
-        .bind("book-1")
+        .bind(book_id)
         .execute(&cleanup_pool)
         .await
         .expect("existing book thumbnails should be deleted before generated thumbnail sse test");
     cleanup_pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+    generate_book_thumbnail(paths.main_db.as_path(), book_id)
         .await
         .expect("generate_book_thumbnail should execute successfully for sse contract");
 
@@ -217,7 +252,7 @@ async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
         .iter()
         .filter(|event| event.name == "ThumbnailBookAdded")
         .filter(|event| {
-            event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
+            event.payload.get("bookId").and_then(|value| value.as_str()) == Some(book_id)
         })
         .filter(|event| {
             event

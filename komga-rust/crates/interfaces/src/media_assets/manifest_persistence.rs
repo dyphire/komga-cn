@@ -480,8 +480,8 @@ pub(crate) async fn build_persisted_book_manifest(
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
-    let database_file = app.auth_db.db.database_file();
-    let Some(user) = resolved_request_auth_user(headers, database_file).await else {
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
+    else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
 

@@ -16,7 +16,7 @@ pub async fn books_import(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&headers) {
+    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
         return response;
     }
 
@@ -330,7 +330,6 @@ mod tests {
     fn test_app_state(task_queue: Box<dyn TaskQueueService>) -> HttpAppState {
         let operational = OperationalState {
             runtime: RuntimeState {
-                database_file: PathBuf::from("/tmp/main.db"),
                 tasks_db_file: PathBuf::from("/tmp/tasks.db"),
                 lucene_data_directory: PathBuf::from("/tmp/lucene"),
                 fonts_data_directory: PathBuf::from("/tmp/fonts"),
@@ -369,7 +368,7 @@ mod tests {
             discovery_auth: DiscoveryAuthState::default(),
             auth_db: AuthDatabaseState {
                 db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
-                    operational.runtime.database_file.clone(),
+                    PathBuf::from("/tmp/main.db"),
                     sqlx::sqlite::SqlitePoolOptions::new()
                         .connect_lazy("sqlite::memory:")
                         .expect("lazy in-memory pool should open"),

@@ -643,7 +643,7 @@ pub async fn books_list(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -672,7 +672,7 @@ pub async fn books_list(
         Some(&payload),
         full_text_search.clone(),
         &app.discovery_auth,
-        app.auth_db.db.database_file(),
+        &*app.services.runtime_identity,
         strict_runtime_shape,
     )
     .await
@@ -691,7 +691,7 @@ pub(super) async fn books_deprecated_get(
     app: &HttpAppState,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -760,7 +760,7 @@ pub(super) async fn books_deprecated_get(
         payload.as_ref(),
         search.clone(),
         &app.discovery_auth,
-        database_file,
+        &*app.services.runtime_identity,
         true,
     )
     .await
@@ -780,7 +780,7 @@ pub async fn series_books_deprecated(
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
     let database_file = app.auth_db.db.database_file();
-    if let Some(response) = require_request_auth(&headers, database_file).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -808,7 +808,11 @@ pub async fn series_books_deprecated(
 
     if let Err(denial) = app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(&headers, &detail_context, database_file)
+        .resolve_detail_query_context_with_persistence(
+            &*app.services.runtime_identity,
+            &headers,
+            &detail_context,
+        )
         .await
     {
         return detail_access_denial_response(denial);
@@ -830,7 +834,7 @@ pub async fn series_books_deprecated(
         Some(&payload),
         None,
         &app.discovery_auth,
-        database_file,
+        &*app.services.runtime_identity,
         true,
     )
     .await
@@ -848,7 +852,7 @@ pub async fn books_latest(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -866,9 +870,9 @@ pub async fn books_latest(
         let context = match app
             .discovery_auth
             .resolve_query_context_with_persistence(
+                &*app.services.runtime_identity,
                 &headers,
                 library_ids.as_deref(),
-                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -941,7 +945,7 @@ pub async fn books_ondeck(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -960,9 +964,9 @@ pub async fn books_ondeck(
     let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
             &headers,
             library_ids.as_deref(),
-            app.auth_db.db.database_file(),
         )
         .await
     {
@@ -1037,7 +1041,7 @@ pub async fn books_duplicates(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -1045,7 +1049,7 @@ pub async fn books_duplicates(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
+    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -1114,7 +1118,7 @@ pub async fn book_tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
+    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
     }
 
@@ -1138,13 +1142,13 @@ pub async fn book_tags(
     let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
             &headers,
             if series_scope.is_some() || readlist_scope.is_some() || library_ids.is_empty() {
                 None
             } else {
                 Some(library_ids.as_slice())
             },
-            app.auth_db.db.database_file(),
         )
         .await
     {

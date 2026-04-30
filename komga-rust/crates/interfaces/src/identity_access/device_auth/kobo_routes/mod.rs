@@ -144,10 +144,10 @@ async fn kobo_book_thumbnail_response(
     height: &str,
 ) -> Response {
     if let Err(status) = required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token,
         headers,
         remote_addr,
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -378,10 +378,10 @@ pub async fn kobo_library_sync(
     uri: axum::http::Uri,
 ) -> Response {
     let current_user = match required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -390,10 +390,10 @@ pub async fn kobo_library_sync(
     };
     let user_id_value = user_id(&current_user).to_string();
     let current_api_key_id = resolved_kobo_request_api_key_metadata(
+        &*app.services.runtime_identity,
         &current_user,
         auth_token.as_str(),
         &headers,
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     .map(|(id, _)| id);
@@ -519,10 +519,10 @@ pub async fn kobo_library_book_metadata(
     uri: axum::http::Uri,
 ) -> Response {
     if let Err(status) = required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -653,10 +653,10 @@ pub async fn kobo_library_book_state(
     uri: axum::http::Uri,
 ) -> Response {
     let current_user = match required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -714,10 +714,10 @@ pub async fn kobo_library_book_state_update(
     body: Bytes,
 ) -> Response {
     let current_user = match required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -824,10 +824,10 @@ pub async fn kobo_library_book_state_update(
     }
 
     let (device_id, device_name) = resolved_kobo_request_api_key_metadata(
+        &*app.services.runtime_identity,
         &current_user,
         auth_token.as_str(),
         &headers,
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
@@ -900,10 +900,10 @@ pub async fn kobo_book_file_epub(
     Query(query): Query<KoboBookFileQuery>,
 ) -> Response {
     let current_user = match required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {
@@ -1046,10 +1046,10 @@ pub async fn kobo_catch_all(
     body: Bytes,
 ) -> Response {
     if let Err(status) = required_kobo_user(
+        &*app.services.runtime_identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.operational.runtime.database_file.as_path(),
     )
     .await
     {

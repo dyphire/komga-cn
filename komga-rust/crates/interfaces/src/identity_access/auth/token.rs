@@ -2,8 +2,10 @@ use axum::http::{HeaderMap, Uri};
 use axum_extra::extract::cookie::CookieJar;
 use komga_application::identity_access::AuthUser;
 
-pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
-    komga_infrastructure::auth::runtime_identity_access::auth_token_user(headers)
+use crate::state::IdentityService;
+
+pub fn auth_token_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
+    identity.auth_token_user(headers.clone())
 }
 
 pub fn resolved_token(headers: &HeaderMap) -> String {
@@ -30,21 +32,20 @@ pub fn remember_me_requested(uri: &Uri) -> bool {
         .is_some_and(|query| query.split('&').any(|pair| pair == "remember-me=true"))
 }
 
-pub fn session_token_for_user_with_runtime_key(user: &AuthUser, runtime_key: &str) -> String {
-    komga_infrastructure::auth::runtime_identity_access::session_token_for_user_with_runtime_key(
-        user,
-        runtime_key,
-    )
+pub fn session_token_for_user_with_runtime_key(
+    identity: &dyn IdentityService,
+    user: &AuthUser,
+    runtime_key: &str,
+) -> String {
+    identity.session_token_for_user_with_runtime_key(user.clone(), runtime_key.to_string())
 }
 
 pub fn remember_me_token_for_user_with_runtime_key(
+    identity: &dyn IdentityService,
     user: &AuthUser,
     runtime_key: &str,
 ) -> Option<String> {
-    komga_infrastructure::auth::runtime_identity_access::remember_me_token_for_user_with_runtime_key(
-        user,
-        runtime_key,
-    )
+    identity.remember_me_token_for_user_with_runtime_key(user.clone(), runtime_key.to_string())
 }
 
 fn x_auth_token(headers: &HeaderMap) -> Option<String> {
