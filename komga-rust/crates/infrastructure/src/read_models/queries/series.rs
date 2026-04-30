@@ -1,4 +1,4 @@
-use komga_application::discovery::{RuntimeSeriesListQuery, SeriesDetailQuery};
+use komga_application::discovery::{SeriesDetailQuery, SeriesListQuery};
 use komga_application::discovery::{
     SeriesDetailReadModel, SeriesReadModel, SeriesResourceReadModel,
 };
@@ -69,7 +69,7 @@ impl From<SqlxSeriesDetailRow> for SeriesDetailReadModel {
 pub(in crate::read_models) async fn list_series_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &RuntimeSeriesListQuery,
+    query: &SeriesListQuery,
 ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
     let allowed = effective_library_ids(context, query.library_ids.as_deref());
     if allowed.as_ref().is_some_and(Vec::is_empty) {
@@ -293,7 +293,7 @@ fn apply_series_list_filters_sqlx<'args>(
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
     context: &DiscoveryQueryContext,
-    query: &RuntimeSeriesListQuery,
+    query: &SeriesListQuery,
     allowed_library_ids: Option<&Vec<String>>,
 ) {
     query_filters_sqlx(

@@ -318,7 +318,12 @@ impl SqliteTempPool {
         drop(pool);
 
         for path in sqlite_sidecar_paths(&db_path) {
-            let _ = remove_file_after_release(&path);
+            remove_file_after_release(&path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to remove temp sqlite file {} after pool close: {error}",
+                    path.display()
+                )
+            });
         }
     }
 }

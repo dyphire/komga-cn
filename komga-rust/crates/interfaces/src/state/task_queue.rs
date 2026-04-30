@@ -1,4 +1,5 @@
 use super::*;
+use komga_application::operational::PersistedServerSettings;
 
 #[async_trait]
 pub trait ServerSettingsService: Send + Sync {

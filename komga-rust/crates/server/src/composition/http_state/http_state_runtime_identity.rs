@@ -1,21 +1,21 @@
 use super::*;
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, PersistedApiKey,
-    PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    AuthOutcome, AuthUser, CreateAuthUserInput, KoboStoreSyncMergeResult, KoboSyncPage,
+    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, UpdateAuthUserInput,
+    UpdateAuthUserResult,
 };
 use komga_infrastructure::auth::runtime_identity_access as infrastructure_auth_runtime_identity;
 use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity_access;
 use komga_interfaces::state::{
-    AuthenticationActivityWriteInput, CreateAuthUserInput, IdentityService,
+    AuthenticationActivityWriteInput, IdentityService,
     KoboMetadataRecord as InterfacesKoboMetadataRecord,
     KoreaderBookLookupError as InterfacesKoreaderBookLookupError,
     KoreaderBookTarget as InterfacesKoreaderBookTarget,
     PersistedBookMediaFile as InterfacesPersistedBookMediaFile,
-    PersistedReadProgressRecord as InterfacesPersistedReadProgressRecord, UpdateAuthUserInput,
-    UpdateAuthUserResult,
+    PersistedReadProgressRecord as InterfacesPersistedReadProgressRecord,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -479,28 +479,7 @@ impl IdentityService for RuntimeIdentityService {
         &self,
         input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
-        infrastructure_runtime_identity::create_auth_user(
-            self.db.database_file(),
-            infrastructure_runtime_identity::CreateAuthUserInput {
-                user_id: input.user_id,
-                email: input.email,
-                password_hash: input.password_hash,
-                roles: input.roles,
-                shared_libraries: infrastructure_runtime_identity::SharedLibrariesInput {
-                    all: input.shared_libraries.all,
-                    library_ids: input.shared_libraries.library_ids,
-                },
-                labels_allow: input.labels_allow,
-                labels_exclude: input.labels_exclude,
-                age_restriction: input.age_restriction.map(|value| {
-                    infrastructure_runtime_identity::AuthUserAgeRestrictionInput {
-                        age: value.age,
-                        allow_only: value.allow_only,
-                    }
-                }),
-            },
-        )
-        .await
+        infrastructure_runtime_identity::create_auth_user(self.db.database_file(), input).await
     }
 
     async fn delete_auth_user(&self, target_user_id: String) -> Result<bool, sqlx::Error> {
@@ -516,31 +495,9 @@ impl IdentityService for RuntimeIdentityService {
         infrastructure_runtime_identity::update_auth_user(
             self.db.database_file(),
             &target_user_id,
-            infrastructure_runtime_identity::UpdateAuthUserInput {
-                roles: patch.roles,
-                shared_libraries: patch.shared_libraries.map(|value| {
-                    infrastructure_runtime_identity::SharedLibrariesInput {
-                        all: value.all,
-                        library_ids: value.library_ids,
-                    }
-                }),
-                labels_allow: patch.labels_allow,
-                labels_exclude: patch.labels_exclude,
-                age_restriction: patch.age_restriction.map(|value| {
-                    value.map(|inner| {
-                        infrastructure_runtime_identity::AuthUserAgeRestrictionInput {
-                            age: inner.age,
-                            allow_only: inner.allow_only,
-                        }
-                    })
-                }),
-            },
+            patch,
         )
         .await
-        .map(|result| UpdateAuthUserResult {
-            updated: result.updated,
-            expire_sessions: result.expire_sessions,
-        })
     }
 
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {

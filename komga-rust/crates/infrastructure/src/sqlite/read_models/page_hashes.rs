@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use komga_application::media_assets::{PageHashDeleteTarget, PageHashDeleteTargetPage};
 use reqwest::Url;
 use serde_json::{Value, json};
 use sqlx::{QueryBuilder, Row, Sqlite};
@@ -19,21 +20,6 @@ pub struct PageHashUnknownSource {
 pub struct PageHashUnknownMatchTarget {
     pub book_id: String,
     pub page_number: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct PageHashDeleteTargetPage {
-    pub file_hash: String,
-    pub file_size: i64,
-    pub file_name: String,
-    pub media_type: String,
-    pub page_number: i64,
-}
-
-#[derive(Clone, Debug)]
-pub struct PageHashDeleteTarget {
-    pub book_id: String,
-    pub pages: Vec<PageHashDeleteTargetPage>,
 }
 
 pub async fn load_page_hashes_page(

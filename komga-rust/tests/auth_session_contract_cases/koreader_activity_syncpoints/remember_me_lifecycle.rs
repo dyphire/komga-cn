@@ -1,7 +1,6 @@
-use super::sse_events::read_sse_until;
+use super::sse_events::{parse_event_log, read_sse_until};
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use komga_contract_testkit::sse::parse_event_log;
 use serde_json::{Value, json};
 use std::time::Duration;
 

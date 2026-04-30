@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 #[derive(Default)]
 pub(crate) struct NoopOperationalRuntimeService;
 #[async_trait]

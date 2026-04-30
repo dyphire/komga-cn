@@ -6,7 +6,7 @@ mod sibling;
 
 use komga_application::discovery::{
     BookDetailReadModel, BookReadModel, BookReadProgressReadModel, BookReadlistsQuery,
-    CollectionReadModel, ReadListDetailQuery, ReadListReadModel, RuntimeReadListBooksQuery,
+    CollectionReadModel, ReadListBooksQuery, ReadListDetailQuery, ReadListReadModel,
     RuntimeReadListsQuery, SeriesCollectionsQuery,
 };
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
@@ -134,7 +134,7 @@ struct SqlxReadListCandidateRow {
 pub(in crate::read_models) async fn list_readlist_books_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &RuntimeReadListBooksQuery,
+    query: &ReadListBooksQuery,
 ) -> Result<komga_domain::discovery::PageEnvelope<BookReadModel>, DiscoveryError> {
     books::list_readlist_books_sqlx(pool, context, query).await
 }

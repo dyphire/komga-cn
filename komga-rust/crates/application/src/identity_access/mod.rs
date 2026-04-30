@@ -1,6 +1,7 @@
 mod contracts;
 mod device_tokens;
 mod kobo_sync;
+mod mutation_models;
 mod principal_resolution;
 mod session_tokens;
 mod user_models;
@@ -20,6 +21,10 @@ pub use kobo_sync::{
     build_kobo_deleted_tag, build_kobo_new_entitlement, build_kobo_new_tag, build_kobo_sync_events,
     build_komga_sync_token_payload, decode_or_passthrough_sync_token,
     is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
+};
+pub use mutation_models::{
+    AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
+    UpdateAuthUserResult,
 };
 pub use principal_resolution::{
     configured_api_key_identity, koreader_authorized, resolve_kobo_user, resolve_koreader_user_id,

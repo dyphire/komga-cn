@@ -124,6 +124,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    use komga_application::operational::PersistedServerSettings;
     use komga_application::task_processing::{TaskKind, TaskRequest};
 
     use crate::discovery_auth::state::DiscoveryAuthState;
@@ -327,8 +328,8 @@ mod tests {
             Ok(BTreeMap::new())
         }
 
-        async fn load_settings(&self) -> Result<crate::state::PersistedServerSettings, String> {
-            Ok(crate::state::PersistedServerSettings {
+        async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
+            Ok(PersistedServerSettings {
                 delete_empty_collections: false,
                 delete_empty_read_lists: false,
                 remember_me_key: String::new(),

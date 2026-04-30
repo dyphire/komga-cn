@@ -1,5 +1,5 @@
 use komga_application::discovery::BookDetailReadModel;
-use komga_application::discovery::{BookDetailQuery, RuntimeReadListBooksQuery};
+use komga_application::discovery::{BookDetailQuery, ReadListBooksQuery};
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
 
@@ -16,7 +16,7 @@ pub(super) async fn get_readlist_book_sibling_sqlx(
     let page = list_readlist_books_sqlx(
         pool.clone(),
         context,
-        &RuntimeReadListBooksQuery {
+        &ReadListBooksQuery {
             readlist_id: readlist_id.to_string(),
             page: 0,
             size: 20,

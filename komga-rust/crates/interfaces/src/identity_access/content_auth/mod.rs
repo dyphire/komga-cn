@@ -28,9 +28,9 @@ use crate::identity_access::auth::{
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::operational::register_session_expired_event;
-use crate::state::{
-    AuthUserAgeRestrictionInput, CreateAuthUserInput, HttpAppState, IdentityService,
-    SharedLibrariesInput, UpdateAuthUserInput,
+use crate::state::{HttpAppState, IdentityService};
+use komga_application::identity_access::{
+    AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
 };
 
 mod activity_routes;

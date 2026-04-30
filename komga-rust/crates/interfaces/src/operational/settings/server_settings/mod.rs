@@ -3,6 +3,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use komga_application::operational::PersistedServerSettings;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -11,7 +12,6 @@ use crate::operational::helpers::{
     effective_server_context_path, effective_server_port, invalid_settings_payload,
     is_valid_context_path, multi_source_number, multi_source_string,
 };
-use crate::state::PersistedServerSettings;
 use crate::state::{HttpAppState, OperationalSettings, RuntimeState};
 
 pub(crate) async fn get_server_settings(

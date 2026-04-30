@@ -28,9 +28,6 @@ pub use read_models::{
 };
 pub use readlists::{
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery,
-    RuntimeReadListBooksQuery, RuntimeReadListsQuery, classify_readlist_books_query,
-    normalize_readlists_search,
+    RuntimeReadListsQuery, classify_readlist_books_query, normalize_readlists_search,
 };
-pub use series::{
-    RuntimeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery, SeriesListQuery,
-};
+pub use series::{SeriesCollectionsQuery, SeriesDetailQuery, SeriesListQuery};

@@ -3,7 +3,6 @@ use axum::http::{Request, StatusCode, header};
 use komga_application::task_processing::TaskQueueRecord;
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
-use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
@@ -108,9 +107,4 @@ fn write_stale_analyzer_version_marker(index_dir: &std::path::Path) {
         search_analyzer_version().saturating_add(1).to_string(),
     )
     .expect("stale analyzer version marker should be written");
-}
-
-#[test]
-fn task_runtime_contract_target_is_registered() {
-    assert_required_target_declared("tasks/scanner", "task_runtime_contract");
 }

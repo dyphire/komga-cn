@@ -35,20 +35,6 @@ pub struct ReadListBooksQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RuntimeReadListBooksQuery {
-    pub readlist_id: String,
-    pub page: usize,
-    pub size: usize,
-    pub unpaged: bool,
-    pub library_ids: Option<Vec<String>>,
-    pub deleted: Option<bool>,
-    pub tags: Option<Vec<String>>,
-    pub read_statuses: Option<Vec<String>>,
-    pub media_statuses: Option<Vec<String>>,
-    pub authors: Option<Vec<String>>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadListDetailQuery {
     pub readlist_id: String,
 }
@@ -77,9 +63,7 @@ where
         query: ReadListBooksQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         classify_readlist_books_query(&query)?;
-        self.repository
-            .list_readlist_books(context, runtime_readlist_books_query(query))
-            .await
+        self.repository.list_readlist_books(context, query).await
     }
 }
 
@@ -95,21 +79,6 @@ pub fn classify_readlist_books_query(
 
 pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
     search.and_then(|value| (!value.trim().is_empty()).then_some(value))
-}
-
-pub(crate) fn runtime_readlist_books_query(query: ReadListBooksQuery) -> RuntimeReadListBooksQuery {
-    RuntimeReadListBooksQuery {
-        readlist_id: query.readlist_id,
-        page: query.page,
-        size: query.size,
-        unpaged: query.unpaged,
-        library_ids: query.library_ids,
-        deleted: query.deleted,
-        tags: query.tags,
-        read_statuses: query.read_statuses,
-        media_statuses: query.media_statuses,
-        authors: query.authors,
-    }
 }
 
 #[cfg(test)]

@@ -4,10 +4,9 @@ use std::sync::Mutex;
 use komga_application::discovery::{
     BookDetailQuery, BookDetailReadModel, BookReadModel, BookReadlistsQuery, BookResourceReadModel,
     BookSiblingQuery, CollectionReadModel, DiscoveryQueryRepository, LibraryReadModel,
-    ReadListDetailQuery, ReadListReadModel, RuntimeBooksLatestQuery, RuntimeBooksListQuery,
-    RuntimeReadListBooksQuery, RuntimeReadListsQuery, RuntimeSeriesListQuery,
-    SeriesCollectionsQuery, SeriesDetailQuery, SeriesDetailReadModel, SeriesReadModel,
-    SeriesResourceReadModel,
+    ReadListBooksQuery, ReadListDetailQuery, ReadListReadModel, RuntimeBooksLatestQuery,
+    RuntimeBooksListQuery, RuntimeReadListsQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    SeriesDetailReadModel, SeriesListQuery, SeriesReadModel, SeriesResourceReadModel,
 };
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -488,7 +487,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
     async fn list_series(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeSeriesListQuery,
+        query: SeriesListQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
         queries::series::list_series_sqlx(pool, context, &query).await
@@ -515,7 +514,7 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
     async fn list_readlist_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeReadListBooksQuery,
+        query: ReadListBooksQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
         readlists::list_readlist_books_sqlx(pool, context, &query).await

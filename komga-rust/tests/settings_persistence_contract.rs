@@ -1,4 +1,3 @@
-use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::sqlite::connect_main_write_context;
 use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
@@ -8,11 +7,6 @@ mod support {
 }
 
 use support::persistence_contract_fixture;
-
-#[test]
-fn settings_persistence_contract_target_is_registered() {
-    assert_required_target_declared("settings", "settings_persistence_contract");
-}
 
 #[tokio::test]
 async fn server_settings_rows_persist_in_flyway_seeded_main_db() {

@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-const FILE_RELEASE_RETRY_DEADLINE: Duration = Duration::from_secs(5);
+const FILE_RELEASE_RETRY_DEADLINE: Duration = Duration::from_secs(30);
 const FILE_RELEASE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 pub mod browser;

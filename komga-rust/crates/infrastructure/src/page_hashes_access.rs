@@ -3,8 +3,8 @@ use std::io::Read;
 use std::path::Path;
 
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_single_image,
-    content_type_from_filename,
+    BookMediaRecord, BookPageRecord, PageHashDeleteTarget, PageHashThumbnail, book_media_is_pdf,
+    book_media_is_single_image, content_type_from_filename,
 };
 use serde_json::Value;
 use std::io::Cursor;
@@ -28,27 +28,6 @@ use crate::sqlite::read_models::page_hashes::{
 };
 use crate::sqlite::write_models::page_hashes::upsert_page_hash as upsert_page_hash_model;
 use crate::sqlite::{connect_read_pool, connect_write_pool};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PageHashThumbnail {
-    pub bytes: Vec<u8>,
-    pub media_type: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PageHashDeleteTargetPage {
-    pub file_hash: String,
-    pub file_size: i64,
-    pub file_name: String,
-    pub media_type: String,
-    pub page_number: i64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PageHashDeleteTarget {
-    pub book_id: String,
-    pub pages: Vec<PageHashDeleteTargetPage>,
-}
 
 const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
 
@@ -85,27 +64,7 @@ pub async fn load_page_hash_delete_targets(
     database_file: &Path,
     page_hash: &str,
 ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-    load_page_hash_delete_targets_model(database_file, page_hash)
-        .await
-        .map(|targets| {
-            targets
-                .into_iter()
-                .map(|target| PageHashDeleteTarget {
-                    book_id: target.book_id,
-                    pages: target
-                        .pages
-                        .into_iter()
-                        .map(|page| PageHashDeleteTargetPage {
-                            file_hash: page.file_hash,
-                            file_size: page.file_size,
-                            file_name: page.file_name,
-                            media_type: page.media_type,
-                            page_number: page.page_number,
-                        })
-                        .collect(),
-                })
-                .collect()
-        })
+    load_page_hash_delete_targets_model(database_file, page_hash).await
 }
 
 pub async fn load_page_hash_thumbnail(

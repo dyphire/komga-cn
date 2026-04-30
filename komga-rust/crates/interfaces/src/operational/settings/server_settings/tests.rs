@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use komga_application::identity_access::AuthUser;
+use komga_application::operational::PersistedServerSettings;
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
 };
@@ -280,9 +281,9 @@ impl ServerSettingsService for FakeSettingsStore {
             .collect())
     }
 
-    async fn load_settings(&self) -> Result<crate::state::PersistedServerSettings, String> {
+    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
         let persisted = self.load_map().await?;
-        Ok(crate::state::PersistedServerSettings {
+        Ok(PersistedServerSettings {
             delete_empty_collections: persisted
                 .get("DELETE_EMPTY_COLLECTIONS")
                 .and_then(|v| v.as_deref())

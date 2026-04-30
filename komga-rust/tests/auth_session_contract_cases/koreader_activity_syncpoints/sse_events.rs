@@ -1,7 +1,6 @@
 use super::*;
 use http_body_util::BodyExt;
 use komga_application::media_assets::{BooksImportEntry, ImportCopyMode, MediaImportPort};
-use komga_contract_testkit::sse::parse_event_log;
 use komga_infrastructure::filesystem::import::FilesystemImportPort;
 use std::fs;
 use std::path::Path;
@@ -37,6 +36,106 @@ pub(super) async fn read_sse_until(
         if let Ok(data) = frame.into_data() {
             buffer.push_str(&String::from_utf8_lossy(&data));
         }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ParsedEventLog {
+    pub events: Vec<ParsedEvent>,
+}
+
+#[derive(Debug)]
+pub(super) struct ParsedEvent {
+    pub name: String,
+    pub payload: serde_json::Value,
+}
+
+pub(super) fn parse_event_log(input: &str) -> anyhow::Result<ParsedEventLog> {
+    let mut events = Vec::new();
+    let mut frame = SseFrame::default();
+
+    for raw_line in input.lines() {
+        let line = raw_line.trim_end_matches('\r');
+
+        if line.is_empty() {
+            if !frame.is_empty()
+                && let Some(event) = frame.finish()?
+            {
+                events.push(event);
+            }
+            continue;
+        }
+
+        if line.starts_with(':') {
+            frame.skipped = true;
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("event:") {
+            frame.event_name = Some(value.trim_start().to_string());
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("data:") {
+            frame.data_lines.push(value.trim_start().to_string());
+        }
+    }
+
+    if !frame.is_empty()
+        && let Some(event) = frame.finish()?
+    {
+        events.push(event);
+    }
+
+    Ok(ParsedEventLog { events })
+}
+
+#[derive(Default)]
+struct SseFrame {
+    event_name: Option<String>,
+    data_lines: Vec<String>,
+    skipped: bool,
+}
+
+impl SseFrame {
+    fn is_empty(&self) -> bool {
+        self.event_name.is_none() && self.data_lines.is_empty() && !self.skipped
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Option<ParsedEvent>> {
+        if self.skipped {
+            self.clear();
+            return Ok(None);
+        }
+
+        let event_name = self
+            .event_name
+            .take()
+            .unwrap_or_else(|| "message".to_string());
+        let data = self.data_lines.join("\n");
+        self.clear();
+
+        if matches!(event_name.as_str(), "heartbeat" | "keepalive" | "ping") {
+            return Ok(None);
+        }
+
+        let payload = if data.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str::<serde_json::Value>(&data)
+                .unwrap_or_else(|_| serde_json::Value::String(data))
+        };
+
+        Ok(Some(ParsedEvent {
+            name: event_name,
+            payload,
+        }))
+    }
+
+    fn clear(&mut self) {
+        self.event_name = None;
+        self.data_lines.clear();
+        self.skipped = false;
     }
 }
 

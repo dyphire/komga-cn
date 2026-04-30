@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::operational::PersistedServerSettings;
+
 use crate::sqlite::read_models::client_settings::{
     load_client_settings_global as load_client_settings_global_model,
     load_client_settings_user as load_client_settings_user_model,
@@ -19,20 +21,6 @@ use serde_json::{Value, json};
 use sqlx::Row;
 
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PersistedServerSettings {
-    pub delete_empty_collections: bool,
-    pub delete_empty_read_lists: bool,
-    pub remember_me_key: String,
-    pub remember_me_duration_days: u64,
-    pub thumbnail_size: &'static str,
-    pub task_pool_size: u64,
-    pub server_port: Option<u16>,
-    pub server_context_path: Option<String>,
-    pub kobo_proxy: bool,
-    pub kobo_port: Option<u16>,
-}
 
 struct PersistedHistoricalEvent {
     id: String,

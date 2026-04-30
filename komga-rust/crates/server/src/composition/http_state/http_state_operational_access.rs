@@ -1,13 +1,13 @@
 use super::*;
 use async_trait::async_trait;
+use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::filesystem::browser as infrastructure_browser;
 use komga_infrastructure::filesystem::fonts as infrastructure_fonts;
 use komga_infrastructure::filesystem::transient_books as infrastructure_transient_books;
 use komga_interfaces::state::{
     ClaimInitialAdminUserResult, OperationalRuntimeService, OperationalSettingsService,
-    PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashThumbnail, SqlitePoolSnapshot,
-    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage,
+    SqlitePoolSnapshot, TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage,
 };
 use serde_json::Value;
 
@@ -309,12 +309,6 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
         infrastructure_page_hashes::load_page_hash_thumbnail(self.db.database_file(), &page_hash)
             .await
-            .map(|value| {
-                value.map(|row| PageHashThumbnail {
-                    media_type: row.media_type,
-                    bytes: row.bytes,
-                })
-            })
     }
 
     async fn load_unknown_page_hash_thumbnail(
@@ -328,12 +322,6 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
             resize_to,
         )
         .await
-        .map(|value| {
-            value.map(|row| PageHashThumbnail {
-                media_type: row.media_type,
-                bytes: row.bytes,
-            })
-        })
     }
 
     async fn load_page_hashes_page(
@@ -374,25 +362,6 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
         infrastructure_page_hashes::load_page_hash_delete_targets(self.db.database_file(), &hash)
             .await
-            .map(|targets| {
-                targets
-                    .into_iter()
-                    .map(|target| PageHashDeleteTarget {
-                        book_id: target.book_id,
-                        pages: target
-                            .pages
-                            .into_iter()
-                            .map(|page| PageHashDeleteTargetPage {
-                                file_hash: page.file_hash,
-                                file_size: page.file_size,
-                                file_name: page.file_name,
-                                media_type: page.media_type,
-                                page_number: page.page_number,
-                            })
-                            .collect(),
-                    })
-                    .collect()
-            })
     }
 
     async fn upsert_page_hash(

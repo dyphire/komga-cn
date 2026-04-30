@@ -1,4 +1,3 @@
-mod backend_contract;
 mod user_mutation;
 
 pub use crate::auth::device_auth::{
@@ -23,9 +22,5 @@ pub use crate::auth::runtime_identity_access::{
     persisted_users, remember_me_max_age_seconds, remember_me_token_for_user_with_runtime_key,
     session_token_for_user_with_runtime_key, sync_remember_me_runtime_database_file,
     sync_remember_me_runtime_settings,
-};
-pub use backend_contract::{
-    AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
-    UpdateAuthUserResult,
 };
 pub use user_mutation::{create_auth_user, delete_auth_user, update_auth_user};

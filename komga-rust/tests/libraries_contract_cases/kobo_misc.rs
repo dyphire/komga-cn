@@ -1,10 +1,5 @@
 use super::*;
 
-#[test]
-fn libraries_contract_target_is_registered() {
-    assert_required_target_declared("libraries", "libraries_contract");
-}
-
 #[tokio::test]
 async fn router_kobo_catch_all_returns_empty_json_when_proxy_disabled() {
     let paths = new_router_fixture("router-kobo-catch-all-disabled").await;

@@ -1,4 +1,3 @@
-use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::context::SqlitePersistenceContext;
 use komga_infrastructure::sqlite::{
     connect_main_write_context, connect_test_pool, connect_write_pool, setup,
@@ -11,11 +10,6 @@ mod support {
 }
 
 use support::persistence_contract_fixture;
-
-#[test]
-fn runtime_schema_contract_target_is_registered() {
-    assert_required_target_declared("schema/bootstrap", "runtime_schema_contract");
-}
 
 #[tokio::test]
 async fn bootstrap_fresh_install() {

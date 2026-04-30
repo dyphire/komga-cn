@@ -1,5 +1,5 @@
 use komga_application::discovery::BookReadModel;
-use komga_application::discovery::RuntimeReadListBooksQuery;
+use komga_application::discovery::ReadListBooksQuery;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
@@ -10,7 +10,7 @@ use crate::read_models::filters::{SqlxWhereState, append_clause_sqlx, effective_
 pub(super) async fn list_readlist_books_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &RuntimeReadListBooksQuery,
+    query: &ReadListBooksQuery,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
     let allowed = effective_library_ids(context, query.library_ids.as_deref());
     if allowed.as_ref().is_some_and(Vec::is_empty) {

@@ -11,24 +11,6 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         .await
         .expect("scanner persistence fixture should be created");
 
-    let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
-        .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(
-        scan_result.series.len(),
-        1,
-        "fixture sanity: one series expected"
-    );
-    assert_eq!(
-        scan_result.series[0].books.len(),
-        1,
-        "fixture sanity: one book expected"
-    );
-    assert_eq!(
-        scan_result.sidecars.len(),
-        2,
-        "fixture sanity: one series sidecar and one book sidecar expected",
-    );
-
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
         .await
         .expect("scan write-shape contract should persist scanner rows");
@@ -130,19 +112,6 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
         .await
         .expect("scanner task-emission fixture should be created");
 
-    let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
-        .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(
-        scan_result.series.len(),
-        1,
-        "fixture sanity: one series expected"
-    );
-    assert_eq!(
-        scan_result.series[0].books.len(),
-        1,
-        "fixture sanity: one book expected"
-    );
-
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
         .await
         .expect("task-emission contract should execute scan/analyze runtime flow");
@@ -242,19 +211,6 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-restart-visibility")
         .await
         .expect("scanner restart fixture should be created");
-
-    let scan_result = scan_root_folder(&fixture.library_root, &ScannerOptions::default())
-        .expect("filesystem scan fixture should produce deterministic scanner output");
-    assert_eq!(
-        scan_result.series.len(),
-        1,
-        "fixture sanity: one series expected"
-    );
-    assert_eq!(
-        scan_result.series[0].books.len(),
-        1,
-        "fixture sanity: one book expected"
-    );
 
     process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
         .await

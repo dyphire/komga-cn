@@ -10,6 +10,7 @@ use komga_application::library_catalog::{
     LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord, LibraryTaskResult,
     LibraryTaskService, UpdateLibraryService,
 };
+use komga_application::operational::PersistedServerSettings;
 use sqlx::SqlitePool;
 
 use komga_application::task_processing::TaskEngine;
@@ -143,10 +144,10 @@ impl ServerSettingsService for RuntimeServerSettingsService {
             .map_err(|error| error.to_string())
     }
 
-    async fn load_settings(&self) -> Result<InterfacesPersistedServerSettings, String> {
+    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
         infrastructure_operational_settings::load_server_settings(&self.store)
             .await
-            .map(|settings| InterfacesPersistedServerSettings {
+            .map(|settings| PersistedServerSettings {
                 delete_empty_collections: settings.delete_empty_collections,
                 delete_empty_read_lists: settings.delete_empty_read_lists,
                 remember_me_key: settings.remember_me_key,

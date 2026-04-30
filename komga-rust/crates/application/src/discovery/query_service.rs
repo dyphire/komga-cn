@@ -58,9 +58,9 @@ pub fn requested_library_ids_for_runtime_shape(
     }
 }
 use super::{
-    BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, ReadListDetailQuery,
-    RuntimeBooksLatestQuery, RuntimeBooksListQuery, RuntimeReadListBooksQuery,
-    RuntimeReadListsQuery, RuntimeSeriesListQuery, SeriesCollectionsQuery, SeriesDetailQuery,
+    BookDetailQuery, BookReadlistsQuery, BookSiblingQuery, ReadListBooksQuery, ReadListDetailQuery,
+    RuntimeBooksLatestQuery, RuntimeBooksListQuery, RuntimeReadListsQuery, SeriesCollectionsQuery,
+    SeriesDetailQuery, SeriesListQuery,
 };
 
 pub trait DiscoveryQueryRepository {
@@ -72,7 +72,7 @@ pub trait DiscoveryQueryRepository {
     fn list_series(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeSeriesListQuery,
+        query: SeriesListQuery,
     ) -> impl Future<Output = Result<PageEnvelope<SeriesReadModel>, DiscoveryError>>;
 
     fn list_books(
@@ -90,7 +90,7 @@ pub trait DiscoveryQueryRepository {
     fn list_readlist_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeReadListBooksQuery,
+        query: ReadListBooksQuery,
     ) -> impl Future<Output = Result<PageEnvelope<BookReadModel>, DiscoveryError>>;
 
     fn list_readlists(
