@@ -539,15 +539,15 @@ impl IdentityService for TestIdentityService {
     }
     async fn load_koreader_book_target(
         &self,
-        _book_hash: String,
+        book_hash: String,
     ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
         test_state()
             .lock()
             .expect("runtime identity access test state lock should not be poisoned")
             .koreader_book_targets
-            .values()
-            .next()
-            .cloned()
+            .iter()
+            .find(|((_, hash), _)| hash == &book_hash)
+            .map(|(_, result)| result.clone())
             .unwrap_or(Ok(None))
     }
     async fn load_read_progress(

@@ -17,6 +17,7 @@ node_modules
 *.bak
 .slim
 .sisyphus
+.opencode
 CLAUDE.md
 AGENTS.md
 

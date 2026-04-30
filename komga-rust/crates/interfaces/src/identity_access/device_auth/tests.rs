@@ -10,9 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::state::{
-    KoreaderBookLookupError, KoreaderBookTarget, seed_koreader_book_target,
-};
+use crate::state::{KoreaderBookLookupError, KoreaderBookTarget, seed_koreader_book_target};
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()

@@ -563,6 +563,7 @@ pub async fn series_list(
             Some(&payload),
             full_text_search.clone(),
             &app.discovery_auth,
+            app.auth_db.db.database_file(),
             strict_runtime_shape,
         )
         .await

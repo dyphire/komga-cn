@@ -672,6 +672,7 @@ pub async fn books_list(
         Some(&payload),
         full_text_search.clone(),
         &app.discovery_auth,
+        app.auth_db.db.database_file(),
         strict_runtime_shape,
     )
     .await
@@ -759,6 +760,7 @@ pub(super) async fn books_deprecated_get(
         payload.as_ref(),
         search.clone(),
         &app.discovery_auth,
+        database_file,
         true,
     )
     .await
@@ -828,6 +830,7 @@ pub async fn series_books_deprecated(
         Some(&payload),
         None,
         &app.discovery_auth,
+        database_file,
         true,
     )
     .await

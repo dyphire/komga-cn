@@ -1,4 +1,5 @@
 use crate::state::PersistedDiscoveryService;
+use std::path::Path;
 
 use crate::discovery_auth::state::DiscoveryAuthState;
 
@@ -237,6 +238,7 @@ pub(crate) async fn runtime_owned_books_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
+    database_file: &Path,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     books_queries::runtime_owned_books_list_response(
@@ -246,6 +248,7 @@ pub(crate) async fn runtime_owned_books_list_response(
         payload,
         full_text_search,
         auth_state,
+        database_file,
         strict_runtime_shape,
     )
     .await
@@ -268,6 +271,7 @@ pub(crate) async fn runtime_owned_series_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
+    database_file: &Path,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     series_queries::runtime_owned_series_list_response(
@@ -277,6 +281,7 @@ pub(crate) async fn runtime_owned_series_list_response(
         payload,
         full_text_search,
         auth_state,
+        database_file,
         strict_runtime_shape,
     )
     .await
