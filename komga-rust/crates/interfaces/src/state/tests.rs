@@ -7,46 +7,31 @@ use super::*;
 pub(crate) struct NoopOperationalRuntimeService;
 #[async_trait]
 impl OperationalRuntimeService for NoopOperationalRuntimeService {
-    async fn load_task_execution_values(
-        &self,
-        tasks_db_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_libraries_count(&self, database_file: PathBuf) -> Result<f64, String> {
+    async fn load_libraries_count(&self) -> Result<f64, String> {
         panic!("unused test service")
     }
-    async fn load_series_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_books_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_books_filesize_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_sidecars_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_collections_count(&self, database_file: PathBuf) -> Result<f64, String> {
+    async fn load_collections_count(&self) -> Result<f64, String> {
         panic!("unused test service")
     }
-    async fn load_readlists_count(&self, database_file: PathBuf) -> Result<f64, String> {
+    async fn load_readlists_count(&self) -> Result<f64, String> {
         panic!("unused test service")
     }
-    async fn load_task_failure_count(&self, database_file: PathBuf) -> Result<f64, String> {
+    async fn load_task_failure_count(&self) -> Result<f64, String> {
         panic!("unused test service")
     }
     async fn load_sqlite_pool_snapshots(
@@ -63,25 +48,22 @@ pub(crate) struct NoopOperationalSettingsService;
 impl OperationalSettingsService for NoopOperationalSettingsService {
     async fn load_announcement_read_ids(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<Vec<String>, sqlx::Error> {
         panic!("unused test service")
     }
     async fn save_announcements_read(
         &self,
-        database_file: PathBuf,
         user_id: String,
         ids: Vec<String>,
     ) -> Result<(), sqlx::Error> {
         panic!("unused test service")
     }
-    async fn load_claim_status(&self, database_file: PathBuf) -> Result<bool, sqlx::Error> {
+    async fn load_claim_status(&self) -> Result<bool, sqlx::Error> {
         panic!("unused test service")
     }
     async fn claim_initial_admin_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         email: String,
         password_hash: String,
@@ -90,43 +72,31 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_client_settings_global(
         &self,
-        database_file: PathBuf,
         allow_unauthorized_only: bool,
     ) -> Result<Value, sqlx::Error> {
         panic!("unused test service")
     }
-    async fn load_client_settings_user(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Result<Value, sqlx::Error> {
+    async fn load_client_settings_user(&self, user_id: String) -> Result<Value, sqlx::Error> {
         panic!("unused test service")
     }
     async fn upsert_client_settings_global(
         &self,
-        database_file: PathBuf,
         settings: Vec<(String, String, bool)>,
     ) -> Result<(), sqlx::Error> {
         panic!("unused test service")
     }
     async fn upsert_client_settings_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         settings: Vec<(String, String)>,
     ) -> Result<(), sqlx::Error> {
         panic!("unused test service")
     }
-    async fn delete_client_settings_global(
-        &self,
-        database_file: PathBuf,
-        keys: Vec<String>,
-    ) -> Result<(), sqlx::Error> {
+    async fn delete_client_settings_global(&self, keys: Vec<String>) -> Result<(), sqlx::Error> {
         panic!("unused test service")
     }
     async fn delete_client_settings_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         keys: Vec<String>,
     ) -> Result<(), sqlx::Error> {
@@ -144,16 +114,11 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     fn load_font_file(&self, path: PathBuf, family: String, file: String) -> Option<Vec<u8>> {
         panic!("unused test service")
     }
-    async fn delete_syncpoints_by_user(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Result<(), sqlx::Error> {
+    async fn delete_syncpoints_by_user(&self, user_id: String) -> Result<(), sqlx::Error> {
         panic!("unused test service")
     }
     async fn delete_syncpoints_by_user_and_key_ids(
         &self,
-        database_file: PathBuf,
         user_id: String,
         key_ids: Vec<String>,
     ) -> Result<(), sqlx::Error> {
@@ -161,7 +126,6 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_history_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         sorts: Vec<String>,
@@ -170,7 +134,6 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_page_hash_matches_page(
         &self,
-        database_file: PathBuf,
         page_hash: String,
         page: u64,
         size: u64,
@@ -180,14 +143,12 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_page_hash_thumbnail(
         &self,
-        database_file: PathBuf,
         page_hash: String,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
         panic!("unused test service")
     }
     async fn load_unknown_page_hash_thumbnail(
         &self,
-        database_file: PathBuf,
         page_hash: String,
         resize_to: Option<u32>,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
@@ -195,7 +156,6 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_page_hashes_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         actions: Vec<String>,
@@ -205,7 +165,6 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_page_hashes_unknown_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         sorts: Vec<String>,
@@ -214,14 +173,12 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn load_page_hash_delete_targets(
         &self,
-        database_file: PathBuf,
         hash: String,
     ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
         panic!("unused test service")
     }
     async fn upsert_page_hash(
         &self,
-        database_file: PathBuf,
         hash: String,
         size: Option<i64>,
         action: String,
@@ -233,7 +190,6 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     }
     async fn infer_transient_series_and_number(
         &self,
-        database_file: PathBuf,
         transient_name: String,
     ) -> (Option<String>, Option<f64>) {
         panic!("unused test service")
@@ -241,11 +197,7 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
     fn list_transient_book_entries(&self, root: PathBuf) -> Vec<Value> {
         panic!("unused test service")
     }
-    async fn validate_transient_scan_root(
-        &self,
-        database_file: PathBuf,
-        path: String,
-    ) -> Result<(), String> {
+    async fn validate_transient_scan_root(&self, path: String) -> Result<(), String> {
         panic!("unused test service")
     }
     fn load_transient_book_file_metadata(&self, path: String) -> Option<TransientBookFileMetadata> {
@@ -272,15 +224,14 @@ impl OperationalSettingsService for NoopOperationalSettingsService {
 pub(crate) struct NoopMediaAssetsService;
 #[async_trait]
 impl MediaAssetsService for NoopMediaAssetsService {
-    fn media_import_service(&self, database_file: PathBuf) -> Box<dyn RuntimeMediaImportService> {
+    fn media_import_service(&self) -> Box<dyn RuntimeMediaImportService> {
         panic!("unused test service")
     }
-    fn book_metadata_service(&self, database_file: PathBuf) -> Box<dyn RuntimeBookMetadataService> {
+    fn book_metadata_service(&self) -> Box<dyn RuntimeBookMetadataService> {
         panic!("unused test service")
     }
     async fn refresh_book_search_documents_after_metadata_update(
         &self,
-        database_file: PathBuf,
         index_dir: PathBuf,
         book_id: String,
     ) -> Result<(), String> {
@@ -288,7 +239,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn persist_book_page_hashes_with_media_content(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<(), String> {
         panic!("unused test service")
@@ -316,42 +266,33 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_persisted_book_media(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::BookMediaRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_media_files(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_media_file_records(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<PersistedMediaFileRecord>, String> {
         panic!("unused test service")
     }
-    async fn book_media_is_ready_status(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, String> {
+    async fn book_media_is_ready_status(&self, book_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_pages(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_page_row(
         &self,
-        database_file: PathBuf,
         book_id: String,
         page_number: u64,
     ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
@@ -415,21 +356,15 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_persisted_epub_extension_blob(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, String> {
         panic!("unused test service")
     }
-    async fn load_series_book_ids(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Vec<String>, String> {
+    async fn load_series_book_ids(&self, series_id: String) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn refresh_series_read_progress_row(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<(), String> {
@@ -437,7 +372,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn delete_series_read_progress_row(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<(), String> {
@@ -445,7 +379,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_series_tachiyomi_progress(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String> {
@@ -453,7 +386,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_book_progression(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String> {
@@ -461,7 +393,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn persist_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: u64,
@@ -472,7 +403,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn delete_persisted_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<(), String> {
@@ -480,7 +410,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn readlist_tachiyomi_counters(
         &self,
-        database_file: PathBuf,
         ordered_book_ids: Vec<String>,
         user_id: String,
     ) -> Result<(u64, u64, u64, u64, u64), String> {
@@ -488,7 +417,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn persist_readlist_tachiyomi_progress(
         &self,
-        database_file: PathBuf,
         ordered_book_ids: Vec<String>,
         user_id: String,
         last_book_read: usize,
@@ -497,28 +425,24 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_selected_book_thumbnail(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
         panic!("unused test service")
     }
     async fn load_book_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_thumbnails(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::EntityThumbnailRecord>, String> {
         panic!("unused test service")
     }
     async fn insert_book_thumbnail(
         &self,
-        database_file: PathBuf,
         book_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -528,30 +452,20 @@ impl MediaAssetsService for NoopMediaAssetsService {
     ) -> Result<komga_application::media_assets::EntityThumbnailRecord, String> {
         panic!("unused test service")
     }
-    async fn select_book_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String> {
+    async fn select_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn delete_book_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String> {
+    async fn delete_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn load_persisted_readlist_thumbnails(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<komga_application::media_assets::ReadlistThumbnailRecord>, String> {
         panic!("unused test service")
     }
     async fn insert_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -563,7 +477,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn select_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
@@ -571,7 +484,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn delete_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
@@ -579,14 +491,12 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_persisted_collection_thumbnails(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<komga_application::media_assets::CollectionThumbnailRecord>, String> {
         panic!("unused test service")
     }
     async fn insert_collection_thumbnail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -596,16 +506,11 @@ impl MediaAssetsService for NoopMediaAssetsService {
     ) -> Result<komga_application::media_assets::CollectionThumbnailRecord, String> {
         panic!("unused test service")
     }
-    async fn select_collection_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String> {
+    async fn select_collection_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn delete_collection_thumbnail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
@@ -613,28 +518,24 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_selected_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_thumbnails(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<komga_application::media_assets::SeriesThumbnailRecord>, String> {
         panic!("unused test service")
     }
     async fn load_series_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
         panic!("unused test service")
     }
     async fn insert_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -646,7 +547,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn select_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
@@ -654,7 +554,6 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn delete_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
@@ -662,28 +561,24 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_persisted_readlist_name(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_book_restrictions(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
         panic!("unused test service")
     }
     async fn load_readlist_archive_entries(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<(String, PathBuf)>, String> {
         panic!("unused test service")
     }
     async fn load_series_archive_entries(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
         panic!("unused test service")
@@ -700,66 +595,42 @@ impl MediaAssetsService for NoopMediaAssetsService {
     }
     async fn load_persisted_manifest_book(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(String, String, String)>, String> {
         panic!("unused test service")
     }
-    async fn persisted_book_exists(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, String> {
+    async fn persisted_book_exists(&self, book_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn persisted_book_ids(&self, database_file: PathBuf) -> Result<Vec<String>, String> {
+    async fn persisted_book_ids(&self) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn persisted_series_exists(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<bool, String> {
+    async fn persisted_series_exists(&self, series_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_oneshot(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<bool>, String> {
         panic!("unused test service")
     }
-    async fn persisted_readlist_exists(
-        &self,
-        database_file: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String> {
+    async fn persisted_readlist_exists(&self, readlist_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn persisted_collection_exists(
-        &self,
-        database_file: PathBuf,
-        collection_id: String,
-    ) -> Result<bool, String> {
+    async fn persisted_collection_exists(&self, collection_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn load_series_book_number_sorts(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<(String, f64)>, String> {
         panic!("unused test service")
     }
-    async fn load_book_page_count(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<Option<u64>, String> {
+    async fn load_book_page_count(&self, book_id: String) -> Result<Option<u64>, String> {
         panic!("unused test service")
     }
     async fn persist_book_progression(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: f64,
@@ -779,21 +650,18 @@ pub(crate) struct NoopDiscoveryDetailService;
 impl DiscoveryDetailService for NoopDiscoveryDetailService {
     async fn load_book_id_by_sorted_position(
         &self,
-        database_file: PathBuf,
         index: usize,
     ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_resource(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<PersistedBookResourceRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_detail(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: Option<String>,
     ) -> Result<Option<PersistedBookDetailRecord>, String> {
@@ -801,52 +669,42 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     }
     async fn load_persisted_book_sibling_id(
         &self,
-        database_file: PathBuf,
         book_id: String,
         direction: PersistedBookSiblingDirectionRecord,
     ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
-    async fn persisted_collections_exist(&self, database_file: PathBuf) -> Result<bool, String> {
+    async fn persisted_collections_exist(&self) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn load_persisted_collections(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_collection_series_ids(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_collection_detail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
         panic!("unused test service")
     }
-    async fn load_series_library_id(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, series_id: String) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_series_restrictions(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<PersistedSeriesRestrictionRecord, String> {
         panic!("unused test service")
     }
     async fn persist_collection_create(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
@@ -856,7 +714,6 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     }
     async fn persist_collection_update(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
@@ -864,64 +721,48 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     ) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn delete_persisted_collection(
-        &self,
-        database_file: PathBuf,
-        collection_id: String,
-    ) -> Result<bool, String> {
+    async fn delete_persisted_collection(&self, collection_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
     async fn upsert_collection_search_document(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         collection_id: String,
     ) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn delete_collection_search_document(
-        &self,
-        index_dir: PathBuf,
-        collection_id: String,
-    ) -> Result<(), String> {
+    async fn delete_collection_search_document(&self, collection_id: String) -> Result<(), String> {
         panic!("unused test service")
     }
     async fn load_persisted_readlists(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_readlist_detail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_readlist_book_rows(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
         panic!("unused test service")
     }
     async fn load_comicrack_match_candidates(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_authors(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
         panic!("unused test service")
     }
     async fn persist_readlist_create(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -932,7 +773,6 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     }
     async fn persist_readlist_update(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -941,85 +781,59 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     ) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn delete_persisted_readlist(
-        &self,
-        database_file: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String> {
+    async fn delete_persisted_readlist(&self, readlist_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn upsert_readlist_search_document(
-        &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String> {
+    async fn upsert_readlist_search_document(&self, readlist_id: String) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn delete_readlist_search_document(
-        &self,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<(), String> {
+    async fn delete_readlist_search_document(&self, readlist_id: String) -> Result<(), String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_resource(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
         panic!("unused test service")
     }
     async fn load_series_id_by_sorted_position(
         &self,
-        database_file: PathBuf,
         index: usize,
     ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_detail(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<SeriesSummaryRecord>, String> {
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesSummaryRecord>, String> {
         panic!("unused test service")
     }
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
         panic!("unused test service")
     }
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_collections(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
         panic!("unused test service")
     }
     async fn load_existing_series_metadata(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
         panic!("unused test service")
     }
     async fn persist_series_metadata_update(
         &self,
-        database_file: PathBuf,
         series_id: String,
         update: SeriesMetadataUpdateRecord,
     ) -> Result<bool, String> {
@@ -1027,8 +841,6 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     }
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         series_id: String,
     ) -> Result<(), String> {
         panic!("unused test service")
@@ -1041,7 +853,6 @@ pub(crate) struct NoopOpdsCatalogService;
 impl OpdsCatalogService for NoopOpdsCatalogService {
     async fn load_browse_series_navigation_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         publishers: Vec<String>,
@@ -1052,7 +863,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_browse_publisher_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
     ) -> Result<Vec<BrowsePublisherEntry>, String> {
@@ -1060,7 +870,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_keep_reading_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
@@ -1068,7 +877,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_on_deck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
@@ -1076,7 +884,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_latest_books(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
@@ -1084,7 +891,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_latest_books_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         user_id: Option<String>,
         library_id: Option<String>,
@@ -1095,7 +901,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_latest_series(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
@@ -1103,7 +908,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_latest_series_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         offset: i64,
@@ -1113,7 +917,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_library_series(
         &self,
-        database_file: PathBuf,
         library_id: String,
         offset: i64,
         limit: i64,
@@ -1122,7 +925,6 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     }
     async fn load_series_page(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         search: Option<String>,
         publishers: Vec<String>,
@@ -1131,10 +933,7 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         panic!("unused test service")
     }
-    async fn load_all_readlists(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<OpdsReadlistEntry>, String> {
+    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
         panic!("unused test service")
     }
 }
@@ -1143,36 +942,29 @@ impl OpdsCatalogService for NoopOpdsCatalogService {
 pub(crate) struct NoopOpdsPersistedService;
 #[async_trait]
 impl OpdsPersistedService for NoopOpdsPersistedService {
-    async fn load_libraries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedLibraryRecord>, String> {
+    async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
         panic!("unused test service")
     }
     async fn load_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Option<PersistedLibraryRecord>, String> {
         panic!("unused test service")
     }
     async fn load_readlists_for_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Vec<PersistedReadlistRecord>, String> {
         panic!("unused test service")
     }
     async fn load_series(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesRecord>, String> {
         panic!("unused test service")
     }
     async fn load_series_books_paged(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
         offset: i64,
@@ -1180,30 +972,23 @@ impl OpdsPersistedService for NoopOpdsPersistedService {
     ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
         panic!("unused test service")
     }
-    async fn load_series_tags(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Vec<String>, String> {
+    async fn load_series_tags(&self, series_id: String) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_readlist(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
         panic!("unused test service")
     }
     async fn load_readlist_books(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
         panic!("unused test service")
     }
     async fn load_unified_search_results(
         &self,
-        database_file: PathBuf,
         query: String,
     ) -> Result<
         (
@@ -1218,35 +1003,30 @@ impl OpdsPersistedService for NoopOpdsPersistedService {
     }
     async fn load_publishers(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_collections(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
     ) -> Result<Vec<PersistedNamedRecord>, String> {
         panic!("unused test service")
     }
     async fn load_collection(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedNamedRecord>, String> {
         panic!("unused test service")
     }
     async fn load_collection_books(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<PersistedBookFeedRecord>, String> {
         panic!("unused test service")
     }
     async fn load_collection_series(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         ordered: bool,
     ) -> Result<Vec<PersistedSeriesRecord>, String> {
@@ -1260,7 +1040,6 @@ pub(crate) struct NoopPersistedDiscoveryService;
 impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     async fn load_persisted_author_names(
         &self,
-        database_file: PathBuf,
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
@@ -1268,14 +1047,12 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_author_roles(
         &self,
-        database_file: PathBuf,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_authors_by_scope(
         &self,
-        database_file: PathBuf,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String> {
@@ -1283,31 +1060,27 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_book_poster_summaries(
         &self,
-        database_file: PathBuf,
     ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_summaries(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
     ) -> Result<Vec<PersistedBookSummary>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedBookSummary>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_book_count(&self, database_file: PathBuf) -> Result<usize, String> {
+    async fn load_persisted_book_count(&self) -> Result<usize, String> {
         panic!("unused test service")
     }
     async fn load_persisted_genres(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1315,7 +1088,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1323,7 +1095,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_languages(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1331,7 +1102,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_publishers(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1339,7 +1109,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_age_ratings(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1347,7 +1116,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_sharing_labels(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1355,7 +1123,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_series_release_dates(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
@@ -1363,115 +1130,86 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn load_persisted_series_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_library_ids(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<String>, String> {
+    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn load_collection_memberships(
         &self,
-        database_file: PathBuf,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         panic!("unused test service")
     }
     async fn load_collection_ordering(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<HashMap<String, i64>, String> {
         panic!("unused test service")
     }
     async fn load_readlist_memberships(
         &self,
-        database_file: PathBuf,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_ondeck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_duplicate_books(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_book_tags(
         &self,
-        database_file: PathBuf,
         scope: Option<PersistedBookTagsScope>,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn persisted_utc_date_minus_days(
-        &self,
-        database_file: PathBuf,
-        days: i64,
-    ) -> Result<Option<String>, String> {
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
         panic!("unused test service")
     }
     async fn load_series_read_dates(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, String>, String> {
         panic!("unused test service")
     }
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedSeriesSummary>, String> {
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedSeriesSummary>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_series_count(&self, database_file: PathBuf) -> Result<usize, String> {
+    async fn load_persisted_series_count(&self) -> Result<usize, String> {
         panic!("unused test service")
     }
-    async fn persisted_series_exist(&self, database_file: PathBuf) -> Result<bool, String> {
+    async fn persisted_series_exist(&self) -> Result<bool, String> {
         panic!("unused test service")
     }
-    async fn search_book_ids(
-        &self,
-        database_file: PathBuf,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
+    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
     async fn search_collection_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<String>, String> {
@@ -1479,7 +1217,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn search_readlist_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String> {
@@ -1487,7 +1224,6 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     }
     async fn search_series_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String> {

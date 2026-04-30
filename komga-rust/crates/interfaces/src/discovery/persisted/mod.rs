@@ -1,6 +1,5 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::Path as FsPath;
 
 use axum::http::Uri;
 use komga_application::discovery::BookReadModel;

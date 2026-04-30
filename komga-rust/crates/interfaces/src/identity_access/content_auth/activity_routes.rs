@@ -19,8 +19,12 @@ pub(crate) async fn users_me_api_keys_create(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match persisted_api_key_comment_exists(&auth_db.database_file, user_id(&current_user), &comment)
-        .await
+    match persisted_api_key_comment_exists(
+        auth_db.db.database_file(),
+        user_id(&current_user),
+        &comment,
+    )
+    .await
     {
         Some(true) => {
             return (
@@ -34,7 +38,7 @@ pub(crate) async fn users_me_api_keys_create(
     }
 
     match persisted_create_api_key(
-        &auth_db.database_file,
+        auth_db.db.database_file(),
         user_id(&current_user),
         comment.as_str(),
     )
@@ -69,7 +73,7 @@ pub(crate) async fn users_me_api_keys_list(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let api_keys = persisted_list_api_keys(&auth_db.database_file, user_id(&current_user))
+    let api_keys = persisted_list_api_keys(auth_db.db.database_file(), user_id(&current_user))
         .await
         .unwrap_or_default();
 
@@ -103,7 +107,7 @@ pub(crate) async fn users_me_api_keys_delete(
     };
 
     match persisted_delete_api_key_by_id(
-        &auth_db.database_file,
+        auth_db.db.database_file(),
         user_id(&current_user),
         &api_key_id,
     )
@@ -130,7 +134,7 @@ pub(crate) async fn users_me_authentication_activity(
     }
 
     let query = uri.query().unwrap_or_default();
-    let mut rows = persisted_list_authentication_activity(&auth_db.database_file, None)
+    let mut rows = persisted_list_authentication_activity(auth_db.db.database_file(), None)
         .await
         .unwrap_or_default();
     rows.retain(|activity| {
@@ -156,7 +160,7 @@ pub(crate) async fn users_authentication_activity(
     }
 
     let query = uri.query().unwrap_or_default();
-    let rows = persisted_list_authentication_activity(&auth_db.database_file, None)
+    let rows = persisted_list_authentication_activity(auth_db.db.database_file(), None)
         .await
         .unwrap_or_default();
 
@@ -178,7 +182,7 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let Some(target_user) = persisted_users(auth_db.database_file.as_path())
+    let Some(target_user) = persisted_users(auth_db.db.database_file())
         .await
         .and_then(|users| {
             users
@@ -191,7 +195,7 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
 
     let api_key_id = query_value(uri.query().unwrap_or_default(), "apikey_id");
 
-    let activity = persisted_list_authentication_activity(&auth_db.database_file, None)
+    let activity = persisted_list_authentication_activity(auth_db.db.database_file(), None)
         .await
         .and_then(|rows| {
             rows.into_iter().find(|activity| {

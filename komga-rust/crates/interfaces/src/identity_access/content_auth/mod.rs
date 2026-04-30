@@ -55,19 +55,19 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     let headers = request.headers().clone();
     let request_metadata = authentication_activity_request_metadata(&request);
 
-    match persisted_api_key_user(&headers, auth_db.database_file.as_path())
+    match persisted_api_key_user(&headers, auth_db.db.database_file())
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
             let api_key_metadata =
-                persisted_api_key_metadata(&headers, auth_db.database_file.as_path()).await;
+                persisted_api_key_metadata(&headers, auth_db.db.database_file()).await;
             let (api_key_id, api_key_comment) = api_key_metadata
                 .as_ref()
                 .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
                 .unwrap_or((None, None));
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.database_file.as_path(),
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
@@ -98,7 +98,7 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
             .is_some_and(|cookie| !cookie.value().trim().is_empty());
         if session_token_from_headers(&headers).is_none() && remember_me_cookie_present {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.database_file.as_path(),
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(&request_metadata, "RememberMe", None, None),
             )
@@ -118,13 +118,13 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
     // Kotlin persists both success and failure authentication events. This HTTP path only aligns
     // successful-source vocabulary for now; the remaining failure-persistence gap is documented by
     // the auth-session contract suite instead of being left implicit.
-    match persisted_basic_user(&headers, auth_db.database_file.as_path())
+    match persisted_basic_user(&headers, auth_db.db.database_file())
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) if remember_me_requested(&uri) => {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.database_file.as_path(),
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
@@ -173,7 +173,7 @@ pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
         }
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
-                auth_db.database_file.as_path(),
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )
@@ -227,7 +227,7 @@ pub(super) async fn users_list(headers: HeaderMap, app: &HttpAppState) -> Respon
         return response;
     }
 
-    let users = persisted_users(app.auth_db.database_file.as_path())
+    let users = persisted_users(app.auth_db.db.database_file())
         .await
         .unwrap_or_default();
 
@@ -240,7 +240,6 @@ pub(super) async fn users_create(
     connection_info: RequestConnectionInfo,
     body: Value,
 ) -> Response {
-    let auth_db = &app.auth_db;
     let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -300,25 +299,22 @@ pub(super) async fn users_create(
     match app
         .services
         .runtime_identity
-        .create_auth_user(
-            auth_db.database_file.clone(),
-            CreateAuthUserInput {
-                user_id: new_user_id,
-                email: email.to_string(),
-                password_hash: hashed_password,
-                roles,
-                shared_libraries: SharedLibrariesInput {
-                    all: shared_libraries.all,
-                    library_ids: shared_libraries.library_ids,
-                },
-                labels_allow,
-                labels_exclude,
-                age_restriction: age_restriction.map(|value| AuthUserAgeRestrictionInput {
-                    age: value.age,
-                    allow_only: value.allow_only,
-                }),
+        .create_auth_user(CreateAuthUserInput {
+            user_id: new_user_id,
+            email: email.to_string(),
+            password_hash: hashed_password,
+            roles,
+            shared_libraries: SharedLibrariesInput {
+                all: shared_libraries.all,
+                library_ids: shared_libraries.library_ids,
             },
-        )
+            labels_allow,
+            labels_exclude,
+            age_restriction: age_restriction.map(|value| AuthUserAgeRestrictionInput {
+                age: value.age,
+                allow_only: value.allow_only,
+            }),
+        })
         .await
     {
         Ok(Some(user)) => (StatusCode::CREATED, Json(user_payload_json(&user))).into_response(),
@@ -351,7 +347,7 @@ pub(super) async fn users_delete(
     match app
         .services
         .runtime_identity
-        .delete_auth_user(auth_db.database_file.clone(), target_user_id.clone())
+        .delete_auth_user(target_user_id.clone())
         .await
     {
         Ok(true) => {
@@ -437,7 +433,6 @@ pub(super) async fn users_update(
         .services
         .runtime_identity
         .update_auth_user(
-            auth_db.database_file.clone(),
             target_user_id.clone(),
             UpdateAuthUserInput {
                 roles: roles_patch,
@@ -508,7 +503,7 @@ pub(super) async fn users_me_password(
     }
 
     match persisted_update_password_by_user_id(
-        auth_db.database_file.as_path(),
+        auth_db.db.database_file(),
         user_id(&current_user),
         password,
     )
@@ -543,7 +538,7 @@ pub(super) async fn users_by_id_password(
     }
 
     match persisted_update_password_by_user_id(
-        auth_db.database_file.as_path(),
+        auth_db.db.database_file(),
         &target_user_id,
         password,
     )

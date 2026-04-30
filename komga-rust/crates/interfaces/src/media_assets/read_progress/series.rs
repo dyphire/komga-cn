@@ -8,11 +8,10 @@ pub async fn series_read_progress_post(
     Path(series_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -73,11 +72,10 @@ pub async fn series_read_progress_delete(
     Path(series_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -134,11 +132,10 @@ pub async fn series_tachiyomi_read_progress_get(
     Path(series_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -176,11 +173,10 @@ pub async fn series_tachiyomi_read_progress_put(
     body: Bytes,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 

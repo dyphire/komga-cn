@@ -1,4 +1,5 @@
 use super::*;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -11,7 +12,7 @@ pub enum RuntimeProfile {
 
 #[derive(Clone)]
 pub struct AuthDatabaseState {
-    pub database_file: PathBuf,
+    pub db: DatabaseHandle,
     pub demo_mode: bool,
     pub session_runtime_key: String,
     pub remember_me_runtime_key: String,

@@ -10,7 +10,7 @@ pub async fn series_detail(
     Path(series_id): Path<String>,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -66,7 +66,7 @@ pub async fn series_collections(
     Path(series_id): Path<String>,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -137,7 +137,7 @@ pub async fn series_metadata_update(
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_admin(&headers, database_file).await {
         return response;
     }

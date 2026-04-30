@@ -113,7 +113,6 @@ async fn opds_book_page_streaming_links(
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
         app.services.media_assets.as_ref(),
-        app.auth_db.database_file.as_path(),
         book_id,
         media_type,
         page_count,
@@ -173,7 +172,6 @@ async fn opds_book_page_streaming_links(
 
 async fn opds_book_page_stream_media_types(
     media_assets: &dyn crate::state::MediaAssetsService,
-    database_file: &Path,
     book_id: &str,
     media_type: &str,
     page_count: i64,
@@ -194,7 +192,7 @@ async fn opds_book_page_stream_media_types(
         )
         || (media_type == "application/epub+zip" && epub_divina_compatible)
     {
-        return load_divina_page_media_types_for_opds(media_assets, database_file, book_id).await;
+        return load_divina_page_media_types_for_opds(media_assets, book_id).await;
     }
 
     vec![]
@@ -202,11 +200,10 @@ async fn opds_book_page_stream_media_types(
 
 async fn load_divina_page_media_types_for_opds(
     media_assets: &dyn crate::state::MediaAssetsService,
-    database_file: &Path,
     book_id: &str,
 ) -> Vec<String> {
     let persisted = media_assets
-        .load_persisted_book_pages(database_file.to_path_buf(), book_id.to_string())
+        .load_persisted_book_pages(book_id.to_string())
         .await
         .unwrap_or_default()
         .into_iter()
@@ -223,7 +220,7 @@ async fn load_divina_page_media_types_for_opds(
     }
 
     let Ok(Some(media)) = media_assets
-        .load_persisted_book_media(database_file.to_path_buf(), book_id.to_string())
+        .load_persisted_book_media(book_id.to_string())
         .await
     else {
         return vec![];

@@ -48,6 +48,5 @@ pub use opds::*;
 pub use operational::*;
 pub use task_queue::*;
 
-pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod tests;

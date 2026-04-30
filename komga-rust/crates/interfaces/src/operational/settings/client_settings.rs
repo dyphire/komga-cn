@@ -19,10 +19,7 @@ pub(crate) async fn get_client_settings_global(
     let settings = match app
         .services
         .operational_settings
-        .load_client_settings_global(
-            app.operational.runtime.database_file.clone(),
-            include_unauthorized_only,
-        )
+        .load_client_settings_global(include_unauthorized_only)
         .await
     {
         Ok(settings) => settings,
@@ -45,10 +42,7 @@ pub(crate) async fn get_client_settings_user(
     let settings = match app
         .services
         .operational_settings
-        .load_client_settings_user(
-            app.operational.runtime.database_file.clone(),
-            user_id(&current_user).to_string(),
-        )
+        .load_client_settings_user(user_id(&current_user).to_string())
         .await
     {
         Ok(settings) => settings,
@@ -74,7 +68,7 @@ pub(crate) async fn patch_client_settings_global(
     match app
         .services
         .operational_settings
-        .upsert_client_settings_global(app.operational.runtime.database_file.clone(), settings)
+        .upsert_client_settings_global(settings)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -102,11 +96,7 @@ pub(crate) async fn patch_client_settings_user(
     match app
         .services
         .operational_settings
-        .upsert_client_settings_user(
-            app.operational.runtime.database_file.clone(),
-            user_id(&current_user).to_string(),
-            settings,
-        )
+        .upsert_client_settings_user(user_id(&current_user).to_string(), settings)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -131,7 +121,7 @@ pub(crate) async fn delete_client_settings_global(
     match app
         .services
         .operational_settings
-        .delete_client_settings_global(app.operational.runtime.database_file.clone(), keys)
+        .delete_client_settings_global(keys)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -159,11 +149,7 @@ pub(crate) async fn delete_client_settings_user(
     match app
         .services
         .operational_settings
-        .delete_client_settings_user(
-            app.operational.runtime.database_file.clone(),
-            user_id(&current_user).to_string(),
-            keys,
-        )
+        .delete_client_settings_user(user_id(&current_user).to_string(), keys)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

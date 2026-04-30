@@ -1,25 +1,26 @@
 use super::*;
 
-#[derive(Clone, Default)]
-struct RuntimeDiscoveryDetailService;
+#[derive(Clone)]
+struct RuntimeDiscoveryDetailService {
+    db: DatabaseHandle,
+    index_dir: PathBuf,
+}
 
 #[async_trait::async_trait]
 impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     async fn load_book_id_by_sorted_position(
         &self,
-        database_file: PathBuf,
         index: usize,
     ) -> Result<Option<String>, String> {
-        infrastructure_detail_books::load_book_id_by_sorted_position(database_file.as_path(), index)
+        infrastructure_detail_books::load_book_id_by_sorted_position(self.db.database_file(), index)
             .await
     }
 
     async fn load_persisted_book_resource(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<PersistedBookResourceRecord>, String> {
-        infrastructure_detail_books::load_persisted_book_resource(database_file.as_path(), &book_id)
+        infrastructure_detail_books::load_persisted_book_resource(self.db.database_file(), &book_id)
             .await
             .map(|value| {
                 value.map(|row| PersistedBookResourceRecord {
@@ -32,12 +33,11 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_book_detail(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: Option<String>,
     ) -> Result<Option<PersistedBookDetailRecord>, String> {
         infrastructure_detail_books::load_persisted_book_detail(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
             user_id.as_deref(),
         )
@@ -102,7 +102,6 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_book_sibling_id(
         &self,
-        database_file: PathBuf,
         book_id: String,
         direction: PersistedBookSiblingDirectionRecord,
     ) -> Result<Option<String>, String> {
@@ -116,23 +115,22 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         };
 
         infrastructure_detail_books::load_persisted_book_sibling_id(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
             direction,
         )
         .await
     }
 
-    async fn persisted_collections_exist(&self, database_file: PathBuf) -> Result<bool, String> {
-        infrastructure_detail_collections::persisted_collections_exist(database_file.as_path())
+    async fn persisted_collections_exist(&self) -> Result<bool, String> {
+        infrastructure_detail_collections::persisted_collections_exist(self.db.database_file())
             .await
     }
 
     async fn load_persisted_collections(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
-        infrastructure_detail_collections::load_persisted_collections(database_file.as_path())
+        infrastructure_detail_collections::load_persisted_collections(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -149,11 +147,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_collection_series_ids(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<String>, String> {
         infrastructure_detail_collections::load_persisted_collection_series_ids(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
         )
         .await
@@ -161,11 +158,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_collection_detail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
         infrastructure_detail_collections::load_persisted_collection_detail(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
         )
         .await
@@ -180,13 +176,9 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         })
     }
 
-    async fn load_series_library_id(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, series_id: String) -> Result<Option<String>, String> {
         infrastructure_detail_collections::load_series_library_id(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -194,11 +186,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_series_restrictions(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<PersistedSeriesRestrictionRecord, String> {
         infrastructure_detail_collections::load_series_restrictions(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -210,14 +201,13 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn persist_collection_create(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
         series_ids: Vec<String>,
     ) -> Result<(), String> {
         infrastructure_detail_collections::persist_collection_create(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
             &name,
             ordered,
@@ -228,14 +218,13 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn persist_collection_update(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
         series_ids: Vec<String>,
     ) -> Result<bool, String> {
         infrastructure_detail_collections::persist_collection_update(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
             &name,
             ordered,
@@ -244,13 +233,9 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         .await
     }
 
-    async fn delete_persisted_collection(
-        &self,
-        database_file: PathBuf,
-        collection_id: String,
-    ) -> Result<bool, String> {
+    async fn delete_persisted_collection(&self, collection_id: String) -> Result<bool, String> {
         infrastructure_detail_collections::delete_persisted_collection(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
         )
         .await
@@ -258,37 +243,28 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn upsert_collection_search_document(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         collection_id: String,
     ) -> Result<bool, String> {
         sync_entity_upsert_from_database(
-            database_file.as_path(),
-            index_dir.as_path(),
+            self.db.database_file(),
+            self.index_dir.as_path(),
             SearchEntityType::Collection,
             &collection_id,
         )
         .await
     }
 
-    async fn delete_collection_search_document(
-        &self,
-        index_dir: PathBuf,
-        collection_id: String,
-    ) -> Result<(), String> {
+    async fn delete_collection_search_document(&self, collection_id: String) -> Result<(), String> {
         sync_entity_delete_from_index(
-            index_dir.as_path(),
+            self.index_dir.as_path(),
             SearchEntityType::Collection,
             &collection_id,
         )
         .await
     }
 
-    async fn load_persisted_readlists(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedReadlistRecord>, String> {
-        infrastructure_detail_readlists::load_persisted_readlists(database_file.as_path())
+    async fn load_persisted_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+        infrastructure_detail_readlists::load_persisted_readlists(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -306,11 +282,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_readlist_detail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
         infrastructure_detail_readlists::load_persisted_readlist_detail(
-            database_file.as_path(),
+            self.db.database_file(),
             &readlist_id,
         )
         .await
@@ -328,11 +303,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_readlist_book_rows(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
         infrastructure_detail_readlists::load_persisted_readlist_book_rows(
-            database_file.as_path(),
+            self.db.database_file(),
             &readlist_id,
         )
         .await
@@ -348,9 +322,8 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_comicrack_match_candidates(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-        infrastructure_detail_readlists::load_comicrack_match_candidates(database_file.as_path())
+        infrastructure_detail_readlists::load_comicrack_match_candidates(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -368,11 +341,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_book_authors(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
         infrastructure_detail_readlists::load_persisted_book_authors(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -388,7 +360,6 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn persist_readlist_create(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -396,7 +367,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         book_ids: Vec<String>,
     ) -> Result<(), String> {
         infrastructure_detail_readlists::persist_readlist_create(
-            database_file.as_path(),
+            self.db.database_file(),
             &readlist_id,
             &name,
             &summary,
@@ -408,7 +379,6 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn persist_readlist_update(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -416,7 +386,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         book_ids: Vec<String>,
     ) -> Result<bool, String> {
         infrastructure_detail_readlists::persist_readlist_update(
-            database_file.as_path(),
+            self.db.database_file(),
             &readlist_id,
             &name,
             &summary,
@@ -426,40 +396,27 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         .await
     }
 
-    async fn delete_persisted_readlist(
-        &self,
-        database_file: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String> {
+    async fn delete_persisted_readlist(&self, readlist_id: String) -> Result<bool, String> {
         infrastructure_detail_readlists::delete_persisted_readlist(
-            database_file.as_path(),
+            self.db.database_file(),
             &readlist_id,
         )
         .await
     }
 
-    async fn upsert_readlist_search_document(
-        &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String> {
+    async fn upsert_readlist_search_document(&self, readlist_id: String) -> Result<bool, String> {
         sync_entity_upsert_from_database(
-            database_file.as_path(),
-            index_dir.as_path(),
+            self.db.database_file(),
+            self.index_dir.as_path(),
             SearchEntityType::ReadList,
             &readlist_id,
         )
         .await
     }
 
-    async fn delete_readlist_search_document(
-        &self,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<(), String> {
+    async fn delete_readlist_search_document(&self, readlist_id: String) -> Result<(), String> {
         sync_entity_delete_from_index(
-            index_dir.as_path(),
+            self.index_dir.as_path(),
             SearchEntityType::ReadList,
             &readlist_id,
         )
@@ -468,11 +425,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_series_resource(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
         infrastructure_detail_series::load_persisted_series_resource(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -487,11 +443,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_series_id_by_sorted_position(
         &self,
-        database_file: PathBuf,
         index: usize,
     ) -> Result<Option<String>, String> {
         infrastructure_detail_series::load_series_id_by_sorted_position(
-            database_file.as_path(),
+            self.db.database_file(),
             index,
         )
         .await
@@ -499,11 +454,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_series_detail(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
         infrastructure_detail_series::load_persisted_series_detail(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -534,11 +488,8 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         })
     }
 
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<SeriesSummaryRecord>, String> {
-        infrastructure_discovery_series::load_persisted_series_summaries(database_file.as_path())
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesSummaryRecord>, String> {
+        infrastructure_discovery_series::load_persisted_series_summaries(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -559,23 +510,19 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
             })
     }
 
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
         infrastructure_discovery_runtime_queries::load_series_total_book_counts(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
         infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -583,11 +530,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_persisted_series_collections(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
         infrastructure_detail_series::load_persisted_series_collections(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -607,11 +553,10 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn load_existing_series_metadata(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
         infrastructure_detail_series::load_existing_series_metadata(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await
@@ -665,12 +610,11 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn persist_series_metadata_update(
         &self,
-        database_file: PathBuf,
         series_id: String,
         update: SeriesMetadataUpdateRecord,
     ) -> Result<bool, String> {
         infrastructure_detail_series::persist_series_metadata_update(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
             infrastructure_detail_series::SeriesMetadataUpdateRecord {
                 status: update.status,
@@ -726,25 +670,26 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         series_id: String,
     ) -> Result<(), String> {
         infrastructure_detail_series::refresh_series_after_metadata_update(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
         )
         .await?;
 
         sync_series_and_oneshot_books_after_metadata_update(
-            database_file.as_path(),
-            index_dir.as_path(),
+            self.db.database_file(),
+            self.index_dir.as_path(),
             &series_id,
         )
         .await
     }
 }
 
-pub(super) fn compose_discovery_detail_service() -> Box<dyn DiscoveryDetailService> {
-    Box::new(RuntimeDiscoveryDetailService)
+pub(super) fn compose_discovery_detail_service(
+    db: DatabaseHandle,
+    index_dir: PathBuf,
+) -> Box<dyn DiscoveryDetailService> {
+    Box::new(RuntimeDiscoveryDetailService { db, index_dir })
 }

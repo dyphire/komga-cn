@@ -70,7 +70,6 @@ fn random_sort_keys(series: &[PersistedSeriesSummary]) -> HashMap<String, u64> {
 
 pub async fn load_persisted_series_page(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
@@ -83,15 +82,9 @@ pub async fn load_persisted_series_page(
     if let Some(search) = query.search.as_ref().map(|value| value.trim())
         && !search.is_empty()
     {
-        let total_count = backend
-            .load_persisted_series_count(database_file.to_path_buf())
-            .await?;
+        let total_count = backend.load_persisted_series_count().await?;
         let ranked_candidates = backend
-            .search_series_scored_ids(
-                database_file.to_path_buf(),
-                search.to_string(),
-                total_count.max(1),
-            )
+            .search_series_scored_ids(search.to_string(), total_count.max(1))
             .await?;
         let candidate_ids = ranked_candidates
             .iter()
@@ -106,13 +99,11 @@ pub async fn load_persisted_series_page(
                 .map(|(index, (_, id))| (id.clone(), index))
                 .collect();
             series = backend
-                .load_persisted_series_summaries_by_ids(database_file.to_path_buf(), candidate_ids)
+                .load_persisted_series_summaries_by_ids(candidate_ids)
                 .await?;
         }
     } else {
-        series = backend
-            .load_persisted_series_summaries(database_file.to_path_buf())
-            .await?;
+        series = backend.load_persisted_series_summaries().await?;
     }
 
     if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
@@ -318,8 +309,7 @@ pub async fn load_persisted_series_page(
             return Ok(page);
         };
 
-        let read_progress =
-            load_series_read_progress_counts(backend, database_file, user_id).await?;
+        let read_progress = load_series_read_progress_counts(backend, user_id).await?;
 
         if let Some(read_statuses) = filters.read_statuses.as_ref() {
             series = filter_rows(series, |row| {
@@ -347,7 +337,7 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(complete) = filters.complete {
-        let total_book_counts = load_series_total_book_counts(backend, database_file).await?;
+        let total_book_counts = load_series_total_book_counts(backend).await?;
         series = filter_rows(series, |row| {
             let Some(total_book_count) = total_book_counts.get(&row.id).copied() else {
                 return false;
@@ -596,7 +586,7 @@ pub async fn load_persisted_series_page(
 
     if let Some(release_date_in_last_days) = filters.release_date_in_last_days
         && let Some(cutoff) =
-            persisted_utc_date_minus_days(backend, database_file, release_date_in_last_days).await?
+            persisted_utc_date_minus_days(backend, release_date_in_last_days).await?
     {
         series = filter_rows(series, |row| {
             matches_optional_value(
@@ -609,8 +599,7 @@ pub async fn load_persisted_series_page(
 
     if let Some(release_date_not_in_last_days) = filters.release_date_not_in_last_days
         && let Some(cutoff) =
-            persisted_utc_date_minus_days(backend, database_file, release_date_not_in_last_days)
-                .await?
+            persisted_utc_date_minus_days(backend, release_date_not_in_last_days).await?
     {
         series = filter_rows(series, |row| {
             matches_optional_value(
@@ -705,7 +694,7 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(collection_ids) = filters.collection_ids.as_ref() {
-        let memberships = load_collection_memberships(backend, database_file).await?;
+        let memberships = load_collection_memberships(backend).await?;
         series = filter_rows(series, |row| {
             memberships
                 .get(&row.id)
@@ -723,7 +712,7 @@ pub async fn load_persisted_series_page(
         )
     }) {
         if let Some(collection_id) = filters.collection_ids.as_ref().and_then(|ids| ids.first()) {
-            load_collection_ordering(backend, database_file, collection_id).await?
+            load_collection_ordering(backend, collection_id).await?
         } else {
             HashMap::new()
         }
@@ -738,7 +727,7 @@ pub async fn load_persisted_series_page(
         )
     }) {
         if let Some(user_id) = context.user_id.as_deref() {
-            load_series_read_dates(backend, database_file, user_id).await?
+            load_series_read_dates(backend, user_id).await?
         } else {
             HashMap::new()
         }

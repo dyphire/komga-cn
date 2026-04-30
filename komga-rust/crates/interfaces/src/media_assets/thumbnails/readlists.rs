@@ -11,14 +11,11 @@ pub async fn readlist_thumbnail(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    let Some(user) =
-        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
+    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -65,14 +62,11 @@ pub async fn readlist_thumbnails(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    let Some(user) =
-        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
+    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -122,14 +116,11 @@ pub async fn readlist_thumbnail_by_id(
     headers: HeaderMap,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    let Some(user) =
-        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
+    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -169,9 +160,7 @@ pub async fn readlist_thumbnail_upload(
     Path(readlist_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -222,9 +211,7 @@ pub async fn readlist_thumbnail_select(
     headers: HeaderMap,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -246,9 +233,7 @@ pub async fn readlist_thumbnail_delete(
     headers: HeaderMap,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 

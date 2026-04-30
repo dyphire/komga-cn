@@ -47,9 +47,7 @@ async fn opds_v2_recommended(
         return opds_catalog_unauthorized_response(&headers);
     };
 
-    let database_file = app.auth_db.database_file.as_path();
-    let libraries = match load_libraries(app.services.opds_persisted.as_ref(), database_file).await
-    {
+    let libraries = match load_libraries(app.services.opds_persisted.as_ref()).await {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -87,11 +85,7 @@ async fn opds_v2_recommended(
     let mut keep_reading = app
         .services
         .opds_catalog
-        .load_keep_reading_books(
-            app.auth_db.database_file.clone(),
-            user_id_value.clone(),
-            library_id.map(str::to_string),
-        )
+        .load_keep_reading_books(user_id_value.clone(), library_id.map(str::to_string))
         .await
         .unwrap_or_default()
         .into_iter()
@@ -114,11 +108,7 @@ async fn opds_v2_recommended(
     let mut on_deck = app
         .services
         .opds_catalog
-        .load_on_deck_books(
-            app.auth_db.database_file.clone(),
-            user_id_value.clone(),
-            library_id.map(str::to_string),
-        )
+        .load_on_deck_books(user_id_value.clone(), library_id.map(str::to_string))
         .await
         .unwrap_or_default()
         .into_iter()
@@ -173,7 +163,6 @@ async fn opds_v2_recommended(
 
     let has_visible_collections = has_visible_collections_for_scope(
         app.services.opds_persisted.as_ref(),
-        database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
@@ -182,7 +171,6 @@ async fn opds_v2_recommended(
     let has_visible_readlists = has_visible_readlists_for_scope(
         app.services.opds_catalog.as_ref(),
         app.services.opds_persisted.as_ref(),
-        database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
@@ -348,7 +336,6 @@ async fn load_visible_latest_books_for_catalog(
             .services
             .opds_catalog
             .load_latest_books_paged(
-                app.auth_db.database_file.clone(),
                 allowed_library_ids.clone(),
                 Some(user_id.to_string()),
                 library_id.map(str::to_string),
@@ -400,7 +387,6 @@ async fn load_visible_latest_series_for_catalog(
             .services
             .opds_catalog
             .load_latest_series_paged(
-                app.auth_db.database_file.clone(),
                 allowed_library_ids.clone(),
                 library_id.map(str::to_string),
                 offset,
@@ -540,10 +526,8 @@ pub(crate) async fn opds_v2_library_browse(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = validate_library_scope(
         app.services.opds_persisted.as_ref(),
-        database_file,
         &allowed_library_ids,
         library_id,
     )
@@ -552,8 +536,7 @@ pub(crate) async fn opds_v2_library_browse(
         return response;
     }
 
-    let libraries = match load_libraries(app.services.opds_persisted.as_ref(), database_file).await
-    {
+    let libraries = match load_libraries(app.services.opds_persisted.as_ref()).await {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -607,7 +590,6 @@ pub(crate) async fn opds_v2_library_browse(
     ];
     let has_collections = has_visible_collections_for_scope(
         app.services.opds_persisted.as_ref(),
-        database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
@@ -623,7 +605,6 @@ pub(crate) async fn opds_v2_library_browse(
     let has_readlists = has_visible_readlists_for_scope(
         app.services.opds_catalog.as_ref(),
         app.services.opds_persisted.as_ref(),
-        database_file,
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
@@ -640,7 +621,6 @@ pub(crate) async fn opds_v2_library_browse(
     let (series_navigation, total_series) = load_browse_series_navigation(
         app.services.opds_catalog.as_ref(),
         &headers,
-        database_file,
         &allowed_library_ids,
         library_id,
         publishers.as_slice(),
@@ -652,7 +632,6 @@ pub(crate) async fn opds_v2_library_browse(
     let publisher_navigation = load_browse_publisher_navigation(
         app.services.opds_catalog.as_ref(),
         &headers,
-        database_file,
         &allowed_library_ids,
         library_id,
     )

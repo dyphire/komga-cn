@@ -4,14 +4,12 @@ use super::*;
 
 pub async fn load_persisted_alphabetical_groups(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
     context: &DiscoveryQueryContext,
     filters: RuntimeSeriesFilters,
     full_text_search: Option<String>,
 ) -> Result<Vec<Value>, String> {
     let page = load_persisted_series_page(
         backend,
-        database_file,
         context,
         PersistedSeriesBrowseQuery::from_filters(
             filters.into_criteria(),

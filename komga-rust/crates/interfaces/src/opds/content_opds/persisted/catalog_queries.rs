@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
@@ -36,7 +35,6 @@ fn persisted_readlist(entry: OpdsReadlistEntry) -> PersistedReadlist {
 pub(super) async fn load_browse_series_navigation(
     backend: &dyn OpdsCatalogService,
     headers: &HeaderMap,
-    database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
     publishers: &[String],
@@ -45,7 +43,6 @@ pub(super) async fn load_browse_series_navigation(
 ) -> Result<(Vec<Value>, usize), String> {
     let (entries, total) = backend
         .load_browse_series_navigation_entries(
-            database_file.to_path_buf(),
             allowed_library_ids.clone(),
             library_id.map(str::to_string),
             publishers.to_vec(),
@@ -80,16 +77,11 @@ pub(super) fn browse_series_navigation_values(
 pub(super) async fn load_browse_publisher_navigation(
     backend: &dyn OpdsCatalogService,
     headers: &HeaderMap,
-    database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Result<Vec<Value>, String> {
     let entries = backend
-        .load_browse_publisher_entries(
-            database_file.to_path_buf(),
-            allowed_library_ids.clone(),
-            library_id.map(str::to_string),
-        )
+        .load_browse_publisher_entries(allowed_library_ids.clone(), library_id.map(str::to_string))
         .await?;
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     Ok(entries
@@ -110,7 +102,6 @@ pub(super) async fn load_browse_publisher_navigation(
 
 pub(super) async fn load_series_page(
     backend: &dyn OpdsCatalogService,
-    database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
@@ -119,7 +110,6 @@ pub(super) async fn load_series_page(
 ) -> Result<Vec<PersistedSeries>, String> {
     backend
         .load_series_page(
-            database_file.to_path_buf(),
             allowed_library_ids.clone(),
             search.map(str::to_string),
             publishers.to_vec(),
@@ -132,10 +122,9 @@ pub(super) async fn load_series_page(
 
 pub(super) async fn load_all_readlists(
     backend: &dyn OpdsCatalogService,
-    database_file: &Path,
 ) -> Result<Vec<PersistedReadlist>, String> {
     backend
-        .load_all_readlists(database_file.to_path_buf())
+        .load_all_readlists()
         .await
         .map(|entries| entries.into_iter().map(persisted_readlist).collect())
 }

@@ -1,5 +1,6 @@
 use super::*;
 use async_trait::async_trait;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::filesystem::browser as infrastructure_browser;
 use komga_infrastructure::filesystem::fonts as infrastructure_fonts;
 use komga_infrastructure::filesystem::transient_books as infrastructure_transient_books;
@@ -10,69 +11,65 @@ use komga_interfaces::state::{
 };
 use serde_json::Value;
 
-#[derive(Clone, Default)]
-pub(super) struct RuntimeOperationalRuntimeService;
+#[derive(Clone)]
+pub(super) struct RuntimeOperationalRuntimeService {
+    main_db: DatabaseHandle,
+    tasks_db: DatabaseHandle,
+}
 
 #[async_trait]
 impl OperationalRuntimeService for RuntimeOperationalRuntimeService {
-    async fn load_task_execution_values(
-        &self,
-        tasks_db_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
-        infrastructure_operational_metrics::load_task_execution_values(tasks_db_file.as_path())
-            .await
+    async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
+        infrastructure_operational_metrics::load_task_execution_values(
+            self.tasks_db.database_file(),
+        )
+        .await
     }
 
-    async fn load_libraries_count(&self, database_file: PathBuf) -> Result<f64, String> {
-        infrastructure_operational_metrics::load_libraries_count(database_file.as_path()).await
+    async fn load_libraries_count(&self) -> Result<f64, String> {
+        infrastructure_operational_metrics::load_libraries_count(self.main_db.database_file()).await
     }
 
-    async fn load_series_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
-        infrastructure_operational_metrics::load_series_grouped_by_library(database_file.as_path())
-            .await
+    async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        infrastructure_operational_metrics::load_series_grouped_by_library(
+            self.main_db.database_file(),
+        )
+        .await
     }
 
-    async fn load_books_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
-        infrastructure_operational_metrics::load_books_grouped_by_library(database_file.as_path())
-            .await
+    async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        infrastructure_operational_metrics::load_books_grouped_by_library(
+            self.main_db.database_file(),
+        )
+        .await
     }
 
-    async fn load_books_filesize_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         infrastructure_operational_metrics::load_books_filesize_grouped_by_library(
-            database_file.as_path(),
+            self.main_db.database_file(),
         )
         .await
     }
 
-    async fn load_sidecars_grouped_by_library(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         infrastructure_operational_metrics::load_sidecars_grouped_by_library(
-            database_file.as_path(),
+            self.main_db.database_file(),
         )
         .await
     }
 
-    async fn load_collections_count(&self, database_file: PathBuf) -> Result<f64, String> {
-        infrastructure_operational_metrics::load_collections_count(database_file.as_path()).await
+    async fn load_collections_count(&self) -> Result<f64, String> {
+        infrastructure_operational_metrics::load_collections_count(self.main_db.database_file())
+            .await
     }
 
-    async fn load_readlists_count(&self, database_file: PathBuf) -> Result<f64, String> {
-        infrastructure_operational_metrics::load_readlists_count(database_file.as_path()).await
+    async fn load_readlists_count(&self) -> Result<f64, String> {
+        infrastructure_operational_metrics::load_readlists_count(self.main_db.database_file()).await
     }
 
-    async fn load_task_failure_count(&self, database_file: PathBuf) -> Result<f64, String> {
-        infrastructure_operational_metrics::load_task_failure_count(database_file.as_path()).await
+    async fn load_task_failure_count(&self) -> Result<f64, String> {
+        infrastructure_operational_metrics::load_task_failure_count(self.main_db.database_file())
+            .await
     }
 
     async fn load_sqlite_pool_snapshots(
@@ -96,22 +93,26 @@ impl OperationalRuntimeService for RuntimeOperationalRuntimeService {
     }
 }
 
-pub(super) fn compose_operational_runtime_service() -> RuntimeOperationalRuntimeService {
-    RuntimeOperationalRuntimeService
+pub(super) fn compose_operational_runtime_service(
+    main_db: DatabaseHandle,
+    tasks_db: DatabaseHandle,
+) -> RuntimeOperationalRuntimeService {
+    RuntimeOperationalRuntimeService { main_db, tasks_db }
 }
 
-#[derive(Clone, Default)]
-pub(super) struct RuntimeOperationalSettingsService;
+#[derive(Clone)]
+pub(super) struct RuntimeOperationalSettingsService {
+    db: DatabaseHandle,
+}
 
 #[async_trait]
 impl OperationalSettingsService for RuntimeOperationalSettingsService {
     async fn load_announcement_read_ids(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<Vec<String>, sqlx::Error> {
         komga_infrastructure::announcements_access::load_announcement_read_ids(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -119,31 +120,29 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn save_announcements_read(
         &self,
-        database_file: PathBuf,
         user_id: String,
         ids: Vec<String>,
     ) -> Result<(), sqlx::Error> {
         komga_infrastructure::announcements_access::save_announcements_read(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             ids.as_slice(),
         )
         .await
     }
 
-    async fn load_claim_status(&self, database_file: PathBuf) -> Result<bool, sqlx::Error> {
-        komga_infrastructure::claims_access::load_claim_status(database_file.as_path()).await
+    async fn load_claim_status(&self) -> Result<bool, sqlx::Error> {
+        komga_infrastructure::claims_access::load_claim_status(self.db.database_file()).await
     }
 
     async fn claim_initial_admin_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         email: String,
         password_hash: String,
     ) -> Result<ClaimInitialAdminUserResult, sqlx::Error> {
         komga_infrastructure::claims_access::claim_initial_admin_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &email,
             &password_hash,
@@ -173,23 +172,18 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_client_settings_global(
         &self,
-        database_file: PathBuf,
         allow_unauthorized_only: bool,
     ) -> Result<Value, sqlx::Error> {
         infrastructure_operational_settings::load_client_settings_global(
-            database_file.as_path(),
+            self.db.database_file(),
             allow_unauthorized_only,
         )
         .await
     }
 
-    async fn load_client_settings_user(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Result<Value, sqlx::Error> {
+    async fn load_client_settings_user(&self, user_id: String) -> Result<Value, sqlx::Error> {
         infrastructure_operational_settings::load_client_settings_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -197,11 +191,10 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn upsert_client_settings_global(
         &self,
-        database_file: PathBuf,
         settings: Vec<(String, String, bool)>,
     ) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::upsert_client_settings_global(
-            database_file.as_path(),
+            self.db.database_file(),
             settings.as_slice(),
         )
         .await
@@ -209,25 +202,20 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn upsert_client_settings_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         settings: Vec<(String, String)>,
     ) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::upsert_client_settings_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             settings.as_slice(),
         )
         .await
     }
 
-    async fn delete_client_settings_global(
-        &self,
-        database_file: PathBuf,
-        keys: Vec<String>,
-    ) -> Result<(), sqlx::Error> {
+    async fn delete_client_settings_global(&self, keys: Vec<String>) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::delete_client_settings_global(
-            database_file.as_path(),
+            self.db.database_file(),
             keys.as_slice(),
         )
         .await
@@ -235,12 +223,11 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn delete_client_settings_user(
         &self,
-        database_file: PathBuf,
         user_id: String,
         keys: Vec<String>,
     ) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::delete_client_settings_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             keys.as_slice(),
         )
@@ -263,13 +250,9 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         infrastructure_fonts::load_font_file(path.as_path(), &family, &file)
     }
 
-    async fn delete_syncpoints_by_user(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Result<(), sqlx::Error> {
+    async fn delete_syncpoints_by_user(&self, user_id: String) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::delete_syncpoints_by_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -277,12 +260,11 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn delete_syncpoints_by_user_and_key_ids(
         &self,
-        database_file: PathBuf,
         user_id: String,
         key_ids: Vec<String>,
     ) -> Result<(), sqlx::Error> {
         infrastructure_operational_settings::delete_syncpoints_by_user_and_key_ids(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             key_ids.as_slice(),
         )
@@ -291,13 +273,12 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_history_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         infrastructure_operational_settings::load_history_page(
-            database_file.as_path(),
+            self.db.database_file(),
             page,
             size,
             &sorts,
@@ -307,14 +288,13 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hash_matches_page(
         &self,
-        database_file: PathBuf,
         page_hash: String,
         page: u64,
         size: u64,
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         infrastructure_page_hashes::load_page_hash_matches_page(
-            database_file.as_path(),
+            self.db.database_file(),
             &page_hash,
             page,
             size,
@@ -325,10 +305,9 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hash_thumbnail(
         &self,
-        database_file: PathBuf,
         page_hash: String,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-        infrastructure_page_hashes::load_page_hash_thumbnail(database_file.as_path(), &page_hash)
+        infrastructure_page_hashes::load_page_hash_thumbnail(self.db.database_file(), &page_hash)
             .await
             .map(|value| {
                 value.map(|row| PageHashThumbnail {
@@ -340,12 +319,11 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_unknown_page_hash_thumbnail(
         &self,
-        database_file: PathBuf,
         page_hash: String,
         resize_to: Option<u32>,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
         infrastructure_page_hashes::load_unknown_page_hash_thumbnail(
-            database_file.as_path(),
+            self.db.database_file(),
             &page_hash,
             resize_to,
         )
@@ -360,14 +338,13 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hashes_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         actions: Vec<String>,
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         infrastructure_page_hashes::load_page_hashes_page(
-            database_file.as_path(),
+            self.db.database_file(),
             page,
             size,
             &actions,
@@ -378,13 +355,12 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hashes_unknown_page(
         &self,
-        database_file: PathBuf,
         page: u64,
         size: u64,
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
         infrastructure_page_hashes::load_page_hashes_unknown_page(
-            database_file.as_path(),
+            self.db.database_file(),
             page,
             size,
             &sorts,
@@ -394,10 +370,9 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hash_delete_targets(
         &self,
-        database_file: PathBuf,
         hash: String,
     ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-        infrastructure_page_hashes::load_page_hash_delete_targets(database_file.as_path(), &hash)
+        infrastructure_page_hashes::load_page_hash_delete_targets(self.db.database_file(), &hash)
             .await
             .map(|targets| {
                 targets
@@ -422,12 +397,11 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn upsert_page_hash(
         &self,
-        database_file: PathBuf,
         hash: String,
         size: Option<i64>,
         action: String,
     ) -> Result<(), sqlx::Error> {
-        infrastructure_page_hashes::upsert_page_hash(database_file.as_path(), &hash, size, &action)
+        infrastructure_page_hashes::upsert_page_hash(self.db.database_file(), &hash, size, &action)
             .await
     }
 
@@ -458,11 +432,10 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn infer_transient_series_and_number(
         &self,
-        database_file: PathBuf,
         transient_name: String,
     ) -> (Option<String>, Option<f64>) {
         infrastructure_transient_books::infer_transient_series_and_number(
-            database_file.as_path(),
+            self.db.database_file(),
             &transient_name,
         )
         .await
@@ -472,13 +445,9 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         infrastructure_transient_books::list_transient_book_entries(root.as_path())
     }
 
-    async fn validate_transient_scan_root(
-        &self,
-        database_file: PathBuf,
-        path: String,
-    ) -> Result<(), String> {
+    async fn validate_transient_scan_root(&self, path: String) -> Result<(), String> {
         infrastructure_transient_books::validate_transient_scan_root(
-            database_file.as_path(),
+            self.db.database_file(),
             std::path::Path::new(&path),
         )
         .await
@@ -528,6 +497,8 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     }
 }
 
-pub(super) fn compose_operational_settings_service() -> RuntimeOperationalSettingsService {
-    RuntimeOperationalSettingsService
+pub(super) fn compose_operational_settings_service(
+    db: DatabaseHandle,
+) -> RuntimeOperationalSettingsService {
+    RuntimeOperationalSettingsService { db }
 }

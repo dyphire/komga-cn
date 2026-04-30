@@ -19,7 +19,7 @@ use crate::state::{
     OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
     ServerSettingsService, SseOperationalState, StartupTimingState, TaskQueueService,
     TransientBooksStore,
-    test_support::{
+    tests::{
         NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
         NoopOpdsPersistedService, NoopOperationalRuntimeService, NoopOperationalSettingsService,
         NoopPersistedDiscoveryService,
@@ -467,7 +467,12 @@ fn test_app_state(
         read_progress: crate::state::ReadProgressState::default(),
         discovery_auth: crate::discovery_auth::state::DiscoveryAuthState::default(),
         auth_db: crate::state::AuthDatabaseState {
-            database_file: operational.runtime.database_file.clone(),
+            db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
+                operational.runtime.database_file.clone(),
+                sqlx::sqlite::SqlitePoolOptions::new()
+                    .connect_lazy("sqlite::memory:")
+                    .expect("lazy in-memory pool should open"),
+            ),
             demo_mode: false,
             session_runtime_key: operational.remember_me_runtime_key.clone(),
             remember_me_runtime_key: operational.remember_me_runtime_key.clone(),

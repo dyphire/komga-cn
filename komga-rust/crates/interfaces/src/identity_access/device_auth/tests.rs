@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::state::{
-    KoreaderBookLookupError, KoreaderBookTarget, test_support::seed_koreader_book_target,
+    KoreaderBookLookupError, KoreaderBookTarget, seed_koreader_book_target,
 };
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
@@ -491,13 +491,18 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
 #[tokio::test]
 async fn kobo_ping_rejects_requests_without_valid_auth() {
     let auth_db = crate::state::AuthDatabaseState {
-        database_file: unique_temp_path("komga-device-auth-ping"),
+        db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
+            unique_temp_path("komga-device-auth-ping"),
+            sqlx::sqlite::SqlitePoolOptions::new()
+                .connect_lazy("sqlite::memory:")
+                .expect("lazy in-memory pool should open"),
+        ),
         demo_mode: false,
         session_runtime_key: "test-session".to_string(),
         remember_me_runtime_key: "test-remember-me".to_string(),
     };
     let response = kobo_ping_for_tests(
-        auth_db.database_file.as_path(),
+        auth_db.db.database_file(),
         "invalid-token",
         RequestConnectionInfo::default(),
         HeaderMap::new(),

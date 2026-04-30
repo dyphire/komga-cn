@@ -60,10 +60,7 @@ pub(crate) async fn post_transient_books(
     match app
         .services
         .operational_settings
-        .validate_transient_scan_root(
-            app.operational.runtime.database_file.clone(),
-            requested_path.to_string(),
-        )
+        .validate_transient_scan_root(requested_path.to_string())
         .await
     {
         Ok(()) => {}

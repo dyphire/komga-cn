@@ -36,7 +36,7 @@ pub async fn resolve_book_id_for_persisted(app: &HttpAppState, requested_book_id
     match app
         .services
         .discovery_detail
-        .load_book_id_by_sorted_position(app.auth_db.database_file.clone(), index)
+        .load_book_id_by_sorted_position(index)
         .await
     {
         Ok(Some(book_id)) => book_id,
@@ -51,7 +51,7 @@ pub async fn load_persisted_book_resource(
     let resource = app
         .services
         .discovery_detail
-        .load_persisted_book_resource(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_resource(book_id.to_string())
         .await?
         .map(|row| PersistedBookResource {
             library_id: row.library_id,
@@ -69,11 +69,7 @@ pub(super) async fn load_persisted_book_detail(
     let model = app
         .services
         .discovery_detail
-        .load_persisted_book_detail(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            user_id.map(str::to_string),
-        )
+        .load_persisted_book_detail(book_id.to_string(), user_id.map(str::to_string))
         .await?
         .map(|row| BookDetailReadModel {
             id: row.id,
@@ -183,11 +179,7 @@ pub(super) async fn load_persisted_book_sibling_detail(
     let Some(sibling_id) = app
         .services
         .discovery_detail
-        .load_persisted_book_sibling_id(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            direction,
-        )
+        .load_persisted_book_sibling_id(book_id.to_string(), direction)
         .await?
     else {
         return Ok(None);

@@ -193,7 +193,7 @@ async fn series_feed(
     exclude_newly_added: bool,
     kotlin_unpaged_page_shape: bool,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -232,7 +232,6 @@ async fn series_feed(
 
     match load_persisted_series_page(
         app.services.discovery_persisted.as_ref(),
-        database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
             SeriesFilterCriteria {
@@ -283,7 +282,7 @@ pub async fn series_latest(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
 }
 
 pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&headers, database_file).await {
         return response;
     }
@@ -296,7 +295,6 @@ pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppSt
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
         app.services.discovery_persisted.as_ref(),
-        database_file,
         requested_library_ids.as_ref(),
     )
     .await;
@@ -409,7 +407,6 @@ pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppSt
 
     match load_persisted_series_page(
         app.services.discovery_persisted.as_ref(),
-        database_file,
         &context,
         PersistedSeriesBrowseQuery::from_filters(
             SeriesFilterCriteria {
@@ -479,7 +476,7 @@ pub async fn series_alphabetical_groups(
     body: Value,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     if !body.is_object() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -509,7 +506,6 @@ pub async fn series_alphabetical_groups(
     let mut filters = filters;
     filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
         app.services.discovery_persisted.as_ref(),
-        database_file,
         filters.criteria.library_ids.as_ref(),
     )
     .await;
@@ -527,7 +523,6 @@ pub async fn series_alphabetical_groups(
 
     match load_persisted_alphabetical_groups(
         app.services.discovery_persisted.as_ref(),
-        database_file,
         &context,
         filters,
         full_text_search,
@@ -545,9 +540,7 @@ pub async fn series_list(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -562,7 +555,7 @@ pub async fn series_list(
     let full_text_search = extract_full_text_search(&payload);
     let strict_runtime_shape = should_use_strict_runtime_shape(Some(&payload));
 
-    if app.auth_db.database_file.exists()
+    if app.auth_db.db.database_file().exists()
         && let Some(runtime_response) = runtime_owned_series_list_response(
             app.services.discovery_persisted.as_ref(),
             &headers,
@@ -570,7 +563,6 @@ pub async fn series_list(
             Some(&payload),
             full_text_search.clone(),
             &app.discovery_auth,
-            app.auth_db.database_file.as_path(),
             strict_runtime_shape,
         )
         .await
@@ -578,7 +570,7 @@ pub async fn series_list(
         return runtime_response;
     }
 
-    if !app.auth_db.database_file.exists() {
+    if !app.auth_db.db.database_file().exists() {
         return StatusCode::NOT_FOUND.into_response();
     }
 

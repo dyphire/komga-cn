@@ -56,11 +56,11 @@ use helpers::*;
 
 #[cfg(test)]
 pub(crate) async fn load_koreader_book_target_for_tests(
-    database_file: &FsPath,
+    _database_file: &FsPath,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
     default_test_identity_service()
-        .load_koreader_book_target(database_file.to_path_buf(), book_hash.to_string())
+        .load_koreader_book_target(book_hash.to_string())
         .await
 }
 

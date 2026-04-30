@@ -48,7 +48,7 @@ pub async fn load_persisted_series_resource(
     let resource = app
         .services
         .discovery_detail
-        .load_persisted_series_resource(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_persisted_series_resource(series_id.to_string())
         .await?
         .map(|row| PersistedSeriesResource {
             library_id: row.library_id,
@@ -84,7 +84,7 @@ pub async fn resolve_series_id_for_persisted(
     match app
         .services
         .discovery_detail
-        .load_series_id_by_sorted_position(app.auth_db.database_file.clone(), index)
+        .load_series_id_by_sorted_position(index)
         .await
     {
         Ok(Some(series_id)) => series_id,
@@ -100,7 +100,7 @@ pub(super) async fn load_persisted_series_detail(
     let Some(row) = app
         .services
         .discovery_detail
-        .load_persisted_series_detail(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_persisted_series_detail(series_id.to_string())
         .await?
     else {
         return Ok(None);
@@ -112,7 +112,7 @@ pub(super) async fn load_persisted_series_detail(
     let persisted_summary = app
         .services
         .discovery_detail
-        .load_persisted_series_summaries(app.auth_db.database_file.clone())
+        .load_persisted_series_summaries()
         .await?
         .into_iter()
         .find(|entry| entry.id == series_id);
@@ -120,7 +120,7 @@ pub(super) async fn load_persisted_series_detail(
     let total_book_count = app
         .services
         .discovery_detail
-        .load_series_total_book_counts(app.auth_db.database_file.clone())
+        .load_series_total_book_counts()
         .await?
         .get(series_id)
         .copied()
@@ -130,10 +130,7 @@ pub(super) async fn load_persisted_series_detail(
         let counts = app
             .services
             .discovery_detail
-            .load_series_read_progress_counts(
-                app.auth_db.database_file.clone(),
-                user_id.to_string(),
-            )
+            .load_series_read_progress_counts(user_id.to_string())
             .await?
             .get(series_id)
             .copied();
@@ -289,7 +286,7 @@ pub(super) async fn load_persisted_series_collections(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_series_collections(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_persisted_series_collections(series_id.to_string())
         .await?;
     Ok(rows
         .into_iter()
@@ -312,7 +309,7 @@ pub async fn load_existing_series_metadata(
     let metadata = app
         .services
         .discovery_detail
-        .load_existing_series_metadata(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_existing_series_metadata(series_id.to_string())
         .await?
         .map(|row| ExistingSeriesMetadata {
             status: row.status,
@@ -356,11 +353,7 @@ pub async fn persist_series_metadata_update(
     let updated = app
         .services
         .discovery_detail
-        .persist_series_metadata_update(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            update,
-        )
+        .persist_series_metadata_update(series_id.to_string(), update)
         .await?;
     if updated && let Some(series) = load_persisted_series_resource(app, series_id).await? {
         register_runtime_sse_event(
@@ -382,11 +375,7 @@ pub async fn sync_series_search_documents_after_metadata_update(
 ) -> Result<(), String> {
     app.services
         .discovery_detail
-        .refresh_series_search_documents_after_metadata_update(
-            app.auth_db.database_file.clone(),
-            app.operational.runtime.lucene_data_directory.clone(),
-            series_id.to_string(),
-        )
+        .refresh_series_search_documents_after_metadata_update(series_id.to_string())
         .await
 }
 

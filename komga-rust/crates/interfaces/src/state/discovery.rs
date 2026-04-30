@@ -5,168 +5,122 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub trait PersistedDiscoveryService: Send + Sync {
     async fn load_persisted_author_names(
         &self,
-        database_file: PathBuf,
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_author_roles(
         &self,
-        database_file: PathBuf,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_authors_by_scope(
         &self,
-        database_file: PathBuf,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String>;
     async fn load_book_poster_summaries(
         &self,
-        database_file: PathBuf,
     ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String>;
     async fn load_persisted_book_summaries(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
     ) -> Result<Vec<PersistedBookSummary>, String>;
     async fn load_persisted_book_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedBookSummary>, String>;
-    async fn load_persisted_book_count(&self, database_file: PathBuf) -> Result<usize, String>;
+    async fn load_persisted_book_count(&self) -> Result<usize, String>;
     async fn load_persisted_genres(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_languages(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_publishers(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_age_ratings(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_sharing_labels(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_series_release_dates(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
     async fn load_persisted_series_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String>;
-    async fn load_persisted_library_ids(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<String>, String>;
+    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
     async fn load_collection_memberships(
         &self,
-        database_file: PathBuf,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String>;
     async fn load_collection_ordering(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<HashMap<String, i64>, String>;
-    async fn load_readlist_memberships(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String>;
+    async fn load_readlist_memberships(&self)
+    -> Result<BTreeMap<String, BTreeSet<String>>, String>;
     async fn load_persisted_ondeck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String>;
-    async fn load_persisted_duplicate_books(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String>;
+    async fn load_persisted_duplicate_books(&self)
+    -> Result<Vec<PersistedBookBrowseEntry>, String>;
     async fn load_persisted_book_tags(
         &self,
-        database_file: PathBuf,
         scope: Option<PersistedBookTagsScope>,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String>;
-    async fn persisted_utc_date_minus_days(
-        &self,
-        database_file: PathBuf,
-        days: i64,
-    ) -> Result<Option<String>, String>;
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String>;
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String>;
     async fn load_series_read_dates(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, String>, String>;
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String>;
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedSeriesSummary>, String>;
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String>;
     async fn load_persisted_series_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedSeriesSummary>, String>;
-    async fn load_persisted_series_count(&self, database_file: PathBuf) -> Result<usize, String>;
-    async fn persisted_series_exist(&self, database_file: PathBuf) -> Result<bool, String>;
-    async fn search_book_ids(
-        &self,
-        database_file: PathBuf,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<String>, String>;
+    async fn load_persisted_series_count(&self) -> Result<usize, String>;
+    async fn persisted_series_exist(&self) -> Result<bool, String>;
+    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String>;
     async fn search_collection_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<String>, String>;
     async fn search_readlist_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String>;
     async fn search_series_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String>;
@@ -422,66 +376,51 @@ pub struct SeriesSummaryRecord {
 
 #[async_trait]
 pub trait DiscoveryDetailService: Send + Sync {
-    async fn load_book_id_by_sorted_position(
-        &self,
-        database_file: PathBuf,
-        index: usize,
-    ) -> Result<Option<String>, String>;
+    async fn load_book_id_by_sorted_position(&self, index: usize)
+    -> Result<Option<String>, String>;
 
     async fn load_persisted_book_resource(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<PersistedBookResourceRecord>, String>;
 
     async fn load_persisted_book_detail(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: Option<String>,
     ) -> Result<Option<PersistedBookDetailRecord>, String>;
 
     async fn load_persisted_book_sibling_id(
         &self,
-        database_file: PathBuf,
         book_id: String,
         direction: PersistedBookSiblingDirectionRecord,
     ) -> Result<Option<String>, String>;
 
-    async fn persisted_collections_exist(&self, database_file: PathBuf) -> Result<bool, String>;
+    async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
     async fn load_persisted_collections(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
 
     async fn load_persisted_collection_series_ids(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<String>, String>;
 
     async fn load_persisted_collection_detail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
 
-    async fn load_series_library_id(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Option<String>, String>;
+    async fn load_series_library_id(&self, series_id: String) -> Result<Option<String>, String>;
 
     async fn load_series_restrictions(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<PersistedSeriesRestrictionRecord, String>;
 
     async fn persist_collection_create(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
@@ -490,63 +429,46 @@ pub trait DiscoveryDetailService: Send + Sync {
 
     async fn persist_collection_update(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         name: String,
         ordered: bool,
         series_ids: Vec<String>,
     ) -> Result<bool, String>;
 
-    async fn delete_persisted_collection(
-        &self,
-        database_file: PathBuf,
-        collection_id: String,
-    ) -> Result<bool, String>;
+    async fn delete_persisted_collection(&self, collection_id: String) -> Result<bool, String>;
 
     async fn upsert_collection_search_document(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         collection_id: String,
     ) -> Result<bool, String>;
 
-    async fn delete_collection_search_document(
-        &self,
-        index_dir: PathBuf,
-        collection_id: String,
-    ) -> Result<(), String>;
+    async fn delete_collection_search_document(&self, collection_id: String) -> Result<(), String>;
 
     async fn load_persisted_readlists(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
 
     async fn load_persisted_readlist_detail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String>;
 
     async fn load_persisted_readlist_book_rows(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
 
     async fn load_comicrack_match_candidates(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
 
     async fn load_persisted_book_authors(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<PersistedBookAuthorRecord>, String>;
 
     async fn persist_readlist_create(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -556,7 +478,6 @@ pub trait DiscoveryDetailService: Send + Sync {
 
     async fn persist_readlist_update(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         name: String,
         summary: String,
@@ -564,82 +485,54 @@ pub trait DiscoveryDetailService: Send + Sync {
         book_ids: Vec<String>,
     ) -> Result<bool, String>;
 
-    async fn delete_persisted_readlist(
-        &self,
-        database_file: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String>;
+    async fn delete_persisted_readlist(&self, readlist_id: String) -> Result<bool, String>;
 
-    async fn upsert_readlist_search_document(
-        &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String>;
+    async fn upsert_readlist_search_document(&self, readlist_id: String) -> Result<bool, String>;
 
-    async fn delete_readlist_search_document(
-        &self,
-        index_dir: PathBuf,
-        readlist_id: String,
-    ) -> Result<(), String>;
+    async fn delete_readlist_search_document(&self, readlist_id: String) -> Result<(), String>;
 
     async fn load_persisted_series_resource(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesResourceRecord>, String>;
 
     async fn load_series_id_by_sorted_position(
         &self,
-        database_file: PathBuf,
         index: usize,
     ) -> Result<Option<String>, String>;
 
     async fn load_persisted_series_detail(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesDetailRecord>, String>;
 
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<SeriesSummaryRecord>, String>;
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesSummaryRecord>, String>;
 
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String>;
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
 
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String>;
 
     async fn load_persisted_series_collections(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<PersistedSeriesCollectionRecord>, String>;
 
     async fn load_existing_series_metadata(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<ExistingSeriesMetadataRecord>, String>;
 
     async fn persist_series_metadata_update(
         &self,
-        database_file: PathBuf,
         series_id: String,
         update: SeriesMetadataUpdateRecord,
     ) -> Result<bool, String>;
 
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
-        database_file: PathBuf,
-        index_dir: PathBuf,
         series_id: String,
     ) -> Result<(), String>;
 }

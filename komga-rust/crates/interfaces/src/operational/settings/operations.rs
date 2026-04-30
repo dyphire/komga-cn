@@ -39,12 +39,7 @@ pub(crate) async fn get_history(
     let page_data = match app
         .services
         .operational_settings
-        .load_history_page(
-            app.operational.runtime.database_file.clone(),
-            page,
-            size,
-            sorts,
-        )
+        .load_history_page(page, size, sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -71,20 +66,13 @@ pub(crate) async fn delete_syncpoints_me(
         SyncpointDeleteScope::All => {
             app.services
                 .operational_settings
-                .delete_syncpoints_by_user(
-                    app.operational.runtime.database_file.clone(),
-                    user_id(&current_user).to_string(),
-                )
+                .delete_syncpoints_by_user(user_id(&current_user).to_string())
                 .await
         }
         SyncpointDeleteScope::ApiKeys(key_ids) => {
             app.services
                 .operational_settings
-                .delete_syncpoints_by_user_and_key_ids(
-                    app.operational.runtime.database_file.clone(),
-                    user_id(&current_user).to_string(),
-                    key_ids,
-                )
+                .delete_syncpoints_by_user_and_key_ids(user_id(&current_user).to_string(), key_ids)
                 .await
         }
     };

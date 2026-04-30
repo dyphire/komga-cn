@@ -6,10 +6,7 @@ pub(super) async fn infer_transient_series_and_number(
 ) -> (Option<String>, Option<f64>) {
     app.services
         .operational_settings
-        .infer_transient_series_and_number(
-            app.operational.runtime.database_file.clone(),
-            transient_name.to_string(),
-        )
+        .infer_transient_series_and_number(transient_name.to_string())
         .await
 }
 

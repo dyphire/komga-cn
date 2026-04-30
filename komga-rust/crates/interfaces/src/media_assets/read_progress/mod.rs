@@ -30,11 +30,7 @@ pub(crate) async fn load_read_progress_from_services(
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_read_progress(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            user_id.to_string(),
-        )
+        .load_read_progress(book_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -44,7 +40,7 @@ pub(crate) async fn load_series_book_ids_from_services(
 ) -> Result<Vec<String>, String> {
     app.services
         .media_assets
-        .load_series_book_ids(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_book_ids(series_id.to_string())
         .await
 }
 
@@ -59,7 +55,6 @@ pub(crate) async fn persist_read_progress_from_services(
     app.services
         .media_assets
         .persist_read_progress(
-            app.auth_db.database_file.clone(),
             book_id.to_string(),
             user_id.to_string(),
             page,
@@ -76,11 +71,7 @@ pub(crate) async fn delete_persisted_read_progress_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .delete_persisted_read_progress(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            user_id.to_string(),
-        )
+        .delete_persisted_read_progress(book_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -91,11 +82,7 @@ pub(crate) async fn refresh_series_read_progress_row_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .refresh_series_read_progress_row(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            user_id.to_string(),
-        )
+        .refresh_series_read_progress_row(series_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -106,11 +93,7 @@ pub(crate) async fn delete_series_read_progress_row_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .delete_series_read_progress_row(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            user_id.to_string(),
-        )
+        .delete_series_read_progress_row(series_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -121,10 +104,6 @@ pub(crate) async fn load_series_tachiyomi_progress_from_services(
 ) -> Result<Option<Value>, String> {
     app.services
         .media_assets
-        .load_series_tachiyomi_progress(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            user_id.to_string(),
-        )
+        .load_series_tachiyomi_progress(series_id.to_string(), user_id.to_string())
         .await
 }

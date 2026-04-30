@@ -19,16 +19,12 @@ use komga_application::discovery::{
 
 pub async fn load_book_poster_summaries(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
 ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
-    backend
-        .load_book_poster_summaries(database_file.to_path_buf())
-        .await
+    backend.load_book_poster_summaries().await
 }
 
 pub async fn load_persisted_books_page(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,
 ) -> Result<PageEnvelope<BookReadModel>, String> {
@@ -38,15 +34,9 @@ pub async fn load_persisted_books_page(
     if let Some(search) = query.search.as_ref().map(|value| value.trim())
         && !search.is_empty()
     {
-        let total_count = backend
-            .load_persisted_book_count(database_file.to_path_buf())
-            .await?;
+        let total_count = backend.load_persisted_book_count().await?;
         let candidate_ids = backend
-            .search_book_ids(
-                database_file.to_path_buf(),
-                search.to_string(),
-                total_count.max(1),
-            )
+            .search_book_ids(search.to_string(), total_count.max(1))
             .await?;
         if candidate_ids.is_empty() {
             books.clear();
@@ -58,7 +48,6 @@ pub async fn load_persisted_books_page(
                 .collect();
             books = backend
                 .load_persisted_book_summaries_by_ids(
-                    database_file.to_path_buf(),
                     context.user_id.as_deref().map(str::to_string),
                     candidate_ids,
                 )
@@ -66,10 +55,7 @@ pub async fn load_persisted_books_page(
         }
     } else {
         books = backend
-            .load_persisted_book_summaries(
-                database_file.to_path_buf(),
-                context.user_id.as_deref().map(str::to_string),
-            )
+            .load_persisted_book_summaries(context.user_id.as_deref().map(str::to_string))
             .await?;
     }
 
@@ -111,7 +97,7 @@ pub async fn load_persisted_books_page(
 
     let readlist_memberships =
         if filters.read_list_ids.is_some() || filters.read_list_ids_excluded.is_some() {
-            Some(load_readlist_memberships(backend, database_file).await?)
+            Some(load_readlist_memberships(backend).await?)
         } else {
             None
         };
@@ -343,7 +329,7 @@ pub async fn load_persisted_books_page(
         || filters.poster_selected.is_some()
         || filters.poster_selected_excluded.is_some()
     {
-        let posters = load_book_poster_summaries(backend, database_file).await?;
+        let posters = load_book_poster_summaries(backend).await?;
 
         if filters.poster_types.is_some() || filters.poster_selected.is_some() {
             books = filter_rows(books, |row| {
@@ -496,7 +482,7 @@ pub async fn load_persisted_books_page(
 
     if let Some(release_date_in_last_days) = filters.release_date_in_last_days
         && let Some(cutoff) = backend
-            .persisted_utc_date_minus_days(database_file.to_path_buf(), release_date_in_last_days)
+            .persisted_utc_date_minus_days(release_date_in_last_days)
             .await?
     {
         books = filter_rows(books, |row| {
@@ -510,10 +496,7 @@ pub async fn load_persisted_books_page(
 
     if let Some(release_date_not_in_last_days) = filters.release_date_not_in_last_days
         && let Some(cutoff) = backend
-            .persisted_utc_date_minus_days(
-                database_file.to_path_buf(),
-                release_date_not_in_last_days,
-            )
+            .persisted_utc_date_minus_days(release_date_not_in_last_days)
             .await?
     {
         books = filter_rows(books, |row| {
@@ -781,7 +764,6 @@ fn compare_relevance_ranks(
 
 pub async fn runtime_owned_persisted_books_page(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
     context: &DiscoveryQueryContext,
     filters: &RuntimeBooksFilters,
     sorts: &[String],
@@ -790,15 +772,10 @@ pub async fn runtime_owned_persisted_books_page(
     size: usize,
     unpaged: bool,
 ) -> Option<Result<PageEnvelope<BookReadModel>, String>> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let sort_modes = parse_persisted_books_sort_modes(sorts, full_text_search.as_deref());
     Some(
         load_persisted_books_page(
             backend,
-            database_file,
             context,
             PersistedBooksBrowseQuery::from_runtime_filters(
                 filters,
@@ -862,7 +839,6 @@ pub async fn runtime_owned_books_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
-    database_file: &FsPath,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     let query_string = uri.query().unwrap_or_default();
@@ -910,7 +886,6 @@ pub async fn runtime_owned_books_list_response(
         restrict_books_filters_to_persisted_shape(&mut filters);
         filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
             backend,
-            database_file,
             filters.criteria.library_ids.as_ref(),
         )
         .await;
@@ -920,13 +895,7 @@ pub async fn runtime_owned_books_list_response(
         strict_runtime_shape,
         filters.criteria.library_ids.clone(),
     );
-    let context = match auth_state
-        .resolve_query_context_with_persistence(
-            headers,
-            requested_library_ids.as_deref(),
-            database_file,
-        )
-        .await
+    let context = match auth_state.resolve_query_context(headers, requested_library_ids.as_deref())
     {
         Some(context) => context,
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
@@ -941,7 +910,6 @@ pub async fn runtime_owned_books_list_response(
 
     if let Some(persisted_page) = runtime_owned_persisted_books_page(
         backend,
-        database_file,
         &context,
         &filters,
         &sorts,
@@ -980,23 +948,15 @@ pub async fn runtime_owned_books_latest_response(
     headers: &HeaderMap,
     uri: &Uri,
     auth_state: &DiscoveryAuthState,
-    database_file: &FsPath,
 ) -> Option<Response> {
     let query = uri.query().unwrap_or_default();
     let request = runtime_list_request(query);
 
-    if !database_file.exists() {
-        return None;
-    }
-
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids = remap_requested_library_ids_for_persisted(
-        backend,
-        database_file,
-        requested_library_ids.as_ref(),
-    )
-    .await
-    .or(requested_library_ids);
+    let library_ids =
+        remap_requested_library_ids_for_persisted(backend, requested_library_ids.as_ref())
+            .await
+            .or(requested_library_ids);
 
     let page = request.page;
     let size = request.size;
@@ -1009,7 +969,6 @@ pub async fn runtime_owned_books_latest_response(
 
     match load_persisted_books_page(
         backend,
-        database_file,
         &context,
         PersistedBooksBrowseQuery::from_filters(
             BooksFilterCriteria {

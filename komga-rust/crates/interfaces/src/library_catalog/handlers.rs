@@ -23,7 +23,7 @@ use super::response_mapping::{libraries_payload, library_payload};
 use super::task_mapping::{enqueue_task_records, enqueue_task_records_with_status};
 
 pub async fn libraries_route(State(app): State<Arc<HttpAppState>>, headers: HeaderMap) -> Response {
-    response(headers, &app, app.auth_db.database_file.as_path()).await
+    response(headers, &app, app.auth_db.db.database_file()).await
 }
 
 pub async fn library_detail_route(
@@ -31,7 +31,7 @@ pub async fn library_detail_route(
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    library_detail(headers, &app, app.auth_db.database_file.as_path(), path).await
+    library_detail(headers, &app, app.auth_db.db.database_file(), path).await
 }
 
 pub async fn library_create_route(

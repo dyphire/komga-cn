@@ -8,13 +8,11 @@ pub async fn book_detail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    if app.auth_db.database_file.exists() {
+    if app.auth_db.db.database_file().exists() {
         let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
             Ok(resource) => resource,
             Err(error) => return internal_error_response(error),
@@ -35,7 +33,7 @@ pub async fn book_detail(
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                app.auth_db.database_file.as_path(),
+                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -64,13 +62,11 @@ pub async fn book_sibling_previous(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    if app.auth_db.database_file.exists() {
+    if app.auth_db.db.database_file().exists() {
         let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
         let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
@@ -93,7 +89,7 @@ pub async fn book_sibling_previous(
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                app.auth_db.database_file.as_path(),
+                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -123,13 +119,11 @@ pub async fn book_sibling_next(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    if app.auth_db.database_file.exists() {
+    if app.auth_db.db.database_file().exists() {
         let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
         let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
@@ -152,7 +146,7 @@ pub async fn book_sibling_next(
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                app.auth_db.database_file.as_path(),
+                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -182,13 +176,11 @@ pub async fn book_readlists(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    if app.auth_db.database_file.exists() {
+    if app.auth_db.db.database_file().exists() {
         let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
         let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
@@ -211,7 +203,7 @@ pub async fn book_readlists(
             .resolve_detail_query_context_with_persistence(
                 &headers,
                 &detail_context,
-                app.auth_db.database_file.as_path(),
+                app.auth_db.db.database_file(),
             )
             .await
         {

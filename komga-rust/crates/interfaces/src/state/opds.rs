@@ -186,7 +186,6 @@ pub struct PersistedBookFeedRecord {
 pub trait OpdsCatalogService: Send + Sync {
     async fn load_browse_series_navigation_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         publishers: Vec<String>,
@@ -196,35 +195,30 @@ pub trait OpdsCatalogService: Send + Sync {
 
     async fn load_browse_publisher_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
     ) -> Result<Vec<BrowsePublisherEntry>, String>;
 
     async fn load_keep_reading_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String>;
 
     async fn load_on_deck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String>;
 
     async fn load_latest_books(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String>;
 
     async fn load_latest_books_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         user_id: Option<String>,
         library_id: Option<String>,
@@ -234,14 +228,12 @@ pub trait OpdsCatalogService: Send + Sync {
 
     async fn load_latest_series(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String>;
 
     async fn load_latest_series_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         offset: i64,
@@ -250,7 +242,6 @@ pub trait OpdsCatalogService: Send + Sync {
 
     async fn load_library_series(
         &self,
-        database_file: PathBuf,
         library_id: String,
         offset: i64,
         limit: i64,
@@ -258,7 +249,6 @@ pub trait OpdsCatalogService: Send + Sync {
 
     async fn load_series_page(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         search: Option<String>,
         publishers: Vec<String>,
@@ -266,59 +256,40 @@ pub trait OpdsCatalogService: Send + Sync {
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String>;
 
-    async fn load_all_readlists(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<OpdsReadlistEntry>, String>;
+    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String>;
 }
 
 #[async_trait]
 pub trait OpdsPersistedService: Send + Sync {
-    async fn load_libraries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedLibraryRecord>, String>;
+    async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String>;
     async fn load_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Option<PersistedLibraryRecord>, String>;
     async fn load_readlists_for_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Vec<PersistedReadlistRecord>, String>;
-    async fn load_series(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Option<PersistedSeriesRecord>, String>;
+    async fn load_series(&self, series_id: String)
+    -> Result<Option<PersistedSeriesRecord>, String>;
     async fn load_series_books_paged(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<PersistedSeriesBookRecord>, String>;
-    async fn load_series_tags(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Vec<String>, String>;
+    async fn load_series_tags(&self, series_id: String) -> Result<Vec<String>, String>;
     async fn load_readlist(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<PersistedReadlistRecord>, String>;
     async fn load_readlist_books(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String>;
     async fn load_unified_search_results(
         &self,
-        database_file: PathBuf,
         query: String,
     ) -> Result<
         (
@@ -331,27 +302,22 @@ pub trait OpdsPersistedService: Send + Sync {
     >;
     async fn load_publishers(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
     ) -> Result<Vec<String>, String>;
     async fn load_collections(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
     ) -> Result<Vec<PersistedNamedRecord>, String>;
     async fn load_collection(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedNamedRecord>, String>;
     async fn load_collection_books(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<PersistedBookFeedRecord>, String>;
     async fn load_collection_series(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         ordered: bool,
     ) -> Result<Vec<PersistedSeriesRecord>, String>;

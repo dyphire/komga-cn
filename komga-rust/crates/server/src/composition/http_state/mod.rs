@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections as infrastructure_detail_collections,
     readlists as infrastructure_detail_readlists, series as infrastructure_detail_series,
@@ -76,30 +77,35 @@ mod http_state_runtime_identity;
 
 pub fn compose_http_runtime(
     config: &RuntimeConfig,
+    db: DatabaseHandle,
+    tasks_db: DatabaseHandle,
     background: RuntimeBackgroundState,
     worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> HttpAppState {
-    let runtime_identity_service = http_state_runtime_identity::compose_runtime_identity_service();
-    let operational_runtime_service: Box<dyn OperationalRuntimeService> =
-        Box::new(http_state_operational_access::compose_operational_runtime_service());
-    let operational_settings_service: Box<dyn OperationalSettingsService> =
-        Box::new(http_state_operational_access::compose_operational_settings_service());
-    let media_assets_service = http_state_media_assets::compose_media_assets_service();
-    let discovery_detail_service = http_state_discovery::compose_discovery_detail_service();
+    let runtime_identity_service =
+        http_state_runtime_identity::compose_runtime_identity_service(db.clone());
+    let operational_runtime_service: Box<dyn OperationalRuntimeService> = Box::new(
+        http_state_operational_access::compose_operational_runtime_service(db.clone(), tasks_db),
+    );
+    let media_assets_service = http_state_media_assets::compose_media_assets_service(db.clone());
+    let discovery_detail_service = http_state_discovery::compose_discovery_detail_service(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    );
     let discovery_persisted = http_state_discovery::compose_persisted_discovery_service(
-        config.database_file.as_path(),
-        config.lucene_data_directory.as_path(),
+        db.clone(),
+        config.lucene_data_directory.clone(),
     );
     let (opds_catalog, opds_persisted) =
-        http_state_opds::compose_opds_services(config.lucene_data_directory.as_path());
+        http_state_opds::compose_opds_services(&db, config.lucene_data_directory.as_path());
+    let operational_settings_service: Box<dyn OperationalSettingsService> =
+        Box::new(http_state_operational_access::compose_operational_settings_service(db.clone()));
 
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
-    runtime_identity_service.sync_remember_me_runtime_database_file(
-        remember_me_runtime_key.clone(),
-        config.database_file.clone(),
-    );
+    runtime_identity_service
+        .sync_remember_me_runtime_database_file(remember_me_runtime_key.clone());
     preload_remember_me_runtime_settings(
         config,
         remember_me_runtime_key.as_str(),
@@ -119,7 +125,7 @@ pub fn compose_http_runtime(
     let profile = http_state_runtime_config::runtime_profile(config);
     let discovery_auth = DiscoveryAuthState::default();
     let auth_db = AuthDatabaseState {
-        database_file: config.database_file.clone(),
+        db: db.clone(),
         demo_mode: config.demo_mode,
         session_runtime_key,
         remember_me_runtime_key: remember_me_runtime_key.clone(),

@@ -8,6 +8,7 @@ pub mod announcements_access;
 pub mod auth;
 pub mod claims_access;
 pub mod context;
+pub mod database_handle;
 pub mod discovery_detail_access;
 pub mod discovery_persisted_access;
 pub mod filesystem;

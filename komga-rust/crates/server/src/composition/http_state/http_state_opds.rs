@@ -2,6 +2,7 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchQueryLifecycle};
 use komga_interfaces::state::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
@@ -16,13 +17,14 @@ use super::http_state_discovery::resolve_discovery_index_dir;
 const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
 
 #[derive(Clone)]
-pub(super) struct RuntimeOpdsCatalogService;
+pub(super) struct RuntimeOpdsCatalogService {
+    pub(super) db: DatabaseHandle,
+}
 
 #[async_trait]
 impl OpdsCatalogService for RuntimeOpdsCatalogService {
     async fn load_browse_series_navigation_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         publishers: Vec<String>,
@@ -30,7 +32,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         size: usize,
     ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String> {
         infrastructure_opds_catalog::load_browse_series_navigation_entries(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
             library_id.as_deref(),
             &publishers,
@@ -54,12 +56,11 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_browse_publisher_entries(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
     ) -> Result<Vec<BrowsePublisherEntry>, String> {
         infrastructure_opds_catalog::load_browse_publisher_entries(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
             library_id.as_deref(),
         )
@@ -76,12 +77,11 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_keep_reading_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
         infrastructure_opds_catalog::load_keep_reading_books(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             library_id.as_deref(),
         )
@@ -92,12 +92,11 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_on_deck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
         library_id: Option<String>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
         infrastructure_opds_catalog::load_on_deck_books(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             library_id.as_deref(),
         )
@@ -108,12 +107,11 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_latest_books(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
         infrastructure_opds_catalog::load_latest_books(
-            database_file.as_path(),
+            self.db.database_file(),
             library_id.as_deref(),
             limit,
         )
@@ -124,7 +122,6 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_latest_books_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         user_id: Option<String>,
         library_id: Option<String>,
@@ -132,7 +129,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
         infrastructure_opds_catalog::load_latest_books_paged(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
             user_id.as_deref(),
             library_id.as_deref(),
@@ -146,12 +143,11 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_latest_series(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         infrastructure_opds_catalog::load_latest_series(
-            database_file.as_path(),
+            self.db.database_file(),
             library_id.as_deref(),
             limit,
         )
@@ -162,14 +158,13 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_latest_series_paged(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         library_id: Option<String>,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         infrastructure_opds_catalog::load_latest_series_paged(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
             library_id.as_deref(),
             offset,
@@ -182,13 +177,12 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_library_series(
         &self,
-        database_file: PathBuf,
         library_id: String,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         infrastructure_opds_catalog::load_library_series(
-            database_file.as_path(),
+            self.db.database_file(),
             &library_id,
             offset,
             limit,
@@ -200,7 +194,6 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
     async fn load_series_page(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
         search: Option<String>,
         publishers: Vec<String>,
@@ -208,7 +201,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         infrastructure_opds_catalog::load_series_page(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
             search.as_deref(),
             &publishers,
@@ -220,11 +213,8 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         .map_err(|error| error.to_string())
     }
 
-    async fn load_all_readlists(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<OpdsReadlistEntry>, String> {
-        infrastructure_opds_catalog::load_all_readlists(database_file.as_path())
+    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
+        infrastructure_opds_catalog::load_all_readlists(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -241,16 +231,14 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
 
 #[derive(Clone)]
 pub(super) struct RuntimeOpdsPersistedService {
+    pub(super) db: DatabaseHandle,
     pub(super) lucene_data_directory: PathBuf,
 }
 
 #[async_trait]
 impl OpdsPersistedService for RuntimeOpdsPersistedService {
-    async fn load_libraries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedLibraryRecord>, String> {
-        infrastructure_opds_persisted::load_libraries(database_file.as_path())
+    async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+        infrastructure_opds_persisted::load_libraries(self.db.database_file())
             .await
             .map(|rows| rows.into_iter().map(map_persisted_library_record).collect())
             .map_err(|error| error.to_string())
@@ -258,10 +246,9 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Option<PersistedLibraryRecord>, String> {
-        infrastructure_opds_persisted::load_library(database_file.as_path(), &library_id)
+        infrastructure_opds_persisted::load_library(self.db.database_file(), &library_id)
             .await
             .map(|value| value.map(map_persisted_library_record))
             .map_err(|error| error.to_string())
@@ -269,11 +256,10 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_readlists_for_library(
         &self,
-        database_file: PathBuf,
         library_id: String,
     ) -> Result<Vec<PersistedReadlistRecord>, String> {
         infrastructure_opds_persisted::load_readlists_for_library(
-            database_file.as_path(),
+            self.db.database_file(),
             &library_id,
         )
         .await
@@ -287,10 +273,9 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_series(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<PersistedSeriesRecord>, String> {
-        infrastructure_opds_persisted::load_series(database_file.as_path(), &series_id)
+        infrastructure_opds_persisted::load_series(self.db.database_file(), &series_id)
             .await
             .map(|value| value.map(map_persisted_series_record))
             .map_err(|error| error.to_string())
@@ -298,14 +283,13 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_series_books_paged(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
         offset: i64,
         limit: i64,
     ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
         infrastructure_opds_persisted::load_series_books_paged(
-            database_file.as_path(),
+            self.db.database_file(),
             &series_id,
             &user_id,
             offset,
@@ -320,22 +304,17 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         .map_err(|error| error.to_string())
     }
 
-    async fn load_series_tags(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Vec<String>, String> {
-        infrastructure_opds_persisted::load_series_tags(database_file.as_path(), &series_id)
+    async fn load_series_tags(&self, series_id: String) -> Result<Vec<String>, String> {
+        infrastructure_opds_persisted::load_series_tags(self.db.database_file(), &series_id)
             .await
             .map_err(|error| error.to_string())
     }
 
     async fn load_readlist(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
-        infrastructure_opds_persisted::load_readlist(database_file.as_path(), &readlist_id)
+        infrastructure_opds_persisted::load_readlist(self.db.database_file(), &readlist_id)
             .await
             .map(|value| value.map(map_persisted_readlist_record))
             .map_err(|error| error.to_string())
@@ -343,10 +322,9 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_readlist_books(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-        infrastructure_opds_persisted::load_readlist_books(database_file.as_path(), &readlist_id)
+        infrastructure_opds_persisted::load_readlist_books(self.db.database_file(), &readlist_id)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -358,7 +336,6 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_unified_search_results(
         &self,
-        database_file: PathBuf,
         query: String,
     ) -> Result<
         (
@@ -371,34 +348,34 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
     > {
         let trimmed_query = query.trim().to_string();
         let (series, books, collections, readlists) = if trimmed_query.is_empty() {
-            load_blank_opds_search_results(database_file.as_path()).await?
+            load_blank_opds_search_results(self.db.database_file()).await?
         } else {
             let index_dir = resolve_discovery_index_dir(
-                database_file.as_path(),
+                self.db.database_file(),
                 self.lucene_data_directory.as_path(),
             );
             match SearchQueryLifecycle::bootstrap(index_dir.as_path()) {
                 Ok(index) => (
                     load_ranked_series_search_results(
-                        database_file.as_path(),
+                        self.db.database_file(),
                         &index,
                         &trimmed_query,
                     )
                     .await?,
                     load_ranked_book_search_results(
-                        database_file.as_path(),
+                        self.db.database_file(),
                         &index,
                         &trimmed_query,
                     )
                     .await?,
                     load_ranked_collection_search_results(
-                        database_file.as_path(),
+                        self.db.database_file(),
                         &index,
                         &trimmed_query,
                     )
                     .await?,
                     load_ranked_readlist_search_results(
-                        database_file.as_path(),
+                        self.db.database_file(),
                         &index,
                         &trimmed_query,
                     )
@@ -430,11 +407,10 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_publishers(
         &self,
-        database_file: PathBuf,
         allowed_library_ids: Option<HashSet<String>>,
     ) -> Result<Vec<String>, String> {
         infrastructure_opds_persisted::load_publishers(
-            database_file.as_path(),
+            self.db.database_file(),
             &allowed_library_ids,
         )
         .await
@@ -443,11 +419,10 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_collections(
         &self,
-        database_file: PathBuf,
         library_id: Option<String>,
     ) -> Result<Vec<PersistedNamedRecord>, String> {
         infrastructure_opds_persisted::load_collections(
-            database_file.as_path(),
+            self.db.database_file(),
             library_id.as_deref(),
         )
         .await
@@ -457,10 +432,9 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_collection(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Option<PersistedNamedRecord>, String> {
-        infrastructure_opds_persisted::load_collection(database_file.as_path(), &collection_id)
+        infrastructure_opds_persisted::load_collection(self.db.database_file(), &collection_id)
             .await
             .map(|value| value.map(map_persisted_named_record))
             .map_err(|error| error.to_string())
@@ -468,11 +442,10 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_collection_books(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<PersistedBookFeedRecord>, String> {
         infrastructure_opds_persisted::load_collection_books(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
         )
         .await
@@ -486,12 +459,11 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 
     async fn load_collection_series(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         ordered: bool,
     ) -> Result<Vec<PersistedSeriesRecord>, String> {
         infrastructure_opds_persisted::load_collection_series(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
             ordered,
         )
@@ -502,11 +474,13 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
 }
 
 pub(super) fn compose_opds_services(
+    db: &DatabaseHandle,
     lucene_data_directory: &std::path::Path,
 ) -> (RuntimeOpdsCatalogService, RuntimeOpdsPersistedService) {
     (
-        RuntimeOpdsCatalogService,
+        RuntimeOpdsCatalogService { db: db.clone() },
         RuntimeOpdsPersistedService {
+            db: db.clone(),
             lucene_data_directory: lucene_data_directory.to_path_buf(),
         },
     )

@@ -67,7 +67,7 @@ pub(super) async fn load_persisted_readlists(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_readlists(app.auth_db.database_file.clone())
+        .load_persisted_readlists()
         .await?;
 
     let mut readlists = Vec::with_capacity(rows.len());
@@ -98,7 +98,7 @@ pub async fn load_comicrack_match_candidates(
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
     app.services
         .discovery_detail
-        .load_comicrack_match_candidates(app.auth_db.database_file.clone())
+        .load_comicrack_match_candidates()
         .await
 }
 
@@ -108,7 +108,7 @@ pub async fn load_persisted_book_authors(
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
     app.services
         .discovery_detail
-        .load_persisted_book_authors(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_authors(book_id.to_string())
         .await
 }
 
@@ -120,7 +120,7 @@ pub(super) async fn load_persisted_readlist_detail(
     let Some(row) = app
         .services
         .discovery_detail
-        .load_persisted_readlist_detail(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .load_persisted_readlist_detail(readlist_id.to_string())
         .await?
     else {
         return Ok(None);
@@ -151,10 +151,7 @@ async fn load_persisted_readlist_book_ids(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_readlist_book_rows(
-            app.auth_db.database_file.clone(),
-            readlist_id.to_string(),
-        )
+        .load_persisted_readlist_book_rows(readlist_id.to_string())
         .await?;
 
     let total_count = rows.len();
@@ -216,7 +213,6 @@ pub async fn persist_readlist_create(
     app.services
         .discovery_detail
         .persist_readlist_create(
-            app.auth_db.database_file.clone(),
             readlist_id.clone(),
             input.name.clone(),
             input.summary.clone(),
@@ -247,7 +243,6 @@ pub async fn persist_readlist_update(
         .services
         .discovery_detail
         .persist_readlist_update(
-            app.auth_db.database_file.clone(),
             readlist_id.to_string(),
             input.name.clone(),
             input.summary.clone(),
@@ -277,7 +272,7 @@ pub async fn delete_persisted_readlist(
     let deleted = app
         .services
         .discovery_detail
-        .delete_persisted_readlist(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .delete_persisted_readlist(readlist_id.to_string())
         .await?;
     if deleted && let Some(readlist) = existing {
         register_runtime_sse_event(
@@ -299,11 +294,7 @@ pub async fn upsert_readlist_search_document(
 ) -> Result<bool, String> {
     app.services
         .discovery_detail
-        .upsert_readlist_search_document(
-            app.auth_db.database_file.clone(),
-            app.operational.runtime.lucene_data_directory.clone(),
-            readlist_id.to_string(),
-        )
+        .upsert_readlist_search_document(readlist_id.to_string())
         .await
 }
 
@@ -313,10 +304,7 @@ pub async fn delete_readlist_search_document(
 ) -> Result<(), String> {
     app.services
         .discovery_detail
-        .delete_readlist_search_document(
-            app.operational.runtime.lucene_data_directory.clone(),
-            readlist_id.to_string(),
-        )
+        .delete_readlist_search_document(readlist_id.to_string())
         .await
 }
 
@@ -576,7 +564,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     let auth_state = &app.discovery_auth;
     let Some(context) = auth_state
         .resolve_query_context_with_persistence(headers, None, database_file)
@@ -598,10 +586,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_readlist_book_rows(
-            app.auth_db.database_file.clone(),
-            readlist_id.to_string(),
-        )
+        .load_persisted_readlist_book_rows(readlist_id.to_string())
         .await?;
     let mut visible = Vec::new();
 

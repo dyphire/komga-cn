@@ -551,8 +551,6 @@ async fn metric_detail_json(
 ) -> Result<Option<Value>, String> {
     let tag_filters = metric_query_tags(uri);
     let state = &app.operational;
-    let database_file = state.runtime.database_file.as_path();
-    let tasks_db_file = state.runtime.tasks_db_file.as_path();
 
     match metric_name {
         "application.ready.time" => Ok(Some(single_measurement_metric(
@@ -691,16 +689,9 @@ async fn metric_detail_json(
             one_minute_load_average().unwrap_or(0.0),
         ))),
         "komga.tasks.execution" => Ok(Some(
-            metric_tasks_execution(
-                app,
-                tasks_db_file,
-                tag_filters.get("type").map(String::as_str),
-            )
-            .await?,
+            metric_tasks_execution(app, tag_filters.get("type").map(String::as_str)).await?,
         )),
-        "komga.tasks.failure" => Ok(Some(
-            metric_tasks_failure(app, database_file, tasks_db_file).await?,
-        )),
+        "komga.tasks.failure" => Ok(Some(metric_tasks_failure(app).await?)),
         "komga.libraries" => Ok(Some(
             simple_metric(
                 metric_name,
@@ -708,7 +699,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_libraries_count(database_file.to_path_buf())
+                    .load_libraries_count()
                     .await?,
             )
             .await,
@@ -720,7 +711,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_series_grouped_by_library(database_file.to_path_buf())
+                    .load_series_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -733,7 +724,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_books_grouped_by_library(database_file.to_path_buf())
+                    .load_books_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -746,7 +737,7 @@ async fn metric_detail_json(
                 Some("bytes"),
                 app.services
                     .operational_runtime
-                    .load_books_filesize_grouped_by_library(database_file.to_path_buf())
+                    .load_books_filesize_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -759,7 +750,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_sidecars_grouped_by_library(database_file.to_path_buf())
+                    .load_sidecars_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
             )
@@ -772,7 +763,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_collections_count(database_file.to_path_buf())
+                    .load_collections_count()
                     .await?,
             )
             .await,
@@ -784,7 +775,7 @@ async fn metric_detail_json(
                 Some("count"),
                 app.services
                     .operational_runtime
-                    .load_readlists_count(database_file.to_path_buf())
+                    .load_readlists_count()
                     .await?,
             )
             .await,
@@ -805,13 +796,12 @@ fn metric_query_tags(uri: &Uri) -> HashMap<String, String> {
 
 async fn metric_tasks_execution(
     app: &HttpAppState,
-    tasks_db_file: &Path,
     task_type: Option<&str>,
 ) -> Result<Value, String> {
     let values = app
         .services
         .operational_runtime
-        .load_task_execution_values(tasks_db_file.to_path_buf())
+        .load_task_execution_values()
         .await?;
 
     let count = if let Some(task_type) = task_type {
@@ -850,20 +840,16 @@ async fn metric_tasks_execution(
     }))
 }
 
-async fn metric_tasks_failure(
-    app: &HttpAppState,
-    database_file: &Path,
-    tasks_db_file: &Path,
-) -> Result<Value, String> {
+async fn metric_tasks_failure(app: &HttpAppState) -> Result<Value, String> {
     let failures = app
         .services
         .operational_runtime
-        .load_task_failure_count(database_file.to_path_buf())
+        .load_task_failure_count()
         .await?;
     let task_types = unique_strings(
         app.services
             .operational_runtime
-            .load_task_execution_values(tasks_db_file.to_path_buf())
+            .load_task_execution_values()
             .await?
             .into_iter()
             .map(|(kind, _)| kind)

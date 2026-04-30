@@ -1,4 +1,5 @@
 use axum::Router;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
@@ -82,6 +83,12 @@ pub async fn build_router_with_config(
     finalize_router_startup(
         compose_http_runtime(
             config,
+            DatabaseHandle::file_backed(config.database_file.clone())
+                .await
+                .expect("database handle should initialize"),
+            DatabaseHandle::file_backed(config.tasks_db_file.clone())
+                .await
+                .expect("tasks database handle should initialize"),
             background,
             Some(worker_runtime_guard),
             None,
@@ -99,7 +106,19 @@ pub async fn build_router_without_runtime_workers(
 ) -> Router {
     let background = prepare_task_queue(config, None).await;
     finalize_router_startup(
-        compose_http_runtime(config, background, None, None, startup_timing.clone()),
+        compose_http_runtime(
+            config,
+            DatabaseHandle::file_backed(config.database_file.clone())
+                .await
+                .expect("database handle should initialize"),
+            DatabaseHandle::file_backed(config.tasks_db_file.clone())
+                .await
+                .expect("tasks database handle should initialize"),
+            background,
+            None,
+            None,
+            startup_timing.clone(),
+        ),
         startup_timing,
         startup_started_at,
     )
@@ -129,6 +148,12 @@ pub async fn serve_with_config(
     let router = finalize_router_startup(
         compose_http_runtime(
             &config,
+            DatabaseHandle::file_backed(config.database_file.clone())
+                .await
+                .expect("database handle should initialize"),
+            DatabaseHandle::file_backed(config.tasks_db_file.clone())
+                .await
+                .expect("tasks database handle should initialize"),
             background,
             Some(worker_runtime_guard),
             Some(shutdown_tx.clone()),

@@ -273,19 +273,19 @@ pub(super) async fn authenticated_user(
         connection_info.remote_addr(),
     );
 
-    match persisted_api_key_user(headers, &auth_db.database_file)
+    match persisted_api_key_user(headers, auth_db.db.database_file())
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
             let api_key_metadata =
-                persisted_api_key_metadata(headers, &auth_db.database_file).await;
+                persisted_api_key_metadata(headers, auth_db.db.database_file()).await;
             let (api_key_id, api_key_comment) = api_key_metadata
                 .as_ref()
                 .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
                 .unwrap_or((None, None));
             let _ = persisted_record_successful_authentication_activity(
-                &auth_db.database_file,
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
@@ -305,13 +305,13 @@ pub(super) async fn authenticated_user(
         return Some(user);
     }
 
-    match persisted_basic_user(headers, &auth_db.database_file)
+    match persisted_basic_user(headers, auth_db.db.database_file())
         .await
         .unwrap_or(AuthOutcome::Missing)
     {
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
-                &auth_db.database_file,
+                auth_db.db.database_file(),
                 &user,
                 authentication_activity_write_input(&request_metadata, "Password", None, None),
             )

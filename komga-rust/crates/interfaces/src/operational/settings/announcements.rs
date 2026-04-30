@@ -35,10 +35,7 @@ pub(crate) async fn get_announcements(
     let read_ids = match app
         .services
         .operational_settings
-        .load_announcement_read_ids(
-            app.operational.runtime.database_file.clone(),
-            user_id(&current_user).to_string(),
-        )
+        .load_announcement_read_ids(user_id(&current_user).to_string())
         .await
     {
         Ok(ids) => ids,
@@ -68,11 +65,7 @@ pub(crate) async fn put_announcements(
     if app
         .services
         .operational_settings
-        .save_announcements_read(
-            app.operational.runtime.database_file.clone(),
-            user_id(&current_user).to_string(),
-            ids,
-        )
+        .save_announcements_read(user_id(&current_user).to_string(), ids)
         .await
         .is_err()
     {

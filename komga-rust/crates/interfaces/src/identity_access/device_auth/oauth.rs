@@ -273,11 +273,7 @@ pub async fn oauth2_login_code(
     let user = match app
         .services
         .runtime_identity
-        .ensure_oauth_user(
-            state.runtime.database_file.clone(),
-            email.clone(),
-            allow_create,
-        )
+        .ensure_oauth_user(email.clone(), allow_create)
         .await
     {
         Ok(Some(user)) => user,
@@ -297,7 +293,7 @@ pub async fn oauth2_login_code(
 
     let source = format!("OAuth2:{client_name}");
     let _ = persisted_record_successful_authentication_activity(
-        auth_db.database_file.as_path(),
+        auth_db.db.database_file(),
         &user,
         authentication_activity_write_input(
             &authentication_activity_headers_metadata_with_remote_addr(
@@ -639,7 +635,6 @@ async fn oauth2_login_error_response(
         .services
         .runtime_identity
         .persisted_record_failed_authentication_activity(
-            app.auth_db.database_file.clone(),
             email.map(str::to_string),
             authentication_activity_write_input(
                 &authentication_activity_headers_metadata_with_remote_addr(

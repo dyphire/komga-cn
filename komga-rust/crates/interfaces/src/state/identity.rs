@@ -122,7 +122,7 @@ pub trait IdentityService: Send + Sync {
         runtime_key: String,
     ) -> Option<String>;
     fn sync_session_runtime_settings(&self, runtime_key: String, max_inactive_seconds: u64);
-    fn sync_remember_me_runtime_database_file(&self, runtime_key: String, database_file: PathBuf);
+    fn sync_remember_me_runtime_database_file(&self, runtime_key: String);
     fn sync_remember_me_runtime_settings(
         &self,
         runtime_key: String,
@@ -147,114 +147,80 @@ pub trait IdentityService: Send + Sync {
         session_token: String,
         registration_id: String,
     ) -> Option<String>;
-    async fn persisted_basic_user(
-        &self,
-        headers: HeaderMap,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome>;
-    async fn persisted_api_key_user(
-        &self,
-        headers: HeaderMap,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome>;
-    async fn persisted_api_key_user_by_token(
-        &self,
-        api_key: String,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome>;
+    async fn persisted_basic_user(&self, headers: HeaderMap) -> Option<AuthOutcome>;
+    async fn persisted_api_key_user(&self, headers: HeaderMap) -> Option<AuthOutcome>;
+    async fn persisted_api_key_user_by_token(&self, api_key: String) -> Option<AuthOutcome>;
     async fn persisted_api_key_metadata(
         &self,
         headers: HeaderMap,
-        database_file: PathBuf,
     ) -> Option<PersistedApiKeyMetadata>;
-    async fn persisted_users(&self, database_file: PathBuf) -> Option<Vec<AuthUser>>;
+    async fn persisted_users(&self) -> Option<Vec<AuthUser>>;
     async fn persisted_update_password_by_user_id(
         &self,
-        database_file: PathBuf,
         user_id: String,
         password: String,
     ) -> Option<bool>;
     async fn persisted_create_api_key(
         &self,
-        database_file: PathBuf,
         user_id: String,
         comment: String,
     ) -> Option<PersistedApiKey>;
     async fn persisted_api_key_comment_exists(
         &self,
-        database_file: PathBuf,
         user_id: String,
         comment: String,
     ) -> Option<bool>;
-    async fn persisted_list_api_keys(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Option<Vec<PersistedApiKey>>;
+    async fn persisted_list_api_keys(&self, user_id: String) -> Option<Vec<PersistedApiKey>>;
     async fn persisted_delete_api_key_by_id(
         &self,
-        database_file: PathBuf,
         user_id: String,
         api_key_id: String,
     ) -> Option<bool>;
     async fn persisted_list_authentication_activity(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
     ) -> Option<Vec<PersistedAuthenticationActivity>>;
-    async fn persisted_cleanup_authentication_activity(
-        &self,
-        database_file: PathBuf,
-    ) -> Option<u64>;
+    async fn persisted_cleanup_authentication_activity(&self) -> Option<u64>;
     async fn persisted_latest_authentication_activity_by_user_and_api_key(
         &self,
-        database_file: PathBuf,
         user_id: String,
         api_key_id: String,
     ) -> Option<PersistedAuthenticationActivity>;
     async fn persisted_record_failed_authentication_activity(
         &self,
-        database_file: PathBuf,
         email: Option<String>,
         input: AuthenticationActivityWriteInput,
         error: String,
     ) -> Option<()>;
     async fn persisted_record_successful_authentication_activity(
         &self,
-        database_file: PathBuf,
         user: AuthUser,
         input: AuthenticationActivityWriteInput,
     ) -> Option<()>;
     async fn ensure_oauth_user(
         &self,
-        database_file: PathBuf,
         email: String,
         allow_create: bool,
     ) -> Result<Option<AuthUser>, sqlx::Error>;
     fn configured_api_key(&self) -> Option<String>;
     async fn load_book_created_timestamp(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<String>, sqlx::Error>;
     async fn load_book_last_epub_position_locator(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<Value>, sqlx::Error>;
     async fn load_book_media_file(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error>;
     async fn load_kobo_metadata_record(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<KoboMetadataRecord>, sqlx::Error>;
     async fn load_kobo_sync_page(
         &self,
-        database_file: PathBuf,
         user: AuthUser,
         user_id: String,
         current_api_key_id: Option<String>,
@@ -264,23 +230,19 @@ pub trait IdentityService: Send + Sync {
     ) -> Result<KoboSyncPage, sqlx::Error>;
     async fn load_koreader_book_target(
         &self,
-        database_file: PathBuf,
         book_hash: String,
     ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError>;
     async fn load_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error>;
     async fn load_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error>;
     async fn persist_read_progress_with_locator(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: i64,
@@ -290,39 +252,25 @@ pub trait IdentityService: Send + Sync {
         timestamp: String,
         locator: Option<Value>,
     ) -> Result<(), String>;
-    async fn persisted_book_exists(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, sqlx::Error>;
+    async fn persisted_book_exists(&self, book_id: String) -> Result<bool, sqlx::Error>;
     async fn proxy_kobo_store_library_sync(
         &self,
         forwarded_headers: Vec<(String, String)>,
         query: Option<String>,
         raw_sync_token: String,
     ) -> Result<KoboStoreSyncMergeResult, ()>;
-    async fn remove_sync_point(
-        &self,
-        database_file: PathBuf,
-        sync_point_id: String,
-    ) -> Result<(), sqlx::Error>;
+    async fn remove_sync_point(&self, sync_point_id: String) -> Result<(), sqlx::Error>;
     async fn create_auth_user(
         &self,
-        database_file: PathBuf,
         input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error>;
-    async fn delete_auth_user(
-        &self,
-        database_file: PathBuf,
-        target_user_id: String,
-    ) -> Result<bool, sqlx::Error>;
+    async fn delete_auth_user(&self, target_user_id: String) -> Result<bool, sqlx::Error>;
     async fn update_auth_user(
         &self,
-        database_file: PathBuf,
         target_user_id: String,
         patch: UpdateAuthUserInput,
     ) -> Result<UpdateAuthUserResult, sqlx::Error>;
-    async fn open_auth_pool(&self, database_file: PathBuf) -> Result<SqlitePool, sqlx::Error>;
+    async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error>;
 }
 
 #[cfg(test)]
@@ -410,12 +358,7 @@ impl IdentityService for TestIdentityService {
     }
 
     fn sync_session_runtime_settings(&self, _runtime_key: String, _max_inactive_seconds: u64) {}
-    fn sync_remember_me_runtime_database_file(
-        &self,
-        _runtime_key: String,
-        _database_file: PathBuf,
-    ) {
-    }
+    fn sync_remember_me_runtime_database_file(&self, _runtime_key: String) {}
     fn sync_remember_me_runtime_settings(
         &self,
         _runtime_key: String,
@@ -458,40 +401,26 @@ impl IdentityService for TestIdentityService {
             .remove(&(runtime_key, session_token, registration_id))
     }
 
-    async fn persisted_basic_user(
-        &self,
-        _headers: HeaderMap,
-        _database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_basic_user(&self, _headers: HeaderMap) -> Option<AuthOutcome> {
         Some(AuthOutcome::Missing)
     }
-    async fn persisted_api_key_user(
-        &self,
-        _headers: HeaderMap,
-        _database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_api_key_user(&self, _headers: HeaderMap) -> Option<AuthOutcome> {
         Some(AuthOutcome::Missing)
     }
-    async fn persisted_api_key_user_by_token(
-        &self,
-        _api_key: String,
-        _database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_api_key_user_by_token(&self, _api_key: String) -> Option<AuthOutcome> {
         None
     }
     async fn persisted_api_key_metadata(
         &self,
         _headers: HeaderMap,
-        _database_file: PathBuf,
     ) -> Option<PersistedApiKeyMetadata> {
         None
     }
-    async fn persisted_users(&self, _database_file: PathBuf) -> Option<Vec<AuthUser>> {
+    async fn persisted_users(&self) -> Option<Vec<AuthUser>> {
         Some(vec![])
     }
     async fn persisted_update_password_by_user_id(
         &self,
-        _database_file: PathBuf,
         _user_id: String,
         _password: String,
     ) -> Option<bool> {
@@ -499,7 +428,6 @@ impl IdentityService for TestIdentityService {
     }
     async fn persisted_create_api_key(
         &self,
-        _database_file: PathBuf,
         _user_id: String,
         _comment: String,
     ) -> Option<PersistedApiKey> {
@@ -507,22 +435,16 @@ impl IdentityService for TestIdentityService {
     }
     async fn persisted_api_key_comment_exists(
         &self,
-        _database_file: PathBuf,
         _user_id: String,
         _comment: String,
     ) -> Option<bool> {
         Some(false)
     }
-    async fn persisted_list_api_keys(
-        &self,
-        _database_file: PathBuf,
-        _user_id: String,
-    ) -> Option<Vec<PersistedApiKey>> {
+    async fn persisted_list_api_keys(&self, _user_id: String) -> Option<Vec<PersistedApiKey>> {
         Some(vec![])
     }
     async fn persisted_delete_api_key_by_id(
         &self,
-        _database_file: PathBuf,
         _user_id: String,
         _api_key_id: String,
     ) -> Option<bool> {
@@ -530,20 +452,15 @@ impl IdentityService for TestIdentityService {
     }
     async fn persisted_list_authentication_activity(
         &self,
-        _database_file: PathBuf,
         _user_id: Option<String>,
     ) -> Option<Vec<PersistedAuthenticationActivity>> {
         Some(vec![])
     }
-    async fn persisted_cleanup_authentication_activity(
-        &self,
-        _database_file: PathBuf,
-    ) -> Option<u64> {
+    async fn persisted_cleanup_authentication_activity(&self) -> Option<u64> {
         Some(0)
     }
     async fn persisted_latest_authentication_activity_by_user_and_api_key(
         &self,
-        _database_file: PathBuf,
         _user_id: String,
         _api_key_id: String,
     ) -> Option<PersistedAuthenticationActivity> {
@@ -551,7 +468,6 @@ impl IdentityService for TestIdentityService {
     }
     async fn persisted_record_failed_authentication_activity(
         &self,
-        _database_file: PathBuf,
         _email: Option<String>,
         _input: AuthenticationActivityWriteInput,
         _error: String,
@@ -560,7 +476,6 @@ impl IdentityService for TestIdentityService {
     }
     async fn persisted_record_successful_authentication_activity(
         &self,
-        _database_file: PathBuf,
         _user: AuthUser,
         _input: AuthenticationActivityWriteInput,
     ) -> Option<()> {
@@ -568,7 +483,6 @@ impl IdentityService for TestIdentityService {
     }
     async fn ensure_oauth_user(
         &self,
-        _database_file: PathBuf,
         _email: String,
         _allow_create: bool,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
@@ -579,35 +493,30 @@ impl IdentityService for TestIdentityService {
     }
     async fn load_book_created_timestamp(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
     ) -> Result<Option<String>, sqlx::Error> {
         Ok(None)
     }
     async fn load_book_last_epub_position_locator(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
     ) -> Result<Option<Value>, sqlx::Error> {
         Ok(None)
     }
     async fn load_book_media_file(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
     ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
         Ok(None)
     }
     async fn load_kobo_metadata_record(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
     ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
         Ok(None)
     }
     async fn load_kobo_sync_page(
         &self,
-        _database_file: PathBuf,
         _user: AuthUser,
         _user_id: String,
         _current_api_key_id: Option<String>,
@@ -630,20 +539,19 @@ impl IdentityService for TestIdentityService {
     }
     async fn load_koreader_book_target(
         &self,
-        database_file: PathBuf,
-        book_hash: String,
+        _book_hash: String,
     ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
         test_state()
             .lock()
             .expect("runtime identity access test state lock should not be poisoned")
             .koreader_book_targets
-            .get(&(database_file, book_hash))
+            .values()
+            .next()
             .cloned()
             .unwrap_or(Ok(None))
     }
     async fn load_read_progress(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
         _user_id: String,
     ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
@@ -651,14 +559,12 @@ impl IdentityService for TestIdentityService {
     }
     async fn load_thumbnail_by_id(
         &self,
-        _database_file: PathBuf,
         _thumbnail_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
         Ok(None)
     }
     async fn persist_read_progress_with_locator(
         &self,
-        _database_file: PathBuf,
         _book_id: String,
         _user_id: String,
         _page: i64,
@@ -670,11 +576,7 @@ impl IdentityService for TestIdentityService {
     ) -> Result<(), String> {
         Ok(())
     }
-    async fn persisted_book_exists(
-        &self,
-        _database_file: PathBuf,
-        _book_id: String,
-    ) -> Result<bool, sqlx::Error> {
+    async fn persisted_book_exists(&self, _book_id: String) -> Result<bool, sqlx::Error> {
         Ok(false)
     }
     async fn proxy_kobo_store_library_sync(
@@ -689,30 +591,20 @@ impl IdentityService for TestIdentityService {
             should_continue: false,
         })
     }
-    async fn remove_sync_point(
-        &self,
-        _database_file: PathBuf,
-        _sync_point_id: String,
-    ) -> Result<(), sqlx::Error> {
+    async fn remove_sync_point(&self, _sync_point_id: String) -> Result<(), sqlx::Error> {
         Ok(())
     }
     async fn create_auth_user(
         &self,
-        _database_file: PathBuf,
         _input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
         Ok(None)
     }
-    async fn delete_auth_user(
-        &self,
-        _database_file: PathBuf,
-        _target_user_id: String,
-    ) -> Result<bool, sqlx::Error> {
+    async fn delete_auth_user(&self, _target_user_id: String) -> Result<bool, sqlx::Error> {
         Ok(false)
     }
     async fn update_auth_user(
         &self,
-        _database_file: PathBuf,
         _target_user_id: String,
         _patch: UpdateAuthUserInput,
     ) -> Result<UpdateAuthUserResult, sqlx::Error> {
@@ -721,7 +613,7 @@ impl IdentityService for TestIdentityService {
             expire_sessions: false,
         })
     }
-    async fn open_auth_pool(&self, _database_file: PathBuf) -> Result<SqlitePool, sqlx::Error> {
+    async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {
         Err(sqlx::Error::PoolClosed)
     }
 }

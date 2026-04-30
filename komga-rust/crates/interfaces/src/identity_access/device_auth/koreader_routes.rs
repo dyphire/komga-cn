@@ -88,10 +88,7 @@ async fn load_koreader_book_target(
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
     app.services
         .runtime_identity
-        .load_koreader_book_target(
-            app.operational.runtime.database_file.clone(),
-            book_hash.to_string(),
-        )
+        .load_koreader_book_target(book_hash.to_string())
         .await
 }
 
@@ -102,11 +99,7 @@ async fn load_read_progress(
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_read_progress(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-            user_id.to_string(),
-        )
+        .load_read_progress(book_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -119,7 +112,7 @@ pub async fn koreader_user_create(
     if let Err(status) = required_koreader_user(
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.database_file.as_path(),
+        app.auth_db.db.database_file(),
     )
     .await
     {
@@ -151,7 +144,7 @@ pub async fn koreader_user_auth(
     match required_koreader_user(
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.database_file.as_path(),
+        app.auth_db.db.database_file(),
     )
     .await
     {
@@ -279,10 +272,7 @@ async fn koreader_epub_progress_value(
     let (_extension_class, blob) = app
         .services
         .media_assets
-        .load_persisted_epub_extension_blob(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-        )
+        .load_persisted_epub_extension_blob(book_id.to_string())
         .await
         .ok()??;
     let positions = app.services.media_assets.decode_epub_positions(blob).ok()?;
@@ -391,10 +381,7 @@ pub async fn koreader_put_progress(
                 match app
                     .services
                     .media_assets
-                    .load_persisted_epub_extension_blob(
-                        app.operational.runtime.database_file.clone(),
-                        target.id.clone(),
-                    )
+                    .load_persisted_epub_extension_blob(target.id.clone())
                     .await
                 {
                     Ok(Some((_extension_class, blob))) => {
@@ -487,7 +474,6 @@ pub async fn koreader_put_progress(
         .services
         .media_assets
         .persist_book_progression(
-            app.operational.runtime.database_file.clone(),
             target.id.clone(),
             user_id_value.clone(),
             progression,

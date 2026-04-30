@@ -27,7 +27,7 @@ pub async fn book_analyze(
     let Some(book) = (match app
         .services
         .discovery_detail
-        .load_persisted_book_detail(app.auth_db.database_file.clone(), book_id.clone(), None)
+        .load_persisted_book_detail(book_id.clone(), None)
         .await
     {
         Ok(book) => book,
@@ -58,7 +58,7 @@ pub async fn book_metadata_refresh(
     let Some(book) = (match app
         .services
         .discovery_detail
-        .load_persisted_book_detail(app.auth_db.database_file.clone(), book_id.clone(), None)
+        .load_persisted_book_detail(book_id.clone(), None)
         .await
     {
         Ok(book) => book,
@@ -111,10 +111,7 @@ pub async fn book_metadata_update(
         }
     };
 
-    let service = app
-        .services
-        .media_assets
-        .book_metadata_service(app.auth_db.database_file.clone());
+    let service = app.services.media_assets.book_metadata_service();
 
     match service.update_book_metadata(&book_id, &patch).await {
         Ok(Some(series_id)) => {
@@ -122,7 +119,6 @@ pub async fn book_metadata_update(
                 .services
                 .media_assets
                 .refresh_book_search_documents_after_metadata_update(
-                    app.auth_db.database_file.clone(),
                     app.operational.runtime.lucene_data_directory.clone(),
                     book_id.clone(),
                 )
@@ -146,11 +142,7 @@ pub async fn book_metadata_update(
             if let Ok(Some(book)) = app
                 .services
                 .discovery_detail
-                .load_persisted_book_detail(
-                    app.auth_db.database_file.clone(),
-                    book_id.clone(),
-                    None,
-                )
+                .load_persisted_book_detail(book_id.clone(), None)
                 .await
             {
                 register_runtime_sse_event(
@@ -227,10 +219,7 @@ pub async fn book_metadata_batch_update(
         updates.push((book_id.clone(), patch));
     }
 
-    let service = app
-        .services
-        .media_assets
-        .book_metadata_service(app.auth_db.database_file.clone());
+    let service = app.services.media_assets.book_metadata_service();
     let updated_book_ids = updates
         .iter()
         .map(|(book_id, _)| book_id.clone())
@@ -261,11 +250,7 @@ pub async fn book_metadata_batch_update(
         if let Ok(Some(book)) = app
             .services
             .discovery_detail
-            .load_persisted_book_detail(
-                app.auth_db.database_file.clone(),
-                updated_book_id.clone(),
-                None,
-            )
+            .load_persisted_book_detail(updated_book_id.clone(), None)
             .await
         {
             register_runtime_sse_event(
@@ -554,10 +539,7 @@ pub async fn series_analyze(
     let book_ids = match app
         .services
         .media_assets
-        .load_series_book_ids(
-            app.auth_db.database_file.clone(),
-            resolved_series_id.clone(),
-        )
+        .load_series_book_ids(resolved_series_id.clone())
         .await
     {
         Ok(book_ids) => book_ids,
@@ -590,7 +572,7 @@ pub async fn series_metadata_refresh(
     let book_ids = match app
         .services
         .media_assets
-        .load_series_book_ids(app.auth_db.database_file.clone(), series_id.clone())
+        .load_series_book_ids(series_id.clone())
         .await
     {
         Ok(book_ids) => book_ids,

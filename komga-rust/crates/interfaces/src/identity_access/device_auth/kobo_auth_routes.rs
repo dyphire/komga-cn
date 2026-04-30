@@ -14,7 +14,7 @@ pub async fn kobo_ping(
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
-        app.auth_db.database_file.as_path(),
+        app.auth_db.db.database_file(),
     )
     .await
     {

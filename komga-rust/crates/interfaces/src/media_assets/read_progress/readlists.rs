@@ -10,16 +10,13 @@ async fn load_tachiyomi_readlist_book_ids(
     let readlist_books = app
         .services
         .opds_persisted
-        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .load_readlist_books(readlist_id.to_string())
         .await?;
     if readlist_books.is_empty() {
         let readlist_exists = app
             .services
             .media_assets
-            .load_persisted_readlist_name(
-                app.auth_db.database_file.clone(),
-                readlist_id.to_string(),
-            )
+            .load_persisted_readlist_name(readlist_id.to_string())
             .await?
             .is_some();
         return Ok(
@@ -44,14 +41,11 @@ pub async fn readlist_tachiyomi_read_progress_get(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    let Some(user) =
-        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
+    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -68,11 +62,7 @@ pub async fn readlist_tachiyomi_read_progress_get(
     let counters = match app
         .services
         .media_assets
-        .readlist_tachiyomi_counters(
-            app.auth_db.database_file.clone(),
-            ordered_book_ids,
-            user_id(&user).to_string(),
-        )
+        .readlist_tachiyomi_counters(ordered_book_ids, user_id(&user).to_string())
         .await
     {
         Ok(counters) => counters,
@@ -102,14 +92,11 @@ pub async fn readlist_tachiyomi_read_progress_put(
     Path(readlist_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
-    let Some(user) =
-        resolved_request_auth_user(&headers, app.auth_db.database_file.as_path()).await
+    let Some(user) = resolved_request_auth_user(&headers, app.auth_db.db.database_file()).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -156,7 +143,6 @@ pub async fn readlist_tachiyomi_read_progress_put(
         .services
         .media_assets
         .persist_readlist_tachiyomi_progress(
-            app.auth_db.database_file.clone(),
             visible_book_ids,
             user_id(&user).to_string(),
             last_book_read as usize,

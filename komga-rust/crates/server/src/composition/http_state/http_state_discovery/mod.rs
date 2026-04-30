@@ -1,5 +1,6 @@
 use super::*;
 
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::SearchEntityType;
 use komga_infrastructure::search::runtime_tasks::{
     sync_entity_delete_from_index, sync_entity_upsert_from_database,
@@ -11,15 +12,18 @@ mod detail_access;
 mod index_dirs;
 mod persisted_access;
 
-pub(super) fn compose_discovery_detail_service() -> Box<dyn DiscoveryDetailService> {
-    detail_access::compose_discovery_detail_service()
+pub(super) fn compose_discovery_detail_service(
+    db: DatabaseHandle,
+    index_dir: PathBuf,
+) -> Box<dyn DiscoveryDetailService> {
+    detail_access::compose_discovery_detail_service(db, index_dir)
 }
 
 pub(super) fn compose_persisted_discovery_service(
-    database_file: &std::path::Path,
-    lucene_data_directory: &std::path::Path,
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
 ) -> Box<dyn PersistedDiscoveryService> {
-    persisted_access::compose_persisted_discovery_service(database_file, lucene_data_directory)
+    persisted_access::compose_persisted_discovery_service(db, lucene_data_directory)
 }
 
 pub(super) fn resolve_discovery_index_dir(

@@ -53,13 +53,7 @@ pub(crate) async fn get_page_hashes(
     let page_data = match app
         .services
         .operational_settings
-        .load_page_hashes_page(
-            app.operational.runtime.database_file.clone(),
-            page,
-            size,
-            actions,
-            sorts,
-        )
+        .load_page_hashes_page(page, size, actions, sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -143,12 +137,7 @@ pub(crate) async fn get_page_hashes_unknown(
     let page_data = match app
         .services
         .operational_settings
-        .load_page_hashes_unknown_page(
-            app.operational.runtime.database_file.clone(),
-            page,
-            size,
-            sorts,
-        )
+        .load_page_hashes_unknown_page(page, size, sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -181,13 +170,7 @@ pub(crate) async fn get_page_hash_matches(
     let page_data = match app
         .services
         .operational_settings
-        .load_page_hash_matches_page(
-            app.operational.runtime.database_file.clone(),
-            page_hash.clone(),
-            page,
-            size,
-            sorts,
-        )
+        .load_page_hash_matches_page(page_hash.clone(), page, size, sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -209,7 +192,7 @@ pub(crate) async fn get_page_hash_thumbnail(
     let thumbnail = match app
         .services
         .operational_settings
-        .load_page_hash_thumbnail(app.operational.runtime.database_file.clone(), page_hash)
+        .load_page_hash_thumbnail(page_hash)
         .await
     {
         Ok(Some(thumbnail)) => thumbnail,
@@ -242,11 +225,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     let thumbnail = match app
         .services
         .operational_settings
-        .load_unknown_page_hash_thumbnail(
-            app.operational.runtime.database_file.clone(),
-            page_hash,
-            resize_to,
-        )
+        .load_unknown_page_hash_thumbnail(page_hash, resize_to)
         .await
     {
         Ok(Some(thumbnail)) => thumbnail,
@@ -298,12 +277,7 @@ pub(crate) async fn put_page_hash(
     match app
         .services
         .operational_settings
-        .upsert_page_hash(
-            app.operational.runtime.database_file.clone(),
-            hash.to_string(),
-            size,
-            action.to_string(),
-        )
+        .upsert_page_hash(hash.to_string(), size, action.to_string())
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
@@ -323,10 +297,7 @@ pub(crate) async fn post_page_hash_delete_all(
     let delete_targets = match app
         .services
         .operational_settings
-        .load_page_hash_delete_targets(
-            app.operational.runtime.database_file.clone(),
-            page_hash.clone(),
-        )
+        .load_page_hash_delete_targets(page_hash.clone())
         .await
     {
         Ok(targets) => targets,

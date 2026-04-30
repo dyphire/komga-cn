@@ -23,13 +23,13 @@ use crate::identity_access::auth::{
     user_shared_library_ids,
 };
 use crate::request_urls::app_absolute_url;
+use crate::state::{HttpAppState, PersistedMediaFileRecord};
+use komga_application::task_processing::TaskQueueRecord;
 #[cfg(test)]
-use crate::state::test_support::media_assets::{
+use komga_infrastructure::filesystem::media_access::page_content::{
     load_archive_page_rows, load_generated_pdf_page_rows, read_pdf_page_as_single_page_pdf,
     resolve_book_page_bytes,
 };
-use crate::state::{HttpAppState, PersistedMediaFileRecord};
-use komga_application::task_processing::TaskQueueRecord;
 
 use super::helpers::{
     invalid_progression_payload, invalid_read_progress_payload, mark_runtime_owned,
@@ -83,7 +83,7 @@ async fn load_persisted_book_media_from_services(
 ) -> Result<Option<PersistedBookMedia>, String> {
     app.services
         .media_assets
-        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_media(book_id.to_string())
         .await
 }
 
@@ -93,7 +93,7 @@ async fn load_persisted_book_pages_from_services(
 ) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_book_pages(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_pages(book_id.to_string())
         .await
 }
 
@@ -103,7 +103,7 @@ async fn load_persisted_book_media_files_from_services(
 ) -> Result<Vec<String>, String> {
     app.services
         .media_assets
-        .load_persisted_book_media_files(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_media_files(book_id.to_string())
         .await
 }
 
@@ -113,7 +113,7 @@ async fn load_persisted_media_file_records_from_services(
 ) -> Result<Vec<PersistedMediaFileRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_media_file_records(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_media_file_records(book_id.to_string())
         .await
 }
 
@@ -123,7 +123,7 @@ async fn load_persisted_manifest_book_from_services(
 ) -> Result<Option<(String, String, String)>, String> {
     app.services
         .media_assets
-        .load_persisted_manifest_book(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_manifest_book(book_id.to_string())
         .await
 }
 
@@ -134,11 +134,7 @@ async fn load_book_progression_from_services(
 ) -> Result<Option<Value>, String> {
     app.services
         .media_assets
-        .load_book_progression(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            user_id.to_string(),
-        )
+        .load_book_progression(book_id.to_string(), user_id.to_string())
         .await
 }
 
@@ -148,7 +144,7 @@ async fn load_book_restrictions_from_services(
 ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
     app.services
         .media_assets
-        .load_book_restrictions(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_book_restrictions(book_id.to_string())
         .await
 }
 
@@ -158,7 +154,7 @@ async fn load_book_page_count_from_services(
 ) -> Result<Option<u64>, String> {
     app.services
         .media_assets
-        .load_book_page_count(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_book_page_count(book_id.to_string())
         .await
 }
 
@@ -168,7 +164,7 @@ async fn persisted_readlist_exists_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .persisted_readlist_exists(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .persisted_readlist_exists(readlist_id.to_string())
         .await
 }
 
@@ -179,11 +175,7 @@ async fn load_persisted_book_page_row_from_services(
 ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_book_page_row(
-            app.auth_db.database_file.clone(),
-            book_id.to_string(),
-            page_number,
-        )
+        .load_persisted_book_page_row(book_id.to_string(), page_number)
         .await
 }
 
@@ -193,10 +185,7 @@ async fn load_persisted_readlist_thumbnails_from_services(
 ) -> Result<Vec<komga_application::media_assets::ReadlistThumbnailRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_readlist_thumbnails(
-            app.auth_db.database_file.clone(),
-            readlist_id.to_string(),
-        )
+        .load_persisted_readlist_thumbnails(readlist_id.to_string())
         .await
 }
 
@@ -212,7 +201,6 @@ async fn insert_readlist_thumbnail_from_services(
     app.services
         .media_assets
         .insert_readlist_thumbnail(
-            app.auth_db.database_file.clone(),
             readlist_id.to_string(),
             thumbnail.to_vec(),
             media_type.to_string(),
@@ -230,11 +218,7 @@ async fn select_readlist_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .select_readlist_thumbnail(
-            app.auth_db.database_file.clone(),
-            readlist_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .select_readlist_thumbnail(readlist_id.to_string(), thumbnail_id.to_string())
         .await
 }
 
@@ -245,11 +229,7 @@ async fn delete_readlist_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .delete_readlist_thumbnail(
-            app.auth_db.database_file.clone(),
-            readlist_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .delete_readlist_thumbnail(readlist_id.to_string(), thumbnail_id.to_string())
         .await
 }
 
@@ -259,7 +239,7 @@ async fn book_media_is_ready_status_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .book_media_is_ready_status(app.auth_db.database_file.clone(), book_id.to_string())
+        .book_media_is_ready_status(book_id.to_string())
         .await
 }
 
@@ -269,7 +249,7 @@ async fn load_series_book_ids_from_media_services(
 ) -> Result<Vec<String>, String> {
     app.services
         .media_assets
-        .load_series_book_ids(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_book_ids(series_id.to_string())
         .await
 }
 
@@ -279,7 +259,7 @@ async fn load_selected_book_thumbnail_from_services(
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
     app.services
         .media_assets
-        .load_selected_book_thumbnail(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_selected_book_thumbnail(book_id.to_string())
         .await
 }
 
@@ -289,7 +269,7 @@ async fn persisted_book_exists_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .persisted_book_exists(app.auth_db.database_file.clone(), book_id.to_string())
+        .persisted_book_exists(book_id.to_string())
         .await
 }
 
@@ -299,7 +279,7 @@ async fn persisted_series_exists_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .persisted_series_exists(app.auth_db.database_file.clone(), series_id.to_string())
+        .persisted_series_exists(series_id.to_string())
         .await
 }
 
@@ -309,7 +289,7 @@ async fn persisted_collection_exists_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .persisted_collection_exists(app.auth_db.database_file.clone(), collection_id.to_string())
+        .persisted_collection_exists(collection_id.to_string())
         .await
 }
 
@@ -319,7 +299,7 @@ async fn load_book_thumbnail_by_id_from_services(
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
     app.services
         .media_assets
-        .load_book_thumbnail_by_id(app.auth_db.database_file.clone(), thumbnail_id.to_string())
+        .load_book_thumbnail_by_id(thumbnail_id.to_string())
         .await
 }
 
@@ -329,7 +309,7 @@ async fn load_persisted_book_thumbnails_from_services(
 ) -> Result<Vec<komga_application::media_assets::EntityThumbnailRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_book_thumbnails(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_thumbnails(book_id.to_string())
         .await
 }
 
@@ -345,7 +325,6 @@ async fn insert_book_thumbnail_from_services(
     app.services
         .media_assets
         .insert_book_thumbnail(
-            app.auth_db.database_file.clone(),
             book_id.to_string(),
             thumbnail.to_vec(),
             media_type.to_string(),
@@ -362,7 +341,7 @@ async fn select_book_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .select_book_thumbnail(app.auth_db.database_file.clone(), thumbnail_id.to_string())
+        .select_book_thumbnail(thumbnail_id.to_string())
         .await
 }
 
@@ -372,7 +351,7 @@ async fn delete_book_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .delete_book_thumbnail(app.auth_db.database_file.clone(), thumbnail_id.to_string())
+        .delete_book_thumbnail(thumbnail_id.to_string())
         .await
 }
 
@@ -413,7 +392,7 @@ async fn load_persisted_readlist_name_from_services(
 ) -> Result<Option<String>, String> {
     app.services
         .media_assets
-        .load_persisted_readlist_name(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .load_persisted_readlist_name(readlist_id.to_string())
         .await
 }
 
@@ -423,7 +402,7 @@ async fn load_series_archive_entries_from_services(
 ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
     app.services
         .media_assets
-        .load_series_archive_entries(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_archive_entries(series_id.to_string())
         .await
 }
 
@@ -433,10 +412,7 @@ async fn load_persisted_collection_thumbnails_from_services(
 ) -> Result<Vec<komga_application::media_assets::CollectionThumbnailRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_collection_thumbnails(
-            app.auth_db.database_file.clone(),
-            collection_id.to_string(),
-        )
+        .load_persisted_collection_thumbnails(collection_id.to_string())
         .await
 }
 
@@ -452,7 +428,6 @@ async fn insert_collection_thumbnail_from_services(
     app.services
         .media_assets
         .insert_collection_thumbnail(
-            app.auth_db.database_file.clone(),
             collection_id.to_string(),
             thumbnail.to_vec(),
             media_type.to_string(),
@@ -469,7 +444,7 @@ async fn select_collection_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .select_collection_thumbnail(app.auth_db.database_file.clone(), thumbnail_id.to_string())
+        .select_collection_thumbnail(thumbnail_id.to_string())
         .await
 }
 
@@ -480,11 +455,7 @@ async fn delete_collection_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .delete_collection_thumbnail(
-            app.auth_db.database_file.clone(),
-            collection_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .delete_collection_thumbnail(collection_id.to_string(), thumbnail_id.to_string())
         .await
 }
 
@@ -494,7 +465,7 @@ async fn load_persisted_series_thumbnails_from_services(
 ) -> Result<Vec<komga_application::media_assets::SeriesThumbnailRecord>, String> {
     app.services
         .media_assets
-        .load_persisted_series_thumbnails(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_persisted_series_thumbnails(series_id.to_string())
         .await
 }
 
@@ -504,7 +475,7 @@ async fn load_series_thumbnail_by_id_from_services(
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
     app.services
         .media_assets
-        .load_series_thumbnail_by_id(app.auth_db.database_file.clone(), thumbnail_id.to_string())
+        .load_series_thumbnail_by_id(thumbnail_id.to_string())
         .await
 }
 
@@ -514,7 +485,7 @@ async fn load_persisted_series_oneshot_from_services(
 ) -> Result<Option<bool>, String> {
     app.services
         .media_assets
-        .load_persisted_series_oneshot(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_persisted_series_oneshot(series_id.to_string())
         .await
 }
 
@@ -530,7 +501,6 @@ async fn insert_series_thumbnail_from_services(
     app.services
         .media_assets
         .insert_series_thumbnail(
-            app.auth_db.database_file.clone(),
             series_id.to_string(),
             thumbnail.to_vec(),
             media_type.to_string(),
@@ -548,11 +518,7 @@ async fn select_series_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .select_series_thumbnail(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .select_series_thumbnail(series_id.to_string(), thumbnail_id.to_string())
         .await
 }
 
@@ -563,11 +529,7 @@ async fn delete_series_thumbnail_from_services(
 ) -> Result<bool, String> {
     app.services
         .media_assets
-        .delete_series_thumbnail(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            thumbnail_id.to_string(),
-        )
+        .delete_series_thumbnail(series_id.to_string(), thumbnail_id.to_string())
         .await
 }
 
@@ -658,7 +620,7 @@ async fn load_selected_series_thumbnail_from_services(
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
     app.services
         .media_assets
-        .load_selected_series_thumbnail(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_selected_series_thumbnail(series_id.to_string())
         .await
 }
 
@@ -668,7 +630,7 @@ async fn load_series_book_number_sorts_from_services(
 ) -> Result<Vec<(String, f64)>, String> {
     app.services
         .media_assets
-        .load_series_book_number_sorts(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_book_number_sorts(series_id.to_string())
         .await
 }
 

@@ -27,10 +27,7 @@ async fn load_thumbnail_by_id(
 ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_thumbnail_by_id(
-            app.operational.runtime.database_file.clone(),
-            thumbnail_id.to_string(),
-        )
+        .load_thumbnail_by_id(thumbnail_id.to_string())
         .await
 }
 
@@ -40,10 +37,7 @@ async fn load_kobo_metadata_record(
 ) -> Result<Option<crate::state::KoboMetadataRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_kobo_metadata_record(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-        )
+        .load_kobo_metadata_record(book_id.to_string())
         .await
 }
 
@@ -54,21 +48,14 @@ async fn load_read_progress(
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_read_progress(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-            user_id.to_string(),
-        )
+        .load_read_progress(book_id.to_string(), user_id.to_string())
         .await
 }
 
 async fn persisted_book_exists(app: &HttpAppState, book_id: &str) -> Result<bool, sqlx::Error> {
     app.services
         .runtime_identity
-        .persisted_book_exists(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-        )
+        .persisted_book_exists(book_id.to_string())
         .await
 }
 
@@ -78,10 +65,7 @@ async fn load_book_created_timestamp(
 ) -> Result<Option<String>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_book_created_timestamp(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-        )
+        .load_book_created_timestamp(book_id.to_string())
         .await
 }
 
@@ -91,10 +75,7 @@ async fn load_book_last_epub_position_locator(
 ) -> Result<Option<Value>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_book_last_epub_position_locator(
-            app.operational.runtime.database_file.clone(),
-            book_id.to_string(),
-        )
+        .load_book_last_epub_position_locator(book_id.to_string())
         .await
 }
 
@@ -110,7 +91,6 @@ async fn load_kobo_sync_page(
     app.services
         .runtime_identity
         .load_kobo_sync_page(
-            app.operational.runtime.database_file.clone(),
             current_user.clone(),
             user_id.to_string(),
             current_api_key_id.map(str::to_string),
@@ -148,10 +128,7 @@ async fn proxy_kobo_store_library_sync(
 async fn remove_sync_point(app: &HttpAppState, sync_point_id: &str) -> Result<(), sqlx::Error> {
     app.services
         .runtime_identity
-        .remove_sync_point(
-            app.operational.runtime.database_file.clone(),
-            sync_point_id.to_string(),
-        )
+        .remove_sync_point(sync_point_id.to_string())
         .await
 }
 
@@ -869,7 +846,6 @@ pub async fn kobo_library_book_state_update(
         .services
         .media_assets
         .persist_book_progression(
-            app.operational.runtime.database_file.clone(),
             book_id.clone(),
             user_id_value.clone(),
             locator_progression,
@@ -942,10 +918,7 @@ pub async fn kobo_book_file_epub(
     let media = match app
         .services
         .media_assets
-        .load_persisted_book_media(
-            app.operational.runtime.database_file.clone(),
-            book_id.clone(),
-        )
+        .load_persisted_book_media(book_id.clone())
         .await
     {
         Ok(Some(media)) => media,

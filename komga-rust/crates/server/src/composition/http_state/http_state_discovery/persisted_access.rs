@@ -2,8 +2,8 @@ use super::index_dirs::{register_discovery_index_dir, resolve_discovery_index_di
 use super::*;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
 
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::SearchQueryLifecycle;
 use komga_interfaces::state::PersistedDiscoveryService;
 
@@ -166,19 +166,19 @@ fn persisted_series_summary(
 
 #[derive(Clone)]
 pub(super) struct RuntimePersistedDiscoveryService {
-    lucene_data_directory: PathBuf,
+    db: DatabaseHandle,
+    index_dir: PathBuf,
 }
 
 #[async_trait::async_trait]
 impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
     async fn load_persisted_author_names(
         &self,
-        database_file: PathBuf,
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_authors::load_persisted_author_names(
-            database_file.as_path(),
+            self.db.database_file(),
             &search,
             authorized_library_ids.as_deref(),
         )
@@ -187,11 +187,10 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_author_roles(
         &self,
-        database_file: PathBuf,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_authors::load_persisted_author_roles(
-            database_file.as_path(),
+            self.db.database_file(),
             authorized_library_ids.as_deref(),
         )
         .await
@@ -199,7 +198,6 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_authors_by_scope(
         &self,
-        database_file: PathBuf,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String> {
@@ -219,7 +217,7 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
             }
         };
         let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
-            database_file.as_path(),
+            self.db.database_file(),
             &mapped_scope,
             authorized_library_ids.as_deref(),
         )
@@ -235,10 +233,9 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_book_poster_summaries(
         &self,
-        database_file: PathBuf,
     ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
         let rows =
-            infrastructure_discovery_books::load_book_poster_summaries(database_file.as_path())
+            infrastructure_discovery_books::load_book_poster_summaries(self.db.database_file())
                 .await?;
         Ok(rows
             .into_iter()
@@ -259,11 +256,10 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_book_summaries(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
     ) -> Result<Vec<PersistedBookSummary>, String> {
         infrastructure_discovery_books::load_persisted_book_summaries(
-            database_file.as_path(),
+            self.db.database_file(),
             user_id.as_deref(),
         )
         .await
@@ -272,12 +268,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_book_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedBookSummary>, String> {
         infrastructure_discovery_books::load_persisted_book_summaries_by_ids(
-            database_file.as_path(),
+            self.db.database_file(),
             user_id.as_deref(),
             ids.as_slice(),
         )
@@ -285,18 +280,17 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
         .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
     }
 
-    async fn load_persisted_book_count(&self, database_file: PathBuf) -> Result<usize, String> {
-        infrastructure_discovery_books::load_persisted_book_count(database_file.as_path()).await
+    async fn load_persisted_book_count(&self) -> Result<usize, String> {
+        infrastructure_discovery_books::load_persisted_book_count(self.db.database_file()).await
     }
 
     async fn load_persisted_genres(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_genres(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -305,12 +299,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_tags(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -319,12 +312,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_languages(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_languages(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -333,12 +325,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_publishers(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_publishers(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -347,12 +338,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_age_ratings(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_age_ratings(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -361,12 +351,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_sharing_labels(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_sharing_labels(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -375,12 +364,11 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_series_release_dates(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_series_release_dates(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
@@ -389,45 +377,39 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_series_tags(
         &self,
-        database_file: PathBuf,
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
         infrastructure_discovery_facets::load_persisted_series_tags(
-            database_file.as_path(),
+            self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
         )
         .await
     }
 
-    async fn load_persisted_library_ids(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<String>, String> {
+    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         infrastructure_discovery_library_mappings::load_persisted_library_ids(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
     async fn load_collection_memberships(
         &self,
-        database_file: PathBuf,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         infrastructure_discovery_library_mappings::load_collection_memberships(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
     async fn load_collection_ordering(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<HashMap<String, i64>, String> {
         infrastructure_discovery_library_mappings::load_collection_ordering(
-            database_file.as_path(),
+            self.db.database_file(),
             &collection_id,
         )
         .await
@@ -435,21 +417,19 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_readlist_memberships(
         &self,
-        database_file: PathBuf,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         infrastructure_discovery_library_mappings::load_readlist_memberships(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
     async fn load_persisted_ondeck_books(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
         infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -458,10 +438,9 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_duplicate_books(
         &self,
-        database_file: PathBuf,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
         infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
         .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
@@ -469,7 +448,6 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_persisted_book_tags(
         &self,
-        database_file: PathBuf,
         scope: Option<PersistedBookTagsScope>,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
@@ -486,20 +464,16 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
             }
         });
         infrastructure_discovery_runtime_queries::load_persisted_book_tags(
-            database_file.as_path(),
+            self.db.database_file(),
             scope.as_ref(),
             authorized_library_ids.as_deref(),
         )
         .await
     }
 
-    async fn persisted_utc_date_minus_days(
-        &self,
-        database_file: PathBuf,
-        days: i64,
-    ) -> Result<Option<String>, String> {
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
         infrastructure_discovery_runtime_queries::persisted_utc_date_minus_days(
-            database_file.as_path(),
+            self.db.database_file(),
             days,
         )
         .await
@@ -507,11 +481,10 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_series_read_progress_counts(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
         infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -519,68 +492,52 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn load_series_read_dates(
         &self,
-        database_file: PathBuf,
         user_id: String,
     ) -> Result<HashMap<String, String>, String> {
         infrastructure_discovery_runtime_queries::load_series_read_dates(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
     }
 
-    async fn load_series_total_book_counts(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
         infrastructure_discovery_runtime_queries::load_series_total_book_counts(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
-    async fn load_persisted_series_summaries(
-        &self,
-        database_file: PathBuf,
-    ) -> Result<Vec<PersistedSeriesSummary>, String> {
-        infrastructure_discovery_series::load_persisted_series_summaries(database_file.as_path())
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
+        infrastructure_discovery_series::load_persisted_series_summaries(self.db.database_file())
             .await
             .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
     }
 
     async fn load_persisted_series_summaries_by_ids(
         &self,
-        database_file: PathBuf,
         ids: Vec<String>,
     ) -> Result<Vec<PersistedSeriesSummary>, String> {
         infrastructure_discovery_series::load_persisted_series_summaries_by_ids(
-            database_file.as_path(),
+            self.db.database_file(),
             ids.as_slice(),
         )
         .await
         .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
     }
 
-    async fn load_persisted_series_count(&self, database_file: PathBuf) -> Result<usize, String> {
-        infrastructure_discovery_series::load_persisted_series_count(database_file.as_path()).await
+    async fn load_persisted_series_count(&self) -> Result<usize, String> {
+        infrastructure_discovery_series::load_persisted_series_count(self.db.database_file()).await
     }
 
-    async fn persisted_series_exist(&self, database_file: PathBuf) -> Result<bool, String> {
-        infrastructure_discovery_series::persisted_series_exist(database_file.as_path()).await
+    async fn persisted_series_exist(&self) -> Result<bool, String> {
+        infrastructure_discovery_series::persisted_series_exist(self.db.database_file()).await
     }
 
-    async fn search_book_ids(
-        &self,
-        database_file: PathBuf,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
+    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String> {
         Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(
-                database_file.as_path(),
-                self.lucene_data_directory.as_path(),
-            )
-            .as_path(),
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
             &query,
             SearchEntityType::Book,
             limit,
@@ -589,16 +546,12 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn search_collection_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<String>, String> {
         Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(
-                database_file.as_path(),
-                self.lucene_data_directory.as_path(),
-            )
-            .as_path(),
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
             &query,
             SearchEntityType::Collection,
             limit,
@@ -607,16 +560,12 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn search_readlist_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String> {
         Ok(search_scored_ids_or_empty(
-            resolve_discovery_index_dir(
-                database_file.as_path(),
-                self.lucene_data_directory.as_path(),
-            )
-            .as_path(),
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
             &query,
             SearchEntityType::ReadList,
             limit,
@@ -625,16 +574,12 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 
     async fn search_series_scored_ids(
         &self,
-        database_file: PathBuf,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String> {
         Ok(search_scored_ids_or_empty(
-            resolve_discovery_index_dir(
-                database_file.as_path(),
-                self.lucene_data_directory.as_path(),
-            )
-            .as_path(),
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
             &query,
             SearchEntityType::Series,
             limit,
@@ -643,11 +588,12 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
 }
 
 pub(super) fn compose_persisted_discovery_service(
-    database_file: &std::path::Path,
-    lucene_data_directory: &std::path::Path,
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
 ) -> Box<dyn PersistedDiscoveryService> {
-    register_discovery_index_dir(database_file, lucene_data_directory);
+    register_discovery_index_dir(db.database_file(), lucene_data_directory.as_path());
     Box::new(RuntimePersistedDiscoveryService {
-        lucene_data_directory: lucene_data_directory.to_path_buf(),
+        db,
+        index_dir: lucene_data_directory,
     })
 }

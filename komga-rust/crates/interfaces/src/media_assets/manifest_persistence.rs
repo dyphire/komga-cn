@@ -480,7 +480,7 @@ pub(crate) async fn build_persisted_book_manifest(
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
-    let database_file = app.auth_db.database_file.as_path();
+    let database_file = app.auth_db.db.database_file();
     let Some(user) = resolved_request_auth_user(headers, database_file).await else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
@@ -530,10 +530,7 @@ pub(crate) async fn build_persisted_book_manifest(
         let extension_blob = app
             .services
             .media_assets
-            .load_persisted_epub_extension_blob(
-                app.auth_db.database_file.clone(),
-                book_id.to_string(),
-            )
+            .load_persisted_epub_extension_blob(book_id.to_string())
             .await?;
         let payload = persisted_epub_manifest_payload(
             headers,

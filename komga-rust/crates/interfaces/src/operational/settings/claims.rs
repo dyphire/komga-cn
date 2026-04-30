@@ -15,7 +15,7 @@ pub(crate) async fn get_claim_status(State(app): State<Arc<HttpAppState>>) -> Re
     let is_claimed = app
         .services
         .operational_settings
-        .load_claim_status(app.operational.runtime.database_file.clone())
+        .load_claim_status()
         .await
         .unwrap_or(false);
 
@@ -35,7 +35,7 @@ pub(crate) async fn post_claim(
     if app
         .services
         .operational_settings
-        .load_claim_status(app.operational.runtime.database_file.clone())
+        .load_claim_status()
         .await
         .unwrap_or(false)
     {
@@ -51,12 +51,7 @@ pub(crate) async fn post_claim(
     let created_user = match app
         .services
         .operational_settings
-        .claim_initial_admin_user(
-            app.operational.runtime.database_file.clone(),
-            created_user_id,
-            email,
-            hashed_password,
-        )
+        .claim_initial_admin_user(created_user_id, email, hashed_password)
         .await
     {
         Ok(ClaimInitialAdminUserResult::Created(created_user)) => *created_user,

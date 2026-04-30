@@ -12,7 +12,6 @@ use crate::discovery::filters::{
 
 pub async fn runtime_owned_persisted_series_page(
     backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
     context: &DiscoveryQueryContext,
     filters: &RuntimeSeriesFilters,
     sorts: &[String],
@@ -21,12 +20,8 @@ pub async fn runtime_owned_persisted_series_page(
     size: usize,
     unpaged: bool,
 ) -> Option<Result<PageEnvelope<PersistedSeriesSummary>, String>> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let sort_modes = parse_persisted_series_sort_modes(sorts, full_text_search.as_deref());
-    let has_persisted_rows = match persisted_series_exist(backend, database_file).await {
+    let has_persisted_rows = match persisted_series_exist(backend).await {
         Ok(has_rows) => has_rows,
         Err(error) => return Some(Err(error)),
     };
@@ -37,7 +32,6 @@ pub async fn runtime_owned_persisted_series_page(
     Some(
         load_persisted_series_page(
             backend,
-            database_file,
             context,
             PersistedSeriesBrowseQuery::from_runtime_filters(
                 filters,
@@ -100,13 +94,8 @@ pub fn parse_persisted_series_sort_modes(
     modes
 }
 
-async fn persisted_series_exist(
-    backend: &dyn PersistedDiscoveryService,
-    database_file: &FsPath,
-) -> Result<bool, String> {
-    backend
-        .persisted_series_exist(database_file.to_path_buf())
-        .await
+async fn persisted_series_exist(backend: &dyn PersistedDiscoveryService) -> Result<bool, String> {
+    backend.persisted_series_exist().await
 }
 
 pub async fn runtime_owned_series_list_response(
@@ -116,7 +105,6 @@ pub async fn runtime_owned_series_list_response(
     payload: Option<&Value>,
     full_text_search: Option<String>,
     auth_state: &DiscoveryAuthState,
-    database_file: &FsPath,
     strict_runtime_shape: bool,
 ) -> Option<Response> {
     let query = uri.query().unwrap_or_default();
@@ -146,7 +134,6 @@ pub async fn runtime_owned_series_list_response(
     if !strict_runtime_shape {
         filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
             backend,
-            database_file,
             filters.criteria.library_ids.as_ref(),
         )
         .await;
@@ -156,13 +143,7 @@ pub async fn runtime_owned_series_list_response(
         strict_runtime_shape,
         filters.criteria.library_ids.clone(),
     );
-    let context = match auth_state
-        .resolve_query_context_with_persistence(
-            headers,
-            requested_library_ids.as_deref(),
-            database_file,
-        )
-        .await
+    let context = match auth_state.resolve_query_context(headers, requested_library_ids.as_deref())
     {
         Some(context) => context,
         None => return Some(StatusCode::UNAUTHORIZED.into_response()),
@@ -170,7 +151,6 @@ pub async fn runtime_owned_series_list_response(
 
     if let Some(persisted_page) = runtime_owned_persisted_series_page(
         backend,
-        database_file,
         &context,
         &filters,
         &sorts,

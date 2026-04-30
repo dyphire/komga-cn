@@ -14,7 +14,7 @@ async fn load_collection_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_collection(app.auth_db.database_file.clone(), collection_id.to_string())
+        .load_collection(collection_id.to_string())
         .await?
         .map(|row| PersistedCollection {
             id: row.id,
@@ -32,11 +32,7 @@ async fn load_collection_series_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_collection_series(
-            app.auth_db.database_file.clone(),
-            collection_id.to_string(),
-            ordered,
-        )
+        .load_collection_series(collection_id.to_string(), ordered)
         .await?
         .into_iter()
         .map(|row| PersistedSeries {
@@ -58,7 +54,7 @@ async fn load_series_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_series(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series(series_id.to_string())
         .await?
         .map(|row| PersistedSeries {
             id: row.id,
@@ -81,13 +77,7 @@ async fn load_series_books_paged_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_series_books_paged(
-            app.auth_db.database_file.clone(),
-            series_id.to_string(),
-            user_id.to_string(),
-            offset,
-            limit,
-        )
+        .load_series_books_paged(series_id.to_string(), user_id.to_string(), offset, limit)
         .await?
         .into_iter()
         .map(|row| PersistedSeriesBook {
@@ -130,7 +120,7 @@ async fn load_series_tags_from_services(
 ) -> Result<Vec<String>, String> {
     app.services
         .opds_persisted
-        .load_series_tags(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_tags(series_id.to_string())
         .await
 }
 
@@ -141,7 +131,7 @@ async fn load_readlist_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_readlist(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .load_readlist(readlist_id.to_string())
         .await?
         .map(|row| PersistedReadlist {
             id: row.id,
@@ -158,7 +148,7 @@ async fn load_readlist_books_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_readlist_books(app.auth_db.database_file.clone(), readlist_id.to_string())
+        .load_readlist_books(readlist_id.to_string())
         .await?
         .into_iter()
         .map(|row| PersistedReadlistBook {
@@ -201,7 +191,7 @@ async fn load_collection_books_from_services(
     Ok(app
         .services
         .opds_persisted
-        .load_collection_books(app.auth_db.database_file.clone(), collection_id.to_string())
+        .load_collection_books(collection_id.to_string())
         .await?
         .into_iter()
         .map(|row| PersistedBookFeedItem {
@@ -241,7 +231,7 @@ async fn load_unified_search_results_from_services(
     let (series_rows, book_rows, collection_rows, readlist_rows) = app
         .services
         .opds_persisted
-        .load_unified_search_results(app.auth_db.database_file.clone(), query.to_string())
+        .load_unified_search_results(query.to_string())
         .await?;
 
     Ok((

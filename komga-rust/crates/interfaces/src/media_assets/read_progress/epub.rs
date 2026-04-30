@@ -215,7 +215,7 @@ pub(crate) async fn normalize_book_epub_locator(
     let extension = match app
         .services
         .media_assets
-        .load_persisted_epub_extension_blob(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_epub_extension_blob(book_id.to_string())
         .await
     {
         Ok(extension) => extension,
@@ -284,7 +284,7 @@ pub(super) async fn load_epub_locator_for_page(
     match app
         .services
         .media_assets
-        .load_persisted_epub_extension_blob(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_epub_extension_blob(book_id.to_string())
         .await
     {
         Ok(Some((_class, blob))) => Ok(app

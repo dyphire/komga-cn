@@ -13,7 +13,7 @@ pub struct PersistedCollectionWriteInput {
 pub async fn persisted_collections_exist(app: &HttpAppState) -> Result<bool, String> {
     app.services
         .discovery_detail
-        .persisted_collections_exist(app.auth_db.database_file.clone())
+        .persisted_collections_exist()
         .await
 }
 
@@ -23,7 +23,7 @@ pub(super) async fn load_persisted_collections(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_collections(app.auth_db.database_file.clone())
+        .load_persisted_collections()
         .await?;
 
     let mut collections = Vec::with_capacity(rows.len());
@@ -36,7 +36,7 @@ pub(super) async fn load_persisted_collections(
             series_ids: app
                 .services
                 .discovery_detail
-                .load_persisted_collection_series_ids(app.auth_db.database_file.clone(), id.clone())
+                .load_persisted_collection_series_ids(id.clone())
                 .await?,
             created_date: row.created_date,
             last_modified_date: row.last_modified_date,
@@ -54,10 +54,7 @@ pub(super) async fn load_persisted_collection_detail(
     let Some(row) = app
         .services
         .discovery_detail
-        .load_persisted_collection_detail(
-            app.auth_db.database_file.clone(),
-            collection_id.to_string(),
-        )
+        .load_persisted_collection_detail(collection_id.to_string())
         .await?
     else {
         return Ok(None);
@@ -70,10 +67,7 @@ pub(super) async fn load_persisted_collection_detail(
         series_ids: app
             .services
             .discovery_detail
-            .load_persisted_collection_series_ids(
-                app.auth_db.database_file.clone(),
-                collection_id.to_string(),
-            )
+            .load_persisted_collection_series_ids(collection_id.to_string())
             .await?,
         created_date: row.created_date,
         last_modified_date: row.last_modified_date,
@@ -89,7 +83,7 @@ pub async fn load_series_library_id(
 ) -> Result<Option<String>, String> {
     app.services
         .discovery_detail
-        .load_series_library_id(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_library_id(series_id.to_string())
         .await
 }
 
@@ -124,7 +118,7 @@ pub async fn series_visible_to_context(
     let restriction_record = app
         .services
         .discovery_detail
-        .load_series_restrictions(app.auth_db.database_file.clone(), series_id.to_string())
+        .load_series_restrictions(series_id.to_string())
         .await?;
 
     Ok(restrictions_allow_content(
@@ -200,7 +194,6 @@ pub async fn persist_collection_create(
     app.services
         .discovery_detail
         .persist_collection_create(
-            app.auth_db.database_file.clone(),
             collection_id.clone(),
             input.name.clone(),
             input.ordered,
@@ -230,7 +223,6 @@ pub async fn persist_collection_update(
         .services
         .discovery_detail
         .persist_collection_update(
-            app.auth_db.database_file.clone(),
             collection_id.to_string(),
             input.name.clone(),
             input.ordered,
@@ -259,7 +251,7 @@ pub async fn delete_persisted_collection(
     let deleted = app
         .services
         .discovery_detail
-        .delete_persisted_collection(app.auth_db.database_file.clone(), collection_id.to_string())
+        .delete_persisted_collection(collection_id.to_string())
         .await?;
     if deleted && let Some(collection) = existing {
         register_runtime_sse_event(
@@ -281,11 +273,7 @@ pub async fn upsert_collection_search_document(
 ) -> Result<bool, String> {
     app.services
         .discovery_detail
-        .upsert_collection_search_document(
-            app.auth_db.database_file.clone(),
-            app.operational.runtime.lucene_data_directory.clone(),
-            collection_id.to_string(),
-        )
+        .upsert_collection_search_document(collection_id.to_string())
         .await
 }
 
@@ -295,10 +283,7 @@ pub async fn delete_collection_search_document(
 ) -> Result<(), String> {
     app.services
         .discovery_detail
-        .delete_collection_search_document(
-            app.operational.runtime.lucene_data_directory.clone(),
-            collection_id.to_string(),
-        )
+        .delete_collection_search_document(collection_id.to_string())
         .await
 }
 

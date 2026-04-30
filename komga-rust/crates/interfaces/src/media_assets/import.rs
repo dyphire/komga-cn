@@ -27,10 +27,7 @@ pub async fn books_import(
         }
     };
 
-    let service = app
-        .services
-        .media_assets
-        .media_import_service(app.auth_db.database_file.clone());
+    let service = app.services.media_assets.media_import_service();
     enqueue_books_best_effort(service.as_ref(), payload, &app).await;
 
     let mut response = StatusCode::ACCEPTED.into_response();
@@ -371,7 +368,12 @@ mod tests {
             read_progress: crate::state::ReadProgressState::default(),
             discovery_auth: DiscoveryAuthState::default(),
             auth_db: AuthDatabaseState {
-                database_file: operational.runtime.database_file.clone(),
+                db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
+                    operational.runtime.database_file.clone(),
+                    sqlx::sqlite::SqlitePoolOptions::new()
+                        .connect_lazy("sqlite::memory:")
+                        .expect("lazy in-memory pool should open"),
+                ),
                 demo_mode: false,
                 session_runtime_key: operational.remember_me_runtime_key.clone(),
                 remember_me_runtime_key: operational.remember_me_runtime_key.clone(),

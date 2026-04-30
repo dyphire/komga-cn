@@ -6,6 +6,7 @@ use komga_application::identity_access::{
 };
 use komga_infrastructure::auth::runtime_identity_access as infrastructure_auth_runtime_identity;
 use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity_access;
 use komga_interfaces::state::{
     AuthenticationActivityWriteInput, CreateAuthUserInput, IdentityService,
@@ -19,11 +20,13 @@ use komga_interfaces::state::{
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-#[derive(Clone, Default)]
-pub(super) struct RuntimeIdentityService;
+#[derive(Clone)]
+pub(super) struct RuntimeIdentityService {
+    db: DatabaseHandle,
+}
 
-pub(super) fn compose_runtime_identity_service() -> Box<dyn IdentityService> {
-    Box::new(RuntimeIdentityService)
+pub(super) fn compose_runtime_identity_service(db: DatabaseHandle) -> Box<dyn IdentityService> {
+    Box::new(RuntimeIdentityService { db })
 }
 
 #[async_trait::async_trait]
@@ -61,10 +64,10 @@ impl IdentityService for RuntimeIdentityService {
         )
     }
 
-    fn sync_remember_me_runtime_database_file(&self, runtime_key: String, database_file: PathBuf) {
+    fn sync_remember_me_runtime_database_file(&self, runtime_key: String) {
         infrastructure_runtime_identity_access::sync_remember_me_runtime_database_file(
             &runtime_key,
-            database_file.as_path(),
+            self.db.database_file(),
         )
     }
 
@@ -131,38 +134,26 @@ impl IdentityService for RuntimeIdentityService {
         )
     }
 
-    async fn persisted_basic_user(
-        &self,
-        headers: HeaderMap,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_basic_user(&self, headers: HeaderMap) -> Option<AuthOutcome> {
         infrastructure_runtime_identity_access::persisted_basic_user(
             &headers,
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
-    async fn persisted_api_key_user(
-        &self,
-        headers: HeaderMap,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_api_key_user(&self, headers: HeaderMap) -> Option<AuthOutcome> {
         infrastructure_runtime_identity_access::persisted_api_key_user(
             &headers,
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
-    async fn persisted_api_key_user_by_token(
-        &self,
-        api_key: String,
-        database_file: PathBuf,
-    ) -> Option<AuthOutcome> {
+    async fn persisted_api_key_user_by_token(&self, api_key: String) -> Option<AuthOutcome> {
         infrastructure_runtime_identity_access::persisted_api_key_user_by_token(
             &api_key,
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
@@ -170,27 +161,25 @@ impl IdentityService for RuntimeIdentityService {
     async fn persisted_api_key_metadata(
         &self,
         headers: HeaderMap,
-        database_file: PathBuf,
     ) -> Option<PersistedApiKeyMetadata> {
         infrastructure_runtime_identity_access::persisted_api_key_metadata(
             &headers,
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
-    async fn persisted_users(&self, database_file: PathBuf) -> Option<Vec<AuthUser>> {
-        infrastructure_runtime_identity_access::persisted_users(database_file.as_path()).await
+    async fn persisted_users(&self) -> Option<Vec<AuthUser>> {
+        infrastructure_runtime_identity_access::persisted_users(self.db.database_file()).await
     }
 
     async fn persisted_update_password_by_user_id(
         &self,
-        database_file: PathBuf,
         user_id: String,
         password: String,
     ) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_update_password_by_user_id(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &password,
         )
@@ -199,12 +188,11 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_create_api_key(
         &self,
-        database_file: PathBuf,
         user_id: String,
         comment: String,
     ) -> Option<PersistedApiKey> {
         infrastructure_runtime_identity_access::persisted_create_api_key(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &comment,
         )
@@ -213,25 +201,20 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_api_key_comment_exists(
         &self,
-        database_file: PathBuf,
         user_id: String,
         comment: String,
     ) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_api_key_comment_exists(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &comment,
         )
         .await
     }
 
-    async fn persisted_list_api_keys(
-        &self,
-        database_file: PathBuf,
-        user_id: String,
-    ) -> Option<Vec<PersistedApiKey>> {
+    async fn persisted_list_api_keys(&self, user_id: String) -> Option<Vec<PersistedApiKey>> {
         infrastructure_runtime_identity_access::persisted_list_api_keys(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
         )
         .await
@@ -239,12 +222,11 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_delete_api_key_by_id(
         &self,
-        database_file: PathBuf,
         user_id: String,
         api_key_id: String,
     ) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_delete_api_key_by_id(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &api_key_id,
         )
@@ -253,34 +235,29 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_list_authentication_activity(
         &self,
-        database_file: PathBuf,
         user_id: Option<String>,
     ) -> Option<Vec<PersistedAuthenticationActivity>> {
         infrastructure_runtime_identity_access::persisted_list_authentication_activity(
-            database_file.as_path(),
+            self.db.database_file(),
             user_id.as_deref(),
         )
         .await
     }
 
-    async fn persisted_cleanup_authentication_activity(
-        &self,
-        database_file: PathBuf,
-    ) -> Option<u64> {
+    async fn persisted_cleanup_authentication_activity(&self) -> Option<u64> {
         infrastructure_runtime_identity_access::persisted_cleanup_authentication_activity(
-            database_file.as_path(),
+            self.db.database_file(),
         )
         .await
     }
 
     async fn persisted_latest_authentication_activity_by_user_and_api_key(
         &self,
-        database_file: PathBuf,
         user_id: String,
         api_key_id: String,
     ) -> Option<PersistedAuthenticationActivity> {
         infrastructure_runtime_identity_access::persisted_latest_authentication_activity_by_user_and_api_key(
-            database_file.as_path(),
+            self.db.database_file(),
             &user_id,
             &api_key_id,
         )
@@ -289,13 +266,12 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_record_failed_authentication_activity(
         &self,
-        database_file: PathBuf,
         email: Option<String>,
         input: AuthenticationActivityWriteInput,
         error: String,
     ) -> Option<()> {
         infrastructure_auth_runtime_identity::persisted_record_failed_authentication_activity(
-            database_file.as_path(),
+            self.db.database_file(),
             email.as_deref(),
             &input.source,
             &error,
@@ -307,12 +283,11 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_record_successful_authentication_activity(
         &self,
-        database_file: PathBuf,
         user: AuthUser,
         input: AuthenticationActivityWriteInput,
     ) -> Option<()> {
         infrastructure_runtime_identity_access::persisted_record_successful_authentication_activity(
-            database_file.as_path(),
+            self.db.database_file(),
             &user,
             &input.source,
             input.api_key_id.as_deref(),
@@ -325,12 +300,11 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn ensure_oauth_user(
         &self,
-        database_file: PathBuf,
         email: String,
         allow_create: bool,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
         infrastructure_runtime_identity_access::ensure_oauth_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &email,
             allow_create,
         )
@@ -343,11 +317,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_book_created_timestamp(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<String>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_created_timestamp(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -355,11 +328,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_book_last_epub_position_locator(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<Value>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_last_epub_position_locator(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -367,11 +339,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_book_media_file(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<InterfacesPersistedBookMediaFile>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_media_file(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -380,11 +351,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_kobo_metadata_record(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<InterfacesKoboMetadataRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_kobo_metadata_record(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -393,7 +363,6 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_kobo_sync_page(
         &self,
-        database_file: PathBuf,
         user: AuthUser,
         user_id: String,
         current_api_key_id: Option<String>,
@@ -402,7 +371,7 @@ impl IdentityService for RuntimeIdentityService {
         limit: usize,
     ) -> Result<KoboSyncPage, sqlx::Error> {
         infrastructure_runtime_identity_access::load_kobo_sync_page(
-            database_file.as_path(),
+            self.db.database_file(),
             &user,
             &user_id,
             current_api_key_id.as_deref(),
@@ -415,11 +384,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_koreader_book_target(
         &self,
-        database_file: PathBuf,
         book_hash: String,
     ) -> Result<Option<InterfacesKoreaderBookTarget>, InterfacesKoreaderBookLookupError> {
         infrastructure_runtime_identity_access::load_koreader_book_target(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_hash,
         )
         .await
@@ -429,12 +397,11 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<Option<InterfacesPersistedReadProgressRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_read_progress(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
             &user_id,
         )
@@ -444,11 +411,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn load_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_thumbnail_by_id(
-            database_file.as_path(),
+            self.db.database_file(),
             &thumbnail_id,
         )
         .await
@@ -456,7 +422,6 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persist_read_progress_with_locator(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: i64,
@@ -467,7 +432,7 @@ impl IdentityService for RuntimeIdentityService {
         locator: Option<Value>,
     ) -> Result<(), String> {
         infrastructure_runtime_identity_access::persist_read_progress_with_locator(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
             &user_id,
             page,
@@ -480,13 +445,9 @@ impl IdentityService for RuntimeIdentityService {
         .await
     }
 
-    async fn persisted_book_exists(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, sqlx::Error> {
+    async fn persisted_book_exists(&self, book_id: String) -> Result<bool, sqlx::Error> {
         infrastructure_runtime_identity_access::persisted_book_exists(
-            database_file.as_path(),
+            self.db.database_file(),
             &book_id,
         )
         .await
@@ -506,13 +467,9 @@ impl IdentityService for RuntimeIdentityService {
         .await
     }
 
-    async fn remove_sync_point(
-        &self,
-        database_file: PathBuf,
-        sync_point_id: String,
-    ) -> Result<(), sqlx::Error> {
+    async fn remove_sync_point(&self, sync_point_id: String) -> Result<(), sqlx::Error> {
         infrastructure_runtime_identity_access::remove_sync_point(
-            database_file.as_path(),
+            self.db.database_file(),
             &sync_point_id,
         )
         .await
@@ -520,11 +477,10 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn create_auth_user(
         &self,
-        database_file: PathBuf,
         input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
         infrastructure_runtime_identity::create_auth_user(
-            database_file.as_path(),
+            self.db.database_file(),
             infrastructure_runtime_identity::CreateAuthUserInput {
                 user_id: input.user_id,
                 email: input.email,
@@ -547,23 +503,18 @@ impl IdentityService for RuntimeIdentityService {
         .await
     }
 
-    async fn delete_auth_user(
-        &self,
-        database_file: PathBuf,
-        target_user_id: String,
-    ) -> Result<bool, sqlx::Error> {
-        infrastructure_runtime_identity::delete_auth_user(database_file.as_path(), &target_user_id)
+    async fn delete_auth_user(&self, target_user_id: String) -> Result<bool, sqlx::Error> {
+        infrastructure_runtime_identity::delete_auth_user(self.db.database_file(), &target_user_id)
             .await
     }
 
     async fn update_auth_user(
         &self,
-        database_file: PathBuf,
         target_user_id: String,
         patch: UpdateAuthUserInput,
     ) -> Result<UpdateAuthUserResult, sqlx::Error> {
         infrastructure_runtime_identity::update_auth_user(
-            database_file.as_path(),
+            self.db.database_file(),
             &target_user_id,
             infrastructure_runtime_identity::UpdateAuthUserInput {
                 roles: patch.roles,
@@ -592,8 +543,8 @@ impl IdentityService for RuntimeIdentityService {
         })
     }
 
-    async fn open_auth_pool(&self, database_file: PathBuf) -> Result<SqlitePool, sqlx::Error> {
-        infrastructure_runtime_identity_access::open_auth_pool(database_file.as_path()).await
+    async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {
+        infrastructure_runtime_identity_access::open_auth_pool(self.db.database_file()).await
     }
 }
 

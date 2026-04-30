@@ -25,7 +25,7 @@ async fn load_accessible_book_media(
     let Some(media) = (match app
         .services
         .media_assets
-        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.to_string())
+        .load_persisted_book_media(book_id.to_string())
         .await
     {
         Ok(media) => media,
@@ -70,7 +70,7 @@ pub async fn book_read_progress(
     body: Bytes,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
 
@@ -86,8 +86,7 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     };
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
@@ -172,7 +171,7 @@ pub async fn book_read_progress_delete(
     Path(book_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
 
@@ -184,8 +183,7 @@ pub async fn book_read_progress_delete(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
@@ -222,7 +220,7 @@ pub async fn book_progression(
     body: Bytes,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
 
@@ -233,14 +231,13 @@ pub async fn book_progression(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) = (match app
         .services
         .media_assets
-        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.clone())
+        .load_persisted_book_media(book_id.clone())
         .await
     {
         Ok(media) => media,
@@ -323,7 +320,6 @@ pub async fn book_progression(
         .services
         .media_assets
         .persist_book_progression(
-            app.auth_db.database_file.clone(),
             book_id.clone(),
             user_id(&user).to_string(),
             progression,
@@ -346,7 +342,7 @@ pub async fn book_progression_get(
     Path(book_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    if let Some(response) = require_request_auth(&headers, auth_db.database_file.as_path()).await {
+    if let Some(response) = require_request_auth(&headers, auth_db.db.database_file()).await {
         return response;
     }
 
@@ -357,14 +353,13 @@ pub async fn book_progression_get(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&headers, auth_db.database_file.as_path()).await
-    else {
+    let Some(user) = resolved_request_auth_user(&headers, auth_db.db.database_file()).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(media) = (match app
         .services
         .media_assets
-        .load_persisted_book_media(app.auth_db.database_file.clone(), book_id.clone())
+        .load_persisted_book_media(book_id.clone())
         .await
     {
         Ok(media) => media,

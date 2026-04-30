@@ -28,15 +28,13 @@ pub async fn collection_series(
     Path(collection_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
         .await
     {
         Some(context) => context,
@@ -337,9 +335,7 @@ pub async fn collections(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -363,14 +359,14 @@ pub async fn collections(
 
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content = if app.auth_db.database_file.exists() {
+    let mut content = if app.auth_db.db.database_file().exists() {
         let persisted_rows_exist = match persisted_collections_exist(&app).await {
             Ok(exists) => exists,
             Err(error) => return internal_error_response(error),
@@ -396,7 +392,7 @@ pub async fn collections(
             .resolve_query_context_with_persistence(
                 &headers,
                 Some(&requested_library_ids),
-                app.auth_db.database_file.as_path(),
+                app.auth_db.db.database_file(),
             )
             .await
         {
@@ -462,11 +458,7 @@ pub async fn collections(
         let ranked_ids: Vec<String> = match app
             .services
             .discovery_persisted
-            .search_collection_ids(
-                app.auth_db.database_file.clone(),
-                search.to_string(),
-                search_limit,
-            )
+            .search_collection_ids(search.to_string(), search_limit)
             .await
         {
             Ok(ids) => ids,
@@ -520,9 +512,7 @@ pub async fn collection_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -814,22 +804,20 @@ pub async fn collection_detail(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_auth(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_auth(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&headers, None, app.auth_db.database_file.as_path())
+        .resolve_query_context_with_persistence(&headers, None, app.auth_db.db.database_file())
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if app.auth_db.database_file.exists() {
+    if app.auth_db.db.database_file().exists() {
         match load_persisted_collection_detail(&app, &collection_id).await {
             Ok(Some(mut collection)) => {
                 let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
@@ -866,9 +854,7 @@ pub async fn collection_update(
     Path(collection_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 
@@ -929,9 +915,7 @@ pub async fn collection_delete(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    if let Some(response) =
-        require_request_admin(&headers, app.auth_db.database_file.as_path()).await
-    {
+    if let Some(response) = require_request_admin(&headers, app.auth_db.db.database_file()).await {
         return response;
     }
 

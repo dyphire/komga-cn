@@ -150,7 +150,7 @@ pub(crate) async fn opds_v1_on_deck(headers: HeaderMap, uri: Uri, app: &HttpAppS
     let books = app
         .services
         .opds_catalog
-        .load_on_deck_books(app.auth_db.database_file.clone(), user_id.clone(), None)
+        .load_on_deck_books(user_id.clone(), None)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -204,7 +204,7 @@ pub(crate) async fn opds_v1_keep_reading(
     let books = app
         .services
         .opds_catalog
-        .load_keep_reading_books(app.auth_db.database_file.clone(), user_id.clone(), None)
+        .load_keep_reading_books(user_id.clone(), None)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -260,13 +260,7 @@ pub(crate) async fn opds_v1_series_latest(
         let batch = app
             .services
             .opds_catalog
-            .load_latest_series_paged(
-                app.auth_db.database_file.clone(),
-                allowed_library_ids.clone(),
-                None,
-                raw_offset,
-                batch_limit,
-            )
+            .load_latest_series_paged(allowed_library_ids.clone(), None, raw_offset, batch_limit)
             .await
             .unwrap_or_default();
         if batch.is_empty() {
@@ -349,7 +343,6 @@ pub(crate) async fn opds_v1_books_latest(
             .services
             .opds_catalog
             .load_latest_books_paged(
-                app.auth_db.database_file.clone(),
                 allowed_library_ids.clone(),
                 Some(current_user_id.clone()),
                 None,
@@ -407,7 +400,6 @@ pub(crate) async fn opds_v1_books_latest(
 }
 
 pub(crate) async fn opds_v1_libraries(headers: HeaderMap, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
     if require_auth(&headers).is_some() {
         return opds_v1_basic_unauthorized_response();
     }
@@ -416,7 +408,7 @@ pub(crate) async fn opds_v1_libraries(headers: HeaderMap, app: &HttpAppState) ->
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let rows = load_libraries(app.services.opds_persisted.as_ref(), database_file)
+    let rows = load_libraries(app.services.opds_persisted.as_ref())
         .await
         .unwrap_or_default()
         .into_iter()
@@ -448,7 +440,6 @@ pub(crate) async fn opds_v1_collections(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
     if let Some(response) = require_auth(&headers) {
         return response;
     }
@@ -458,13 +449,12 @@ pub(crate) async fn opds_v1_collections(
     };
 
     let mut rows = Vec::new();
-    for collection in load_collections(app.services.opds_persisted.as_ref(), database_file, None)
+    for collection in load_collections(app.services.opds_persisted.as_ref(), None)
         .await
         .unwrap_or_default()
     {
         let series = load_collection_series(
             app.services.opds_persisted.as_ref(),
-            database_file,
             &collection.id,
             collection.ordered,
         )
@@ -517,17 +507,13 @@ pub(crate) async fn opds_v1_readlists(
     for readlist in app
         .services
         .opds_catalog
-        .load_all_readlists(app.auth_db.database_file.clone())
+        .load_all_readlists()
         .await
         .unwrap_or_default()
     {
-        let books = load_readlist_books(
-            app.services.opds_persisted.as_ref(),
-            app.auth_db.database_file.as_path(),
-            &readlist.id,
-        )
-        .await
-        .unwrap_or_default();
+        let books = load_readlist_books(app.services.opds_persisted.as_ref(), &readlist.id)
+            .await
+            .unwrap_or_default();
         if books
             .iter()
             .any(|book| library_visible(&allowed_library_ids, &book.library_id))
@@ -560,7 +546,6 @@ pub(crate) async fn opds_v1_publishers(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.database_file.as_path();
     if require_auth(&headers).is_some() {
         return opds_v1_basic_unauthorized_response();
     }
@@ -569,13 +554,9 @@ pub(crate) async fn opds_v1_publishers(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let publishers = load_publishers(
-        app.services.opds_persisted.as_ref(),
-        database_file,
-        &allowed_library_ids,
-    )
-    .await
-    .unwrap_or_default();
+    let publishers = load_publishers(app.services.opds_persisted.as_ref(), &allowed_library_ids)
+        .await
+        .unwrap_or_default();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let rows = publishers
         .into_iter()
@@ -621,7 +602,6 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, app: &HttpAppSt
     let search_rows = if let Some(search_term) = search.as_deref() {
         load_opds_v1_series_search_results(
             app.services.opds_persisted.as_ref(),
-            app.auth_db.database_file.as_path(),
             app.services.opds_catalog.as_ref(),
             &allowed_library_ids,
             search_term,
@@ -645,7 +625,6 @@ pub(crate) async fn opds_v1_series(headers: HeaderMap, uri: Uri, app: &HttpAppSt
         app.services
             .opds_catalog
             .load_series_page(
-                app.auth_db.database_file.clone(),
                 allowed_library_ids.clone(),
                 None,
                 publishers.clone(),

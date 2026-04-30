@@ -39,17 +39,15 @@ pub struct PersistedMediaFileRecord {
 #[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait MediaAssetsService: Send + Sync {
-    fn media_import_service(&self, database_file: PathBuf) -> Box<dyn RuntimeMediaImportService>;
-    fn book_metadata_service(&self, database_file: PathBuf) -> Box<dyn RuntimeBookMetadataService>;
+    fn media_import_service(&self) -> Box<dyn RuntimeMediaImportService>;
+    fn book_metadata_service(&self) -> Box<dyn RuntimeBookMetadataService>;
     async fn refresh_book_search_documents_after_metadata_update(
         &self,
-        database_file: PathBuf,
         index_dir: PathBuf,
         book_id: String,
     ) -> Result<(), String>;
     async fn persist_book_page_hashes_with_media_content(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<(), String>;
     fn decode_epub_positions(&self, blob: Vec<u8>) -> Result<Vec<Value>, String>;
@@ -65,32 +63,21 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Option<(Vec<u8>, String)>;
     async fn load_persisted_book_media(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::BookMediaRecord>, String>;
-    async fn load_persisted_book_media_files(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<Vec<String>, String>;
+    async fn load_persisted_book_media_files(&self, book_id: String)
+    -> Result<Vec<String>, String>;
     async fn load_persisted_media_file_records(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<PersistedMediaFileRecord>, String>;
-    async fn book_media_is_ready_status(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, String>;
+    async fn book_media_is_ready_status(&self, book_id: String) -> Result<bool, String>;
     async fn load_persisted_book_pages(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String>;
     async fn load_persisted_book_page_row(
         &self,
-        database_file: PathBuf,
         book_id: String,
         page_number: u64,
     ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String>;
@@ -136,41 +123,31 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Option<u64>;
     async fn load_persisted_epub_extension_blob(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, String>;
-    async fn load_series_book_ids(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<Vec<String>, String>;
+    async fn load_series_book_ids(&self, series_id: String) -> Result<Vec<String>, String>;
     async fn refresh_series_read_progress_row(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<(), String>;
     async fn delete_series_read_progress_row(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<(), String>;
     async fn load_series_tachiyomi_progress(
         &self,
-        database_file: PathBuf,
         series_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String>;
     async fn load_book_progression(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String>;
     async fn persist_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: u64,
@@ -179,41 +156,34 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Result<(), String>;
     async fn delete_persisted_read_progress(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
     ) -> Result<(), String>;
     async fn readlist_tachiyomi_counters(
         &self,
-        database_file: PathBuf,
         ordered_book_ids: Vec<String>,
         user_id: String,
     ) -> Result<(u64, u64, u64, u64, u64), String>;
     async fn persist_readlist_tachiyomi_progress(
         &self,
-        database_file: PathBuf,
         ordered_book_ids: Vec<String>,
         user_id: String,
         last_book_read: usize,
     ) -> Result<Option<()>, String>;
     async fn load_selected_book_thumbnail(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String>;
     async fn load_book_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String>;
     async fn load_persisted_book_thumbnails(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::EntityThumbnailRecord>, String>;
     async fn insert_book_thumbnail(
         &self,
-        database_file: PathBuf,
         book_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -221,24 +191,14 @@ pub trait MediaAssetsService: Send + Sync {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::EntityThumbnailRecord, String>;
-    async fn select_book_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String>;
-    async fn delete_book_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String>;
+    async fn select_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String>;
+    async fn delete_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String>;
     async fn load_persisted_readlist_thumbnails(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<komga_application::media_assets::ReadlistThumbnailRecord>, String>;
     async fn insert_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -248,24 +208,20 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Result<komga_application::media_assets::ReadlistThumbnailRecord, String>;
     async fn select_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn delete_readlist_thumbnail(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn load_persisted_collection_thumbnails(
         &self,
-        database_file: PathBuf,
         collection_id: String,
     ) -> Result<Vec<komga_application::media_assets::CollectionThumbnailRecord>, String>;
     async fn insert_collection_thumbnail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -273,35 +229,26 @@ pub trait MediaAssetsService: Send + Sync {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::CollectionThumbnailRecord, String>;
-    async fn select_collection_thumbnail(
-        &self,
-        database_file: PathBuf,
-        thumbnail_id: String,
-    ) -> Result<bool, String>;
+    async fn select_collection_thumbnail(&self, thumbnail_id: String) -> Result<bool, String>;
     async fn delete_collection_thumbnail(
         &self,
-        database_file: PathBuf,
         collection_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn load_selected_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String>;
     async fn load_persisted_series_thumbnails(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<komga_application::media_assets::SeriesThumbnailRecord>, String>;
     async fn load_series_thumbnail_by_id(
         &self,
-        database_file: PathBuf,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String>;
     async fn insert_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail: Vec<u8>,
         media_type: String,
@@ -311,34 +258,28 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Result<komga_application::media_assets::SeriesThumbnailRecord, String>;
     async fn select_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn delete_series_thumbnail(
         &self,
-        database_file: PathBuf,
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String>;
     async fn load_persisted_readlist_name(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Option<String>, String>;
     async fn load_book_restrictions(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(Option<u16>, Vec<String>)>, String>;
     async fn load_readlist_archive_entries(
         &self,
-        database_file: PathBuf,
         readlist_id: String,
     ) -> Result<Vec<(String, PathBuf)>, String>;
     async fn load_series_archive_entries(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String>;
     fn is_font_resource(&self, resource_name: String) -> bool;
@@ -349,48 +290,24 @@ pub trait MediaAssetsService: Send + Sync {
     ) -> Option<Vec<u8>>;
     async fn load_persisted_manifest_book(
         &self,
-        database_file: PathBuf,
         book_id: String,
     ) -> Result<Option<(String, String, String)>, String>;
-    async fn persisted_book_exists(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<bool, String>;
-    async fn persisted_book_ids(&self, database_file: PathBuf) -> Result<Vec<String>, String>;
-    async fn persisted_series_exists(
-        &self,
-        database_file: PathBuf,
-        series_id: String,
-    ) -> Result<bool, String>;
+    async fn persisted_book_exists(&self, book_id: String) -> Result<bool, String>;
+    async fn persisted_book_ids(&self) -> Result<Vec<String>, String>;
+    async fn persisted_series_exists(&self, series_id: String) -> Result<bool, String>;
     async fn load_persisted_series_oneshot(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Option<bool>, String>;
-    async fn persisted_readlist_exists(
-        &self,
-        database_file: PathBuf,
-        readlist_id: String,
-    ) -> Result<bool, String>;
-    async fn persisted_collection_exists(
-        &self,
-        database_file: PathBuf,
-        collection_id: String,
-    ) -> Result<bool, String>;
+    async fn persisted_readlist_exists(&self, readlist_id: String) -> Result<bool, String>;
+    async fn persisted_collection_exists(&self, collection_id: String) -> Result<bool, String>;
     async fn load_series_book_number_sorts(
         &self,
-        database_file: PathBuf,
         series_id: String,
     ) -> Result<Vec<(String, f64)>, String>;
-    async fn load_book_page_count(
-        &self,
-        database_file: PathBuf,
-        book_id: String,
-    ) -> Result<Option<u64>, String>;
+    async fn load_book_page_count(&self, book_id: String) -> Result<Option<u64>, String>;
     async fn persist_book_progression(
         &self,
-        database_file: PathBuf,
         book_id: String,
         user_id: String,
         page: f64,
