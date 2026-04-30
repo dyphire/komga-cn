@@ -1,5 +1,8 @@
 use super::*;
 use komga_infrastructure::database_handle::DatabaseHandle;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -165,11 +168,11 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
 
 #[test]
 fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_idle() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("periodic scan worker test runtime should build");
-    let paths = runtime.block_on(async {
+    let paths = executor.block_on(async {
         let paths = new_router_fixture("worker-periodic-scan-lifecycle").await;
         seed_router_contract_data(&paths).await;
 
@@ -186,10 +189,9 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime.block_on(runtime_task_context(&paths));
-    let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-        runtime.clone(),
-        "rust-main",
+    let runtime = executor.block_on(runtime_task_context(&paths));
+    let task_queue = Arc::new(Mutex::new(executor.block_on(
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
 
     let idle_logs = capture_router_logs_async_result(&config, {
@@ -303,11 +305,11 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
 
 #[test]
 fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_state() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let executor = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("periodic multi-library scan worker test runtime should build");
-    let paths = runtime.block_on(async {
+    let paths = executor.block_on(async {
         let paths = new_router_fixture("worker-periodic-scan-multi-library").await;
         seed_router_contract_data(&paths).await;
 
@@ -332,10 +334,9 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime.block_on(runtime_task_context(&paths));
-    let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-        runtime.clone(),
-        "rust-main",
+    let runtime = executor.block_on(runtime_task_context(&paths));
+    let task_queue = Arc::new(Mutex::new(executor.block_on(
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
 
     let (run_logs, (enqueued, last_run)) = capture_router_logs_async_result(&config, {
@@ -397,9 +398,8 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
     let config = runtime_config_for_paths(&paths);
     let runtime = executor.block_on(runtime_task_context(&paths));
 
-    let idle_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-        runtime.clone(),
-        "rust-main",
+    let idle_queue = Arc::new(Mutex::new(executor.block_on(
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
     let idle_logs = capture_router_logs_async_result(&config, {
         let runtime = runtime.clone();
@@ -422,9 +422,8 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         0
     );
 
-    let success_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-        runtime.clone(),
-        "rust-main",
+    let success_queue = Arc::new(Mutex::new(executor.block_on(
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
     executor.block_on(async {
         let mut queue = success_queue.lock().await;
@@ -454,9 +453,8 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
     assert_eq!(field_u64(success_run, "queued_tasks"), Some(1));
     assert_eq!(field_u64(success_complete, "processed"), Some(1));
 
-    let failure_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-        runtime.clone(),
-        "rust-main",
+    let failure_queue = Arc::new(Mutex::new(executor.block_on(
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
     executor.block_on(async {
         let mut queue = failure_queue.lock().await;
@@ -540,8 +538,22 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
         Some("authentication_activity_cleanup")
     );
 
+    let skip_pools = runtime.block_on(async {
+        let task_write_pool = connect_task_write_pool(config.main_db.database_file())
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(
+            config.main_db.database_file(),
+            default_read_max_connections(),
+        )
+        .await
+        .expect("test private read pool should open");
+        (task_write_pool, task_read_pool)
+    });
     let skip_runtime = TaskRuntimeContext {
         owns_main_database: false,
+        task_write_pool: skip_pools.0,
+        task_read_pool: skip_pools.1,
         ..config.clone()
     };
     let skip_logs = capture_router_logs_async_result(&log_config, async move {
@@ -571,10 +583,20 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
     ));
     std::fs::create_dir_all(&invalid_root).expect("auth cleanup invalid fixture root should exist");
     let failure_runtime = runtime.block_on(async {
+        let failure_root_db_path = invalid_root.join("database.sqlite");
+        let task_write_pool = connect_task_write_pool(&failure_root_db_path)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool =
+            connect_task_pool(&failure_root_db_path, default_read_max_connections())
+                .await
+                .expect("test private read pool should open");
         TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(invalid_root.join("database.sqlite"))
+            main_db: DatabaseHandle::file_backed(failure_root_db_path)
                 .await
                 .expect("test db should open"),
+            task_write_pool,
+            task_read_pool,
             ..config
         }
     });

@@ -29,9 +29,13 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_epub_cover() {
     assert!(!cover_bytes.is_empty());
     assert_eq!(cover_media_type, "image/png");
 
-    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for thumbnail generation");
+    generate_book_thumbnail(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should execute successfully for epub cover");
+    pool.close().await;
 
     let main_pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
@@ -113,7 +117,10 @@ async fn generate_book_thumbnail_persists_generated_thumbnail_for_pdf() {
     )
     .await;
 
-    generate_book_thumbnail(paths.main_db.as_path(), "book-pdf-1")
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("pool for generate_book_thumbnail");
+    generate_book_thumbnail(&pool, "book-pdf-1")
         .await
         .expect("generate_book_thumbnail should execute successfully for pdf");
 
@@ -239,7 +246,10 @@ async fn generate_book_thumbnail_emits_thumbnail_book_added_event() {
     cleanup_pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    generate_book_thumbnail(paths.main_db.as_path(), book_id)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("pool for generate_book_thumbnail");
+    generate_book_thumbnail(&pool, book_id)
         .await
         .expect("generate_book_thumbnail should execute successfully for sse contract");
 

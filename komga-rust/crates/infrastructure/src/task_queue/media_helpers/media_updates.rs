@@ -8,7 +8,6 @@ use serde_json::json;
 use sqlx::{Row, Sqlite, SqlitePool};
 
 use super::media_queries::PersistedHashedPageToDelete;
-use crate::sqlite::connect_private_write_pool;
 
 #[derive(Clone)]
 struct BookSseContext {
@@ -47,15 +46,11 @@ async fn load_book_sse_context(
 }
 
 pub async fn persist_book_hash(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     hash: &str,
     koreader: bool,
 ) -> Result<(), String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let sql = if koreader {
         r#"
         UPDATE BOOK
@@ -75,24 +70,20 @@ pub async fn persist_book_hash(
     sqlx::query(sql)
         .bind(hash)
         .bind(book_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("failed to persist book hash for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(())
 }
 
 pub async fn persist_removed_hashed_pages(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     deleted_count_by_hash: &HashMap<String, i64>,
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start remove-hashed-pages transaction for '{book_id}': {error}")
     })?;
@@ -139,8 +130,7 @@ pub async fn persist_removed_hashed_pages(
         format!("failed to commit remove-hashed-pages transaction for '{book_id}': {error}")
     })?;
 
-    let book_context = load_book_sse_context(&pool, book_id).await?;
-    pool.close().await;
+    let book_context = load_book_sse_context(pool, book_id).await?;
 
     if let Some(book_context) = book_context {
         emit_book_changed(book_id, &book_context);
@@ -149,7 +139,7 @@ pub async fn persist_removed_hashed_pages(
 }
 
 pub async fn persist_book_extension_repair(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     library_id: &str,
     book_url: &str,
@@ -157,9 +147,6 @@ pub async fn persist_book_extension_repair(
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start extension-repair transaction for '{book_id}': {error}")
     })?;
@@ -204,13 +191,12 @@ pub async fn persist_book_extension_repair(
     tx.commit().await.map_err(|error| {
         format!("failed to commit extension-repair transaction for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }
 
 pub async fn persist_book_conversion(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     library_id: &str,
     book_url: &str,
@@ -218,9 +204,6 @@ pub async fn persist_book_conversion(
     file_last_modified: i64,
     file_size: i64,
 ) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start convert-book transaction for '{book_id}': {error}")
     })?;
@@ -284,8 +267,7 @@ pub async fn persist_book_conversion(
         format!("failed to commit convert-book transaction for '{book_id}': {error}")
     })?;
 
-    let book_context = load_book_sse_context(&pool, book_id).await?;
-    pool.close().await;
+    let book_context = load_book_sse_context(pool, book_id).await?;
 
     if let Some(book_context) = book_context {
         emit_book_changed(book_id, &book_context);
@@ -294,7 +276,7 @@ pub async fn persist_book_conversion(
 }
 
 pub async fn adjust_analyzed_book_read_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
     previous_media_status: &str,
@@ -308,9 +290,6 @@ pub async fn adjust_analyzed_book_read_progress(
     }
 
     let current_page_count = current_page_count.max(0);
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start analyze-book read-progress adjustment for '{book_id}': {error}")
     })?;
@@ -331,7 +310,6 @@ pub async fn adjust_analyzed_book_read_progress(
         tx.commit().await.map_err(|error| {
             format!("failed to commit empty analyze-book read-progress adjustment for '{book_id}': {error}")
         })?;
-        pool.close().await;
         return Ok(());
     }
 
@@ -373,13 +351,12 @@ pub async fn adjust_analyzed_book_read_progress(
     tx.commit().await.map_err(|error| {
         format!("failed to commit analyze-book read-progress adjustment for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }
 
 pub async fn persist_book_conversion_events(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
     source_path: &Path,
@@ -388,9 +365,6 @@ pub async fn persist_book_conversion_events(
 ) -> Result<(), String> {
     let source_name = source_path.to_string_lossy().to_string();
     let destination_name = destination_path.to_string_lossy().to_string();
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start historical conversion-event transaction for '{book_id}': {error}")
     })?;
@@ -430,13 +404,12 @@ pub async fn persist_book_conversion_events(
     tx.commit().await.map_err(|error| {
         format!("failed to commit historical conversion-event transaction for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }
 
 pub async fn persist_book_page_hashes(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     page_hashes: &[(i64, String)],
 ) -> Result<(), String> {
@@ -444,9 +417,6 @@ pub async fn persist_book_page_hashes(
         return Ok(());
     }
 
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start restore-page-hash transaction for '{book_id}': {error}")
     })?;
@@ -469,13 +439,12 @@ pub async fn persist_book_page_hashes(
     tx.commit().await.map_err(|error| {
         format!("failed to commit restore-page-hash transaction for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }
 
 pub async fn persist_duplicate_page_deleted_events(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
     book_path: &Path,
@@ -486,9 +455,6 @@ pub async fn persist_duplicate_page_deleted_events(
     }
 
     let book_name = book_path.to_string_lossy().to_string();
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start duplicate-page-deleted transaction for '{book_id}': {error}")
     })?;
@@ -517,7 +483,6 @@ pub async fn persist_duplicate_page_deleted_events(
     tx.commit().await.map_err(|error| {
         format!("failed to commit duplicate-page-deleted transaction for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }

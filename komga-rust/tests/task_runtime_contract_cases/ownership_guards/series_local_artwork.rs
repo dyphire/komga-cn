@@ -40,7 +40,7 @@ async fn runtime_skips_series_local_artwork_refresh_when_library_import_local_ar
     pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
@@ -98,7 +98,7 @@ async fn runtime_skips_series_local_artwork_refresh_for_oneshot_series() {
     pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
         .process_available(&runtime)
@@ -165,7 +165,7 @@ async fn runtime_imports_multiple_filesystem_series_local_artworks_and_selects_o
     pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should import multiple filesystem candidates cleanly",
@@ -260,7 +260,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_serie
     pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler.process_available(&runtime).await.expect(
         "series local artwork refresh should preserve existing non-generated selections cleanly",
@@ -353,7 +353,7 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
     pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
         .process_available(&runtime)
@@ -444,7 +444,7 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
         .process_available(&runtime)

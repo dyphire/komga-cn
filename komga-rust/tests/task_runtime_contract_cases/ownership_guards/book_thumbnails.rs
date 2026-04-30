@@ -1,4 +1,7 @@
 use super::*;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 const GIF_1X1: &[u8] = &[
     0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
@@ -12,11 +15,19 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
     seed_router_contract_data(&paths).await;
     write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
+        task_write_pool,
+        task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
             "GenerateBookThumbnail:book-1",
@@ -60,7 +71,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
     write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("GenerateBookThumbnail_book-1", 1_000, None)

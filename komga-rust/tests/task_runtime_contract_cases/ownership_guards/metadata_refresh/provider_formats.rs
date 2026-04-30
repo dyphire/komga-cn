@@ -252,7 +252,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
@@ -366,7 +366,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await

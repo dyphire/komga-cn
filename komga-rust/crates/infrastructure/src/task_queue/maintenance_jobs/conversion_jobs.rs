@@ -192,7 +192,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
             1_000,
@@ -294,7 +294,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
             1_000,
@@ -386,7 +386,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -476,7 +476,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -606,7 +606,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, false).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -792,7 +792,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("RepairExtension_{book_id}"),
             1_000,

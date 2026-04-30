@@ -1,4 +1,7 @@
 use super::*;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 mod external_owned;
 
@@ -109,7 +112,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
@@ -205,11 +208,19 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     .expect("oneshot book metadata row should be inserted for series metadata fixture");
     pool.close().await;
 
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
+        task_write_pool,
+        task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -310,7 +321,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime).await
         .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
@@ -406,7 +417,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await

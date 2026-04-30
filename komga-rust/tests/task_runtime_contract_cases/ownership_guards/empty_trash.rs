@@ -2,7 +2,7 @@ use super::*;
 
 async fn run_empty_trash(paths: &RuntimeDbPaths) {
     let runtime = runtime_task_context(paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("EmptyTrash_library-1", 1_000, Some("library-1".to_string()))

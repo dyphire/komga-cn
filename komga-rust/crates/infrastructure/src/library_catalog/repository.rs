@@ -6,6 +6,7 @@ use komga_application::library_catalog::{
 use komga_application::runtime_sse::register_runtime_sse_event;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use serde_json::json;
+use sqlx::SqlitePool;
 
 use crate::read_models::{get_persisted_library, list_persisted_libraries};
 use crate::sqlite::write_models::libraries::{
@@ -18,12 +19,14 @@ use crate::sqlite::write_models::libraries::{
 #[derive(Clone, Debug)]
 pub struct SqliteLibraryCatalogAdapter {
     database_file: PathBuf,
+    task_write_pool: SqlitePool,
 }
 
 impl SqliteLibraryCatalogAdapter {
-    pub fn new(database_file: impl Into<PathBuf>) -> Self {
+    pub fn new(database_file: impl Into<PathBuf>, task_write_pool: SqlitePool) -> Self {
         Self {
             database_file: database_file.into(),
+            task_write_pool,
         }
     }
 }
@@ -116,7 +119,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         library_id: &str,
     ) -> Result<Vec<(String, String)>, String> {
         crate::task_queue::media_helpers::media_queries::load_books_for_extension_repair(
-            self.database_file.as_path(),
+            &self.task_write_pool,
             library_id,
         )
         .await

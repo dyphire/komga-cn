@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+
+use sqlx::SqlitePool;
 
 use super::{TaskRuntimeConfig, TaskRuntimeContext};
 use komga_application::task_processing::{
@@ -18,7 +19,6 @@ use tracing::{Instrument, Span, error, info};
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
-use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug)]
 struct PersistedLibraryScanProfile {
@@ -28,12 +28,8 @@ struct PersistedLibraryScanProfile {
 }
 
 async fn load_persisted_library_scan_profiles(
-    database_file: &Path,
+    pool: &SqlitePool,
 ) -> Result<Vec<PersistedLibraryScanProfile>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open scan profile db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT
             ID,
@@ -42,7 +38,7 @@ async fn load_persisted_library_scan_profiles(
         FROM LIBRARY
         ORDER BY ID ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query scan profiles: {error}"))?;
 
@@ -94,7 +90,8 @@ pub async fn prepare_task_queue(
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
     let startup_task = startup_search_task.unwrap_or("");
-    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http");
+    let mut task_queue =
+        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http").await;
     if runtime.consumes_queue {
         let _ = task_queue.disown_all().await;
     }
@@ -273,7 +270,7 @@ async fn process_startup_library_scans_inner(
     .await?;
     if startup_scan_batch.is_empty() {
         let profiles = load_scan_profiles(
-            runtime.main_db.database_file(),
+            runtime.main_db.read_pool(),
             "load startup library scan profiles for processing skip boundary",
         )
         .await?;
@@ -291,7 +288,7 @@ async fn process_startup_library_scans_inner(
         return Ok(0);
     }
 
-    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     let startup_scan_tasks = startup_scan_batch.into_queue_records();
     let startup_scan_task_count = startup_scan_tasks.len();
     for task in startup_scan_tasks {
@@ -899,7 +896,7 @@ async fn bootstrap_startup_library_scans_inner(
     }
 
     let profiles = load_scan_profiles(
-        runtime.main_db.database_file(),
+        runtime.main_db.read_pool(),
         "load startup library scan profiles",
     )
     .await?;
@@ -920,10 +917,10 @@ async fn bootstrap_startup_library_scans_inner(
 }
 
 async fn load_scan_profiles(
-    database_file: &std::path::Path,
+    pool: &SqlitePool,
     action: &str,
 ) -> Result<Vec<LibraryScanProfile>, String> {
-    load_persisted_library_scan_profiles(database_file)
+    load_persisted_library_scan_profiles(pool)
         .await
         .map_err(|error| format!("{action}: {error}"))
         .map(|profiles| {
@@ -942,7 +939,7 @@ async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
+    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
         .schedule(
             ScanSchedulingTrigger::Startup,
             &LibraryScanScheduleState::default(),
@@ -955,7 +952,7 @@ async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
+    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
         .schedule(
             ScanSchedulingTrigger::Tick,
             &LibraryScanScheduleState {
@@ -973,7 +970,7 @@ async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(), String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
+    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
         .map_err(|error| format!("build periodic library scan state: {error}"))
@@ -1206,6 +1203,7 @@ mod tests {
     use tokio::sync::{Barrier, Mutex as AsyncMutex, watch};
 
     use crate::database_handle::DatabaseHandle;
+    use crate::sqlite::{connect_task_pool, connect_task_write_pool, default_read_max_connections};
 
     async fn runtime_context() -> TaskRuntimeContext {
         let root = std::env::temp_dir().join(format!(
@@ -1216,8 +1214,15 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&root).expect("test temp dir should be created");
+        let db_path = root.join("main.sqlite");
+        let task_write_pool = connect_task_write_pool(&db_path)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
         TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(root.join("main.sqlite"))
+            main_db: DatabaseHandle::file_backed(db_path)
                 .await
                 .expect("test db should open"),
             tasks_db_file: root.join("tasks.sqlite"),
@@ -1228,6 +1233,8 @@ mod tests {
             owns_sidecar_output: true,
             owns_search_index: true,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         }
     }
 

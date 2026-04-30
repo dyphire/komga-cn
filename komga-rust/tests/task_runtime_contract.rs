@@ -7,7 +7,9 @@ use komga_contract_testkit::contract_matrix::assert_required_target_declared;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
-use komga_infrastructure::sqlite::connect_test_pool;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, connect_test_pool, default_read_max_connections,
+};
 use komga_infrastructure::task_queue::TaskRuntimeContext;
 use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
 use komga_server::app::{
@@ -30,6 +32,12 @@ mod task_runtime_contract_cases;
 const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
 async fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     TaskRuntimeContext {
         main_db: DatabaseHandle::file_backed(paths.main_db.clone())
             .await
@@ -42,12 +50,20 @@ async fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
         owns_sidecar_output: true,
         owns_search_index: true,
         task_pool_size: 1,
+        task_write_pool,
+        task_read_pool,
     }
 }
 
 async fn runtime_task_context_from_config(
     config: &komga_config::env_config::RuntimeConfig,
 ) -> TaskRuntimeContext {
+    let task_write_pool = connect_task_write_pool(&config.database_file)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     TaskRuntimeContext {
         main_db: DatabaseHandle::file_backed(config.database_file.clone())
             .await
@@ -81,6 +97,8 @@ async fn runtime_task_context_from_config(
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         task_pool_size: config.task_pool_size,
+        task_write_pool,
+        task_read_pool,
     }
 }
 

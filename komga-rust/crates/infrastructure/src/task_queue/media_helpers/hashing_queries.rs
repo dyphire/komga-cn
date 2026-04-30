@@ -16,7 +16,7 @@ pub(in crate::task_queue) async fn hash_book_pages(
     runtime: &TaskRuntimeContext,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let Some(library_id) = load_book_library_id(runtime.main_db.database_file(), book_id)
+    let Some(library_id) = load_book_library_id(&runtime.task_write_pool, book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -41,7 +41,7 @@ pub(in crate::task_queue) async fn hash_book(
         return Ok(());
     }
 
-    let Some(state) = load_book_hash_runtime_state(runtime.main_db.database_file(), book_id)
+    let Some(state) = load_book_hash_runtime_state(&runtime.task_write_pool, book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -72,7 +72,7 @@ pub(in crate::task_queue) async fn hash_book(
         }
     }
 
-    let Some(file_path) = load_book_file_path(runtime.main_db.database_file(), book_id)
+    let Some(file_path) = load_book_file_path(&runtime.task_write_pool, book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -94,7 +94,7 @@ pub(in crate::task_queue) async fn hash_book(
         .map(|value| format!("{value:02x}"))
         .collect::<String>();
 
-    persist_book_hash(runtime.main_db.database_file(), book_id, &hash, koreader)
+    persist_book_hash(&runtime.task_write_pool, book_id, &hash, koreader)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -102,7 +102,7 @@ pub(in crate::task_queue) async fn hash_book(
 pub(in crate::task_queue) async fn find_books_for_thumbnail_regeneration(
     runtime: &TaskRuntimeContext,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_persisted_non_deleted_book_ids(runtime.main_db.database_file())
+    load_persisted_non_deleted_book_ids(&runtime.task_write_pool)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -111,7 +111,7 @@ pub(in crate::task_queue) async fn find_books_with_undersized_generated_thumbnai
     runtime: &TaskRuntimeContext,
     max_edge: i64,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_books_with_undersized_generated_thumbnails(runtime.main_db.database_file(), max_edge)
+    load_books_with_undersized_generated_thumbnails(&runtime.task_write_pool, max_edge)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -120,7 +120,7 @@ pub(in crate::task_queue) async fn find_books_with_missing_page_hash(
     runtime: &TaskRuntimeContext,
     library_id: Option<&str>,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_persisted_books_with_missing_page_hash(runtime.main_db.database_file(), library_id)
+    load_persisted_books_with_missing_page_hash(&runtime.task_write_pool, library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -129,10 +129,9 @@ pub(in crate::task_queue) async fn find_duplicate_pages_to_delete(
     runtime: &TaskRuntimeContext,
     library_id: &str,
 ) -> Result<HashMap<String, Vec<HashedPageToDelete>>, TaskExecutionError> {
-    let persisted =
-        load_persisted_duplicate_pages_to_delete(runtime.main_db.database_file(), library_id)
-            .await
-            .map_err(TaskExecutionError::runtime)?;
+    let persisted = load_persisted_duplicate_pages_to_delete(&runtime.task_write_pool, library_id)
+        .await
+        .map_err(TaskExecutionError::runtime)?;
 
     Ok(persisted
         .into_iter()

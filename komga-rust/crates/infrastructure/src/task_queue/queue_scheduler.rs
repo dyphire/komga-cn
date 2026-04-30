@@ -12,11 +12,14 @@ pub struct TaskQueueScheduler {
 }
 
 impl TaskQueueScheduler {
-    pub fn for_runtime(config: impl TaskRuntimeConfig, consumer_owner: impl Into<String>) -> Self {
+    pub async fn for_runtime(
+        config: impl TaskRuntimeConfig,
+        consumer_owner: impl Into<String>,
+    ) -> Self {
         let runtime = config.task_runtime_context();
         let consumes_queue = runtime.consumes_queue;
         let persisted_store = if consumes_queue {
-            SqliteTaskQueueStore::new(runtime.tasks_db_file.clone())
+            SqliteTaskQueueStore::new(runtime.tasks_db_file.clone()).await
         } else {
             None
         };

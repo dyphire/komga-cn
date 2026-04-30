@@ -1,6 +1,9 @@
 use super::*;
 use komga_application::task_processing::TaskProcessingError;
 use komga_infrastructure::database_handle::DatabaseHandle;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct PersistenceSnapshot {
@@ -83,7 +86,7 @@ pub(super) async fn process_scan_library_task(
     deep_scan: bool,
 ) -> Result<usize, TaskProcessingError> {
     let runtime = runtime_task_context_from_config(&config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task(library_id, priority, deep_scan))
         .await;
@@ -91,6 +94,12 @@ pub(super) async fn process_scan_library_task(
 }
 
 pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRuntimeContext {
+    let task_write_pool = connect_task_write_pool(&config.database_file)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     TaskRuntimeContext {
         main_db: DatabaseHandle::file_backed(config.database_file.clone())
             .await
@@ -124,11 +133,14 @@ pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> 
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
         task_pool_size: config.task_pool_size,
+        task_write_pool,
+        task_read_pool,
     }
 }
 
 pub(super) async fn scheduler_for_config(config: &RuntimeConfig) -> TaskQueueScheduler {
     TaskQueueScheduler::for_runtime(runtime_task_context_from_config(config).await, "rust-main")
+        .await
 }
 
 pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {

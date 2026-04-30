@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
 
 use super::TaskRuntimeContext;
 use komga_application::task_processing::{
@@ -8,7 +7,7 @@ use komga_application::task_processing::{
     ScanOneLibraryResult, ScanSchedulingTrigger, SeriesPayload, TaskKind, TaskProcessingError,
     TaskQueueRecord, TaskRequest, TaskSchedule, normalize_library_scan_profiles,
 };
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use tokio::time::Instant;
 
 use super::cleanup_tasks::{cleanup_empty_sets_rows, empty_trash_rows};
@@ -17,15 +16,8 @@ use super::media_helpers::media_queries::{
     load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
 };
 use super::{ExecutedLibraryScan, enqueue_sidecar_refresh_tasks, execute_scan_orchestration};
-use crate::sqlite::connect_read_pool;
 
-async fn load_library_scan_profiles(
-    database_file: &Path,
-) -> Result<Vec<LibraryScanProfile>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open scan profile db: {error}"))?;
-
+async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScanProfile>, String> {
     let rows = sqlx::query(
         r#"SELECT
             ID,
@@ -34,7 +26,7 @@ async fn load_library_scan_profiles(
         FROM LIBRARY
         ORDER BY ID ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query scan profiles: {error}"))?;
 
@@ -50,22 +42,15 @@ async fn load_library_scan_profiles(
 
 #[derive(Clone, Debug)]
 pub struct SqliteFilesystemLibraryScanPipeline {
-    database_file: PathBuf,
     owns_main_database: bool,
+    task_write_pool: SqlitePool,
 }
 
 impl SqliteFilesystemLibraryScanPipeline {
-    pub fn new(database_file: impl Into<PathBuf>) -> Self {
-        Self {
-            database_file: database_file.into(),
-            owns_main_database: true,
-        }
-    }
-
     pub fn for_runtime(runtime: &TaskRuntimeContext) -> Self {
         Self {
-            database_file: runtime.main_db.database_file().to_path_buf(),
             owns_main_database: runtime.owns_main_database,
+            task_write_pool: runtime.task_write_pool.clone(),
         }
     }
 
@@ -73,7 +58,7 @@ impl SqliteFilesystemLibraryScanPipeline {
         &self,
     ) -> Result<Vec<komga_application::task_processing::LibraryScanProfile>, TaskProcessingError>
     {
-        load_library_scan_profiles(self.database_file.as_path())
+        load_library_scan_profiles(&self.task_write_pool)
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("load library scan profiles: {error}"))
@@ -176,7 +161,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             return Ok(());
         }
 
-        cleanup_empty_sets_rows(self.database_file.as_path())
+        cleanup_empty_sets_rows(&self.task_write_pool)
             .await
             .map_err(|error| TaskProcessingError::runtime(format!("cleanup empty sets: {error}")))
     }
@@ -186,7 +171,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             return Ok(());
         }
 
-        empty_trash_rows(self.database_file.as_path(), library_id)
+        empty_trash_rows(&self.task_write_pool, library_id)
             .await
             .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))
     }
@@ -196,12 +181,12 @@ impl SqliteFilesystemLibraryScanPipeline {
         library_id: &str,
         executed_scan: &ExecutedLibraryScan,
     ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
-        collect_follow_up_tasks(self.database_file.as_path(), library_id, executed_scan).await
+        collect_follow_up_tasks(&self.task_write_pool, library_id, executed_scan).await
     }
 }
 
 async fn collect_follow_up_tasks(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     executed_scan: &ExecutedLibraryScan,
 ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
@@ -211,19 +196,18 @@ async fn collect_follow_up_tasks(
 
     let mut follow_up_tasks = Vec::<TaskQueueRecord>::new();
 
-    let hashing_flags = load_library_hashing_flags(database_file, library_id)
+    let hashing_flags = load_library_hashing_flags(pool, library_id)
         .await
         .map_err(|error| {
             TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
         })?;
-    let analyzable_book_ids =
-        load_books_requiring_analysis(database_file, &executed_scan.scan.book_ids)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
-            })?
-            .into_iter()
-            .collect::<HashSet<_>>();
+    let analyzable_book_ids = load_books_requiring_analysis(pool, &executed_scan.scan.book_ids)
+        .await
+        .map_err(|error| {
+            TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
+        })?
+        .into_iter()
+        .collect::<HashSet<_>>();
     for series in &executed_scan.scan.series_rows {
         for book in &series.books {
             if analyzable_book_ids.contains(&book.book_id) {
@@ -238,7 +222,7 @@ async fn collect_follow_up_tasks(
     }
 
     if hashing_flags.hash_files {
-        let book_ids = load_books_with_missing_file_hash(database_file, library_id, false)
+        let book_ids = load_books_with_missing_file_hash(pool, library_id, false)
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("load books with missing file hash: {error}"))
@@ -253,7 +237,7 @@ async fn collect_follow_up_tasks(
     }
 
     if hashing_flags.hash_koreader {
-        let book_ids = load_books_with_missing_file_hash(database_file, library_id, true)
+        let book_ids = load_books_with_missing_file_hash(pool, library_id, true)
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!(
@@ -285,13 +269,13 @@ async fn collect_follow_up_tasks(
             .into_queue_record_with_id(library_id),
     );
 
-    let maintenance_flags = load_library_maintenance_flags(database_file, library_id)
+    let maintenance_flags = load_library_maintenance_flags(pool, library_id)
         .await
         .map_err(|error| {
             TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
         })?;
     if maintenance_flags.repair_extensions {
-        let books = load_books_for_extension_repair(database_file, library_id)
+        let books = load_books_for_extension_repair(pool, library_id)
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("load books for extension repair: {error}"))
@@ -383,7 +367,11 @@ async fn collect_follow_up_tasks(
 
 impl Default for SqliteFilesystemLibraryScanPipeline {
     fn default() -> Self {
-        Self::new(PathBuf::new())
+        Self {
+            owns_main_database: true,
+            task_write_pool: sqlx::SqlitePool::connect_lazy(":memory:")
+                .expect("lazy in-memory pool should not fail"),
+        }
     }
 }
 
@@ -404,12 +392,9 @@ impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
         request: ScanOneLibrary,
     ) -> Result<ScanOneLibraryResult, TaskProcessingError> {
         let library_id = request.library_id;
-        let executed_scan = execute_scan_orchestration(
-            self.database_file.as_path(),
-            &library_id,
-            request.deep_scan,
-        )
-        .await?;
+        let executed_scan =
+            execute_scan_orchestration(&self.task_write_pool, &library_id, request.deep_scan)
+                .await?;
 
         if executed_scan.should_empty_trash {
             self.empty_trash(&library_id).await?;
@@ -421,6 +406,15 @@ impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
             .await?;
 
         Ok(ScanOneLibraryResult::executed(library_id, follow_up_tasks))
+    }
+}
+
+impl SqliteFilesystemLibraryScanPipeline {
+    pub fn from_pools(write_pool: SqlitePool) -> Self {
+        Self {
+            owns_main_database: true,
+            task_write_pool: write_pool,
+        }
     }
 }
 
@@ -486,7 +480,10 @@ mod tests {
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone());
         let scheduled = pipeline
             .schedule(
                 ScanSchedulingTrigger::Startup,
@@ -518,7 +515,10 @@ mod tests {
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone());
         let mut state = LibraryScanScheduleState::default();
         state.mark_elapsed("library-due", Duration::from_secs((60 * 60) + 5));
         state.mark_elapsed("library-not-due", Duration::from_secs(5));
@@ -618,7 +618,10 @@ VALUES (?, ?, ?, ?)"#,
         .expect("existing oneshot book metadata should be inserted");
         pool.close().await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone());
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
             .await
@@ -731,7 +734,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         .expect("deleted book metadata row should be inserted");
         pool.close().await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone());
         let result = pipeline
             .run(ScanOneLibrary::new("library-1".to_string(), false))
             .await
@@ -798,7 +804,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .await;
 
-        let pipeline = SqliteFilesystemLibraryScanPipeline::new(db_path.clone());
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone());
         let error = pipeline
             .schedule(
                 ScanSchedulingTrigger::Startup,

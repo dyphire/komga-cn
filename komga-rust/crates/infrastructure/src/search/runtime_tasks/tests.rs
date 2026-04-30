@@ -109,11 +109,10 @@ VALUES (?, ?, ?, ?, ?)"#,
     .await
     .expect("book metadata should be inserted");
 
-    pool.close().await;
-
-    rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
+    rebuild_index_from_database(&pool, database_file.as_path(), index_dir.as_path())
         .await
         .expect("index rebuild should complete");
+    pool.close().await;
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
         .expect("search index should bootstrap for verification");
@@ -333,11 +332,10 @@ VALUES (?, ?, ?, ?, ?)"#,
         .await
         .expect("readlist row should be inserted");
 
-    pool.close().await;
-
-    rebuild_index_from_database(database_file.as_path(), index_dir.as_path())
+    rebuild_index_from_database(&pool, database_file.as_path(), index_dir.as_path())
         .await
         .expect("index rebuild should complete");
+    pool.close().await;
 
     let pool = connect_write_pool(database_file.as_path())
         .await
@@ -352,7 +350,11 @@ VALUES (?, ?, ?, ?, ?)"#,
 
     pool.close().await;
 
+    let pool = connect_write_pool(database_file.as_path())
+        .await
+        .expect("fixture sqlite database should reopen for collection upsert");
     sync_entity_upsert_from_database(
+        &pool,
         database_file.as_path(),
         index_dir.as_path(),
         SearchEntityType::Collection,
@@ -360,6 +362,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     )
     .await
     .expect("collection upsert should succeed");
+    pool.close().await;
 
     let collection_hits = SearchIndexLifecycle::bootstrap(index_dir.as_path())
         .expect("index should bootstrap")
@@ -367,7 +370,11 @@ VALUES (?, ?, ?, ?, ?)"#,
         .expect("collection query should succeed");
     assert_eq!(collection_hits, vec!["collection-1".to_string()]);
 
+    let pool = connect_write_pool(database_file.as_path())
+        .await
+        .expect("fixture sqlite database should reopen for collection delete");
     sync_entity_delete_from_index(
+        &pool,
         index_dir.as_path(),
         SearchEntityType::Collection,
         "collection-1",
@@ -431,9 +438,11 @@ WHERE SERIES_ID = ?"#,
     .await
     .expect("oneshot series publisher should be updated");
 
-    pool.close().await;
-
+    let pool = connect_write_pool(database_file.as_path())
+        .await
+        .expect("fixture sqlite database should reopen for upserts");
     sync_entity_upsert_from_database(
+        &pool,
         database_file.as_path(),
         index_dir.as_path(),
         SearchEntityType::ReadList,
@@ -442,6 +451,7 @@ WHERE SERIES_ID = ?"#,
     .await
     .expect("readlist upsert should succeed");
     sync_entity_upsert_from_database(
+        &pool,
         database_file.as_path(),
         index_dir.as_path(),
         SearchEntityType::Book,
@@ -450,6 +460,7 @@ WHERE SERIES_ID = ?"#,
     .await
     .expect("book upsert should succeed");
     sync_entity_upsert_from_database(
+        &pool,
         database_file.as_path(),
         index_dir.as_path(),
         SearchEntityType::Series,
@@ -458,12 +469,14 @@ WHERE SERIES_ID = ?"#,
     .await
     .expect("series upsert should succeed");
     sync_series_and_oneshot_books_after_metadata_update(
+        &pool,
         database_file.as_path(),
         index_dir.as_path(),
         "series-oneshot",
     )
     .await
     .expect("series metadata driven oneshot refresh should succeed");
+    pool.close().await;
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
         .expect("index should bootstrap for lifecycle verification");
@@ -500,19 +513,28 @@ WHERE SERIES_ID = ?"#,
 
     drop(index);
 
+    let pool = connect_write_pool(database_file.as_path())
+        .await
+        .expect("fixture sqlite database should reopen for entity deletes");
     sync_entity_delete_from_index(
+        &pool,
         index_dir.as_path(),
         SearchEntityType::ReadList,
         "readlist-1",
     )
     .await
     .expect("readlist delete should succeed");
-    sync_entity_delete_from_index(index_dir.as_path(), SearchEntityType::Book, "book-1")
+    sync_entity_delete_from_index(&pool, index_dir.as_path(), SearchEntityType::Book, "book-1")
         .await
         .expect("book delete should succeed");
-    sync_entity_delete_from_index(index_dir.as_path(), SearchEntityType::Series, "series-1")
-        .await
-        .expect("series delete should succeed");
+    sync_entity_delete_from_index(
+        &pool,
+        index_dir.as_path(),
+        SearchEntityType::Series,
+        "series-1",
+    )
+    .await
+    .expect("series delete should succeed");
 
     let index = SearchIndexLifecycle::bootstrap(index_dir.as_path())
         .expect("index should bootstrap for delete verification");

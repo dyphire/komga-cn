@@ -55,15 +55,14 @@ pub(in crate::task_queue) async fn find_books_to_convert(
     library_id: &str,
 ) -> Result<Vec<PersistedBookToConvert>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    let maintenance_flags =
-        load_library_maintenance_flags(runtime.main_db.database_file(), library_id)
-            .await
-            .map_err(TaskExecutionError::runtime)?;
+    let maintenance_flags = load_library_maintenance_flags(&runtime.task_write_pool, library_id)
+        .await
+        .map_err(TaskExecutionError::runtime)?;
     if !maintenance_flags.convert_to_cbz {
         return Ok(Vec::new());
     }
 
-    load_books_to_convert(runtime.main_db.database_file(), library_id)
+    load_books_to_convert(&runtime.task_write_pool, library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -73,10 +72,9 @@ pub(in crate::task_queue) async fn convert_book(
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
     let runtime_context = runtime.task_runtime_context();
-    let database_file = runtime_context.main_db.database_file().to_path_buf();
     let book_id = book_id.to_string();
 
-    let Some(source) = load_book_conversion_target(database_file.as_path(), &book_id)
+    let Some(source) = load_book_conversion_target(&runtime_context.task_write_pool, &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -181,7 +179,7 @@ pub(in crate::task_queue) async fn convert_book(
     };
 
     if let Err(error) = persist_book_conversion(
-        database_file.as_path(),
+        &runtime_context.task_write_pool,
         &book_id,
         &source.library_id,
         &source.book_url,
@@ -201,7 +199,7 @@ pub(in crate::task_queue) async fn convert_book(
         .await
         .is_ok();
     persist_book_conversion_events(
-        database_file.as_path(),
+        &runtime_context.task_write_pool,
         &book_id,
         &source.series_id,
         &source_path,
@@ -211,19 +209,23 @@ pub(in crate::task_queue) async fn convert_book(
     .await
     .map_err(TaskExecutionError::runtime)?;
 
-    let previous_hashed_pages = load_book_hashed_pages(database_file.as_path(), &book_id)
+    let previous_hashed_pages = load_book_hashed_pages(&runtime_context.task_write_pool, &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
     super::index_tasks::analyze_book(runtime, &book_id).await?;
 
-    let analyzed_pages = load_book_hashed_pages(database_file.as_path(), &book_id)
+    let analyzed_pages = load_book_hashed_pages(&runtime_context.task_write_pool, &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
     let page_hashes_to_restore = restored_page_hashes(&analyzed_pages, &previous_hashed_pages);
-    persist_book_page_hashes(database_file.as_path(), &book_id, &page_hashes_to_restore)
-        .await
-        .map_err(TaskExecutionError::runtime)?;
+    persist_book_page_hashes(
+        &runtime_context.task_write_pool,
+        &book_id,
+        &page_hashes_to_restore,
+    )
+    .await
+    .map_err(TaskExecutionError::runtime)?;
 
     Ok(())
 }

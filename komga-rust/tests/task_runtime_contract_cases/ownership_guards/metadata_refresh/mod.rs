@@ -93,7 +93,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         tasks_pool.close().await;
 
         let runtime = runtime_task_context(&paths).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         scheduler
             .process_available(&runtime).await
             .expect("runtime should process readlist-only RefreshBookMetadata tasks successfully");
@@ -197,7 +197,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
@@ -305,7 +305,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
@@ -475,7 +475,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await

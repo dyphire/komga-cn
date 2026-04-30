@@ -1,4 +1,7 @@
 use super::*;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 #[tokio::test]
 async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
@@ -29,11 +32,19 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
     })
     .to_string();
 
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
+        task_write_pool,
+        task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -138,11 +149,19 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
     .expect("extension-repair fixture media row should be inserted");
     pool.close().await;
 
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
+        task_write_pool,
+        task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -233,11 +252,19 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
     .expect("find-books-to-convert fixture media row should be inserted");
     pool.close().await;
 
+    let task_write_pool = connect_task_write_pool(&paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
+        task_write_pool,
+        task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(

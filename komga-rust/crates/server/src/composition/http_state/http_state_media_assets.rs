@@ -103,6 +103,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         book_id: String,
     ) -> Result<(), String> {
         komga_infrastructure::search::runtime_tasks::sync_entity_upsert_from_database(
+            self.db.write_pool(),
             self.db.database_file(),
             index_dir.as_path(),
             komga_infrastructure::search::index_lifecycle::SearchEntityType::Book,

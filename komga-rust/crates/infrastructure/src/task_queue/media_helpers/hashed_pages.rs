@@ -132,7 +132,6 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         .unwrap_or_default();
 
     let runtime_context = runtime.task_runtime_context();
-    let database_file = runtime_context.main_db.database_file().to_path_buf();
     let book_id = book_id.to_string();
     let analyze_book_id = book_id.clone();
     let removed_page_events = removed_pages
@@ -147,7 +146,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         .collect::<Vec<_>>();
 
     persist_removed_hashed_pages(
-        database_file.as_path(),
+        &runtime_context.task_write_pool,
         &book_id,
         &deleted_count_by_hash,
         file_last_modified,
@@ -159,7 +158,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     super::index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
     persist_duplicate_page_deleted_events(
-        database_file.as_path(),
+        &runtime_context.task_write_pool,
         &book_id,
         &source.series_id,
         &source.file_path,
@@ -177,7 +176,7 @@ pub(in crate::task_queue) async fn load_book_archive_source(
 ) -> Result<Option<BookArchiveSource>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     Ok(
-        load_persisted_book_archive_source(runtime.main_db.database_file(), book_id)
+        load_persisted_book_archive_source(&runtime.task_write_pool, book_id)
             .await
             .map_err(TaskExecutionError::runtime)?
             .map(|source| BookArchiveSource {
@@ -195,7 +194,7 @@ async fn load_book_hashed_pages(
     book_id: &str,
 ) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    load_persisted_book_hashed_pages(runtime.main_db.database_file(), book_id)
+    load_persisted_book_hashed_pages(&runtime.task_write_pool, book_id)
         .await
         .map(|pages| {
             pages

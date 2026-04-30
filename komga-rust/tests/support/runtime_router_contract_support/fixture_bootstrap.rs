@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
 use komga_infrastructure::search::runtime_tasks::rebuild_index_from_database;
+use komga_infrastructure::sqlite::connect_task_write_pool;
 
 use super::{RuntimeDbPaths, persistence_contract_fixture};
 
@@ -51,12 +52,17 @@ pub fn runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
 
 pub async fn search_ready_runtime_config_for_paths(paths: &RuntimeDbPaths) -> RuntimeConfig {
     let config = runtime_config_for_paths(paths);
+    let pool = connect_task_write_pool(paths.main_db.as_path())
+        .await
+        .expect("search-ready runtime config should open pool");
     rebuild_index_from_database(
+        &pool,
         paths.main_db.as_path(),
         config.lucene_data_directory.as_path(),
     )
     .await
     .expect("search-ready runtime config should rebuild the search index from fixture data");
+    pool.close().await;
     config
 }
 

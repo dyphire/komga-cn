@@ -21,7 +21,7 @@ pub(in crate::task_queue) async fn analyze_book(
         });
     }
 
-    let Some(input) = analyze_book_input(runtime.main_db.database_file(), &book_id)
+    let Some(input) = analyze_book_input(&runtime.task_write_pool, &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -58,6 +58,7 @@ pub(in crate::task_queue) async fn analyze_book(
     let current_page_count = persisted.pages.len() as i64;
 
     persist_book_analysis(
+        &runtime.task_write_pool,
         runtime.main_db.database_file(),
         runtime.lucene_data_directory.as_path(),
         &book_id,
@@ -68,7 +69,7 @@ pub(in crate::task_queue) async fn analyze_book(
     .map_err(TaskExecutionError::runtime)?;
 
     adjust_analyzed_book_read_progress(
-        runtime.main_db.database_file(),
+        &runtime.task_write_pool,
         &book_id,
         &input.series_id,
         &input.previous_media_status,

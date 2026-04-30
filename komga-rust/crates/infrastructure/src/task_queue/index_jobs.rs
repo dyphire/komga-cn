@@ -172,7 +172,10 @@ mod tests {
     use super::TaskRuntimeContext;
     use super::*;
     use crate::database_handle::DatabaseHandle;
-    use crate::sqlite::{connect_main_write_context, connect_test_pool};
+    use crate::sqlite::{
+        connect_main_write_context, connect_task_pool, connect_task_write_pool, connect_test_pool,
+        default_read_max_connections,
+    };
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use image::{ImageBuffer, Rgba};
@@ -419,6 +422,12 @@ mod tests {
         .await;
         pool.close().await;
 
+        let task_write_pool = connect_task_write_pool(&database_file)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
         let runtime = TaskRuntimeContext {
             main_db: DatabaseHandle::file_backed(database_file.clone())
                 .await
@@ -431,9 +440,11 @@ mod tests {
             owns_sidecar_output: true,
             owns_search_index: true,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         };
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test").await;
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
@@ -490,6 +501,12 @@ mod tests {
             .expect("selected thumbnail row should be inserted for book-1");
         pool.close().await;
 
+        let task_write_pool = connect_task_write_pool(&database_file)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
         let runtime = TaskRuntimeContext {
             main_db: DatabaseHandle::file_backed(database_file.clone())
                 .await
@@ -502,9 +519,12 @@ mod tests {
             owns_sidecar_output: true,
             owns_search_index: true,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         };
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test")
+                .await;
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
@@ -538,7 +558,7 @@ mod tests {
         let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
         let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test").await;
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
@@ -611,7 +631,8 @@ mod tests {
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-disabled-dimensions-test",
-        );
+        )
+        .await;
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
@@ -719,6 +740,12 @@ mod tests {
         }
         pool.close().await;
 
+        let task_write_pool = connect_task_write_pool(&database_file)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
         let runtime = TaskRuntimeContext {
             main_db: DatabaseHandle::file_backed(database_file.clone())
                 .await
@@ -731,11 +758,14 @@ mod tests {
             owns_sidecar_output: true,
             owns_search_index: false,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         };
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-adjust-test",
-        );
+        )
+        .await;
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
@@ -925,6 +955,12 @@ mod tests {
         .expect("same-count incomplete series row should be inserted");
         pool.close().await;
 
+        let task_write_pool = connect_task_write_pool(&database_file)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
         let runtime = TaskRuntimeContext {
             main_db: DatabaseHandle::file_backed(database_file.clone())
                 .await
@@ -937,11 +973,14 @@ mod tests {
             owns_sidecar_output: true,
             owns_search_index: false,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         };
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-keep-test",
-        );
+        )
+        .await;
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 

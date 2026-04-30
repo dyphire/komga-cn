@@ -3,6 +3,9 @@ use super::*;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::sqlite::setup::bootstrap_pool;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 #[test]
 fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing_it_inline() {
@@ -132,8 +135,15 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
         .build()
         .expect("startup worker bootstrap skip runtime should build")
         .block_on(async {
+            let db_path = root.join("database.sqlite");
+            let task_write_pool = connect_task_write_pool(&db_path)
+                .await
+                .expect("test private write pool should open");
+            let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
+                .await
+                .expect("test private read pool should open");
             komga_infrastructure::task_queue::TaskRuntimeContext {
-                main_db: DatabaseHandle::file_backed(root.join("database.sqlite"))
+                main_db: DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
                 tasks_db_file: root.join("tasks.sqlite"),
@@ -144,6 +154,8 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
                 owns_sidecar_output: false,
                 owns_search_index: false,
                 task_pool_size: 1,
+                task_write_pool,
+                task_read_pool,
             }
         });
 
@@ -199,6 +211,13 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
             bootstrap_pool(main_db.write_pool())
                 .await
                 .expect("test schema should bootstrap");
+            let task_write_pool = connect_task_write_pool(root.join("database.sqlite"))
+                .await
+                .expect("test private write pool should open");
+            let task_read_pool =
+                connect_task_pool(root.join("database.sqlite"), default_read_max_connections())
+                    .await
+                    .expect("test private read pool should open");
             komga_infrastructure::task_queue::TaskRuntimeContext {
                 main_db,
                 tasks_db_file: root.join("tasks.sqlite"),
@@ -209,6 +228,8 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
                 owns_sidecar_output: false,
                 owns_search_index: false,
                 task_pool_size: 1,
+                task_write_pool,
+                task_read_pool,
             }
         });
 
@@ -448,8 +469,15 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         .build()
         .expect("startup scan skip runtime should build")
         .block_on(async {
+            let db_path = skip_root.join("database.sqlite");
+            let task_write_pool = connect_task_write_pool(&db_path)
+                .await
+                .expect("test private write pool should open");
+            let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
+                .await
+                .expect("test private read pool should open");
             komga_infrastructure::task_queue::TaskRuntimeContext {
-                main_db: DatabaseHandle::file_backed(skip_root.join("database.sqlite"))
+                main_db: DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
                 tasks_db_file: skip_root.join("tasks.sqlite"),
@@ -460,6 +488,8 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
                 owns_sidecar_output: false,
                 owns_search_index: false,
                 task_pool_size: 1,
+                task_write_pool,
+                task_read_pool,
             }
         });
     let mut skip_config = runtime_config_for_logging_contract(

@@ -393,7 +393,7 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test").await;
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
@@ -478,7 +478,8 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test")
+                .await;
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 3, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
@@ -624,7 +625,7 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-test").await;
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
             book_id.to_string(),
             vec![super::super::HashedPageToDelete {
@@ -734,7 +735,8 @@ mod tests {
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-missing-file-test",
-        );
+        )
+        .await;
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {
@@ -762,7 +764,8 @@ mod tests {
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-unsupported-media-test",
-        );
+        )
+        .await;
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {
@@ -788,7 +791,8 @@ mod tests {
         )
         .await;
         let mut scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-not-ready-test");
+            TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-not-ready-test")
+                .await;
 
         let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {

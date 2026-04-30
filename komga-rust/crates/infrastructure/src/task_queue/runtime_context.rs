@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use sqlx::SqlitePool;
+
 use crate::database_handle::DatabaseHandle;
 
 #[derive(Clone, Debug)]
@@ -13,6 +15,8 @@ pub struct TaskRuntimeContext {
     pub owns_sidecar_output: bool,
     pub owns_search_index: bool,
     pub task_pool_size: usize,
+    pub task_write_pool: SqlitePool,
+    pub task_read_pool: SqlitePool,
 }
 
 pub trait TaskRuntimeConfig {

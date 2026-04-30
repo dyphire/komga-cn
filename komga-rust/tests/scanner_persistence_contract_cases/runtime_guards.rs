@@ -1,6 +1,9 @@
 use super::support::*;
 use super::*;
 use komga_infrastructure::database_handle::DatabaseHandle;
+use komga_infrastructure::sqlite::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 
 #[tokio::test]
 async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_external_owned() {
@@ -20,6 +23,12 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
     fs::write(&book_path, updated_payload)
         .expect("book payload rewrite should succeed for blocked scan-output contract");
 
+    let task_write_pool = connect_task_write_pool(&fixture.paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&fixture.paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
             .await
@@ -32,8 +41,10 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         owns_sidecar_output: true,
         owns_search_index: true,
         task_pool_size: 1,
+        task_write_pool,
+        task_read_pool,
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -92,7 +103,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         .expect("book payload rewrite should succeed for unknown task contract");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
             "UNSUPPORTED_TASK:book-1",
@@ -236,6 +247,12 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
     .expect("claimed task row should be inserted");
     tasks_pool.close().await;
 
+    let task_write_pool = connect_task_write_pool(&fixture.paths.main_db)
+        .await
+        .expect("test private write pool should open");
+    let task_read_pool = connect_task_pool(&fixture.paths.main_db, default_read_max_connections())
+        .await
+        .expect("test private read pool should open");
     let runtime = TaskRuntimeContext {
         main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
             .await
@@ -248,6 +265,8 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         owns_sidecar_output: false,
         owns_search_index: false,
         task_pool_size: 1,
+        task_write_pool,
+        task_read_pool,
     };
 
     let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
@@ -305,7 +324,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .expect("initial scan-library payload precedence fixture should be written");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -369,7 +388,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     tasks_pool.close().await;
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     replay
         .process_available(&runtime)
         .await
@@ -416,7 +435,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         .expect("initial underscore scan fixture should be written");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
+    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;

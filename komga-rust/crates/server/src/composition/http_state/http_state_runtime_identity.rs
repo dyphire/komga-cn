@@ -371,7 +371,7 @@ impl IdentityService for RuntimeIdentityService {
         limit: usize,
     ) -> Result<KoboSyncPage, sqlx::Error> {
         infrastructure_runtime_identity_access::load_kobo_sync_page(
-            self.db.database_file(),
+            self.db.write_pool(),
             &user,
             &user_id,
             current_api_key_id.as_deref(),
@@ -469,7 +469,7 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn remove_sync_point(&self, sync_point_id: String) -> Result<(), sqlx::Error> {
         infrastructure_runtime_identity_access::remove_sync_point(
-            self.db.database_file(),
+            self.db.write_pool(),
             &sync_point_id,
         )
         .await

@@ -6,7 +6,8 @@ use sqlx::SqlitePool;
 
 use crate::database_handle::DatabaseHandle;
 use crate::sqlite::{
-    connect_main_write_context, connect_write_pool, evict_shared_pools_for_paths, setup,
+    connect_main_write_context, connect_task_pool, connect_task_write_pool, connect_write_pool,
+    default_read_max_connections, evict_shared_pools_for_paths, setup,
 };
 
 pub(crate) struct RuntimeTestFixture {
@@ -49,10 +50,17 @@ impl RuntimeTestFixture {
         consumes_queue: bool,
         owns_search_index: bool,
     ) -> TaskRuntimeContext {
+        let main_db = DatabaseHandle::file_backed(self.database_file.clone())
+            .await
+            .expect("runtime test main db should open");
+        let task_write_pool = connect_task_write_pool(&self.database_file)
+            .await
+            .expect("runtime test private write pool should open");
+        let task_read_pool = connect_task_pool(&self.database_file, default_read_max_connections())
+            .await
+            .expect("runtime test private read pool should open");
         TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(self.database_file.clone())
-                .await
-                .expect("runtime test main db should open"),
+            main_db,
             tasks_db_file: self.tasks_db_file.clone(),
             lucene_data_directory: self.lucene_dir.clone(),
             consumes_queue,
@@ -61,6 +69,8 @@ impl RuntimeTestFixture {
             owns_sidecar_output: true,
             owns_search_index,
             task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
         }
     }
 

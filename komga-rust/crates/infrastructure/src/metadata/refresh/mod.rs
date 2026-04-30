@@ -2,7 +2,6 @@
 
 use std::collections::BTreeSet;
 use std::io::Cursor;
-use std::path::Path;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookMetadata, BookMetadataAuthor, BookMetadataLink, BookPageRecord,
@@ -19,7 +18,6 @@ use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
 use crate::load_pdfium;
-use crate::sqlite::connect_private_write_pool;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 mod artwork_refresh;
@@ -151,13 +149,10 @@ fn thumbnail_max_edge_from_setting(value: Option<&str>) -> u32 {
 }
 
 pub async fn refresh_book_metadata(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     capabilities: &BTreeSet<String>,
 ) -> Result<RefreshBookMetadataOutcome, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let book_id = book_id.to_string();
     let book_id_for_events = book_id.clone();
     let outcome = {
@@ -178,7 +173,7 @@ pub async fn refresh_book_metadata(
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve book path for metadata refresh '{book_id}': {error}")
@@ -197,20 +192,20 @@ pub async fn refresh_book_metadata(
                 import_epub_book && epub_provider_matches_capabilities(capabilities);
             should_emit_book_changed |=
                 import_barcode_isbn && barcode_provider_matches_capabilities(capabilities);
-            if let Some(sidecar_url) = load_sidecar_url_for_parent(&pool, &book_url, true).await? {
+            if let Some(sidecar_url) = load_sidecar_url_for_parent(pool, &book_url, true).await? {
                 let sidecar_path = resolve_library_item_path(&library_root, &sidecar_url);
                 if comicinfo_provider_matches_capabilities(capabilities)
                     && let Ok(xml) = tokio::fs::read_to_string(&sidecar_path).await
                 {
                     if import_comicinfo_book {
                         let patch = extract_comicinfo_book_patch(&xml);
-                        apply_book_metadata_import_patch(&pool, &book_id, patch).await?;
+                        apply_book_metadata_import_patch(pool, &book_id, patch).await?;
                     }
 
                     if import_comicinfo_readlist {
                         for readlist in extract_comicinfo_readlists(&xml) {
                             if let Some(readlist_id) =
-                                upsert_comicinfo_readlist(&pool, &book_id, readlist).await?
+                                upsert_comicinfo_readlist(pool, &book_id, readlist).await?
                             {
                                 changed_readlist_ids.insert(readlist_id);
                             }
@@ -221,15 +216,15 @@ pub async fn refresh_book_metadata(
 
             if import_epub_book
                 && epub_provider_matches_capabilities(capabilities)
-                && let Some(media) = load_book_media_for_refresh(&pool, &book_id).await?
+                && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
                 && let Some(package_document) = load_epub_package_document(&media).await
             {
                 let patch = extract_epub_book_patch(&package_document);
-                apply_book_metadata_import_patch(&pool, &book_id, patch).await?;
+                apply_book_metadata_import_patch(pool, &book_id, patch).await?;
             }
 
             if import_barcode_isbn && barcode_provider_matches_capabilities(capabilities) {
-                refresh_barcode_isbn(&pool, &book_id).await?;
+                refresh_barcode_isbn(pool, &book_id).await?;
             }
         }
 
@@ -241,7 +236,7 @@ pub async fn refresh_book_metadata(
             "#,
         )
         .bind(&book_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("failed to refresh BOOK_METADATA for '{book_id}': {error}"))?;
 
@@ -253,7 +248,7 @@ pub async fn refresh_book_metadata(
             "#,
         )
         .bind(&book_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!("failed to refresh BOOK row timestamp for '{book_id}': {error}")
@@ -268,7 +263,7 @@ pub async fn refresh_book_metadata(
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("failed to resolve book SSE context for '{book_id}': {error}"))?;
         let series_id = book_context
@@ -285,7 +280,6 @@ pub async fn refresh_book_metadata(
             book_changed: should_emit_book_changed,
         }
     };
-    pool.close().await;
 
     if outcome.book_changed
         && let (Some(series_id), Some(library_id)) =
@@ -1017,10 +1011,7 @@ async fn assign_comicinfo_readlist_number(
     }
 }
 
-pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn refresh_series_metadata(pool: &SqlitePool, series_id: &str) -> Result<(), String> {
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
@@ -1043,7 +1034,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
                 "#,
         )
         .bind(&series_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve series path for metadata refresh '{series_id}': {error}")
@@ -1065,7 +1056,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
                 import_comicinfo_series || import_epub_series || import_mylar_series || oneshot;
 
             apply_series_metadata_from_book_imports(
-                &pool,
+                pool,
                 &series_id,
                 resolved_library_root.as_path(),
                 import_comicinfo_series,
@@ -1076,7 +1067,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
             .await?;
 
             apply_mylar_series_import(
-                &pool,
+                pool,
                 &series_id,
                 resolved_library_root.as_path(),
                 &series_url,
@@ -1086,7 +1077,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
             .await?;
 
             if oneshot {
-                apply_oneshot_series_metadata_import(&pool, &series_id).await?;
+                apply_oneshot_series_metadata_import(pool, &series_id).await?;
             }
         }
 
@@ -1098,7 +1089,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
                 "#,
         )
         .bind(&series_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("failed to refresh SERIES_METADATA for '{series_id}': {error}"))?;
 
@@ -1110,7 +1101,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
                 "#,
         )
         .bind(&series_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("failed to refresh SERIES row for '{series_id}': {error}"))?;
 
@@ -1123,7 +1114,7 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
                 "#,
         )
         .bind(&series_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve LIBRARY_ID for refreshed series '{series_id}': {error}")
@@ -1135,7 +1126,6 @@ pub async fn refresh_series_metadata(database_file: &Path, series_id: &str) -> R
             )
         })
     }?;
-    pool.close().await;
 
     if should_emit_series_changed && let Some(library_id) = library_id.as_deref() {
         emit_series_changed_event(&series_id_for_events, library_id);

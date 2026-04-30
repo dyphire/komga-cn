@@ -13,17 +13,6 @@ use crate::sqlite::setup;
 pub const DEFAULT_MAX_CONNECTIONS: u32 = 4;
 pub const WRITE_MAX_CONNECTIONS: u32 = 1;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SharedSqlitePoolSnapshot {
-    pub path: PathBuf,
-    pub max_connections: u32,
-    pub min_connections: u32,
-    pub total_connections: u32,
-    pub idle_connections: u32,
-    pub in_use_connections: u32,
-    pub is_closed: bool,
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PoolKey {
     path: PathBuf,
@@ -54,45 +43,121 @@ fn shared_pools() -> &'static Mutex<HashMap<PoolKey, SqlitePool>> {
     SHARED_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn shared_pool_snapshots_for_paths(paths: &[PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
-    if paths.is_empty() {
-        return Vec::new();
-    }
-
-    let target_paths = paths
-        .iter()
-        .map(|path| absolute_pool_path(path.as_path()))
-        .collect::<HashSet<_>>();
+fn get_shared_pool(pool_key: &PoolKey) -> Option<SqlitePool> {
     let mut pools = shared_pools()
         .lock()
         .expect("shared sqlite pool map lock should not be poisoned");
+    let pool = pools.get(pool_key)?;
 
-    let closed_keys = pools
-        .iter()
-        .filter(|(_, pool)| pool.is_closed())
-        .map(|(pool_key, _)| pool_key.clone())
-        .collect::<Vec<_>>();
-    for pool_key in closed_keys {
-        pools.remove(&pool_key);
+    if pool.is_closed() {
+        pools.remove(pool_key);
+        return None;
     }
 
-    pools
-        .iter()
-        .filter(|(pool_key, _)| target_paths.contains(&pool_key.path))
-        .map(|(pool_key, pool)| {
-            let total_connections = pool.size();
-            let idle_connections = u32::try_from(pool.num_idle()).unwrap_or(u32::MAX);
-            SharedSqlitePoolSnapshot {
-                path: pool_key.path.clone(),
-                max_connections: pool.options().get_max_connections(),
-                min_connections: pool.options().get_min_connections(),
-                total_connections,
-                idle_connections,
-                in_use_connections: total_connections.saturating_sub(idle_connections),
-                is_closed: pool.is_closed(),
-            }
-        })
-        .collect()
+    Some(pool.clone())
+}
+
+fn insert_shared_pool(pool_key: PoolKey, pool: &SqlitePool) -> Option<SqlitePool> {
+    let mut pools = shared_pools()
+        .lock()
+        .expect("shared sqlite pool map lock should not be poisoned");
+    if let Some(existing) = pools.get(&pool_key) {
+        if existing.is_closed() {
+            pools.remove(&pool_key);
+        } else {
+            return Some(existing.clone());
+        }
+    }
+
+    pools.insert(pool_key, pool.clone());
+    None
+}
+
+pub async fn connect_shared_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
+}
+
+pub async fn connect_read_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_shared_pool(path, default_read_max_connections()).await
+}
+
+pub async fn connect_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_shared_pool(path, WRITE_MAX_CONNECTIONS).await
+}
+
+pub async fn connect_main_write_context(
+    path: impl AsRef<Path>,
+) -> Result<SqlitePersistenceContext, sqlx::Error> {
+    let pool =
+        connect_bootstrapped_pool(path, WRITE_MAX_CONNECTIONS, BootstrapTarget::Main).await?;
+    Ok(SqlitePersistenceContext::new(pool))
+}
+
+async fn connect_bootstrapped_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+    bootstrap_target: BootstrapTarget,
+) -> Result<SqlitePool, sqlx::Error> {
+    let pool_key = PoolKey::new(path.as_ref(), max_connections);
+
+    if let Some(pool) = get_shared_pool(&pool_key) {
+        bootstrap_pool_for_target(&pool, bootstrap_target).await?;
+        return Ok(pool);
+    }
+
+    let created_pool = SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .connect_with(file_backed_connect_options(&pool_key.path))
+        .await?;
+    bootstrap_pool_for_target(&created_pool, bootstrap_target).await?;
+
+    if let Some(existing_pool) = insert_shared_pool(pool_key, &created_pool) {
+        created_pool.close().await;
+        bootstrap_pool_for_target(&existing_pool, bootstrap_target).await?;
+        return Ok(existing_pool);
+    }
+
+    Ok(created_pool)
+}
+
+#[derive(Copy, Clone)]
+enum BootstrapTarget {
+    None,
+    Main,
+}
+
+async fn bootstrap_pool_for_target(
+    pool: &SqlitePool,
+    bootstrap_target: BootstrapTarget,
+) -> Result<(), sqlx::Error> {
+    match bootstrap_target {
+        BootstrapTarget::None => Ok(()),
+        BootstrapTarget::Main => setup::bootstrap_pool(pool).await,
+    }
+}
+
+pub async fn connect_task_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .connect_with(file_backed_connect_options(path))
+        .await
+}
+
+pub async fn connect_task_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_task_pool(path, WRITE_MAX_CONNECTIONS).await
+}
+
+pub async fn connect_test_pool(
+    path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    connect_task_pool(path, max_connections).await
 }
 
 pub async fn close_all_shared_pools() {
@@ -136,34 +201,73 @@ pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) -> Vec<SqlitePool> {
     removed
 }
 
-fn get_shared_pool(pool_key: &PoolKey) -> Option<SqlitePool> {
-    let mut pools = shared_pools()
-        .lock()
-        .expect("shared sqlite pool map lock should not be poisoned");
-    let pool = pools.get(pool_key)?;
-
-    if pool.is_closed() {
-        pools.remove(pool_key);
-        return None;
-    }
-
-    Some(pool.clone())
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedSqlitePoolSnapshot {
+    pub path: PathBuf,
+    pub max_connections: u32,
+    pub min_connections: u32,
+    pub total_connections: u32,
+    pub idle_connections: u32,
+    pub in_use_connections: u32,
+    pub is_closed: bool,
 }
 
-fn insert_shared_pool(pool_key: PoolKey, pool: &SqlitePool) -> Option<SqlitePool> {
+pub fn shared_pool_snapshots_for_paths(paths: &[PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    let target_paths = paths
+        .iter()
+        .map(|path| absolute_pool_path(path.as_path()))
+        .collect::<HashSet<_>>();
     let mut pools = shared_pools()
         .lock()
         .expect("shared sqlite pool map lock should not be poisoned");
-    if let Some(existing) = pools.get(&pool_key) {
-        if existing.is_closed() {
-            pools.remove(&pool_key);
-        } else {
-            return Some(existing.clone());
-        }
+
+    let closed_keys = pools
+        .iter()
+        .filter(|(_, pool)| pool.is_closed())
+        .map(|(pool_key, _)| pool_key.clone())
+        .collect::<Vec<_>>();
+    for pool_key in closed_keys {
+        pools.remove(&pool_key);
     }
 
-    pools.insert(pool_key, pool.clone());
-    None
+    pools
+        .iter()
+        .filter(|(pool_key, _)| target_paths.contains(&pool_key.path))
+        .map(|(pool_key, pool)| {
+            let total_connections = pool.size();
+            let idle_connections = u32::try_from(pool.num_idle()).unwrap_or(u32::MAX);
+            SharedSqlitePoolSnapshot {
+                path: pool_key.path.clone(),
+                max_connections: pool.options().get_max_connections(),
+                min_connections: pool.options().get_min_connections(),
+                total_connections,
+                idle_connections,
+                in_use_connections: total_connections.saturating_sub(idle_connections),
+                is_closed: pool.is_closed(),
+            }
+        })
+        .collect()
+}
+
+pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+}
+
+/// Sizing heuristic for read-heavy pools: `max(4, NumCPU)`.
+pub fn default_read_max_connections() -> u32 {
+    let minimum = usize::try_from(DEFAULT_MAX_CONNECTIONS).unwrap_or(usize::MAX);
+    let available = std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(minimum);
+
+    u32::try_from(available.max(minimum)).unwrap_or(u32::MAX)
 }
 
 pub fn reject_or_quarantine_pool_topology(
@@ -180,116 +284,6 @@ pub fn reject_or_quarantine_pool_topology(
     Ok(())
 }
 
-pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptions {
-    SqliteConnectOptions::new()
-        .filename(path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-}
-
-/// Read-heavy SQLite entry points use a small shared pool sized
-/// `max(4, NumCPU)` pattern, while explicit write paths stay serialized behind
-/// `WRITE_MAX_CONNECTIONS` to avoid WAL writer contention.
-pub fn default_read_max_connections() -> u32 {
-    let minimum = usize::try_from(DEFAULT_MAX_CONNECTIONS).unwrap_or(usize::MAX);
-    let available = std::thread::available_parallelism()
-        .map(|value| value.get())
-        .unwrap_or(minimum);
-
-    u32::try_from(available.max(minimum)).unwrap_or(u32::MAX)
-}
-
-pub async fn connect_read_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
-    connect_shared_pool(path, default_read_max_connections()).await
-}
-
-pub async fn connect_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
-    connect_shared_pool(path, WRITE_MAX_CONNECTIONS).await
-}
-
-/// Test code should use private pools by default so fixtures stay isolated and do
-/// not participate in the process-wide shared sqlx pool topology.
-pub async fn connect_test_pool(
-    path: impl AsRef<Path>,
-    max_connections: u32,
-) -> Result<SqlitePool, sqlx::Error> {
-    connect_private_task_pool(path, max_connections).await
-}
-
-/// Task workers should use private pools so background jobs do not attach to the
-/// process-wide shared pool topology used by HTTP and other runtime access paths.
-pub async fn connect_private_task_pool(
-    path: impl AsRef<Path>,
-    max_connections: u32,
-) -> Result<SqlitePool, sqlx::Error> {
-    SqlitePoolOptions::new()
-        .max_connections(max_connections)
-        .connect_with(file_backed_connect_options(path))
-        .await
-}
-
-pub async fn connect_private_write_pool(path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
-    connect_private_task_pool(path, WRITE_MAX_CONNECTIONS).await
-}
-
-pub async fn connect_shared_pool(
-    path: impl AsRef<Path>,
-    max_connections: u32,
-) -> Result<SqlitePool, sqlx::Error> {
-    connect_bootstrapped_pool(path, max_connections, BootstrapTarget::None).await
-}
-
-async fn connect_bootstrapped_pool(
-    path: impl AsRef<Path>,
-    max_connections: u32,
-    bootstrap_target: BootstrapTarget,
-) -> Result<SqlitePool, sqlx::Error> {
-    let pool_key = PoolKey::new(path.as_ref(), max_connections);
-
-    if let Some(pool) = get_shared_pool(&pool_key) {
-        bootstrap_pool_for_target(&pool, bootstrap_target).await?;
-        return Ok(pool);
-    }
-
-    let created_pool = SqlitePoolOptions::new()
-        .max_connections(max_connections)
-        .connect_with(file_backed_connect_options(&pool_key.path))
-        .await?;
-    bootstrap_pool_for_target(&created_pool, bootstrap_target).await?;
-
-    if let Some(existing_pool) = insert_shared_pool(pool_key, &created_pool) {
-        created_pool.close().await;
-        bootstrap_pool_for_target(&existing_pool, bootstrap_target).await?;
-        return Ok(existing_pool);
-    }
-
-    Ok(created_pool)
-}
-
-async fn bootstrap_pool_for_target(
-    pool: &SqlitePool,
-    bootstrap_target: BootstrapTarget,
-) -> Result<(), sqlx::Error> {
-    match bootstrap_target {
-        BootstrapTarget::None => Ok(()),
-        BootstrapTarget::Main => setup::bootstrap_pool(pool).await,
-    }
-}
-
-pub async fn connect_main_write_context(
-    path: impl AsRef<Path>,
-) -> Result<SqlitePersistenceContext, sqlx::Error> {
-    let pool =
-        connect_bootstrapped_pool(path, WRITE_MAX_CONNECTIONS, BootstrapTarget::Main).await?;
-    Ok(SqlitePersistenceContext::new(pool))
-}
-
-#[derive(Copy, Clone)]
-enum BootstrapTarget {
-    None,
-    Main,
-}
-
 pub struct SqliteTempPool {
     pool: SqlitePool,
     db_path: PathBuf,
@@ -298,8 +292,6 @@ pub struct SqliteTempPool {
 impl SqliteTempPool {
     pub async fn new(case_id: &str) -> Result<Self, sqlx::Error> {
         let db_path = deterministic_temp_db_path(case_id);
-        // Temp pools are short-lived test fixtures; bypassing the shared cache keeps Windows
-        // cleanup deterministic because there is only one pool lifecycle to shut down.
         let pool = SqlitePoolOptions::new()
             .max_connections(DEFAULT_MAX_CONNECTIONS)
             .connect_with(file_backed_connect_options(&db_path))

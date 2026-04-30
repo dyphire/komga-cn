@@ -219,7 +219,10 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
         .expect("existing thumbnails should be deleted before small generated test");
     cleanup_pool.close().await;
 
-    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("pool for generate_book_thumbnail");
+    generate_book_thumbnail(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before small generated test");
 
@@ -380,7 +383,10 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
             .expect("existing thumbnails should be deleted before generated-source test");
         cleanup_pool.close().await;
 
-        generate_book_thumbnail(paths.main_db.as_path(), book_id)
+        let pool = connect_test_pool(paths.main_db.as_path(), 1)
+            .await
+            .expect("pool for generate_book_thumbnail");
+        generate_book_thumbnail(&pool, book_id)
             .await
             .expect("generate_book_thumbnail should succeed before generated-source test");
 

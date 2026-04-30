@@ -8,7 +8,6 @@ use sqlx::{Row, SqlitePool};
 
 use crate::persisted_paths::{resolve_rooted_path, resolve_stored_path};
 use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
-use crate::sqlite::connect_private_write_pool;
 
 use super::scan_models::*;
 use super::scan_sse::{
@@ -648,12 +647,9 @@ WHERE SERIES_ID = ?"#,
 }
 
 pub(crate) async fn load_library_scan_config(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<LibraryScanConfig>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY
 FROM LIBRARY
@@ -661,12 +657,11 @@ WHERE ID = ?
 LIMIT 1"#,
     )
     .bind(library_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load library root: {error}"))?;
 
     let Some(row) = row else {
-        pool.close().await;
         return Ok(None);
     };
 
@@ -676,13 +671,12 @@ FROM LIBRARY_EXCLUSIONS
 WHERE LIBRARY_ID = ?"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("failed to load library exclusions for '{library_id}': {error}"))?
     .into_iter()
     .map(|row| row.get::<String, _>("EXCLUSION"))
     .collect::<Vec<_>>();
-    pool.close().await;
 
     Ok(Some(LibraryScanConfig {
         root: row.get::<String, _>("ROOT"),
@@ -696,18 +690,16 @@ WHERE LIBRARY_ID = ?"#,
 }
 
 pub(crate) async fn scan_library(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     deep_scan: bool,
 ) -> Result<ScannedLibrary, String> {
-    let Some(scan_config) = load_library_scan_config(database_file, library_id).await? else {
+    let Some(scan_config) = load_library_scan_config(pool, library_id).await? else {
         return Ok(unavailable_scanned_library());
     };
 
-    let existing_books_by_url =
-        load_existing_scanned_books_by_url(database_file, library_id).await?;
-    let existing_series_by_url =
-        load_existing_scanned_series_by_url(database_file, library_id).await?;
+    let existing_books_by_url = load_existing_scanned_books_by_url(pool, library_id).await?;
+    let existing_series_by_url = load_existing_scanned_series_by_url(pool, library_id).await?;
 
     build_scanned_library(
         scan_config,
@@ -954,12 +946,9 @@ fn build_scanned_library(
 }
 
 pub(crate) async fn library_empty_trash_after_scan(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let value = sqlx::query(
         r#"SELECT EMPTY_TRASH_AFTER_SCAN
 FROM LIBRARY
@@ -967,26 +956,22 @@ WHERE ID = ?
 LIMIT 1"#,
     )
     .bind(library_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| {
         format!("failed to load empty-trash-after-scan flag for '{library_id}': {error}")
     })?
     .map(|row| row.get::<bool, _>("EMPTY_TRASH_AFTER_SCAN"))
     .unwrap_or(false);
-    pool.close().await;
 
     Ok(value)
 }
 
 pub(crate) async fn persist_scanned_library(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     scanned: &ScannedLibrary,
 ) -> Result<PersistScannedLibraryOutcome, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let library_id = library_id.to_string();
     let outcome: PersistScannedLibraryOutcome = 'outcome: {
         let mut book_metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
@@ -1001,7 +986,7 @@ WHERE ID = ?
 LIMIT 1"#,
         )
         .bind(&library_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to load library availability state for '{library_id}': {error}")
@@ -1016,7 +1001,7 @@ SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
             )
             .bind(&library_id)
-            .execute(&pool)
+            .execute(pool)
             .await
             .map_err(|error| {
                 format!("failed to mark library unavailable for '{library_id}': {error}")
@@ -1037,7 +1022,7 @@ SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
             )
             .bind(&library_id)
-            .execute(&pool)
+            .execute(pool)
             .await
             .map_err(|error| {
                 format!("failed to clear library unavailable marker for '{library_id}': {error}")
@@ -1056,7 +1041,7 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
             )
             .bind(&library_id)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await
             .map_err(|error| {
                 format!("failed to query existing SERIES rows for '{library_id}': {error}")
@@ -1068,7 +1053,7 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
             )
             .bind(&library_id)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await
             .map_err(|error| {
                 format!("failed to query existing BOOK rows for '{library_id}': {error}")
@@ -1104,7 +1089,7 @@ SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
                 )
                 .bind(book_id)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| {
                     format!("failed to soft-delete missing BOOK '{book_id}': {error}")
@@ -1126,7 +1111,7 @@ SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
                 )
                 .bind(series_id)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| {
                     format!("failed to soft-delete missing SERIES '{series_id}': {error}")
@@ -1151,7 +1136,7 @@ SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
                 )
                 .bind(book_id)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| {
                     format!("failed to soft-delete missing BOOK '{book_id}': {error}")
@@ -1192,7 +1177,7 @@ WHERE ID = ?
             .bind(&series.series_url)
             .bind(&library_id)
             .bind(series.oneshot)
-            .execute(&pool)
+            .execute(pool)
             .await
             .map_err(|error| format!("failed to update SERIES rows: {error}"))?
             .rows_affected();
@@ -1213,7 +1198,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     .bind(&series.series_url)
                     .bind(&library_id)
                     .bind(series.oneshot)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .map_err(|error| format!("failed to insert SERIES rows: {error}"))?
                     .rows_affected();
@@ -1233,7 +1218,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                 }
             }
 
-            ensure_series_metadata_seed(&pool, series)
+            ensure_series_metadata_seed(pool, series)
                 .await
                 .map_err(|error| {
                     format!(
@@ -1275,7 +1260,7 @@ WHERE ID = ?
                     .bind(book.file_size)
                     .bind(&library_id)
                     .bind(book.oneshot)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .map_err(|error| format!("failed to update BOOK rows: {error}"))?
                     .rows_affected();
@@ -1298,7 +1283,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             .bind(book.file_size)
                             .bind(&library_id)
                             .bind(book.oneshot)
-                            .execute(&pool)
+                            .execute(pool)
                             .await
                             .map_err(|error| format!("failed to insert BOOK rows: {error}"))?
                             .rows_affected();
@@ -1328,7 +1313,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                     }
                 }
 
-                ensure_book_metadata_seed(&pool, book)
+                ensure_book_metadata_seed(pool, book)
                     .await
                     .map_err(|error| {
                         format!(
@@ -1347,7 +1332,7 @@ WHERE FILE_NAME = ?
                     .bind(book.file_size)
                     .bind(&book.file_name)
                     .bind(&book.book_id)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .map_err(|error| format!("failed to update MEDIA_FILE rows: {error}"))?
                     .rows_affected();
@@ -1360,7 +1345,7 @@ VALUES (?, ?, ?)"#,
                         .bind(&book.file_name)
                         .bind(&book.book_id)
                         .bind(book.file_size)
-                        .execute(&pool)
+                        .execute(pool)
                         .await
                         .map_err(|error| format!("failed to insert MEDIA_FILE rows: {error}"))?;
                     }
@@ -1383,7 +1368,7 @@ SET STATUS = 'OUTDATED'
 WHERE BOOK_ID = ?"#,
             )
             .bind(book_id)
-            .execute(&pool)
+            .execute(pool)
             .await
             .map_err(|error| {
                 format!(
@@ -1403,7 +1388,7 @@ WHERE URL = ?
             .bind(sidecar.last_modified_unix_seconds)
             .bind(&sidecar.url)
             .bind(&library_id)
-            .execute(&pool)
+            .execute(pool)
             .await
             .map_err(|error| format!("failed to update SIDECAR rows: {error}"))?
             .rows_affected();
@@ -1417,7 +1402,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
                     .bind(&sidecar.parent_url)
                     .bind(sidecar.last_modified_unix_seconds)
                     .bind(&library_id)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .map_err(|error| format!("failed to insert SIDECAR rows: {error}"))?;
             }
@@ -1430,7 +1415,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
             .collect::<HashSet<_>>();
         let existing_sidecar_urls = sqlx::query(r#"SELECT URL FROM SIDECAR WHERE LIBRARY_ID = ?"#)
             .bind(&library_id)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await
             .map_err(|error| format!("failed to load SIDECAR rows for cleanup: {error}"))?;
         for row in existing_sidecar_urls {
@@ -1441,7 +1426,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
             sqlx::query(r#"DELETE FROM SIDECAR WHERE LIBRARY_ID = ? AND URL = ?"#)
                 .bind(&library_id)
                 .bind(&url)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| format!("failed to delete stale SIDECAR row: {error}"))?;
         }
@@ -1455,14 +1440,14 @@ SET BOOK_COUNT = (SELECT COUNT(*)
 WHERE LIBRARY_ID = ?"#,
         )
         .bind(&library_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!("failed to refresh series book counts after scan for '{library_id}': {error}")
         })?;
 
         let renumbered_book_ids =
-                resort_scanned_series_books(&pool, &discovered_series_ids).await.map_err(
+                resort_scanned_series_books(pool, &discovered_series_ids).await.map_err(
                     |error| {
                         format!(
                             "failed to apply Kotlin-like series numbering after scan for '{library_id}': {error}"
@@ -1472,7 +1457,7 @@ WHERE LIBRARY_ID = ?"#,
         let library_root = resolve_stored_path(
             sqlx::query("SELECT ROOT FROM LIBRARY WHERE ID = ? LIMIT 1")
                 .bind(&library_id)
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await
                 .map_err(|error| {
                     format!("failed to resolve library root for restore in '{library_id}': {error}")
@@ -1481,12 +1466,12 @@ WHERE LIBRARY_ID = ?"#,
                 .as_str(),
         );
         let restored_series_matches =
-            try_restore_deleted_series(&pool, library_root.as_path(), &inserted_series).await?;
+            try_restore_deleted_series(pool, library_root.as_path(), &inserted_series).await?;
         for restored in &restored_series_matches {
             changed_series_ids.insert(restored.inserted_series_id.clone());
         }
         let (restored_series_ids, restored_book_metadata_refreshes) =
-            try_restore_deleted_books(&pool, library_root.as_path(), &inserted_books).await?;
+            try_restore_deleted_books(pool, library_root.as_path(), &inserted_books).await?;
         changed_series_ids.extend(restored_series_ids);
         book_metadata_refreshes.extend(restored_book_metadata_refreshes);
         for restored in &restored_series_matches {
@@ -1494,7 +1479,7 @@ WHERE LIBRARY_ID = ?"#,
             let deleted_book_ids =
                 sqlx::query("SELECT ID FROM BOOK WHERE SERIES_ID = ? ORDER BY ID ASC")
                     .bind(&restored.deleted_series_id)
-                    .fetch_all(&pool)
+                    .fetch_all(pool)
                     .await
                     .map_err(|error| {
                         format!("failed to load restored legacy series books for cleanup: {error}")
@@ -1504,7 +1489,7 @@ WHERE LIBRARY_ID = ?"#,
                 for sql in DELETE_BOOK_DEPENDENCY_SQL {
                     sqlx::query(sql)
                         .bind(&deleted_book_id)
-                        .execute(&pool)
+                        .execute(pool)
                         .await
                         .map_err(|error| {
                             format!(
@@ -1515,7 +1500,7 @@ WHERE LIBRARY_ID = ?"#,
             }
             sqlx::query("DELETE FROM BOOK WHERE SERIES_ID = ?")
                 .bind(&restored.deleted_series_id)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| {
                     format!("failed to delete restored legacy series BOOK rows: {error}")
@@ -1523,7 +1508,7 @@ WHERE LIBRARY_ID = ?"#,
             for sql in DELETE_SERIES_DEPENDENCY_SQL {
                 sqlx::query(sql)
                     .bind(&restored.deleted_series_id)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .map_err(|error| {
                         format!("failed to delete restored legacy series dependencies: {error}")
@@ -1531,7 +1516,7 @@ WHERE LIBRARY_ID = ?"#,
             }
             sqlx::query("DELETE FROM SERIES WHERE ID = ?")
                 .bind(&restored.deleted_series_id)
-                .execute(&pool)
+                .execute(pool)
                 .await
                 .map_err(|error| format!("failed to delete restored legacy SERIES row: {error}"))?;
         }
@@ -1544,8 +1529,6 @@ WHERE LIBRARY_ID = ?"#,
             runtime_events: runtime_events.events,
         };
     };
-
-    pool.close().await;
     emit_scanned_library_runtime_sse_events(&library_id, &outcome);
     Ok(outcome)
 }
@@ -1635,7 +1618,7 @@ WHERE BOOK_ID = ?"#,
 }
 
 pub(crate) async fn load_changed_sidecars(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     scanned_sidecars: &[ScannedSidecarRow],
 ) -> Result<Vec<String>, String> {
@@ -1643,9 +1626,6 @@ pub(crate) async fn load_changed_sidecars(
         return Ok(Vec::new());
     }
 
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let existing_rows = sqlx::query(
         r#"SELECT URL,
        CASE
@@ -1656,10 +1636,9 @@ FROM SIDECAR
 WHERE LIBRARY_ID = ?"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("failed to load existing sidecars for '{library_id}': {error}"))?;
-    pool.close().await;
 
     let existing = existing_rows
         .into_iter()
@@ -1738,12 +1717,9 @@ WHERE EXISTS (SELECT 1 FROM BOOK WHERE ID = ? AND DELETED_DATE IS NULL)"#,
 }
 
 async fn load_existing_scanned_books_by_url(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<HashMap<String, ExistingScannedBookRow>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT ID, URL, SERIES_ID, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM BOOK
@@ -1751,12 +1727,11 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to load existing BOOK rows for deep scan in '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -1774,12 +1749,9 @@ WHERE LIBRARY_ID = ?
 }
 
 async fn load_existing_scanned_series_by_url(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<HashMap<String, ExistingScannedSeriesRow>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT URL, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM SERIES
@@ -1787,12 +1759,11 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to load existing SERIES rows for scan in '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -2276,7 +2247,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             .execute(&pool)
             .await
             .expect("readlist book row should be inserted");
-        pool.close().await;
 
         let scanned = ScannedLibrary {
             root_available: true,
@@ -2304,7 +2274,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             discovered_book_ids: HashSet::from(["book-new".to_string()]),
         };
 
-        let outcome = persist_scanned_library(db_path.as_path(), "library-1", &scanned)
+        let outcome = persist_scanned_library(&pool, "library-1", &scanned)
             .await
             .expect("restore-book scan persist should succeed");
         assert!(outcome.changed_series_ids.iter().any(|id| id == "series-1"));
@@ -2541,7 +2511,6 @@ VALUES (?, ?, ?, ?)"#,
             .await
             .expect("deleted series book metadata should be inserted");
         }
-        pool.close().await;
 
         let scanned = ScannedLibrary {
             root_available: true,
@@ -2583,7 +2552,7 @@ VALUES (?, ?, ?, ?)"#,
             ]),
         };
 
-        let outcome = persist_scanned_library(db_path.as_path(), "library-1", &scanned)
+        let outcome = persist_scanned_library(&pool, "library-1", &scanned)
             .await
             .expect("restore-series scan persist should succeed");
         assert!(
@@ -2658,10 +2627,9 @@ VALUES (?, ?, ?, ?)"#,
         .execute(&pool)
         .await
         .expect("legacy integer sidecar row should be inserted");
-        pool.close().await;
 
         let changed = load_changed_sidecars(
-            db_path.as_path(),
+            &pool,
             "library-1",
             &[ScannedSidecarRow {
                 url: "/library/Series-A/Book-001.xml".to_string(),

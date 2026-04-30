@@ -1,6 +1,7 @@
 use super::support::*;
 use super::*;
 use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
+use komga_infrastructure::sqlite::connect_test_pool;
 use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 
 #[tokio::test]
@@ -189,7 +190,10 @@ async fn pipeline_run_public_seam_keeps_runtime_follow_ups_ahead_of_sidecar_refr
         .await
         .expect("scanner pipeline fixture should be created");
 
-    let pipeline = SqliteFilesystemLibraryScanPipeline::new(fixture.paths.main_db.clone());
+    let read_pool = connect_test_pool(&fixture.paths.main_db, 1)
+        .await
+        .expect("temporary sqlite db should open for pipeline");
+    let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool);
     let result = pipeline
         .run(ScanOneLibrary::new("library-1", false))
         .await

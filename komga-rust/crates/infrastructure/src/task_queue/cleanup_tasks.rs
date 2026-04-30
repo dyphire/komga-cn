@@ -1,11 +1,8 @@
-use std::path::Path;
-
 use sqlx::{Row, Sqlite, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use super::*;
 use crate::sql::task_queue::{EMPTY_TRASH_BOOK_DEPENDENCY_SQL, EMPTY_TRASH_SERIES_DEPENDENCY_SQL};
-use crate::sqlite::connect_private_write_pool;
 
 pub(super) async fn empty_trash(
     runtime: &RuntimeConfig,
@@ -16,7 +13,7 @@ pub(super) async fn empty_trash(
         return Ok(());
     }
 
-    empty_trash_rows(runtime.main_db.database_file(), library_id)
+    empty_trash_rows(&runtime.task_write_pool, library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -27,7 +24,7 @@ pub(super) async fn cleanup_empty_sets(runtime: &RuntimeConfig) -> Result<(), Ta
         return Ok(());
     }
 
-    cleanup_empty_sets_rows(runtime.main_db.database_file())
+    cleanup_empty_sets_rows(&runtime.task_write_pool)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -38,10 +35,7 @@ struct PersistedCleanupEmptySetsFlags {
     delete_readlists: bool,
 }
 
-pub async fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> Result<(), String> {
     let mut tx = pool
         .begin()
         .await
@@ -136,7 +130,6 @@ pub async fn empty_trash_rows(database_file: &Path, library_id: &str) -> Result<
     tx.commit().await.map_err(|error| {
         format!("failed to commit empty-trash transaction for library '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(())
 }
@@ -351,11 +344,8 @@ fn trim_leading_zeroes(bytes: &[u8]) -> &[u8] {
     }
 }
 
-pub async fn cleanup_empty_sets_rows(database_file: &Path) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
-    let flags = load_cleanup_empty_sets_flags_from_pool(&pool).await?;
+pub async fn cleanup_empty_sets_rows(pool: &SqlitePool) -> Result<(), String> {
+    let flags = load_cleanup_empty_sets_flags_from_pool(pool).await?;
     let mut tx = pool
         .begin()
         .await
@@ -388,7 +378,6 @@ pub async fn cleanup_empty_sets_rows(database_file: &Path) -> Result<(), String>
     tx.commit()
         .await
         .map_err(|error| format!("failed to commit cleanup-empty-sets transaction: {error}"))?;
-    pool.close().await;
 
     Ok(())
 }

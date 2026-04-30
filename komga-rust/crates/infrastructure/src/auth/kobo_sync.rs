@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use komga_application::identity_access::{
     AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, KoboSyncPointBook, KoboSyncReadListSnapshot,
@@ -7,9 +6,7 @@ use komga_application::identity_access::{
 };
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
-use sqlx::Row;
-
-use crate::sqlite::connect_private_write_pool;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone, Debug)]
 struct PersistedSyncPoint {
@@ -42,7 +39,7 @@ struct OnDeckSeedRow {
 }
 
 pub async fn load_kobo_sync_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     user: &AuthUser,
     user_id: &str,
     current_api_key_id: Option<&str>,
@@ -50,7 +47,6 @@ pub async fn load_kobo_sync_page(
     last_successful_sync_point_id: Option<&str>,
     limit: usize,
 ) -> Result<KoboSyncPage, sqlx::Error> {
-    let pool = connect_private_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let to_sync_point = if let Some(sync_point_id) = ongoing_sync_point_id {
@@ -85,11 +81,7 @@ pub async fn load_kobo_sync_page(
     })
 }
 
-pub async fn remove_sync_point(
-    database_file: &Path,
-    sync_point_id: &str,
-) -> Result<(), sqlx::Error> {
-    let pool = connect_private_write_pool(database_file).await?;
+pub async fn remove_sync_point(pool: &SqlitePool, sync_point_id: &str) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     delete_sync_point_children(&mut tx, sync_point_id).await?;
     sqlx::query("DELETE FROM SYNC_POINT WHERE ID = ?")

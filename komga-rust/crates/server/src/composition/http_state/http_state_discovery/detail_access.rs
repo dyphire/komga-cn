@@ -246,6 +246,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         collection_id: String,
     ) -> Result<bool, String> {
         sync_entity_upsert_from_database(
+            self.db.write_pool(),
             self.db.database_file(),
             self.index_dir.as_path(),
             SearchEntityType::Collection,
@@ -256,6 +257,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn delete_collection_search_document(&self, collection_id: String) -> Result<(), String> {
         sync_entity_delete_from_index(
+            self.db.write_pool(),
             self.index_dir.as_path(),
             SearchEntityType::Collection,
             &collection_id,
@@ -406,6 +408,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn upsert_readlist_search_document(&self, readlist_id: String) -> Result<bool, String> {
         sync_entity_upsert_from_database(
+            self.db.write_pool(),
             self.db.database_file(),
             self.index_dir.as_path(),
             SearchEntityType::ReadList,
@@ -416,6 +419,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
 
     async fn delete_readlist_search_document(&self, readlist_id: String) -> Result<(), String> {
         sync_entity_delete_from_index(
+            self.db.write_pool(),
             self.index_dir.as_path(),
             SearchEntityType::ReadList,
             &readlist_id,
@@ -679,6 +683,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         .await?;
 
         sync_series_and_oneshot_books_after_metadata_update(
+            self.db.write_pool(),
             self.db.database_file(),
             self.index_dir.as_path(),
             &series_id,

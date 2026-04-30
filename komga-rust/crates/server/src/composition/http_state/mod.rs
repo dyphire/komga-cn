@@ -134,6 +134,7 @@ pub fn compose_http_runtime(
         library_catalog: Box::new(
             http_state_operational_state::SqliteLibraryCatalogService::new(
                 config.database_file.as_path(),
+                db.write_pool().clone(),
             ),
         ),
         task_queue: Box::new(http_state_operational_state::RuntimeTaskQueueService::new(

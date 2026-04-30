@@ -130,7 +130,10 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
         .expect("existing thumbnails should be deleted before generated delete test");
     cleanup_pool.close().await;
 
-    generate_book_thumbnail(paths.main_db.as_path(), "book-1")
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("pool for generate_book_thumbnail");
+    generate_book_thumbnail(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before delete test");
 

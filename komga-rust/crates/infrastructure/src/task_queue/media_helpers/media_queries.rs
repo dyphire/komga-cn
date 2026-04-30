@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use crate::resolve_library_item_path;
-use crate::sqlite::connect_private_write_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedLibraryHashingFlags {
@@ -84,12 +83,9 @@ pub struct PersistedHashedPageToDelete {
 }
 
 pub async fn load_book_hashed_pages(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<PersistedHashedPageToDelete>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT
@@ -104,10 +100,9 @@ pub async fn load_book_hashed_pages(
         "#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("failed to load hashed pages for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -122,12 +117,9 @@ pub async fn load_book_hashed_pages(
 }
 
 pub async fn load_library_hashing_flags(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<PersistedLibraryHashingFlags, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -140,10 +132,9 @@ pub async fn load_library_hashing_flags(
         "#,
     )
     .bind(library_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load library hashing flags for '{library_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map_or(
         PersistedLibraryHashingFlags {
@@ -160,12 +151,9 @@ pub async fn load_library_hashing_flags(
 }
 
 pub async fn load_library_maintenance_flags(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<PersistedLibraryMaintenanceFlags, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -177,12 +165,11 @@ pub async fn load_library_maintenance_flags(
         "#,
     )
     .bind(library_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| {
         format!("failed to load library maintenance flags for '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(row.map_or(
         PersistedLibraryMaintenanceFlags {
@@ -197,13 +184,9 @@ pub async fn load_library_maintenance_flags(
 }
 
 pub async fn load_book_library_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<String>, String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT LIBRARY_ID
@@ -213,22 +196,17 @@ pub async fn load_book_library_id(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load book library for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
 
 pub async fn load_book_hash_runtime_state(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedBookHashRuntimeState>, String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT LIBRARY_ID,
@@ -240,10 +218,9 @@ pub async fn load_book_hash_runtime_state(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load book hash runtime state for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map(|row| PersistedBookHashRuntimeState {
         library_id: row.get::<String, _>("LIBRARY_ID"),
@@ -253,13 +230,9 @@ pub async fn load_book_hash_runtime_state(
 }
 
 pub async fn load_book_file_path(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -272,10 +245,9 @@ pub async fn load_book_file_path(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to query book file for hash task '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map(|row| {
         resolve_library_item_path(
@@ -285,11 +257,7 @@ pub async fn load_book_file_path(
     }))
 }
 
-pub async fn load_non_deleted_book_ids(database_file: &Path) -> Result<Vec<String>, String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn load_non_deleted_book_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
         r#"
         SELECT b.ID
@@ -298,12 +266,11 @@ pub async fn load_non_deleted_book_ids(database_file: &Path) -> Result<Vec<Strin
         ORDER BY b.ID ASC
         "#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to query non-deleted books for thumbnail regeneration: {error}")
     })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -312,13 +279,9 @@ pub async fn load_non_deleted_book_ids(database_file: &Path) -> Result<Vec<Strin
 }
 
 pub async fn load_books_with_undersized_generated_thumbnails(
-    database_file: &Path,
+    pool: &SqlitePool,
     max_edge: i64,
 ) -> Result<Vec<String>, String> {
-    let database_file = database_file.to_path_buf();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT DISTINCT BOOK_ID
@@ -330,12 +293,11 @@ pub async fn load_books_with_undersized_generated_thumbnails(
     )
     .bind(max_edge)
     .bind(max_edge)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to query books with undersized generated thumbnails: {error}")
     })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -344,14 +306,10 @@ pub async fn load_books_with_undersized_generated_thumbnails(
 }
 
 pub async fn load_books_with_missing_page_hash(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let database_file = database_file.to_path_buf();
     let library_id = library_id.map(str::to_string);
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = if let Some(library_id) = library_id.as_deref() {
         sqlx::query(
             r#"
@@ -363,7 +321,7 @@ pub async fn load_books_with_missing_page_hash(
             "#,
         )
         .bind(library_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
     } else {
         sqlx::query(
@@ -374,11 +332,10 @@ pub async fn load_books_with_missing_page_hash(
             OR FILE_HASH IS NULL
             "#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
     }
     .map_err(|error| format!("failed to query books with missing page hashes: {error}"))?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -387,14 +344,10 @@ pub async fn load_books_with_missing_page_hash(
 }
 
 pub async fn load_duplicate_pages_to_delete(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<HashMap<String, Vec<PersistedHashedPageToDelete>>, String> {
-    let database_file = database_file.to_path_buf();
     let library_id = library_id.to_string();
-    let pool = connect_private_write_pool(database_file.as_path())
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT
@@ -426,12 +379,11 @@ pub async fn load_duplicate_pages_to_delete(
     )
     .bind(&library_id)
     .bind(&library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to query duplicate pages to delete for '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     let mut by_book = HashMap::<String, Vec<PersistedHashedPageToDelete>>::new();
     for row in rows {
@@ -452,16 +404,13 @@ pub async fn load_duplicate_pages_to_delete(
 }
 
 pub async fn load_books_requiring_analysis(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_ids: &[String],
 ) -> Result<Vec<String>, String> {
     if book_ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let mut result = Vec::new();
 
     for book_id in book_ids {
@@ -474,7 +423,7 @@ pub async fn load_books_requiring_analysis(
             "#,
         )
         .bind(book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("failed to query media status for '{book_id}': {error}"))?
         .map(|row| row.get::<String, _>("STATUS"));
@@ -490,19 +439,15 @@ pub async fn load_books_requiring_analysis(
             result.push(book_id.clone());
         }
     }
-    pool.close().await;
 
     Ok(result)
 }
 
 pub async fn load_books_with_missing_file_hash(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     koreader: bool,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let sql = if koreader {
         r#"
         SELECT ID
@@ -523,12 +468,11 @@ pub async fn load_books_with_missing_file_hash(
 
     let rows = sqlx::query(sql)
         .bind(library_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| {
             format!("failed to query books with missing file hash for '{library_id}': {error}")
         })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -537,12 +481,9 @@ pub async fn load_books_with_missing_file_hash(
 }
 
 pub async fn load_books_to_convert(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Vec<PersistedBookToConvert>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT ID, SERIES_ID
@@ -557,10 +498,9 @@ pub async fn load_books_to_convert(
         "#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("failed to query books to convert for '{library_id}': {error}"))?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -572,12 +512,9 @@ pub async fn load_books_to_convert(
 }
 
 pub async fn load_book_conversion_target(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedConversionTarget>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -597,10 +534,9 @@ pub async fn load_book_conversion_target(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load convert-book source row for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map(|row| PersistedConversionTarget {
         book_url: row.get::<String, _>("BOOK_URL"),
@@ -615,12 +551,9 @@ pub async fn load_book_conversion_target(
 }
 
 pub async fn load_books_for_extension_repair(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Vec<PersistedExtensionRepairTarget>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT
@@ -638,12 +571,11 @@ pub async fn load_books_for_extension_repair(
         "#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| {
         format!("failed to query books for extension repair in '{library_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(rows
         .into_iter()
@@ -670,12 +602,9 @@ pub async fn load_books_for_extension_repair(
 }
 
 pub async fn load_book_for_extension_repair(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedExtensionRepairTarget>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -694,12 +623,11 @@ pub async fn load_book_for_extension_repair(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| {
         format!("failed to load repair-extension source row for '{book_id}': {error}")
     })?;
-    pool.close().await;
 
     Ok(row.map(|row| PersistedExtensionRepairTarget {
         book_id: row.get::<String, _>("BOOK_ID"),
@@ -712,12 +640,9 @@ pub async fn load_book_for_extension_repair(
 }
 
 pub async fn load_book_archive_source(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedBookArchiveSource>, String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -735,10 +660,9 @@ pub async fn load_book_archive_source(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("failed to load archive source for '{book_id}': {error}"))?;
-    pool.close().await;
 
     Ok(row.map(|row| PersistedBookArchiveSource {
         file_path: resolve_library_item_path(

@@ -1,17 +1,14 @@
-use std::path::Path;
-
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
 };
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_cover_bytes;
 use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
 use crate::metadata::thumbnails::{emit_thumbnail_book_event, emit_thumbnail_series_event};
-use crate::sqlite::connect_private_write_pool;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
@@ -22,10 +19,7 @@ use super::artwork_support::{
 };
 use super::thumbnail_max_edge_from_setting;
 
-pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn refresh_book_local_artwork(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
     let book_id = book_id.to_string();
 
     let result: Result<(), String> = 'result: {
@@ -39,7 +33,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve book path for artwork refresh '{book_id}': {error}")
@@ -48,7 +42,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
         if let Some(book_row) = &book_row {
             let series_id = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
                 .bind(&book_id)
-                .fetch_optional(&pool)
+                .fetch_optional(pool)
                 .await
                 .map_err(|error| {
                     format!(
@@ -67,7 +61,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
                 "#,
             )
             .bind(&book_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .map_err(|error| {
                 format!("failed to resolve import-local-artwork flag for '{book_id}': {error}")
@@ -90,7 +84,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
                     MarkSelectedPreference::No
                 };
                 let selected = import_book_local_artwork_thumbnail(
-                    &pool,
+                    pool,
                     &book_id,
                     &library_root,
                     &artwork_url,
@@ -109,7 +103,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
             "#,
         )
         .bind(&book_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!("failed to refresh THUMBNAIL_BOOK rows for '{book_id}': {error}")
@@ -123,7 +117,7 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
             "#,
         )
         .bind(&book_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!(
@@ -133,14 +127,10 @@ pub async fn refresh_book_local_artwork(database_file: &Path, book_id: &str) -> 
 
         Ok(())
     };
-    pool.close().await;
     result
 }
 
-pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
     let book_id = book_id.to_string();
     let result: Result<(), String> = 'result: {
         let media_row = sqlx::query(
@@ -161,7 +151,7 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve book media for thumbnail generation '{book_id}': {error}")
@@ -193,7 +183,7 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
             LIMIT 1
             "#,
         )
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("failed to load thumbnail size setting: {error}"))?
         .and_then(|row| row.get::<Option<String>, _>("VALUE"));
@@ -220,7 +210,7 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve page row for thumbnail generation '{book_id}': {error}")
@@ -294,7 +284,7 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
             "#,
         )
         .bind(&book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("failed to query selected thumbnail for '{book_id}': {error}"))?
         .map(|row| row.get::<String, _>("TYPE"));
@@ -358,17 +348,13 @@ pub async fn generate_book_thumbnail(database_file: &Path, book_id: &str) -> Res
 
         Ok(())
     };
-    pool.close().await;
     result
 }
 
 pub async fn refresh_series_local_artwork(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
     let series_id = series_id.to_string();
 
     let result: Result<(), String> = 'result: {
@@ -385,7 +371,7 @@ pub async fn refresh_series_local_artwork(
             "#,
         )
         .bind(&series_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| {
             format!("failed to resolve series path for artwork refresh '{series_id}': {error}")
@@ -409,7 +395,7 @@ pub async fn refresh_series_local_artwork(
 
             for (index, artwork_url) in artwork_urls.into_iter().enumerate() {
                 let selected = import_series_local_artwork_thumbnail(
-                    &pool,
+                    pool,
                     &series_id,
                     &library_root,
                     &artwork_url,
@@ -432,7 +418,7 @@ pub async fn refresh_series_local_artwork(
             "#,
         )
         .bind(&series_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!("failed to refresh THUMBNAIL_SERIES rows for '{series_id}': {error}")
@@ -446,7 +432,7 @@ pub async fn refresh_series_local_artwork(
             "#,
         )
         .bind(&series_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| {
             format!(
@@ -456,6 +442,5 @@ pub async fn refresh_series_local_artwork(
 
         Ok(())
     };
-    pool.close().await;
     result
 }

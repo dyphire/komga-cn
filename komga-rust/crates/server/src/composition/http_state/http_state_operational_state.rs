@@ -12,6 +12,8 @@ use komga_application::library_catalog::{
     LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord, LibraryTaskResult,
     LibraryTaskService, UpdateLibraryService,
 };
+use sqlx::SqlitePool;
+
 use komga_application::task_processing::TaskQueueRecord;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
@@ -24,9 +26,9 @@ pub(super) struct SqliteLibraryCatalogService {
 }
 
 impl SqliteLibraryCatalogService {
-    pub(super) fn new(database_file: &Path) -> Self {
+    pub(super) fn new(database_file: &Path, task_write_pool: SqlitePool) -> Self {
         Self {
-            adapter: SqliteLibraryCatalogAdapter::new(database_file.to_path_buf()),
+            adapter: SqliteLibraryCatalogAdapter::new(database_file.to_path_buf(), task_write_pool),
         }
     }
 }
@@ -282,11 +284,50 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
 mod tests {
     use super::*;
     use komga_application::task_processing::TaskQueueRecord;
+    use komga_infrastructure::database_handle::DatabaseHandle;
+    use komga_infrastructure::sqlite::{
+        connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    };
+    use komga_infrastructure::task_queue::TaskRuntimeContext;
     use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::Mutex;
+
+    async fn test_task_runtime_context() -> TaskRuntimeContext {
+        let root = std::env::temp_dir().join(format!(
+            "komga-operational-state-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("test temp dir should be created");
+        let main_db = DatabaseHandle::file_backed(root.join("database.sqlite"))
+            .await
+            .expect("test db should open");
+        let task_write_pool = connect_task_write_pool(main_db.database_file())
+            .await
+            .expect("test task write pool should open");
+        let task_read_pool =
+            connect_task_pool(main_db.database_file(), default_read_max_connections())
+                .await
+                .expect("test task read pool should open");
+        TaskRuntimeContext {
+            main_db,
+            tasks_db_file: root.join("tasks.sqlite"),
+            lucene_data_directory: root.join("lucene"),
+            consumes_queue: true,
+            owns_main_database: true,
+            owns_filesystem_scan_output: true,
+            owns_sidecar_output: true,
+            owns_search_index: true,
+            task_pool_size: 1,
+            task_write_pool,
+            task_read_pool,
+        }
+    }
 
     fn scan_library_task() -> TaskQueueRecord {
         TaskQueueRecord::new("ScanLibrary_library-1_DEEP_false", 8, None)
@@ -306,18 +347,11 @@ mod tests {
     #[tokio::test]
     async fn enqueue_task_records_respects_urgent_wakeup_policy() {
         for (urgent, timeout_ms, should_notify) in [(true, 100_u64, true), (false, 25_u64, false)] {
-            let config = RuntimeConfig::for_runtime_profile(
-                komga_config::profile::RuntimeProfile::LiveLocaldb,
-            );
-            let task_execution_pool = TaskExecutionPoolHandle::new(
-                crate::config::task_runtime_context(&config)
-                    .await
-                    .task_pool_size,
-            );
-            let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-                crate::config::task_runtime_context(&config).await,
-                "rust-main",
-            )));
+            let runtime = test_task_runtime_context().await;
+            let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+            let task_queue = Arc::new(Mutex::new(
+                TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
+            ));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
             let service = RuntimeTaskQueueService::new(
                 task_queue.clone(),
@@ -347,17 +381,11 @@ mod tests {
 
     #[tokio::test]
     async fn apply_task_pool_size_resizes_execution_pool_and_wakes_scheduler() {
-        let config =
-            RuntimeConfig::for_runtime_profile(komga_config::profile::RuntimeProfile::LiveLocaldb);
-        let task_execution_pool = TaskExecutionPoolHandle::new(
-            crate::config::task_runtime_context(&config)
-                .await
-                .task_pool_size,
-        );
-        let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-            crate::config::task_runtime_context(&config).await,
-            "rust-main",
-        )));
+        let runtime = test_task_runtime_context().await;
+        let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+        let task_queue = Arc::new(Mutex::new(
+            TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
+        ));
         let task_wakeup = Arc::new(tokio::sync::Notify::new());
         let service = RuntimeTaskQueueService::new(
             task_queue,

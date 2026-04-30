@@ -1,19 +1,10 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::connect_private_write_pool;
-
-pub async fn aggregate_series_metadata(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<(), String> {
-    let pool = connect_private_write_pool(database_file)
-        .await
-        .map_err(|error| format!("failed to open sqlite pool: {error}"))?;
+pub async fn aggregate_series_metadata(pool: &SqlitePool, series_id: &str) -> Result<(), String> {
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
@@ -164,7 +155,7 @@ pub async fn aggregate_series_metadata(
                         "#,
                 )
                 .bind(&series_id)
-                .fetch_optional(&pool)
+                .fetch_optional(pool)
                 .await
                 .map_err(|error| {
                     format!(
@@ -175,7 +166,6 @@ pub async fn aggregate_series_metadata(
             }
         }
     };
-    pool.close().await;
 
     if let Some(library_id) = library_id.as_deref() {
         register_runtime_sse_event(
