@@ -124,6 +124,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    use komga_application::task_processing::{TaskKind, TaskRequest};
+
     use crate::discovery_auth::state::DiscoveryAuthState;
     use crate::state::{
         AuthDatabaseState, HttpAppState, HttpServerRequestsState, HttpServices,
@@ -150,11 +152,12 @@ mod tests {
                 .into_iter()
                 .next()
                 .expect("test payload should contain one book");
-            Ok(vec![ApplicationTaskQueueRecord::new(
-                next_task_id(),
-                100,
-                Some(book.series_id),
-            )])
+            Ok(vec![
+                TaskRequest::new(TaskKind::ImportBook)
+                    .priority(100)
+                    .group(book.series_id)
+                    .into_queue_record_with_id(&next_task_id()),
+            ])
         }
 
         fn process_queued_book_payload<'a>(
