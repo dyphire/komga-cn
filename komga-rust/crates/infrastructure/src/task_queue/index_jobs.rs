@@ -237,7 +237,7 @@ mod tests {
     }
 
     async fn execute_and_enqueue(
-        scheduler: &mut TaskQueueScheduler,
+        scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
         task_target: Option<&str>,
@@ -452,7 +452,9 @@ mod tests {
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
-            .admin_mut()
+            .admin_for_test()
+            .await
+            .admin
             .take_available("thumbnail-finder-assert")
             .expect("finder should enqueue one generate thumbnail task");
 
@@ -533,7 +535,9 @@ mod tests {
 
         let mut generated = Vec::new();
         while let Some(task) = scheduler
-            .admin_mut()
+            .admin_for_test()
+            .await
+            .admin
             .take_available("thumbnail-finder-all-books-assert")
         {
             generated.push((task.id, task.priority));
@@ -594,7 +598,9 @@ mod tests {
 
         let mut queued = Vec::new();
         while let Some(task) = scheduler
-            .admin_mut()
+            .admin_for_test()
+            .await
+            .admin
             .take_available("analyze-book-follow-up-assert")
         {
             queued.push((task.id, task.simple_type, task.priority, task.group));

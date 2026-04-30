@@ -143,7 +143,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("AnalyzeBook_book-1", 1_000, Some("series-1".to_string()))
@@ -246,7 +246,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
             "RefreshBookMetadata:book-1",
@@ -317,7 +317,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -402,7 +402,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("EmptyTrash_library-1", 1_000, Some("library-1".to_string()))

@@ -14,7 +14,7 @@ use komga_application::library_catalog::{
     CreateLibraryResult, LibraryCatalogMutationError, LibraryChangeSet, LibraryRecord,
     LibraryTaskResult,
 };
-use komga_application::task_processing::TaskQueueRecord;
+pub use komga_application::task_processing::TaskEngine;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

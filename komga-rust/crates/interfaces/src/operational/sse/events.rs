@@ -146,7 +146,7 @@ async fn poll_runtime_events(stream_state: &mut SseStreamState) {
 
 async fn task_queue_status_event(app: &HttpAppState) -> Event {
     let count_by_type =
-        kotlin_visible_task_type_counts(app.services.task_queue.count_task_queue_by_type().await);
+        kotlin_visible_task_type_counts(app.services.task_queue.status().await.counts);
     let total_count: usize = count_by_type.values().sum();
     sse_event(
         "TaskQueueStatus",

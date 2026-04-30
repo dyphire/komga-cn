@@ -4,7 +4,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::task_processing::TaskQueueRecord;
+use komga_application::task_processing::{TaskKind, TaskRequest};
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -97,7 +97,7 @@ fn remove_hashed_pages_task_page(
 fn build_remove_hashed_pages_task(
     book_id: String,
     pages: Vec<Value>,
-) -> Result<TaskQueueRecord, StatusCode> {
+) -> Result<komga_application::task_processing::TaskQueueRecord, StatusCode> {
     let unique_id = format!("RemoveHashedPages_{book_id}");
     let payload = serde_json::to_string(&serde_json::json!({
         "bookId": book_id,
@@ -108,11 +108,10 @@ fn build_remove_hashed_pages_task(
     }))
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(
-        TaskQueueRecord::new(unique_id, REMOVE_HASHED_PAGES_PRIORITY, None)
-            .with_simple_type("RemoveHashedPages")
-            .with_payload(payload),
-    )
+    Ok(TaskRequest::new(TaskKind::RemoveHashedPages)
+        .priority(REMOVE_HASHED_PAGES_PRIORITY)
+        .into_queue_record_with_id(&book_id)
+        .with_payload(payload))
 }
 
 pub(crate) async fn get_page_hashes_unknown(

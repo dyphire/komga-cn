@@ -235,7 +235,7 @@ mod tests {
     }
 
     async fn execute_and_enqueue(
-        scheduler: &mut TaskQueueScheduler,
+        scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
         task_target: Option<&str>,
@@ -402,7 +402,9 @@ mod tests {
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
-            .admin_mut()
+            .admin_for_test()
+            .await
+            .admin
             .take_available("missing-page-hash-finder-assert")
             .expect("finder should enqueue one hash book pages task");
 
@@ -488,7 +490,9 @@ mod tests {
         assert!(matches!(result, Some(Ok(()))));
         assert!(
             scheduler
-                .admin_mut()
+                .admin_for_test()
+                .await
+                .admin
                 .take_available("missing-page-hash-disabled-assert")
                 .is_none(),
             "finder must not enqueue HashBookPages tasks when library.hashPages is disabled at execution time",
@@ -646,7 +650,9 @@ mod tests {
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
-            .admin_mut()
+            .admin_for_test()
+            .await
+            .admin
             .take_available("remove-hashed-pages-thumbnail-assert")
             .expect(
                 "remove-hashed-pages should enqueue generate thumbnail when first page is removed",

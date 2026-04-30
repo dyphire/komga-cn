@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::runtime_sse::{
     current_runtime_sse_event_cursor, pending_runtime_sse_events, register_runtime_sse_event,
 };
-use crate::task_processing::TaskQueueRecord;
+use crate::task_processing::{TaskKind, TaskQueueRecord, TaskRequest};
 
 static GENERATED_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -104,8 +104,10 @@ where
                 })
                 .map_err(|error| format!("serialize books import payload: {error}"))?;
 
-                Ok(TaskQueueRecord::new(next_task_id(), 100, Some(group_id))
-                    .with_simple_type("ImportBook")
+                Ok(TaskRequest::new(TaskKind::ImportBook)
+                    .priority(100)
+                    .group(group_id)
+                    .into_queue_record_with_id(&next_task_id())
                     .with_payload(task_payload))
             })
             .collect()
@@ -165,29 +167,32 @@ fn import_follow_up_analyze_task(
     import_priority: i32,
     series_id: &str,
 ) -> TaskQueueRecord {
-    TaskQueueRecord::new(
-        format!("AnalyzeBook_{book_id}"),
-        import_priority.saturating_add(1),
-        Some(series_id.to_string()),
+    TaskRequest::with_payload(
+        TaskKind::AnalyzeBook,
+        crate::task_processing::BookPayload::new(book_id),
     )
-    .with_simple_type("AnalyzeBook")
+    .priority(import_priority.saturating_add(1))
+    .group(series_id)
+    .into_queue_record()
 }
 
 fn import_follow_up_metadata_task(book_id: &str, series_id: &str) -> TaskQueueRecord {
-    import_follow_up_refresh_task(
-        format!("RefreshBookMetadata_{book_id}"),
-        Some(series_id.to_string()),
+    TaskRequest::with_payload(
+        TaskKind::RefreshBookMetadata,
+        crate::task_processing::BookPayload::new(book_id),
     )
-    .with_simple_type("RefreshBookMetadata")
+    .priority(4)
+    .group(series_id)
+    .into_queue_record()
 }
 
 fn import_follow_up_local_artwork_task(book_id: &str) -> TaskQueueRecord {
-    import_follow_up_refresh_task(format!("RefreshBookLocalArtwork_{book_id}"), None)
-        .with_simple_type("RefreshBookLocalArtwork")
-}
-
-fn import_follow_up_refresh_task(task_id: String, group_id: Option<String>) -> TaskQueueRecord {
-    TaskQueueRecord::new(task_id, 4, group_id)
+    TaskRequest::with_payload(
+        TaskKind::RefreshBookLocalArtwork,
+        crate::task_processing::BookPayload::new(book_id),
+    )
+    .priority(4)
+    .into_queue_record()
 }
 
 fn parse_queued_book_import_payload(task_payload: &str) -> Result<QueuedBookImportPayload, String> {

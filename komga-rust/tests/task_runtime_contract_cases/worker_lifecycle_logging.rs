@@ -426,7 +426,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
     executor.block_on(async {
-        let mut queue = success_queue.lock().await;
+        let queue = success_queue.lock().await;
         queue
             .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
             .await;
@@ -457,7 +457,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
     )));
     executor.block_on(async {
-        let mut queue = failure_queue.lock().await;
+        let queue = failure_queue.lock().await;
         queue
             .enqueue(
                 TaskQueueRecord::new("UNSUPPORTED_TASK:worker-failure", 1_000, None)

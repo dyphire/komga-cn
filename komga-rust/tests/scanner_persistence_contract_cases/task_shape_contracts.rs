@@ -7,7 +7,7 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
         .await
         .expect("scanner hash-book task fixture should be created");
 
-    let mut scheduler = scheduler_for_config(&fixture.config).await;
+    let scheduler = scheduler_for_config(&fixture.config).await;
     scheduler
         .enqueue(TaskQueueRecord::new("HashBook_book-1", 0, None).with_simple_type("HashBook"))
         .await;
@@ -36,7 +36,7 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
         .await
         .expect("scanner refresh-book-metadata task fixture should be created");
 
-    let mut scheduler = scheduler_for_config(&fixture.config).await;
+    let scheduler = scheduler_for_config(&fixture.config).await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -85,7 +85,7 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
         .await
         .expect("scanner duplicate-pages task fixture should be created");
 
-    let mut scheduler = scheduler_for_config(&fixture.config).await;
+    let scheduler = scheduler_for_config(&fixture.config).await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("FindDuplicatePagesToDelete_library-1", 85, None)
@@ -118,7 +118,7 @@ async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_ta
             .await
             .expect("scanner missing-page-hash task fixture should be created");
 
-    let mut scheduler = scheduler_for_config(&fixture.config).await;
+    let scheduler = scheduler_for_config(&fixture.config).await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)

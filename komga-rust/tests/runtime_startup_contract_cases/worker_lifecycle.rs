@@ -45,7 +45,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
                 Some("RebuildIndex"),
             )
             .await;
-            let mut queue = background.task_queue.lock().await;
+            let queue = background.task_queue.lock().await;
             queue
                 .count_by_simple_type()
                 .await
@@ -244,7 +244,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
             Some("RebuildIndex"),
         )
         .await;
-        let mut queue = background.task_queue.lock().await;
+        let queue = background.task_queue.lock().await;
         queue
             .count_by_simple_type()
             .await
@@ -310,7 +310,7 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
                 None,
             )
             .await;
-            let mut queue = background.task_queue.lock().await;
+            let queue = background.task_queue.lock().await;
             queue
                 .count_by_simple_type()
                 .await

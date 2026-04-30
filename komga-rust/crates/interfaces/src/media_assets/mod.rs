@@ -24,7 +24,9 @@ use crate::identity_access::auth::{
 };
 use crate::request_urls::app_absolute_url;
 use crate::state::{HttpAppState, PersistedMediaFileRecord};
-use komga_application::task_processing::TaskQueueRecord;
+use komga_application::task_processing::{
+    BookPayload, SeriesPayload, TaskKind, TaskQueueRecord, TaskRequest,
+};
 #[cfg(test)]
 use komga_infrastructure::filesystem::media_access::page_content::{
     load_archive_page_rows, load_generated_pdf_page_rows, read_pdf_page_as_single_page_pdf,

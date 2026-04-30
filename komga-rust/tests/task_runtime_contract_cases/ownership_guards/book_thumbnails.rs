@@ -27,7 +27,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
             "GenerateBookThumbnail:book-1",
@@ -71,7 +71,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
     write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("GenerateBookThumbnail_book-1", 1_000, None)

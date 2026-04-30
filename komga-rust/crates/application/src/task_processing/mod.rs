@@ -2,7 +2,9 @@ mod contracts;
 mod library_scan_pipeline;
 mod protocol;
 mod scanner_maintenance;
-mod task_kind;
+mod task_engine;
+mod task_enqueuer;
+mod task_registry;
 
 pub use contracts::{
     LibraryScanInterval, TaskProcessingError, TaskQueueAdminPort, TaskQueueExecutionPort,
@@ -20,7 +22,9 @@ pub use scanner_maintenance::{
     LibraryScanProfile, NormalizedLibraryScanProfile, library_scan_interval_from_db,
     normalize_library_scan_profiles,
 };
-pub use task_kind::{
+pub use task_engine::{QueueStatus, TaskEngine};
+pub use task_enqueuer::TaskEnqueuer;
+pub use task_registry::{
     BookPayload, LibraryPayload, RefreshBookMetadataPayload, ScanLibraryPayload, SeriesPayload,
-    TaskDefinition, TaskKind, TaskNameFormat, TaskParseError, TaskPayload, TaskRequest,
+    TaskKind, TaskParseError, TaskPayload, TaskRequest, TaskTypeMetadata,
 };

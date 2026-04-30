@@ -23,7 +23,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
     let book_url = book_path.to_string_lossy().to_string();
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -78,7 +78,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("OneShots")).await;
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -162,7 +162,7 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
     update_library_oneshots_directory(&fixture.paths.main_db, "library-1", Some("_oneshots")).await;
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -351,7 +351,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
         }
 
         let runtime = runtime_task_context_from_config(&fixture.config).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         scheduler
             .enqueue(scan_library_task("library-1", 900, false))
             .await;
@@ -434,7 +434,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
     .expect("book sidecar with provider number should be written for rescan fixture");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -515,7 +515,7 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
         .expect("book payload rewrite should succeed for rescan skip contract");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -647,7 +647,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
         .expect("scanner metadata-repair fixture should be created");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -708,7 +708,7 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
     let series_dir = fixture.library_root.join("Series-A");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -819,7 +819,7 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
 
     let initial_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -933,7 +933,7 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .to_string();
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;

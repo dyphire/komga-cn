@@ -1469,7 +1469,8 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
     let app = build_router_with_config(&runtime_config_for_paths(&paths)).await;
     let auth_token = login_with_basic_and_get_token(app.clone()).await;
     close_router_fixture_shared_pools(&paths).await;
-    std::fs::remove_file(&paths.main_db).expect("main db should be removable for health down test");
+    std::fs::remove_file(&paths.tasks_db)
+        .expect("tasks db should be removable for health down test");
 
     let response = app
         .oneshot(
@@ -1485,7 +1486,7 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    assert_admin_actuator_health_payload(&payload, "DOWN", "DOWN", "UP");
+    assert_admin_actuator_health_payload(&payload, "DOWN", "UP", "DOWN");
 
     cleanup_router_fixture(paths);
 }

@@ -11,6 +11,9 @@ use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use komga_application::identity_access::AuthUser;
+use komga_application::task_processing::{
+    LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
+};
 
 use crate::OperationalState;
 use crate::identity_access::auth::session_token_for_user_with_runtime_key;
@@ -18,8 +21,7 @@ use crate::state::default_test_identity_service;
 use crate::state::{
     BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices, LibraryCatalogService,
     OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
-    ServerSettingsService, SseOperationalState, StartupTimingState, TaskQueueService,
-    TransientBooksStore,
+    ServerSettingsService, SseOperationalState, StartupTimingState, TransientBooksStore,
     tests::{
         NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
         NoopOpdsPersistedService, NoopOperationalRuntimeService, NoopOperationalSettingsService,
@@ -47,7 +49,7 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
     let app = Arc::new(test_app_state(
         database_file.clone(),
         state,
-        Box::new(FakeTaskQueueService {
+        Box::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -106,7 +108,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskQueueService {
+        Box::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 let applied_value = applied_value.clone();
@@ -159,7 +161,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskQueueService {
+        Box::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -192,7 +194,7 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
+        Box::new(FakeTaskEngine { apply: |_| Ok(()) }),
         settings_store,
     ));
     let headers = admin_headers(&fixture_root);
@@ -235,7 +237,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskQueueService { apply: |_| Ok(()) }),
+        Box::new(FakeTaskEngine { apply: |_| Ok(()) }),
         settings_store,
     ));
     let headers = admin_headers(&fixture_root);
@@ -338,15 +340,39 @@ impl ServerSettingsService for FakeSettingsStore {
     }
 }
 
-struct FakeTaskQueueService<F> {
+struct FakeTaskEngine<F> {
     apply: F,
 }
 
 #[async_trait]
-impl<F> TaskQueueService for FakeTaskQueueService<F>
+impl<F> TaskEnqueuer for FakeTaskEngine<F>
 where
     F: Fn(usize) -> Result<(), String> + Send + Sync,
 {
+    async fn enqueue(&self, _kind: TaskKind, _target_id: &str) {}
+
+    async fn enqueue_request(&self, _request: TaskRequest) {}
+
+    async fn enqueue_batch(&self, _batch: LibraryTaskBatch) {}
+}
+
+#[async_trait]
+impl<F> TaskEngine for FakeTaskEngine<F>
+where
+    F: Fn(usize) -> Result<(), String> + Send + Sync,
+{
+    async fn status(&self) -> QueueStatus {
+        QueueStatus::default()
+    }
+
+    async fn clear_unowned_tasks(&self) -> usize {
+        0
+    }
+
+    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
+        (self.apply)(value)
+    }
+
     async fn enqueue_task_records(
         &self,
         _task_records: Vec<komga_application::task_processing::TaskQueueRecord>,
@@ -355,17 +381,7 @@ where
         Ok(())
     }
 
-    async fn clear_unowned_tasks(&self) -> usize {
-        0
-    }
-
-    async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
-        BTreeMap::new()
-    }
-
-    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
-        (self.apply)(value)
-    }
+    fn wakeup(&self) {}
 }
 
 struct NoopLibraryCatalogService;
@@ -466,7 +482,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 fn test_app_state(
     database_file: PathBuf,
     operational: OperationalState,
-    task_queue: Box<dyn TaskQueueService>,
+    task_queue: Box<dyn TaskEngine>,
     server_settings: Box<dyn ServerSettingsService>,
 ) -> HttpAppState {
     HttpAppState {

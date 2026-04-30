@@ -43,14 +43,14 @@ async fn enqueue_books_best_effort(
     for book in payload.books {
         let source_file = book.source_file.display().to_string();
         let series_id = book.series_id.clone();
-        let task_id = kotlin_import_book_task_id(&book);
+        let task_id_suffix = kotlin_import_book_task_id_suffix(&book);
         match service
             .enqueue_books(
                 application_import_payload(BooksImportPayload {
                     copy_mode: payload.copy_mode,
                     books: vec![book],
                 }),
-                &mut || task_id.clone(),
+                &mut || task_id_suffix.clone(),
             )
             .and_then(|mut task_records| {
                 task_records
@@ -84,12 +84,8 @@ async fn enqueue_books_best_effort(
     }
 }
 
-fn kotlin_import_book_task_id(book: &BooksImportEntry) -> String {
-    format!(
-        "ImportBook_{}_{}",
-        book.series_id,
-        book.source_file.display()
-    )
+fn kotlin_import_book_task_id_suffix(book: &BooksImportEntry) -> String {
+    format!("{}_{}", book.series_id, book.source_file.display())
 }
 
 fn application_import_payload(payload: BooksImportPayload) -> ApplicationBooksImportPayload {
@@ -133,7 +129,7 @@ mod tests {
         AuthDatabaseState, HttpAppState, HttpServerRequestsState, HttpServices,
         LibraryCatalogService, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
         RemoteCacheEntry, RuntimeProfile, RuntimeState, ServerSettingsService, SseOperationalState,
-        StartupTimingState, TaskQueueService, TransientBooksStore,
+        StartupTimingState, TaskEngine, TransientBooksStore,
         tests::{
             NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
             NoopOpdsPersistedService, NoopOperationalRuntimeService,
@@ -266,15 +262,46 @@ mod tests {
         }
     }
 
-    struct TestTaskQueueService {
+    struct TestTaskEngine {
         persisted_ids: Arc<tokio::sync::Mutex<Vec<String>>>,
     }
 
     #[async_trait::async_trait]
-    impl TaskQueueService for TestTaskQueueService {
+    impl komga_application::task_processing::TaskEnqueuer for TestTaskEngine {
+        async fn enqueue(
+            &self,
+            _kind: komga_application::task_processing::TaskKind,
+            _target_id: &str,
+        ) {
+        }
+
+        async fn enqueue_request(&self, _request: komga_application::task_processing::TaskRequest) {
+        }
+
+        async fn enqueue_batch(
+            &self,
+            _batch: komga_application::task_processing::LibraryTaskBatch,
+        ) {
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TaskEngine for TestTaskEngine {
+        async fn status(&self) -> komga_application::task_processing::QueueStatus {
+            komga_application::task_processing::QueueStatus::default()
+        }
+
+        async fn clear_unowned_tasks(&self) -> usize {
+            0
+        }
+
+        async fn apply_task_pool_size(&self, _value: usize) -> Result<(), String> {
+            Ok(())
+        }
+
         async fn enqueue_task_records(
             &self,
-            task_records: Vec<TaskQueueRecord>,
+            task_records: Vec<komga_application::task_processing::TaskQueueRecord>,
             _urgent: bool,
         ) -> Result<(), String> {
             let task_record = task_records.into_iter().next().expect("task should exist");
@@ -286,17 +313,7 @@ mod tests {
             }
         }
 
-        async fn clear_unowned_tasks(&self) -> usize {
-            0
-        }
-
-        async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
-            BTreeMap::new()
-        }
-
-        async fn apply_task_pool_size(&self, _value: usize) -> Result<(), String> {
-            Ok(())
-        }
+        fn wakeup(&self) {}
     }
 
     struct TestServerSettingsService;
@@ -327,7 +344,7 @@ mod tests {
         }
     }
 
-    fn test_app_state(task_queue: Box<dyn TaskQueueService>) -> HttpAppState {
+    fn test_app_state(task_queue: Box<dyn TaskEngine>) -> HttpAppState {
         let operational = OperationalState {
             runtime: RuntimeState {
                 tasks_db_file: PathBuf::from("/tmp/tasks.db"),
@@ -415,7 +432,7 @@ mod tests {
             ],
         };
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let app = test_app_state(Box::new(TestTaskQueueService {
+        let app = test_app_state(Box::new(TestTaskEngine {
             persisted_ids: persisted_ids.clone(),
         }));
 

@@ -2,7 +2,7 @@ use super::*;
 
 pub struct HttpServices {
     pub library_catalog: Box<dyn LibraryCatalogService>,
-    pub task_queue: Box<dyn TaskQueueService>,
+    pub task_queue: Box<dyn TaskEngine>,
     pub server_settings: Box<dyn ServerSettingsService>,
     pub runtime_identity: Box<dyn IdentityService>,
     pub operational_runtime: Box<dyn OperationalRuntimeService>,

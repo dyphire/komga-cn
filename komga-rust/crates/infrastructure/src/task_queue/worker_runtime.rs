@@ -90,8 +90,13 @@ pub async fn prepare_task_queue(
 ) -> RuntimeBackgroundState {
     let runtime = config.task_runtime_context();
     let startup_task = startup_search_task.unwrap_or("");
-    let mut task_queue =
-        TaskQueueScheduler::for_runtime(runtime.clone(), "rust-runtime-http").await;
+    let wakeup = std::sync::Arc::new(Notify::new());
+    let task_queue = TaskQueueScheduler::for_runtime_with_wakeup(
+        runtime.clone(),
+        "rust-runtime-http",
+        wakeup.clone(),
+    )
+    .await;
     if runtime.consumes_queue {
         let _ = task_queue.disown_all().await;
     }
@@ -103,7 +108,7 @@ pub async fn prepare_task_queue(
             &runtime,
             RuntimeLifecycleFields::default(),
         );
-        let enqueued = bootstrap_startup_library_scans_inner(&mut task_queue, &runtime)
+        let enqueued = bootstrap_startup_library_scans_inner(&task_queue, &runtime)
             .await
             .unwrap_or_else(|error| {
                 log_runtime_bootstrap(
@@ -162,8 +167,7 @@ pub async fn prepare_task_queue(
             &runtime,
             RuntimeLifecycleFields::default().with_startup_task(startup_task),
         );
-        match bootstrap_startup_search_task_inner(&mut task_queue, &runtime, startup_search_task)
-            .await
+        match bootstrap_startup_search_task_inner(&task_queue, &runtime, startup_search_task).await
         {
             Ok(enqueued) => log_runtime_bootstrap(
                 STARTUP_SEARCH_TASK_COMPONENT,
@@ -189,7 +193,7 @@ pub async fn prepare_task_queue(
 
     RuntimeBackgroundState {
         task_queue: Arc::new(AsyncMutex::new(task_queue)),
-        task_wakeup: Arc::new(Notify::new()),
+        task_wakeup: wakeup,
         task_execution_pool: TaskExecutionPoolHandle::new(runtime.task_pool_size),
     }
 }
@@ -218,7 +222,7 @@ pub fn spawn_runtime_workers(
 }
 
 pub async fn bootstrap_startup_search_task(
-    task_queue: &mut TaskQueueScheduler,
+    task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) {
@@ -288,12 +292,9 @@ async fn process_startup_library_scans_inner(
         return Ok(0);
     }
 
-    let mut task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    let startup_scan_tasks = startup_scan_batch.into_queue_records();
-    let startup_scan_task_count = startup_scan_tasks.len();
-    for task in startup_scan_tasks {
-        task_queue.enqueue(task).await;
-    }
+    let task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let startup_scan_task_count = startup_scan_batch.len();
+    task_queue.enqueue_batch(startup_scan_batch).await;
     task_queue
         .process_available(runtime)
         .await
@@ -487,7 +488,7 @@ async fn run_background_task_iteration_with_pool(
     result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
 ) -> Result<usize, String> {
     let queued_tasks = {
-        let mut task_queue = task_queue.lock().await;
+        let task_queue = task_queue.lock().await;
         task_queue
             .count_by_simple_type()
             .await
@@ -597,7 +598,7 @@ async fn process_shared_task_queue(
         in_flight = in_flight.saturating_sub(1);
 
         let finalize_result = {
-            let mut task_queue = task_queue.lock().await;
+            let task_queue = task_queue.lock().await;
             task_queue
                 .finalize_task_result(task_result, &mut processed)
                 .await
@@ -619,7 +620,7 @@ async fn claim_tasks_up_to_capacity(
     let mut claimed = 0usize;
     while *in_flight < task_execution_pool.desired_size() {
         let task = {
-            let mut task_queue = task_queue.lock().await;
+            let task_queue = task_queue.lock().await;
             task_queue.take_next().await
         };
         let Some(task) = task else {
@@ -627,7 +628,7 @@ async fn claim_tasks_up_to_capacity(
         };
 
         if let Err(error_message) = task_execution_pool.submit(task.clone(), runtime.clone()) {
-            let mut task_queue = task_queue.lock().await;
+            let task_queue = task_queue.lock().await;
             task_queue
                 .fail_claimed_task(&task, error_message.as_str())
                 .await;
@@ -807,7 +808,7 @@ fn startup_task_record(task_name: &str) -> TaskQueueRecord {
 }
 
 async fn bootstrap_startup_search_task_inner(
-    task_queue: &mut TaskQueueScheduler,
+    task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) -> Result<usize, String> {
@@ -873,7 +874,7 @@ async fn run_periodic_library_scan_iteration_inner(
 
     for (library_id, task) in due_tasks {
         {
-            let mut queue = task_queue.lock().await;
+            let queue = task_queue.lock().await;
             queue.enqueue(task).await;
         }
         if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
@@ -888,7 +889,7 @@ async fn run_periodic_library_scan_iteration_inner(
 }
 
 async fn bootstrap_startup_library_scans_inner(
-    task_queue: &mut TaskQueueScheduler,
+    task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
 ) -> Result<usize, String> {
     if !runtime.owns_main_database {
@@ -904,14 +905,10 @@ async fn bootstrap_startup_library_scans_inner(
         return Ok(0);
     }
 
-    let startup_tasks =
-        schedule_startup_library_scan_batch(runtime, "schedule startup library scans")
-            .await?
-            .into_queue_records();
-    let enqueued = startup_tasks.len();
-    for task in startup_tasks {
-        task_queue.enqueue(task).await;
-    }
+    let startup_batch =
+        schedule_startup_library_scan_batch(runtime, "schedule startup library scans").await?;
+    let enqueued = startup_batch.len();
+    task_queue.enqueue_batch(startup_batch).await;
 
     Ok(enqueued)
 }

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 base64.workspace = true
 komga-domain = { path = "../domain" }
 serde.workspace = true

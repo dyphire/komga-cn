@@ -27,9 +27,11 @@ pub(crate) mod media_helpers;
 mod metadata_tasks;
 mod queue_core;
 pub mod queue_scheduler;
+mod runtime_task_engine;
 mod scanner_jobs;
 mod scanner_support;
 mod task_executor;
+pub mod task_handlers;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod worker_runtime;
@@ -41,6 +43,7 @@ use scanner_support::*;
 
 pub use execution_pool::TaskExecutionPoolHandle;
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
+pub use runtime_task_engine::RuntimeTaskEngine;
 pub type TaskQueueAdmin = TaskQueueOrchestrator;
 
 type RuntimeConfig = TaskRuntimeContext;
@@ -61,7 +64,7 @@ impl TaskExecutionOutcome {
         Self { follow_up_tasks }
     }
 
-    async fn enqueue_into(self, scheduler: &mut TaskQueueScheduler) {
+    async fn enqueue_into(self, scheduler: &TaskQueueScheduler) {
         for task in self.follow_up_tasks {
             scheduler.enqueue(task).await;
         }

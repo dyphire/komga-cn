@@ -1,4 +1,6 @@
-use super::task_kind::{BookPayload, LibraryPayload, ScanLibraryPayload, TaskKind, TaskRequest};
+use super::task_registry::{
+    BookPayload, LibraryPayload, ScanLibraryPayload, TaskKind, TaskRequest,
+};
 use super::{LibraryScanInterval, TaskQueueRecord};
 
 const MANUAL_SCAN_PRIORITY: i32 = 8;

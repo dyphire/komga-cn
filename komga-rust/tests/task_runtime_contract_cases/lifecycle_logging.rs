@@ -24,7 +24,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
         let task = task.clone();
         async move {
             let runtime = runtime_task_context_from_config(&config).await;
-            let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+            let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
             scheduler.enqueue(task).await;
             scheduler
                 .process_available(&runtime)
@@ -116,7 +116,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
             {
-                let mut queue = task_queue.lock().await;
+                let queue = task_queue.lock().await;
                 queue.enqueue(failed_task).await;
                 queue.enqueue(disowned_task).await;
             }
@@ -210,7 +210,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         let task = task.clone();
         async move {
             let runtime = runtime_task_context_from_config(&config).await;
-            let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+            let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
             scheduler.enqueue(task).await;
 
             let claimed = scheduler
@@ -317,7 +317,7 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
 
     let config = runtime_config_for_paths(&paths);
     let runtime = runtime_task_context_from_config(&config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main").await;
     let claimed = [
         scheduler
             .take_next()

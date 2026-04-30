@@ -86,7 +86,7 @@ pub(super) async fn process_scan_library_task(
     deep_scan: bool,
 ) -> Result<usize, TaskProcessingError> {
     let runtime = runtime_task_context_from_config(&config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task(library_id, priority, deep_scan))
         .await;

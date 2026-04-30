@@ -44,7 +44,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         task_write_pool,
         task_read_pool,
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -103,7 +103,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         .expect("book payload rewrite should succeed for unknown task contract");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
             "UNSUPPORTED_TASK:book-1",
@@ -300,7 +300,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         task_rows, 1,
         "startup must not enqueue persisted search tasks when tasks database writer is external-owned",
     );
-    let mut queue = background.task_queue.lock().await;
+    let queue = background.task_queue.lock().await;
     let queued_tasks = queue.count_by_simple_type().await;
     assert!(
         queued_tasks.is_empty(),
@@ -324,7 +324,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .expect("initial scan-library payload precedence fixture should be written");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
@@ -388,7 +388,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     tasks_pool.close().await;
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     replay
         .process_available(&runtime)
         .await
@@ -435,7 +435,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         .expect("initial underscore scan fixture should be written");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await;

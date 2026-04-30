@@ -112,7 +112,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await
@@ -220,7 +220,7 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
         task_read_pool,
         ..runtime_task_context(&paths).await
     };
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new(
@@ -321,7 +321,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime).await
         .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
@@ -417,7 +417,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     tasks_pool.close().await;
 
     let runtime = runtime_task_context(&paths).await;
-    let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .process_available(&runtime)
         .await

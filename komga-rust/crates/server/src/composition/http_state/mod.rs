@@ -56,8 +56,7 @@ use komga_interfaces::state::{
     PersistedServerSettings as InterfacesPersistedServerSettings, ReadProgressState,
     RemoteCacheEntry, RuntimeProfile, RuntimeState, SeriesAlternateTitleRecord,
     SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
-    ServerSettingsService, SseOperationalState, StartupTimingState, TaskQueueService,
-    TransientBooksStore,
+    ServerSettingsService, SseOperationalState, StartupTimingState, TransientBooksStore,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -80,7 +79,7 @@ pub fn compose_http_runtime(
     db: DatabaseHandle,
     tasks_db: DatabaseHandle,
     background: RuntimeBackgroundState,
-    worker_runtime_guard: Option<WorkerRuntimeGuard>,
+    _worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> HttpAppState {
@@ -137,12 +136,11 @@ pub fn compose_http_runtime(
                 db.write_pool().clone(),
             ),
         ),
-        task_queue: Box::new(http_state_operational_state::RuntimeTaskQueueService::new(
+        task_queue: http_state_operational_state::create_task_engine(
             background.task_queue,
             background.task_wakeup,
             background.task_execution_pool,
-            worker_runtime_guard,
-        )),
+        ),
         server_settings: Box::new(
             http_state_operational_state::RuntimeServerSettingsService::new(
                 config.database_file.as_path(),

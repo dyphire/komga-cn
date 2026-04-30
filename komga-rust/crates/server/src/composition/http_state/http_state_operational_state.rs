@@ -3,9 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 use crate::build_metadata::current_build_metadata;
-use crate::runtime::background_workers::{
-    SharedTaskQueue, TaskQueueWakeSignal, WorkerRuntimeGuard,
-};
+use crate::runtime::background_workers::{SharedTaskQueue, TaskQueueWakeSignal};
 use async_trait::async_trait;
 use komga_application::library_catalog::{
     CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
@@ -14,11 +12,11 @@ use komga_application::library_catalog::{
 };
 use sqlx::SqlitePool;
 
-use komga_application::task_processing::TaskQueueRecord;
+use komga_application::task_processing::TaskEngine;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore as InfrastructureServerSettingsStore;
-use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
+use komga_infrastructure::task_queue::{RuntimeTaskEngine, TaskExecutionPoolHandle};
 
 #[derive(Clone)]
 pub(super) struct SqliteLibraryCatalogService {
@@ -111,63 +109,16 @@ impl LibraryCatalogService for SqliteLibraryCatalogService {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct RuntimeTaskQueueService {
+pub(super) fn create_task_engine(
     task_queue: SharedTaskQueue,
     task_wakeup: TaskQueueWakeSignal,
     task_execution_pool: TaskExecutionPoolHandle,
-    worker_runtime_guard: Option<WorkerRuntimeGuard>,
-}
-
-impl RuntimeTaskQueueService {
-    pub(super) fn new(
-        task_queue: SharedTaskQueue,
-        task_wakeup: TaskQueueWakeSignal,
-        task_execution_pool: TaskExecutionPoolHandle,
-        worker_runtime_guard: Option<WorkerRuntimeGuard>,
-    ) -> Self {
-        Self {
-            task_queue,
-            task_wakeup,
-            task_execution_pool,
-            worker_runtime_guard,
-        }
-    }
-}
-
-#[async_trait]
-impl TaskQueueService for RuntimeTaskQueueService {
-    async fn enqueue_task_records(
-        &self,
-        task_records: Vec<TaskQueueRecord>,
-        urgent: bool,
-    ) -> Result<(), String> {
-        let _worker_runtime_guard = self.worker_runtime_guard.clone();
-        let mut queue = self.task_queue.lock().await;
-        for task_record in task_records {
-            queue.enqueue(task_record).await;
-        }
-        if urgent {
-            self.task_wakeup.notify_one();
-        }
-        Ok(())
-    }
-
-    async fn clear_unowned_tasks(&self) -> usize {
-        let mut queue = self.task_queue.lock().await;
-        queue.clear_unowned().await
-    }
-
-    async fn count_task_queue_by_type(&self) -> BTreeMap<String, usize> {
-        let mut queue = self.task_queue.lock().await;
-        queue.count_by_simple_type().await
-    }
-
-    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
-        self.task_execution_pool.resize(value);
-        self.task_wakeup.notify_one();
-        Ok(())
-    }
+) -> Box<dyn TaskEngine> {
+    Box::new(RuntimeTaskEngine::new(
+        task_queue,
+        task_execution_pool,
+        task_wakeup,
+    ))
 }
 
 #[derive(Clone)]
@@ -290,7 +241,6 @@ mod tests {
     };
     use komga_infrastructure::task_queue::TaskRuntimeContext;
     use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
-    use serde_json::json;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::Mutex;
@@ -330,18 +280,13 @@ mod tests {
     }
 
     fn scan_library_task() -> TaskQueueRecord {
-        TaskQueueRecord::new("ScanLibrary_library-1_DEEP_false", 8, None)
-            .with_simple_type("ScanLibrary")
-            .with_payload(
-                json!({
-                    "libraryId": "library-1",
-                    "scanDeep": false,
-                    "priority": 8,
-                    "groupId": serde_json::Value::Null,
-                    "uniqueId": "ScanLibrary_library-1_DEEP_false",
-                })
-                .to_string(),
-            )
+        use komga_application::task_processing::{ScanLibraryPayload, TaskKind, TaskRequest};
+        TaskRequest::with_payload(
+            TaskKind::ScanLibrary,
+            ScanLibraryPayload::new("library-1", false),
+        )
+        .priority(8)
+        .into_queue_record_with_id("library-1_DEEP_false")
     }
 
     #[tokio::test]
@@ -353,14 +298,10 @@ mod tests {
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let service = RuntimeTaskQueueService::new(
-                task_queue.clone(),
-                task_wakeup.clone(),
-                task_execution_pool,
-                None,
-            );
+            let engine =
+                create_task_engine(task_queue.clone(), task_wakeup.clone(), task_execution_pool);
 
-            service
+            engine
                 .enqueue_task_records(vec![scan_library_task()], urgent)
                 .await
                 .expect("task enqueue should succeed");
@@ -387,14 +328,10 @@ mod tests {
             TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
         ));
         let task_wakeup = Arc::new(tokio::sync::Notify::new());
-        let service = RuntimeTaskQueueService::new(
-            task_queue,
-            task_wakeup.clone(),
-            task_execution_pool.clone(),
-            None,
-        );
+        let engine =
+            create_task_engine(task_queue, task_wakeup.clone(), task_execution_pool.clone());
 
-        service
+        engine
             .apply_task_pool_size(3)
             .await
             .expect("task pool resize should succeed");

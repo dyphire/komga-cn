@@ -39,8 +39,10 @@ pub async fn book_analyze(
     enqueue_task_records(
         &app,
         vec![
-            TaskQueueRecord::new(format!("AnalyzeBook_{book_id}"), 6, Some(book.series_id))
-                .with_simple_type("AnalyzeBook"),
+            TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(&book_id))
+                .priority(6)
+                .group(book.series_id)
+                .into_queue_record(),
         ],
     )
     .await
@@ -70,14 +72,16 @@ pub async fn book_metadata_refresh(
     enqueue_task_records(
         &app,
         vec![
-            TaskQueueRecord::new(
-                format!("RefreshBookMetadata_{book_id}"),
-                6,
-                Some(book.series_id.clone()),
+            TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
+                .priority(6)
+                .group(book.series_id.clone())
+                .into_queue_record(),
+            TaskRequest::with_payload(
+                TaskKind::RefreshBookLocalArtwork,
+                BookPayload::new(&book_id),
             )
-            .with_simple_type("RefreshBookMetadata"),
-            TaskQueueRecord::new(format!("RefreshBookLocalArtwork_{book_id}"), 6, None)
-                .with_simple_type("RefreshBookLocalArtwork"),
+            .priority(6)
+            .into_queue_record(),
         ],
     )
     .await
@@ -128,12 +132,12 @@ pub async fn book_metadata_update(
             }
 
             if let Some(series_id) = series_id {
-                let task = TaskQueueRecord::new(
-                    format!("AggregateSeriesMetadata_{series_id}"),
-                    80,
-                    Some(series_id),
+                let task = TaskRequest::with_payload(
+                    TaskKind::AggregateSeriesMetadata,
+                    SeriesPayload::new(&series_id),
                 )
-                .with_simple_type("AggregateSeriesMetadata");
+                .priority(80)
+                .into_queue_record();
                 if let Err(error) = process_task_side_effects(&app, vec![task]).await {
                     return internal_error_response(error);
                 }
@@ -233,12 +237,12 @@ pub async fn book_metadata_batch_update(
         let tasks = affected_series_ids
             .into_iter()
             .map(|series_id| {
-                TaskQueueRecord::new(
-                    format!("AggregateSeriesMetadata_{series_id}"),
-                    80,
-                    Some(series_id),
+                TaskRequest::with_payload(
+                    TaskKind::AggregateSeriesMetadata,
+                    SeriesPayload::new(series_id),
                 )
-                .with_simple_type("AggregateSeriesMetadata")
+                .priority(80)
+                .into_queue_record()
             })
             .collect::<Vec<_>>();
         if let Err(error) = process_task_side_effects(&app, tasks).await {
@@ -502,12 +506,14 @@ pub async fn books_thumbnails_regenerate(
     enqueue_task_records(
         &app,
         vec![
-            TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 0, None).with_payload(
-                json!({
-                    "for_bigger_result_only": query.for_bigger_result_only,
-                })
-                .to_string(),
-            ),
+            TaskRequest::new(TaskKind::FindBookThumbnailsToRegenerate)
+                .into_queue_record()
+                .with_payload(
+                    json!({
+                        "for_bigger_result_only": query.for_bigger_result_only,
+                    })
+                    .to_string(),
+                ),
         ],
     )
     .await
@@ -522,7 +528,7 @@ pub async fn series_file_delete(
         return response;
     }
 
-    enqueue_delete_media_task(&app, format!("DeleteSeries_{series_id}"), "DeleteSeries", 8).await
+    enqueue_delete_media_task(&app, TaskKind::DeleteSeries, &series_id, 8).await
 }
 
 pub async fn series_analyze(
@@ -548,12 +554,10 @@ pub async fn series_analyze(
     let task_records = book_ids
         .into_iter()
         .map(|book_id| {
-            TaskQueueRecord::new(
-                format!("AnalyzeBook_{book_id}"),
-                6,
-                Some(resolved_series_id.clone()),
-            )
-            .with_simple_type("AnalyzeBook")
+            TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(book_id))
+                .priority(6)
+                .group(resolved_series_id.clone())
+                .into_queue_record()
         })
         .collect::<Vec<_>>();
 
@@ -582,21 +586,27 @@ pub async fn series_metadata_refresh(
     let mut task_records = vec![];
     for book_id in book_ids {
         task_records.push(
-            TaskQueueRecord::new(
-                format!("RefreshBookMetadata_{book_id}"),
-                6,
-                Some(series_id.clone()),
-            )
-            .with_simple_type("RefreshBookMetadata"),
+            TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
+                .priority(6)
+                .group(series_id.clone())
+                .into_queue_record(),
         );
         task_records.push(
-            TaskQueueRecord::new(format!("RefreshBookLocalArtwork_{book_id}"), 6, None)
-                .with_simple_type("RefreshBookLocalArtwork"),
+            TaskRequest::with_payload(
+                TaskKind::RefreshBookLocalArtwork,
+                BookPayload::new(&book_id),
+            )
+            .priority(6)
+            .into_queue_record(),
         );
     }
     task_records.push(
-        TaskQueueRecord::new(format!("RefreshSeriesLocalArtwork_{series_id}"), 6, None)
-            .with_simple_type("RefreshSeriesLocalArtwork"),
+        TaskRequest::with_payload(
+            TaskKind::RefreshSeriesLocalArtwork,
+            SeriesPayload::new(&series_id),
+        )
+        .priority(6)
+        .into_queue_record(),
     );
 
     enqueue_task_records(&app, task_records).await
@@ -611,18 +621,22 @@ pub async fn book_file_delete(
         return response;
     }
 
-    enqueue_delete_media_task(&app, format!("DeleteBook_{book_id}"), "DeleteBook", 8).await
+    enqueue_delete_media_task(&app, TaskKind::DeleteBook, &book_id, 8).await
 }
 
 async fn enqueue_delete_media_task(
     app: &HttpAppState,
-    task_id: String,
-    simple_type: &'static str,
+    kind: TaskKind,
+    target_id: &str,
     priority: i32,
 ) -> Response {
     enqueue_task_records(
         app,
-        vec![TaskQueueRecord::new(task_id, priority, None).with_simple_type(simple_type)],
+        vec![
+            TaskRequest::new(kind)
+                .priority(priority)
+                .into_queue_record_with_id(target_id),
+        ],
     )
     .await
 }

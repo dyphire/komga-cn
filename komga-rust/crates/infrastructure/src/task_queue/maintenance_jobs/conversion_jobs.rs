@@ -126,7 +126,7 @@ mod tests {
     }
 
     async fn execute_and_enqueue(
-        scheduler: &mut TaskQueueScheduler,
+        scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
         task_target: Option<&str>,
