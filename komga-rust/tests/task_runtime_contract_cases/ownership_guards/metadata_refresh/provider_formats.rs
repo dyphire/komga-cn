@@ -251,7 +251,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
     .expect("EPUB metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
@@ -365,7 +365,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     .expect("barcode metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)

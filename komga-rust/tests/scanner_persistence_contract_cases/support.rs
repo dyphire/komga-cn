@@ -1,5 +1,6 @@
 use super::*;
 use komga_application::task_processing::TaskProcessingError;
+use komga_infrastructure::database_handle::DatabaseHandle;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct PersistenceSnapshot {
@@ -81,7 +82,7 @@ pub(super) async fn process_scan_library_task(
     priority: i32,
     deep_scan: bool,
 ) -> Result<usize, TaskProcessingError> {
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(scan_library_task(library_id, priority, deep_scan))
@@ -89,9 +90,11 @@ pub(super) async fn process_scan_library_task(
     scheduler.process_available(&runtime).await
 }
 
-pub(super) fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRuntimeContext {
+pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRuntimeContext {
     TaskRuntimeContext {
-        database_file: config.database_file.clone(),
+        main_db: DatabaseHandle::file_backed(config.database_file.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: matches!(
@@ -124,8 +127,8 @@ pub(super) fn runtime_task_context_from_config(config: &RuntimeConfig) -> TaskRu
     }
 }
 
-pub(super) fn scheduler_for_config(config: &RuntimeConfig) -> TaskQueueScheduler {
-    TaskQueueScheduler::for_runtime(runtime_task_context_from_config(config), "rust-main")
+pub(super) async fn scheduler_for_config(config: &RuntimeConfig) -> TaskQueueScheduler {
+    TaskQueueScheduler::for_runtime(runtime_task_context_from_config(config).await, "rust-main")
 }
 
 pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result<PathBuf> {

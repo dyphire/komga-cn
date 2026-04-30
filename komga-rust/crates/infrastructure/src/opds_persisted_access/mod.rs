@@ -26,10 +26,6 @@ use records::{
 pub async fn load_libraries(
     database_file: &Path,
 ) -> Result<Vec<PersistedLibraryRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
@@ -52,10 +48,6 @@ pub async fn load_library(
     database_file: &Path,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
@@ -78,10 +70,6 @@ pub async fn load_readlists_for_library(
     database_file: &Path,
     library_id: &str,
 ) -> Result<Vec<PersistedReadlistRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT rl.ID, rl.NAME, rl.ORDERED,
@@ -111,10 +99,6 @@ pub async fn load_series(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
@@ -152,10 +136,6 @@ pub async fn load_series_books_paged(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBookRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
@@ -251,10 +231,6 @@ pub async fn load_series_tags(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT bt.TAG AS TAG
@@ -279,10 +255,6 @@ pub async fn load_readlist(
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlistRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
@@ -306,10 +278,6 @@ pub async fn load_readlist_books(
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBookRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
@@ -388,10 +356,6 @@ ORDER BY rb.NUMBER ASC"#,
 }
 
 pub async fn load_series_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(0);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
@@ -404,10 +368,6 @@ WHERE s.DELETED_DATE IS NULL"#,
 }
 
 pub async fn load_book_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(0);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
@@ -420,10 +380,6 @@ WHERE b.DELETED_DATE IS NULL"#,
 }
 
 pub async fn load_collection_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(0);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM COLLECTION")
         .fetch_one(&pool)
@@ -432,10 +388,6 @@ pub async fn load_collection_search_count(database_file: &Path) -> Result<usize,
 }
 
 pub async fn load_readlist_search_count(database_file: &Path) -> Result<usize, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(0);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM READLIST")
         .fetch_one(&pool)
@@ -447,7 +399,7 @@ pub async fn load_series_search_records_by_ids(
     database_file: &Path,
     ids: &[String],
 ) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
-    if !database_file.exists() || ids.is_empty() {
+    if ids.is_empty() {
         return Ok(vec![]);
     }
 
@@ -491,7 +443,7 @@ pub async fn load_book_search_records_by_ids(
     database_file: &Path,
     ids: &[String],
 ) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
-    if !database_file.exists() || ids.is_empty() {
+    if ids.is_empty() {
         return Ok(vec![]);
     }
 
@@ -576,7 +528,7 @@ pub async fn load_collection_search_records_by_ids(
     database_file: &Path,
     ids: &[String],
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() || ids.is_empty() {
+    if ids.is_empty() {
         return Ok(vec![]);
     }
 
@@ -611,7 +563,7 @@ pub async fn load_readlist_search_records_by_ids(
     database_file: &Path,
     ids: &[String],
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() || ids.is_empty() {
+    if ids.is_empty() {
         return Ok(vec![]);
     }
 
@@ -649,10 +601,6 @@ pub async fn load_series_search_records_limited(
     database_file: &Path,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
@@ -690,10 +638,6 @@ pub async fn load_book_search_records_limited(
     database_file: &Path,
     limit: i64,
 ) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
@@ -772,10 +716,6 @@ pub async fn load_collection_search_records_limited(
     database_file: &Path,
     limit: i64,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME
@@ -807,10 +747,6 @@ pub async fn load_readlist_search_records_limited(
     database_file: &Path,
     limit: i64,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID, NAME

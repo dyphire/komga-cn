@@ -1,7 +1,7 @@
 use super::*;
 
 async fn run_empty_trash(paths: &RuntimeDbPaths) {
-    let runtime = runtime_task_context(paths);
+    let runtime = runtime_task_context(paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(

@@ -40,7 +40,7 @@ async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
@@ -127,7 +127,7 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_series(&mut scheduler, "series-1").await;
@@ -218,7 +218,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -320,7 +320,7 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -429,7 +429,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -625,7 +625,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
     .expect("delete-book oneshot full-series series sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -719,7 +719,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     .expect("delete-book missing fixture read progress row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -845,7 +845,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     std::fs::set_permissions(&series_dir, permissions)
         .expect("delete-book oneshot readonly series directory should become readonly");
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -974,7 +974,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1095,7 +1095,7 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1147,7 +1147,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
         .expect("delete-series missing-directory book url should be updated");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler

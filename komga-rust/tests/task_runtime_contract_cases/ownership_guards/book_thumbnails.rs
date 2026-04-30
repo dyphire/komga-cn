@@ -14,7 +14,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -59,7 +59,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
     seed_router_contract_data(&paths).await;
     write_router_epub_resource(&paths, "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(

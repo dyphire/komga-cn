@@ -11,10 +11,6 @@ pub async fn persisted_collection_exists(
     database_file: &Path,
     collection_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection exists db: {error}"))?;
@@ -37,10 +33,6 @@ pub async fn load_persisted_collection_thumbnails(
     database_file: &Path,
     collection_id: &str,
 ) -> Result<Vec<CollectionThumbnailRecord>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnails db: {error}"))?;
@@ -168,10 +160,6 @@ pub async fn select_collection_thumbnail(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnail select db: {error}"))?;
@@ -236,10 +224,6 @@ pub async fn delete_collection_thumbnail(
     collection_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection thumbnail delete db: {error}"))?;

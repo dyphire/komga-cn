@@ -1,10 +1,14 @@
-use komga_application::task_processing::TaskRuntimeContext;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
+use komga_infrastructure::database_handle::DatabaseHandle;
+use komga_infrastructure::task_queue::TaskRuntimeContext;
 
-pub(crate) fn task_runtime_context(config: &RuntimeConfig) -> TaskRuntimeContext {
+pub(crate) async fn task_runtime_context(config: &RuntimeConfig) -> TaskRuntimeContext {
+    let main_db = DatabaseHandle::file_backed(config.database_file.clone())
+        .await
+        .expect("failed to open main database");
     TaskRuntimeContext {
-        database_file: config.database_file.clone(),
+        main_db,
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: matches!(

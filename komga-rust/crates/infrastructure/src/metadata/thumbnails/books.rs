@@ -11,10 +11,6 @@ pub async fn load_persisted_book_thumbnails(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Vec<EntityThumbnailRecord>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnails db: {error}"))?;
@@ -50,10 +46,6 @@ pub async fn load_selected_book_thumbnail(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open selected book thumbnail db: {error}"))?;
@@ -83,10 +75,6 @@ pub async fn load_book_thumbnail_by_id(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single book thumbnail db: {error}"))?;
@@ -235,10 +223,6 @@ pub async fn select_book_thumbnail(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnail select db: {error}"))?;
@@ -305,10 +289,6 @@ pub async fn delete_book_thumbnail(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book thumbnail delete db: {error}"))?;

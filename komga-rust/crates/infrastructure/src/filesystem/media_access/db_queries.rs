@@ -41,10 +41,6 @@ pub async fn load_persisted_book_media(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<BookMediaRecord>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media db: {error}"))?;
@@ -80,10 +76,6 @@ pub async fn load_persisted_book_media_files(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Vec<String>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media files db: {error}"))?;
@@ -104,10 +96,6 @@ pub async fn load_persisted_media_file_records(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Vec<PersistedMediaFileRow>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book media file records db: {error}"))?;
@@ -139,9 +127,6 @@ pub async fn book_media_is_ready_status(
     database_file: &Path,
     book_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open media status db: {error}"))?;
@@ -160,10 +145,6 @@ pub async fn load_persisted_series_thumbnail_media(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<BookMediaRecord>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail db: {error}"))?;
@@ -197,9 +178,6 @@ pub async fn load_persisted_book_pages(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Vec<BookPageRecord>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book pages db: {error}"))?;
@@ -220,9 +198,6 @@ pub async fn load_persisted_book_page_row(
     book_id: &str,
     page_number: u64,
 ) -> Result<Option<BookPageRecord>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single book page db: {error}"))?;
@@ -320,9 +295,6 @@ async fn load_book_id_by_sorted_position(
     database_file: &Path,
     index: usize,
 ) -> Result<Option<String>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book-id remap db: {error}"))?;
@@ -341,9 +313,6 @@ async fn load_book_id_by_sorted_position(
 }
 
 pub async fn persisted_book_exists(database_file: &Path, book_id: &str) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book-exists db: {error}"))?;
@@ -361,9 +330,6 @@ pub async fn persisted_series_exists(
     database_file: &Path,
     series_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series exists db: {error}"))?;
@@ -381,9 +347,6 @@ pub async fn load_persisted_series_oneshot(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<bool>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series oneshot db: {error}"))?;
@@ -400,9 +363,6 @@ pub async fn load_series_library_id(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series library db: {error}"))?;
@@ -418,9 +378,6 @@ pub async fn load_series_book_ids(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Vec<String>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series books db: {error}"))?;
@@ -445,9 +402,6 @@ pub async fn load_series_book_number_sorts(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Vec<(String, f64)>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series number sort db: {error}"))?;
@@ -472,10 +426,6 @@ pub async fn load_book_restrictions(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book restrictions db: {error}"))?;
@@ -512,10 +462,6 @@ pub async fn load_persisted_manifest_book(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<(String, String, String)>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open manifest book db: {error}"))?;
@@ -548,10 +494,6 @@ pub async fn load_persisted_epub_extension_blob(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open epub extension db: {error}"))?;
@@ -579,10 +521,6 @@ pub async fn load_readlist_archive_entries(
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Vec<(String, PathBuf)>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist archive db: {error}"))?;
@@ -617,10 +555,6 @@ pub async fn load_series_archive_entries(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series archive db: {error}"))?;
@@ -669,9 +603,6 @@ pub async fn load_series_archive_entries(
 }
 
 pub async fn persisted_book_ids(database_file: &Path) -> Result<Vec<String>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book list db: {error}"))?;

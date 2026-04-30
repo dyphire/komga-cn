@@ -3,9 +3,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::{TaskRuntimeConfig, TaskRuntimeContext};
 use komga_application::task_processing::{
     LibraryScanPipeline, LibraryScanProfile, LibraryScanScheduleState, LibraryTaskBatch,
-    ScanSchedulingTrigger, TaskKind, TaskRequest, TaskRuntimeConfig, TaskRuntimeContext,
+    ScanSchedulingTrigger, TaskKind, TaskRequest,
 };
 use serde_json::Value;
 use sqlx::Row;
@@ -29,10 +30,6 @@ struct PersistedLibraryScanProfile {
 async fn load_persisted_library_scan_profiles(
     database_file: &Path,
 ) -> Result<Vec<PersistedLibraryScanProfile>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open scan profile db: {error}"))?;
@@ -276,7 +273,7 @@ async fn process_startup_library_scans_inner(
     .await?;
     if startup_scan_batch.is_empty() {
         let profiles = load_scan_profiles(
-            runtime.database_file.as_path(),
+            runtime.main_db.database_file(),
             "load startup library scan profiles for processing skip boundary",
         )
         .await?;
@@ -764,10 +761,10 @@ pub async fn cleanup_authentication_activity_once(
         RuntimeLifecycleFields::default(),
     );
 
-    if runtime.database_file.is_dir() {
+    if runtime.main_db.database_file().is_dir() {
         let error_message = format!(
             "failed to open sqlite database at {}: path is a directory",
-            runtime.database_file.display()
+            runtime.main_db.database_file().display()
         );
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -779,13 +776,13 @@ pub async fn cleanup_authentication_activity_once(
     }
 
     crate::auth::runtime_identity_access::persisted_cleanup_authentication_activity(
-        runtime.database_file.as_path(),
+        runtime.main_db.database_file(),
     )
     .await
     .ok_or_else(|| {
         let error_message = format!(
             "failed to clean up authentication activity using {}",
-            runtime.database_file.display()
+            runtime.main_db.database_file().display()
         );
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -902,7 +899,7 @@ async fn bootstrap_startup_library_scans_inner(
     }
 
     let profiles = load_scan_profiles(
-        runtime.database_file.as_path(),
+        runtime.main_db.database_file(),
         "load startup library scan profiles",
     )
     .await?;
@@ -945,7 +942,7 @@ async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
         .schedule(
             ScanSchedulingTrigger::Startup,
             &LibraryScanScheduleState::default(),
@@ -958,7 +955,7 @@ async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
         .schedule(
             ScanSchedulingTrigger::Tick,
             &LibraryScanScheduleState {
@@ -976,7 +973,7 @@ async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(), String> {
-    SqliteFilesystemLibraryScanPipeline::new(runtime.database_file.clone())
+    SqliteFilesystemLibraryScanPipeline::new(runtime.main_db.database_file().to_path_buf())
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
         .map_err(|error| format!("build periodic library scan state: {error}"))
@@ -1208,7 +1205,9 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::{Barrier, Mutex as AsyncMutex, watch};
 
-    fn runtime_context() -> TaskRuntimeContext {
+    use crate::database_handle::DatabaseHandle;
+
+    async fn runtime_context() -> TaskRuntimeContext {
         let root = std::env::temp_dir().join(format!(
             "komga-task-execution-pool-{}",
             std::time::SystemTime::now()
@@ -1216,8 +1215,11 @@ mod tests {
                 .expect("system time should be after unix epoch")
                 .as_nanos()
         ));
+        std::fs::create_dir_all(&root).expect("test temp dir should be created");
         TaskRuntimeContext {
-            database_file: root.join("main.sqlite"),
+            main_db: DatabaseHandle::file_backed(root.join("main.sqlite"))
+                .await
+                .expect("test db should open"),
             tasks_db_file: root.join("tasks.sqlite"),
             lucene_data_directory: root.join("lucene"),
             consumes_queue: true,
@@ -1231,7 +1233,7 @@ mod tests {
 
     #[tokio::test]
     async fn task_execution_pool_resize_allows_parallel_fake_tasks_without_restart() {
-        let runtime = runtime_context();
+        let runtime = runtime_context().await;
         let started = Arc::new(Barrier::new(3));
         let (release_tx, release_rx) = watch::channel(false);
         let worker_threads = Arc::new(AsyncMutex::new(Vec::new()));

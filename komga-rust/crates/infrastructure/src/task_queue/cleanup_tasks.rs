@@ -16,7 +16,7 @@ pub(super) async fn empty_trash(
         return Ok(());
     }
 
-    empty_trash_rows(runtime.database_file.as_path(), library_id)
+    empty_trash_rows(runtime.main_db.database_file(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -27,7 +27,7 @@ pub(super) async fn cleanup_empty_sets(runtime: &RuntimeConfig) -> Result<(), Ta
         return Ok(());
     }
 
-    cleanup_empty_sets_rows(runtime.database_file.as_path())
+    cleanup_empty_sets_rows(runtime.main_db.database_file())
         .await
         .map_err(TaskExecutionError::runtime)
 }

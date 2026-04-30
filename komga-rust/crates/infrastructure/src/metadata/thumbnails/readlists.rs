@@ -11,10 +11,6 @@ pub async fn load_persisted_readlist_thumbnails(
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Vec<ReadlistThumbnailRecord>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnails db: {error}"))?;
@@ -143,10 +139,6 @@ pub async fn select_readlist_thumbnail(
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnail select db: {error}"))?;
@@ -230,10 +222,6 @@ pub async fn delete_readlist_thumbnail(
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist thumbnail delete db: {error}"))?;
@@ -363,10 +351,6 @@ pub async fn load_persisted_readlist_name(
     database_file: &Path,
     readlist_id: &str,
 ) -> Result<Option<String>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist file db: {error}"))?;

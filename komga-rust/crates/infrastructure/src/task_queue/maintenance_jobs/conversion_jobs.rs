@@ -1,5 +1,6 @@
 use super::*;
-use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest, TaskRuntimeContext};
+use crate::task_queue::TaskRuntimeContext;
+use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(super) async fn try_execute(
     runtime: &TaskRuntimeContext,
@@ -190,7 +191,7 @@ mod tests {
         let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = fixture.runtime_context(true, true);
+        let runtime = fixture.runtime_context(true, true).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
@@ -292,7 +293,7 @@ mod tests {
         let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = fixture.runtime_context(true, true);
+        let runtime = fixture.runtime_context(true, true).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
@@ -384,7 +385,7 @@ mod tests {
             .expect("convert-book last-modified media row should be inserted");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, true);
+        let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
@@ -474,7 +475,7 @@ mod tests {
             .expect("convert-book failed-cache media row should be inserted");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, true);
+        let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
@@ -604,7 +605,7 @@ mod tests {
         .expect("convert-book success source page hash should be inserted");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, false);
+        let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
@@ -790,7 +791,7 @@ mod tests {
         let tasks_pool = fixture.tasks_pool().await;
         tasks_pool.close().await;
 
-        let runtime = fixture.runtime_context(true, true);
+        let runtime = fixture.runtime_context(true, true).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
         let task = TaskQueueRecord::new(
             format!("RepairExtension_{book_id}"),

@@ -12,10 +12,6 @@ pub async fn load_persisted_series_thumbnails(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Vec<SeriesThumbnailRecord>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnails db: {error}"))?;
@@ -51,10 +47,6 @@ pub async fn load_selected_series_thumbnail(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
@@ -85,10 +77,6 @@ pub async fn load_series_thumbnail_by_id(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open single series thumbnail db: {error}"))?;
@@ -239,10 +227,6 @@ pub async fn select_series_thumbnail(
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail select db: {error}"))?;
@@ -326,10 +310,6 @@ pub async fn delete_series_thumbnail(
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series thumbnail delete db: {error}"))?;

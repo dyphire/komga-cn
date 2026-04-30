@@ -164,7 +164,7 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
         "scanner-triggered runtime flow must execute analyze tasks and persist MEDIA status transitions",
     );
 
-    let mut scheduler = scheduler_for_config(&fixture.config);
+    let mut scheduler = scheduler_for_config(&fixture.config).await;
     assert!(
         scheduler.count_by_simple_type().await.is_empty(),
         "runtime queue should be drained after worker execution instead of leaving persisted pending rows",
@@ -258,7 +258,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     let before_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_before_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_before_restart = load_media_ready_count(&fixture.paths.main_db).await;
-    let mut runtime_before_restart = scheduler_for_config(&fixture.config);
+    let mut runtime_before_restart = scheduler_for_config(&fixture.config).await;
 
     assert!(
         before_restart.series_rows >= 1
@@ -286,7 +286,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     let after_restart = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     let task_after_restart = load_task_snapshot(&fixture.paths.tasks_db).await;
     let media_ready_after_restart = load_media_ready_count(&fixture.paths.main_db).await;
-    let mut runtime_after_restart = scheduler_for_config(&fixture.config);
+    let mut runtime_after_restart = scheduler_for_config(&fixture.config).await;
 
     assert_eq!(
         after_restart, before_restart,

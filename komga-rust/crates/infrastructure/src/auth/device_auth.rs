@@ -80,10 +80,6 @@ pub async fn load_kobo_metadata_record(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE,
@@ -173,10 +169,6 @@ pub async fn load_book_media_file(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
@@ -211,10 +203,6 @@ pub async fn load_thumbnail_by_id(
     database_file: &Path,
     thumbnail_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
@@ -256,10 +244,6 @@ pub async fn persisted_book_exists(
     database_file: &Path,
     book_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT 1 AS FOUND
@@ -278,10 +262,6 @@ pub async fn load_book_last_epub_position_locator(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB
@@ -333,10 +313,6 @@ pub async fn load_book_created_timestamp(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT CREATED_DATE
@@ -360,10 +336,6 @@ pub async fn load_read_progress(
     book_id: &str,
     user_id_value: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT PAGE, COMPLETED, CREATED_DATE, LAST_MODIFIED_DATE,
@@ -461,10 +433,6 @@ pub async fn load_koreader_book_target(
     database_file: &Path,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|_| KoreaderBookLookupError::Persistence)?;

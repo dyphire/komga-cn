@@ -1,3 +1,4 @@
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 
 mod runtime_startup_contract_cases;
@@ -8,11 +9,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tantivy::Index;
 use tantivy::schema::{STORED, STRING, Schema};
 
-fn runtime_task_context(
+async fn runtime_task_context(
     config: &komga_config::env_config::RuntimeConfig,
-) -> komga_application::task_processing::TaskRuntimeContext {
-    komga_application::task_processing::TaskRuntimeContext {
-        database_file: config.database_file.clone(),
+) -> komga_infrastructure::task_queue::TaskRuntimeContext {
+    komga_infrastructure::task_queue::TaskRuntimeContext {
+        main_db: DatabaseHandle::file_backed(config.database_file.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: matches!(

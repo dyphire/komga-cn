@@ -35,7 +35,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
     .expect("book artwork sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new(
@@ -129,7 +129,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
     .expect("Kotlin persisted local artwork task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler.process_available(&runtime).await.expect(
         "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
@@ -189,7 +189,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         .expect("existing thumbnails should be cleared for multi-artwork import test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
@@ -280,7 +280,7 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
         );
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
@@ -375,7 +375,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
     .expect("generated selected thumbnail should be seeded for local artwork selection test");
     pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
@@ -466,7 +466,7 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
     pool.close().await;
 
     let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(

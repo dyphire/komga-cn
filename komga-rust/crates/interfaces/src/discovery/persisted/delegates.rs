@@ -253,15 +253,6 @@ pub(crate) async fn runtime_owned_books_list_response(
     .await
 }
 
-pub(crate) async fn runtime_owned_books_latest_response(
-    backend: &dyn PersistedDiscoveryService,
-    headers: &HeaderMap,
-    uri: &Uri,
-    auth_state: &DiscoveryAuthState,
-) -> Option<Response> {
-    books_queries::runtime_owned_books_latest_response(backend, headers, uri, auth_state).await
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn runtime_owned_series_list_response(
     backend: &dyn PersistedDiscoveryService,

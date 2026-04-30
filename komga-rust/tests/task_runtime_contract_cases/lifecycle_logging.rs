@@ -23,7 +23,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
         let config = config.clone();
         let task = task.clone();
         async move {
-            let runtime = runtime_task_context_from_config(&config);
+            let runtime = runtime_task_context_from_config(&config).await;
             let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
             scheduler.enqueue(task).await;
             scheduler
@@ -110,7 +110,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
         let failed_task = failed_task.clone();
         let disowned_task = disowned_task.clone();
         async move {
-            let mut runtime = runtime_task_context_from_config(&config);
+            let mut runtime = runtime_task_context_from_config(&config).await;
             runtime.task_pool_size = 2;
             let task_queue = std::sync::Arc::new(tokio::sync::Mutex::new(
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main"),
@@ -209,7 +209,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         let config = config.clone();
         let task = task.clone();
         async move {
-            let runtime = runtime_task_context_from_config(&config);
+            let runtime = runtime_task_context_from_config(&config).await;
             let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
             scheduler.enqueue(task).await;
 
@@ -316,7 +316,7 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
     tasks_pool.close().await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime, "rust-main");
     let claimed = [
         scheduler

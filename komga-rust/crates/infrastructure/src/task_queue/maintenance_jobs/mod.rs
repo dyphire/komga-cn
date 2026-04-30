@@ -1,5 +1,5 @@
 use super::*;
-use komga_application::task_processing::TaskRuntimeContext;
+use crate::task_queue::TaskRuntimeContext;
 
 mod cleanup_delete_jobs;
 mod conversion_jobs;

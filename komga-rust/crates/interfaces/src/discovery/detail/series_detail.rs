@@ -10,13 +10,8 @@ pub async fn series_detail(
     Path(series_id): Path<String>,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let resolved_series_id = resolve_series_id_for_persisted(app, &series_id).await;
@@ -70,13 +65,8 @@ pub async fn series_collections(
     Path(series_id): Path<String>,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let Some(context) = app
@@ -145,13 +135,8 @@ pub async fn series_metadata_update(
     Path(series_id): Path<String>,
     body: Value,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let body = match body.as_object() {

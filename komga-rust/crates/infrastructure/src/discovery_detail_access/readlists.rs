@@ -36,10 +36,6 @@ pub struct PersistedBookAuthorRecord {
 }
 
 pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlists exists db: {error}"))?;
@@ -87,10 +83,6 @@ pub async fn load_persisted_readlist_detail(
     database_file: &FsPath,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlistRecord>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted readlist detail db: {error}"))?;
@@ -256,10 +248,6 @@ pub async fn persist_readlist_update(
     ordered: bool,
     book_ids: &[String],
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist update db: {error}"))?;
@@ -306,10 +294,6 @@ pub async fn delete_persisted_readlist(
     database_file: &FsPath,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open readlist delete db: {error}"))?;

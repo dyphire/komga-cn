@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::TaskRuntimeContext;
 use komga_application::task_processing::{
     BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
     LibraryScanScheduleState, LibraryTaskBatch, RefreshBookMetadataPayload, ScanOneLibrary,
     ScanOneLibraryResult, ScanSchedulingTrigger, SeriesPayload, TaskKind, TaskProcessingError,
-    TaskQueueRecord, TaskRequest, TaskRuntimeContext, TaskSchedule,
-    normalize_library_scan_profiles,
+    TaskQueueRecord, TaskRequest, TaskSchedule, normalize_library_scan_profiles,
 };
 use sqlx::Row;
 use tokio::time::Instant;
@@ -22,10 +22,6 @@ use crate::sqlite::connect_read_pool;
 async fn load_library_scan_profiles(
     database_file: &Path,
 ) -> Result<Vec<LibraryScanProfile>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open scan profile db: {error}"))?;
@@ -68,7 +64,7 @@ impl SqliteFilesystemLibraryScanPipeline {
 
     pub fn for_runtime(runtime: &TaskRuntimeContext) -> Self {
         Self {
-            database_file: runtime.database_file.clone(),
+            database_file: runtime.main_db.database_file().to_path_buf(),
             owns_main_database: runtime.owns_main_database,
         }
     }

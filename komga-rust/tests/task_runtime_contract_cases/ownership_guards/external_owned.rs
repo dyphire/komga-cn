@@ -41,7 +41,7 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
         &runtime,
@@ -122,7 +122,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -217,7 +217,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
 
     let runtime = TaskRuntimeContext {
         owns_sidecar_output: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -280,7 +280,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -357,7 +357,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler

@@ -11,7 +11,7 @@ pub(in crate::task_queue) async fn rebuild_index(
     }
 
     rebuild_index_from_database_for_entities(
-        runtime.database_file.as_path(),
+        runtime.main_db.database_file(),
         runtime.lucene_data_directory.as_path(),
         entity_types,
     )

@@ -12,7 +12,7 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
         allow_isolated_writes: true,
     };
 
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
@@ -44,7 +44,7 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
     let paths = new_router_fixture("runtime-executes-legacy-upgrade-index-task-noop").await;
     seed_router_contract_data(&paths).await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new("UpgradeIndex", 1_000, None))
@@ -143,7 +143,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     pool.close().await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
@@ -388,7 +388,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     seed_router_contract_data(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
@@ -505,7 +505,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
     seed_router_contract_data(&paths).await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))

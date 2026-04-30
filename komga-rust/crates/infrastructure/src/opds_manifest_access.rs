@@ -14,10 +14,6 @@ pub async fn load_manifest_book_record(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<ManifestBookRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS NAME, m.MEDIA_TYPE AS MEDIA_TYPE,

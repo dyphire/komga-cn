@@ -56,14 +56,14 @@ pub(in crate::task_queue) async fn find_books_to_convert(
 ) -> Result<Vec<PersistedBookToConvert>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     let maintenance_flags =
-        load_library_maintenance_flags(runtime.database_file.as_path(), library_id)
+        load_library_maintenance_flags(runtime.main_db.database_file(), library_id)
             .await
             .map_err(TaskExecutionError::runtime)?;
     if !maintenance_flags.convert_to_cbz {
         return Ok(Vec::new());
     }
 
-    load_books_to_convert(runtime.database_file.as_path(), library_id)
+    load_books_to_convert(runtime.main_db.database_file(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -73,7 +73,7 @@ pub(in crate::task_queue) async fn convert_book(
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
     let runtime_context = runtime.task_runtime_context();
-    let database_file = runtime_context.database_file.clone();
+    let database_file = runtime_context.main_db.database_file().to_path_buf();
     let book_id = book_id.to_string();
 
     let Some(source) = load_book_conversion_target(database_file.as_path(), &book_id)

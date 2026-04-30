@@ -301,8 +301,7 @@ pub async fn adjust_analyzed_book_read_progress(
     previous_page_count: i64,
     current_page_count: i64,
 ) -> Result<(), String> {
-    if !database_file.exists()
-        || !previous_media_status.eq_ignore_ascii_case("OUTDATED")
+    if !previous_media_status.eq_ignore_ascii_case("OUTDATED")
         || previous_page_count == current_page_count
     {
         return Ok(());
@@ -387,10 +386,6 @@ pub async fn persist_book_conversion_events(
     destination_path: &Path,
     source_deleted: bool,
 ) -> Result<(), String> {
-    if !database_file.exists() {
-        return Ok(());
-    }
-
     let source_name = source_path.to_string_lossy().to_string();
     let destination_name = destination_path.to_string_lossy().to_string();
     let pool = connect_private_write_pool(database_file)
@@ -486,7 +481,7 @@ pub async fn persist_duplicate_page_deleted_events(
     book_path: &Path,
     removed_pages: &[PersistedHashedPageToDelete],
 ) -> Result<(), String> {
-    if removed_pages.is_empty() || !database_file.exists() {
+    if removed_pages.is_empty() {
         return Ok(());
     }
 

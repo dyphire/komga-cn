@@ -108,7 +108,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     .expect("Kotlin persisted metadata task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)
@@ -207,7 +207,7 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -309,7 +309,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
     .expect("Kotlin persisted metadata task row without capabilities should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime).await
@@ -405,7 +405,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
     .expect("Kotlin persisted repair-extension task row should be inserted");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime_task_context(&paths).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .process_available(&runtime)

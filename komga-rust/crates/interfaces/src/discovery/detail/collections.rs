@@ -366,19 +366,15 @@ pub async fn collections(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content = if app.auth_db.db.database_file().exists() {
-        let persisted_rows_exist = match persisted_collections_exist(&app).await {
-            Ok(exists) => exists,
-            Err(error) => return internal_error_response(error),
-        };
+    let persisted_rows_exist = match persisted_collections_exist(&app).await {
+        Ok(exists) => exists,
+        Err(error) => return internal_error_response(error),
+    };
 
-        if persisted_rows_exist {
-            match load_persisted_collections(&app).await {
-                Ok(collections) => collections,
-                Err(error) => return internal_error_response(error),
-            }
-        } else {
-            vec![]
+    let mut content = if persisted_rows_exist {
+        match load_persisted_collections(&app).await {
+            Ok(collections) => collections,
+            Err(error) => return internal_error_response(error),
         }
     } else {
         vec![]
@@ -817,32 +813,30 @@ pub async fn collection_detail(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    if app.auth_db.db.database_file().exists() {
-        match load_persisted_collection_detail(&app, &collection_id).await {
-            Ok(Some(mut collection)) => {
-                let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-                for series_id in &collection.series_ids {
-                    match series_visible_to_context(&app, &context, series_id, None).await {
-                        Ok(true) => visible_series_ids.push(series_id.clone()),
-                        Ok(false) => {}
-                        Err(error) => return internal_error_response(error),
-                    }
+    match load_persisted_collection_detail(&app, &collection_id).await {
+        Ok(Some(mut collection)) => {
+            let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
+            for series_id in &collection.series_ids {
+                match series_visible_to_context(&app, &context, series_id, None).await {
+                    Ok(true) => visible_series_ids.push(series_id.clone()),
+                    Ok(false) => {}
+                    Err(error) => return internal_error_response(error),
                 }
-
-                if collection.series_ids.len() != visible_series_ids.len() {
-                    collection.filtered = true;
-                }
-                collection.series_ids = visible_series_ids;
-
-                if collection.series_ids.is_empty() {
-                    return StatusCode::NOT_FOUND.into_response();
-                }
-
-                return Json(collection_payload(&collection)).into_response();
             }
-            Ok(None) => {}
-            Err(error) => return internal_error_response(error),
+
+            if collection.series_ids.len() != visible_series_ids.len() {
+                collection.filtered = true;
+            }
+            collection.series_ids = visible_series_ids;
+
+            if collection.series_ids.is_empty() {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+
+            return Json(collection_payload(&collection)).into_response();
         }
+        Ok(None) => {}
+        Err(error) => return internal_error_response(error),
     }
 
     StatusCode::NOT_FOUND.into_response()

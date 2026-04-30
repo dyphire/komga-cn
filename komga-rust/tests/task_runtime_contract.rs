@@ -1,13 +1,14 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_application::task_processing::TaskQueueRecord;
-use komga_application::task_processing::TaskRuntimeContext;
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
 use komga_contract_testkit::contract_matrix::assert_required_target_declared;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
 use komga_infrastructure::sqlite::connect_test_pool;
+use komga_infrastructure::task_queue::TaskRuntimeContext;
 use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
 use komga_server::app::{
     build_router_with_config, build_router_without_runtime_workers_for_contract,
@@ -28,9 +29,11 @@ mod task_runtime_contract_cases;
 
 const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
-fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
+async fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
     TaskRuntimeContext {
-        database_file: paths.main_db.clone(),
+        main_db: DatabaseHandle::file_backed(paths.main_db.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: paths.tasks_db.clone(),
         lucene_data_directory: paths.config_dir.join("lucene"),
         consumes_queue: true,
@@ -42,11 +45,13 @@ fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
     }
 }
 
-fn runtime_task_context_from_config(
+async fn runtime_task_context_from_config(
     config: &komga_config::env_config::RuntimeConfig,
 ) -> TaskRuntimeContext {
     TaskRuntimeContext {
-        database_file: config.database_file.clone(),
+        main_db: DatabaseHandle::file_backed(config.database_file.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: matches!(

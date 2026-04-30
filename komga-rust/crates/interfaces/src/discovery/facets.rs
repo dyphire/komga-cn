@@ -78,13 +78,8 @@ async fn resolve_collection_facet_scope(
 }
 
 pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let search = query_value(uri.query().unwrap_or_default(), "search")
@@ -115,13 +110,8 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
 }
 
 pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let context = match resolve_query_context_or_unauthorized(
@@ -152,13 +142,8 @@ pub(super) async fn authors_deprecated_get(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -214,13 +199,8 @@ pub(super) async fn authors_deprecated_get(
 }
 
 pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -302,13 +282,8 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
 }
 
 pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -337,13 +312,8 @@ pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Respons
 }
 
 pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -372,13 +342,8 @@ pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response 
 }
 
 pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -407,13 +372,8 @@ pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
 }
 
 pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -442,13 +402,8 @@ pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Resp
 }
 
 pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -477,13 +432,8 @@ pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
 }
 
 pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -512,13 +462,8 @@ pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
 }
 
 pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -547,13 +492,8 @@ pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) ->
 }
 
 pub async fn series_release_dates(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();

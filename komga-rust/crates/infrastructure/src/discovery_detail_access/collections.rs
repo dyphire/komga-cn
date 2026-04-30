@@ -18,10 +18,6 @@ pub struct PersistedSeriesRestrictionRecord {
 }
 
 pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collections exists db: {error}"))?;
@@ -68,10 +64,6 @@ pub async fn load_persisted_collection_detail(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<Option<PersistedCollectionRecord>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open persisted collection detail db: {error}"))?;
@@ -227,10 +219,6 @@ pub async fn persist_collection_update(
     ordered: bool,
     series_ids: &[String],
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection update db: {error}"))?;
@@ -275,10 +263,6 @@ pub async fn delete_persisted_collection(
     database_file: &FsPath,
     collection_id: &str,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open collection delete db: {error}"))?;

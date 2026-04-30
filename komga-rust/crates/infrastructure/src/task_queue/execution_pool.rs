@@ -1,7 +1,7 @@
+use super::TaskRuntimeContext;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskExecutionResult, TaskQueueRecord};
 use crate::task_queue::task_executor;
 use futures_util::future::BoxFuture;
-use komga_application::task_processing::TaskRuntimeContext;
 #[cfg(test)]
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};

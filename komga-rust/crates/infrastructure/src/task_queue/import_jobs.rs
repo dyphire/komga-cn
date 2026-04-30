@@ -1,7 +1,7 @@
+use super::TaskRuntimeContext;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::filesystem::import::FilesystemImportPort;
 use komga_application::media_assets::MediaImportService;
-use komga_application::task_processing::TaskRuntimeContext;
 use std::future::Future;
 use std::path::PathBuf;
 
@@ -72,7 +72,7 @@ fn prepare_import_task(
     }
 
     Ok(Some((
-        runtime.database_file.clone(),
+        runtime.main_db.database_file().to_path_buf(),
         payload,
         task.priority,
     )))

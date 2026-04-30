@@ -193,13 +193,8 @@ async fn series_feed(
     exclude_newly_added: bool,
     kotlin_unpaged_page_shape: bool,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -286,13 +281,8 @@ pub async fn series_latest(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
 }
 
 pub async fn series_deprecated_get(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -484,17 +474,12 @@ pub async fn series_alphabetical_groups(
     body: Value,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if !body.is_object() {
         return StatusCode::BAD_REQUEST.into_response();
     }
 
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let filters = match parse_runtime_series_filters_with_mode(
@@ -563,24 +548,19 @@ pub async fn series_list(
     let full_text_search = extract_full_text_search(&payload);
     let strict_runtime_shape = should_use_strict_runtime_shape(Some(&payload));
 
-    if app.auth_db.db.database_file().exists()
-        && let Some(runtime_response) = runtime_owned_series_list_response(
-            app.services.discovery_persisted.as_ref(),
-            &headers,
-            &uri,
-            Some(&payload),
-            full_text_search.clone(),
-            &app.discovery_auth,
-            &*app.services.runtime_identity,
-            strict_runtime_shape,
-        )
-        .await
+    if let Some(runtime_response) = runtime_owned_series_list_response(
+        app.services.discovery_persisted.as_ref(),
+        &headers,
+        &uri,
+        Some(&payload),
+        full_text_search.clone(),
+        &app.discovery_auth,
+        &*app.services.runtime_identity,
+        strict_runtime_shape,
+    )
+    .await
     {
         return runtime_response;
-    }
-
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     invalid_runtime_series_list_response(DiscoveryError::InvalidSemantics(

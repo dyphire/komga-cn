@@ -1,6 +1,8 @@
 use super::support::*;
 use super::*;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::sqlite::connect_test_pool;
+use komga_infrastructure::sqlite::setup::bootstrap_pool;
 
 #[test]
 fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing_it_inline() {
@@ -36,7 +38,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
         let config = config.clone();
         async move {
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                runtime_task_context(&config),
+                runtime_task_context(&config).await,
                 Some("RebuildIndex"),
             )
             .await;
@@ -110,7 +112,7 @@ fn runtime_startup_prepare_task_queue_applies_configured_task_pool_size() {
 
     let task_pool_size = runtime.block_on(async {
         let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-            runtime_task_context(&config),
+            runtime_task_context(&config).await,
             None,
         )
         .await;
@@ -125,17 +127,25 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
     let _guard = startup_contract_lock();
     let root = unique_temp_dir("komga-runtime-startup-worker-bootstrap-skip");
     fs::create_dir_all(&root).expect("startup worker bootstrap skip root should exist");
-    let runtime = komga_application::task_processing::TaskRuntimeContext {
-        database_file: root.join("database.sqlite"),
-        tasks_db_file: root.join("tasks.sqlite"),
-        lucene_data_directory: root.join("lucene"),
-        consumes_queue: false,
-        owns_main_database: false,
-        owns_filesystem_scan_output: false,
-        owns_sidecar_output: false,
-        owns_search_index: false,
-        task_pool_size: 1,
-    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("startup worker bootstrap skip runtime should build")
+        .block_on(async {
+            komga_infrastructure::task_queue::TaskRuntimeContext {
+                main_db: DatabaseHandle::file_backed(root.join("database.sqlite"))
+                    .await
+                    .expect("test db should open"),
+                tasks_db_file: root.join("tasks.sqlite"),
+                lucene_data_directory: root.join("lucene"),
+                consumes_queue: false,
+                owns_main_database: false,
+                owns_filesystem_scan_output: false,
+                owns_sidecar_output: false,
+                owns_search_index: false,
+                task_pool_size: 1,
+            }
+        });
 
     let mut config =
         runtime_config_for_logging_contract("komga-runtime-startup-worker-bootstrap-skip-logs");
@@ -178,17 +188,29 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
     let _guard = startup_contract_lock();
     let root = unique_temp_dir("komga-runtime-startup-worker-bootstrap-search-not-owned");
     fs::create_dir_all(&root).expect("mixed ownership startup worker root should exist");
-    let runtime = komga_application::task_processing::TaskRuntimeContext {
-        database_file: root.join("database.sqlite"),
-        tasks_db_file: root.join("tasks.sqlite"),
-        lucene_data_directory: root.join("lucene"),
-        consumes_queue: true,
-        owns_main_database: true,
-        owns_filesystem_scan_output: false,
-        owns_sidecar_output: false,
-        owns_search_index: false,
-        task_pool_size: 1,
-    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("mixed ownership startup worker runtime should build")
+        .block_on(async {
+            let main_db = DatabaseHandle::file_backed(root.join("database.sqlite"))
+                .await
+                .expect("test db should open");
+            bootstrap_pool(main_db.write_pool())
+                .await
+                .expect("test schema should bootstrap");
+            komga_infrastructure::task_queue::TaskRuntimeContext {
+                main_db,
+                tasks_db_file: root.join("tasks.sqlite"),
+                lucene_data_directory: root.join("lucene"),
+                consumes_queue: true,
+                owns_main_database: true,
+                owns_filesystem_scan_output: false,
+                owns_sidecar_output: false,
+                owns_search_index: false,
+                task_pool_size: 1,
+            }
+        });
 
     let mut config = runtime_config_for_logging_contract(
         "komga-runtime-startup-worker-bootstrap-search-not-owned-logs",
@@ -263,7 +285,7 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
         let config = config.clone();
         async move {
             let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                runtime_task_context(&config),
+                runtime_task_context(&config).await,
                 None,
             )
             .await;
@@ -337,7 +359,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         let config = config.clone();
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
-                runtime_task_context(&config),
+                runtime_task_context(&config).await,
             )
             .await;
         }
@@ -397,7 +419,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
         let config = disabled_startup_config.clone();
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
-                runtime_task_context(&config),
+                runtime_task_context(&config).await,
             )
             .await;
         }
@@ -420,17 +442,26 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     );
 
     let skip_root = unique_temp_dir("komga-runtime-startup-library-scan-processing-skip");
-    let skip_runtime = komga_application::task_processing::TaskRuntimeContext {
-        database_file: skip_root.join("database.sqlite"),
-        tasks_db_file: skip_root.join("tasks.sqlite"),
-        lucene_data_directory: skip_root.join("lucene"),
-        consumes_queue: false,
-        owns_main_database: false,
-        owns_filesystem_scan_output: false,
-        owns_sidecar_output: false,
-        owns_search_index: false,
-        task_pool_size: 1,
-    };
+    std::fs::create_dir_all(&skip_root).expect("skip root should be created");
+    let skip_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("startup scan skip runtime should build")
+        .block_on(async {
+            komga_infrastructure::task_queue::TaskRuntimeContext {
+                main_db: DatabaseHandle::file_backed(skip_root.join("database.sqlite"))
+                    .await
+                    .expect("test db should open"),
+                tasks_db_file: skip_root.join("tasks.sqlite"),
+                lucene_data_directory: skip_root.join("lucene"),
+                consumes_queue: false,
+                owns_main_database: false,
+                owns_filesystem_scan_output: false,
+                owns_sidecar_output: false,
+                owns_search_index: false,
+                task_pool_size: 1,
+            }
+        });
     let mut skip_config = runtime_config_for_logging_contract(
         "komga-runtime-startup-library-scan-processing-skip-logs",
     );
@@ -478,7 +509,7 @@ fn runtime_startup_library_scan_processing_logs_no_libraries_skip_boundary() {
         let config = config.clone();
         async move {
             komga_infrastructure::task_queue::worker_runtime::process_startup_library_scans(
-                runtime_task_context(&config),
+                runtime_task_context(&config).await,
             )
             .await;
         }

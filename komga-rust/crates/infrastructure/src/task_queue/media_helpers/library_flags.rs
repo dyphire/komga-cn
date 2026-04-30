@@ -27,7 +27,7 @@ pub(in crate::task_queue) async fn load_library_hashing_flags(
     library_id: &str,
 ) -> Result<LibraryHashingFlags, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    let flags = load_persisted_library_hashing_flags(runtime.database_file.as_path(), library_id)
+    let flags = load_persisted_library_hashing_flags(runtime.main_db.database_file(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
@@ -44,7 +44,7 @@ pub(in crate::task_queue) async fn load_library_maintenance_flags(
 ) -> Result<LibraryMaintenanceFlags, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     let flags =
-        load_persisted_library_maintenance_flags(runtime.database_file.as_path(), library_id)
+        load_persisted_library_maintenance_flags(runtime.main_db.database_file(), library_id)
             .await
             .map_err(TaskExecutionError::runtime)?;
 

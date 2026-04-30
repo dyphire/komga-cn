@@ -1,10 +1,9 @@
+use super::TaskRuntimeContext;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::operational_settings_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_application::task_processing::{
-    RefreshBookMetadataPayload, TaskKind, TaskRequest, TaskRuntimeContext,
-};
+use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
 use serde_json::Value;
 
 fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
@@ -81,7 +80,8 @@ async fn execute_find_book_thumbnails_to_regenerate(
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
     let book_ids = if for_bigger_result_only {
-        let settings_store = ServerSettingsStore::new(runtime.database_file.clone());
+        let settings_store =
+            ServerSettingsStore::new(runtime.main_db.database_file().to_path_buf());
         let settings = load_server_settings(&settings_store)
             .await
             .map_err(|error| {
@@ -169,13 +169,14 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::TaskRuntimeContext;
     use super::*;
+    use crate::database_handle::DatabaseHandle;
     use crate::sqlite::{connect_main_write_context, connect_test_pool};
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
-    use komga_application::task_processing::TaskRuntimeContext;
     use sqlx::{Row, SqlitePool};
     use std::fs::File;
     use std::io::Write;
@@ -419,7 +420,9 @@ mod tests {
         pool.close().await;
 
         let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
+            main_db: DatabaseHandle::file_backed(database_file.clone())
+                .await
+                .expect("test db should open"),
             tasks_db_file,
             lucene_data_directory: lucene_dir,
             consumes_queue: false,
@@ -488,7 +491,9 @@ mod tests {
         pool.close().await;
 
         let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
+            main_db: DatabaseHandle::file_backed(database_file.clone())
+                .await
+                .expect("test db should open"),
             tasks_db_file,
             lucene_data_directory: lucene_dir,
             consumes_queue: false,
@@ -531,7 +536,7 @@ mod tests {
     #[tokio::test]
     async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
         let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
-        let runtime = fixture.runtime_context(false, false);
+        let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test");
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
@@ -602,7 +607,7 @@ mod tests {
     async fn analyze_book_keeps_page_dimensions_null_when_library_analysis_is_disabled() {
         let fixture =
             seed_analyze_book_dimension_fixture("analyze-book-dimensions-disabled", false).await;
-        let runtime = fixture.runtime_context(false, false);
+        let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-disabled-dimensions-test",
@@ -715,7 +720,9 @@ mod tests {
         pool.close().await;
 
         let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
+            main_db: DatabaseHandle::file_backed(database_file.clone())
+                .await
+                .expect("test db should open"),
             tasks_db_file,
             lucene_data_directory: lucene_dir,
             consumes_queue: false,
@@ -919,7 +926,9 @@ mod tests {
         pool.close().await;
 
         let runtime = TaskRuntimeContext {
-            database_file: database_file.clone(),
+            main_db: DatabaseHandle::file_backed(database_file.clone())
+                .await
+                .expect("test db should open"),
             tasks_db_file,
             lucene_data_directory: lucene_dir,
             consumes_queue: false,

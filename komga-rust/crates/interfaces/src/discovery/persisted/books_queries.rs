@@ -4,7 +4,7 @@ use crate::state::PersistedDiscoveryService;
 
 use super::common_helpers::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
-    normalize_unpaged_page_size, normalized_text_matches, runtime_list_request,
+    normalized_text_matches, runtime_list_request,
 };
 use super::*;
 use crate::discovery::filters::{
@@ -944,66 +944,4 @@ pub async fn runtime_owned_books_list_response(
     }
 
     None
-}
-
-pub async fn runtime_owned_books_latest_response(
-    backend: &dyn PersistedDiscoveryService,
-    headers: &HeaderMap,
-    uri: &Uri,
-    auth_state: &DiscoveryAuthState,
-) -> Option<Response> {
-    let query = uri.query().unwrap_or_default();
-    let request = runtime_list_request(query);
-
-    let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids =
-        remap_requested_library_ids_for_persisted(backend, requested_library_ids.as_ref())
-            .await
-            .or(requested_library_ids);
-
-    let page = request.page;
-    let size = request.size;
-    let unpaged = request.unpaged;
-
-    let context = match auth_state.resolve_query_context(headers, library_ids.as_deref()) {
-        Some(context) => context,
-        None => return Some(StatusCode::UNAUTHORIZED.into_response()),
-    };
-
-    match load_persisted_books_page(
-        backend,
-        &context,
-        PersistedBooksBrowseQuery::from_filters(
-            BooksFilterCriteria {
-                library_ids,
-                ..BooksFilterCriteria::default()
-            },
-            None,
-            page,
-            size,
-            unpaged,
-            vec![PersistedBooksSortMode::LastModifiedDateDesc],
-        ),
-    )
-    .await
-    {
-        Ok(page) => {
-            let (page, paged) = if unpaged {
-                (normalize_unpaged_page_size(page, 20), true)
-            } else {
-                (page, true)
-            };
-            let mut response =
-                Json(books_page_payload(page, context.is_admin, paged, true)).into_response();
-            mark_runtime_owned(&mut response);
-            Some(response)
-        }
-        Err(error) => Some(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("runtime books latest failed: {error}") })),
-            )
-                .into_response(),
-        ),
-    }
 }

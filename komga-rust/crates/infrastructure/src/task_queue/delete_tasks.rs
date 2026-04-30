@@ -38,7 +38,7 @@ async fn load_book_delete_target(
 ) -> Result<Option<(String, bool)>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     Ok(
-        load_book_delete_decision(runtime.database_file.as_path(), book_id)
+        load_book_delete_decision(runtime.main_db.database_file(), book_id)
             .await
             .map_err(TaskExecutionError::runtime)?
             .map(|target| (target.series_id, target.oneshot)),
@@ -72,13 +72,13 @@ fn emit_series_changed_after_file_delete(series_id: &str, library_id: &str) {
 
 async fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    let Some(context) = load_book_delete_sse_context(runtime.database_file.as_path(), book_id)
+    let Some(context) = load_book_delete_sse_context(runtime.main_db.database_file(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
-    let Some(work) = load_book_delete_work(runtime.database_file.as_path(), book_id)
+    let Some(work) = load_book_delete_work(runtime.main_db.database_file(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -99,7 +99,7 @@ async fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskE
     remove_sidecar_thumbnail_files(&sidecar_thumbnail_paths).await?;
     remove_empty_parent_directory(&book_path).await?;
 
-    soft_delete_book_rows(runtime.database_file.as_path(), book_id, &work.series_id)
+    soft_delete_book_rows(runtime.main_db.database_file(), book_id, &work.series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
@@ -237,13 +237,13 @@ pub(super) async fn delete_series(
 
     let runtime_context = runtime.task_runtime_context();
     let Some(context) =
-        load_series_delete_sse_context(runtime_context.database_file.as_path(), series_id)
+        load_series_delete_sse_context(runtime_context.main_db.database_file(), series_id)
             .await
             .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
-    let work = load_series_delete_work(runtime_context.database_file.as_path(), series_id)
+    let work = load_series_delete_work(runtime_context.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
@@ -267,11 +267,11 @@ pub(super) async fn delete_series(
     remove_sidecar_thumbnail_files(&sidecar_thumbnail_paths).await?;
     remove_empty_directory(&series_path).await?;
 
-    soft_delete_series_book_rows(runtime_context.database_file.as_path(), series_id)
+    soft_delete_series_book_rows(runtime_context.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
-    soft_delete_series_rows(runtime_context.database_file.as_path(), series_id)
+    soft_delete_series_rows(runtime_context.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 

@@ -43,10 +43,6 @@ pub async fn list_persisted_libraries(
     database_file: &Path,
     context: &DiscoveryQueryContext,
 ) -> Result<Vec<PersistedLibraryReadModel>, DiscoveryError> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(map_sqlx_error)?;
@@ -58,10 +54,6 @@ pub async fn get_persisted_library(
     context: &DiscoveryQueryContext,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryReadModel>, DiscoveryError> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(map_sqlx_error)?;

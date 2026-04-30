@@ -22,7 +22,7 @@ use common_helpers::filter_rows;
 use delegates::*;
 use helpers::*;
 use models::{
-    BooksFilterCriteria, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
     PersistedBookPosterSummary, PersistedBookTagsScope, PersistedBooksBrowseQuery,
     PersistedBooksSortMode, PersistedSeriesBrowseQuery, PersistedSeriesSortMode,
     PersistedSeriesSummary, RuntimeBooksFilters, RuntimeSeriesFilters,

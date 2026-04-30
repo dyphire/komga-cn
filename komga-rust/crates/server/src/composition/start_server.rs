@@ -79,7 +79,8 @@ pub async fn build_router_with_config(
         config.clone(),
         background.task_wakeup.clone(),
         None,
-    );
+    )
+    .await;
     finalize_router_startup(
         compose_http_runtime(
             config,
@@ -130,7 +131,7 @@ pub async fn serve_with_config(
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> std::io::Result<()> {
-    crate::bootstrap::emit_startup_banner_and_runtime_event(&config);
+    crate::bootstrap::emit_startup_banner_and_runtime_event(&config).await;
     let startup_search_plan = plan_startup_search_task_with_logging(&config)?;
     emit_server_bind_event(&listener);
     let startup_search_task = startup_search_plan.startup_task;
@@ -144,7 +145,8 @@ pub async fn serve_with_config(
         config.clone(),
         background.task_wakeup.clone(),
         Some(worker_shutdown_rx),
-    );
+    )
+    .await;
     let router = finalize_router_startup(
         compose_http_runtime(
             &config,

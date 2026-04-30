@@ -42,10 +42,6 @@ async fn load_book_metadata(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<BookMetadata>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book metadata db: {error}"))?;
@@ -134,10 +130,6 @@ async fn load_book_series_id(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<String>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open book series db: {error}"))?;
@@ -155,10 +147,6 @@ async fn persist_book_metadata(
     book_id: &str,
     metadata: &BookMetadata,
 ) -> Result<bool, String> {
-    if !database_file.exists() {
-        return Ok(false);
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book metadata update db: {error}"))?;

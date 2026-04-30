@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_application::task_processing::TaskRuntimeContext;
+use super::TaskRuntimeContext;
 use sqlx::SqlitePool;
 
+use crate::database_handle::DatabaseHandle;
 use crate::sqlite::{
     connect_main_write_context, connect_write_pool, evict_shared_pools_for_paths, setup,
 };
@@ -43,13 +44,15 @@ impl RuntimeTestFixture {
         pool
     }
 
-    pub(crate) fn runtime_context(
+    pub(crate) async fn runtime_context(
         &self,
         consumes_queue: bool,
         owns_search_index: bool,
     ) -> TaskRuntimeContext {
         TaskRuntimeContext {
-            database_file: self.database_file.clone(),
+            main_db: DatabaseHandle::file_backed(self.database_file.clone())
+                .await
+                .expect("runtime test main db should open"),
             tasks_db_file: self.tasks_db_file.clone(),
             lucene_data_directory: self.lucene_dir.clone(),
             consumes_queue,

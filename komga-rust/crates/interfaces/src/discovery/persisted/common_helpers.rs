@@ -190,17 +190,6 @@ pub fn page_payload(content: Vec<Value>, metadata: PagePayloadMetadata) -> Value
     })
 }
 
-pub fn normalize_unpaged_page_size<T>(mut page: PageEnvelope<T>, size: usize) -> PageEnvelope<T> {
-    page.page = 0;
-    page.size = size;
-    page.total_pages = if page.total_elements == 0 {
-        0
-    } else {
-        ((page.total_elements - 1) / size) + 1
-    };
-    page
-}
-
 pub fn invalid_runtime_series_list_response(error: DiscoveryError) -> Response {
     (
         StatusCode::BAD_REQUEST,

@@ -4,7 +4,7 @@ use super::persisted::delegates::{
     internal_error_response, invalid_runtime_books_list_response, load_persisted_book_tags,
     load_persisted_books_page, load_persisted_duplicate_books, load_persisted_ondeck_books,
     remap_requested_library_ids_for_persisted, requested_query_values,
-    runtime_owned_books_latest_response, runtime_owned_books_list_response,
+    runtime_owned_books_list_response,
 };
 use super::persisted::models::{
     BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery, PersistedBooksSortMode,
@@ -647,10 +647,6 @@ pub async fn books_list(
         return response;
     }
 
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
     let payload = if body.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     } else {
@@ -690,13 +686,8 @@ pub(super) async fn books_deprecated_get(
     uri: Uri,
     app: &HttpAppState,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -779,13 +770,8 @@ pub async fn series_books_deprecated(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    let database_file = app.auth_db.db.database_file();
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !database_file.exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let resolved_series_id = super::detail::resolve_series_id_for_persisted(&app, &series_id).await;
@@ -858,86 +844,63 @@ pub async fn books_latest(
 
     let query = uri.query().unwrap_or_default();
 
-    if app.auth_db.db.database_file().exists() {
-        let requested_library_ids = requested_query_values(query, "library_id");
-        let library_ids = remap_requested_library_ids_for_persisted(
-            app.services.discovery_persisted.as_ref(),
-            requested_library_ids.as_ref(),
-        )
-        .await
-        .or(requested_library_ids);
+    let requested_library_ids = requested_query_values(query, "library_id");
+    let library_ids = remap_requested_library_ids_for_persisted(
+        app.services.discovery_persisted.as_ref(),
+        requested_library_ids.as_ref(),
+    )
+    .await
+    .or(requested_library_ids);
 
-        let context = match app
-            .discovery_auth
-            .resolve_query_context_with_persistence(
-                &*app.services.runtime_identity,
-                &headers,
-                library_ids.as_deref(),
-            )
-            .await
-        {
-            Some(context) => context,
-            None => return StatusCode::UNAUTHORIZED.into_response(),
-        };
-
-        let page = query_value(query, "page")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        let size = query_value(query, "size")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(20)
-            .max(1);
-        let unpaged = query_bool(query, "unpaged");
-
-        match load_persisted_books_page(
-            app.services.discovery_persisted.as_ref(),
-            &context,
-            PersistedBooksBrowseQuery::from_filters(
-                BooksFilterCriteria {
-                    library_ids,
-                    ..BooksFilterCriteria::default()
-                },
-                None,
-                page,
-                size,
-                unpaged,
-                vec![PersistedBooksSortMode::LastModifiedDateDesc],
-            ),
-        )
-        .await
-        {
-            Ok(page) => {
-                let (page, paged) = if unpaged {
-                    (normalize_books_latest_unpaged_page_shape(page), true)
-                } else {
-                    (page, true)
-                };
-                return Json(books_page_payload(page, context.is_admin, paged, true))
-                    .into_response();
-            }
-            Err(error) => return internal_error_response(error),
-        }
-    }
-
-    if app.auth_db.db.database_file().exists()
-        && let Some(runtime_response) = runtime_owned_books_latest_response(
-            app.services.discovery_persisted.as_ref(),
+    let context = match app
+        .discovery_auth
+        .resolve_query_context_with_persistence(
+            &*app.services.runtime_identity,
             &headers,
-            &uri,
-            &app.discovery_auth,
+            library_ids.as_deref(),
         )
         .await
     {
-        return runtime_response;
-    }
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
 
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+    let unpaged = query_bool(query, "unpaged");
 
-    invalid_runtime_books_list_response(DiscoveryError::InvalidSemantics(
-        "unsupported runtime books latest filter combination".to_string(),
-    ))
+    match load_persisted_books_page(
+        app.services.discovery_persisted.as_ref(),
+        &context,
+        PersistedBooksBrowseQuery::from_filters(
+            BooksFilterCriteria {
+                library_ids,
+                ..BooksFilterCriteria::default()
+            },
+            None,
+            page,
+            size,
+            unpaged,
+            vec![PersistedBooksSortMode::LastModifiedDateDesc],
+        ),
+    )
+    .await
+    {
+        Ok(page) => {
+            let (page, paged) = if unpaged {
+                (normalize_books_latest_unpaged_page_shape(page), true)
+            } else {
+                (page, true)
+            };
+            Json(books_page_payload(page, context.is_admin, paged, true)).into_response()
+        }
+        Err(error) => internal_error_response(error),
+    }
 }
 
 pub async fn books_ondeck(
@@ -947,10 +910,6 @@ pub async fn books_ondeck(
 ) -> Response {
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();
@@ -1045,10 +1004,6 @@ pub async fn books_duplicates(
         return response;
     }
 
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
     let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -1120,10 +1075,6 @@ pub async fn book_tags(
 ) -> Response {
     if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
         return response;
-    }
-
-    if !app.auth_db.db.database_file().exists() {
-        return StatusCode::NOT_FOUND.into_response();
     }
 
     let query = uri.query().unwrap_or_default();

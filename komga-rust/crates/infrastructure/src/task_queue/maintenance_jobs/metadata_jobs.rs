@@ -1,7 +1,6 @@
 use super::*;
-use komga_application::task_processing::{
-    SeriesPayload, TaskKind, TaskRequest, TaskRuntimeContext,
-};
+use crate::task_queue::TaskRuntimeContext;
+use komga_application::task_processing::{SeriesPayload, TaskKind, TaskRequest};
 use std::collections::BTreeSet;
 
 use serde_json::Value;

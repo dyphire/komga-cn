@@ -21,9 +21,6 @@ pub async fn refresh_series_read_progress_row(
     series_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    if !database_file.exists() {
-        return Ok(());
-    }
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series read progress db: {error}"))?;
@@ -62,9 +59,6 @@ pub async fn delete_series_read_progress_row(
     series_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    if !database_file.exists() {
-        return Ok(());
-    }
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series read progress delete db: {error}"))?;
@@ -82,9 +76,6 @@ pub async fn load_series_tachiyomi_progress(
     series_id: &str,
     user_id_value: &str,
 ) -> Result<Option<Value>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open series tachiyomi db: {error}"))?;

@@ -1,6 +1,7 @@
 use super::*;
+use crate::task_queue::TaskRuntimeContext;
 use komga_application::task_processing::{
-    LibraryScanPipeline, ScanOneLibrary, ScanOneLibraryResult, TaskRuntimeContext,
+    LibraryScanPipeline, ScanOneLibrary, ScanOneLibraryResult,
 };
 
 pub(super) async fn try_execute(

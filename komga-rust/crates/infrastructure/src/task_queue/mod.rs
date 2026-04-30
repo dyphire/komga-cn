@@ -7,10 +7,11 @@ use crate::search::runtime_tasks::{
     AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
     rebuild_index_from_database_for_entities,
 };
-use komga_application::task_processing::{
-    TaskProcessingError, TaskQueueOrchestrator, TaskRuntimeConfig, TaskRuntimeContext,
-};
+use komga_application::task_processing::{TaskProcessingError, TaskQueueOrchestrator};
+
+mod runtime_context;
 use queue_core::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
+pub use runtime_context::{TaskRuntimeConfig, TaskRuntimeContext};
 use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 

@@ -54,7 +54,7 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
     pool.close().await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(
@@ -176,7 +176,7 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
     pool.close().await;
 
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context_from_config(&config);
+    let runtime = runtime_task_context_from_config(&config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(

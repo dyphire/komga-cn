@@ -58,7 +58,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -172,7 +172,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -274,7 +274,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -395,7 +395,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -588,7 +588,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -707,7 +707,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -814,7 +814,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
 
     let runtime = TaskRuntimeContext {
         owns_search_index: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler

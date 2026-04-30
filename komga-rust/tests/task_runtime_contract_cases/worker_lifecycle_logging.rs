@@ -1,4 +1,5 @@
 use super::*;
+use komga_infrastructure::database_handle::DatabaseHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +18,7 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime.block_on(runtime_task_context(&paths));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
@@ -26,7 +27,7 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
             async move {
                 let background =
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                        runtime_task_context_from_config(&config),
+                        runtime_task_context_from_config(&config).await,
                         None,
                     )
                     .await;
@@ -88,7 +89,7 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime.block_on(runtime_task_context(&paths));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
@@ -97,7 +98,7 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
             async move {
                 let background =
                     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-                        runtime_task_context_from_config(&config),
+                        runtime_task_context_from_config(&config).await,
                         None,
                     )
                     .await;
@@ -185,7 +186,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime.block_on(runtime_task_context(&paths));
     let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
         "rust-main",
@@ -264,7 +265,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let task_queue = task_queue.clone();
         async move {
             let mut last_run = HashMap::new();
-            let pool = connect_test_pool(runtime.database_file.as_path(), 1)
+            let pool = connect_test_pool(runtime.main_db.database_file(), 1)
                 .await
                 .expect("periodic scan failure db should open");
             sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID = ?")
@@ -331,7 +332,7 @@ fn periodic_scan_iteration_drains_each_due_library_separately_and_cleans_stale_s
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context(&paths);
+    let runtime = runtime.block_on(runtime_task_context(&paths));
     let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
         "rust-main",
@@ -394,7 +395,7 @@ fn background_task_iteration_logs_completion_and_failure_without_empty_poll_nois
         paths
     });
     let config = runtime_config_for_paths(&paths);
-    let runtime = runtime_task_context(&paths);
+    let runtime = executor.block_on(runtime_task_context(&paths));
 
     let idle_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
         runtime.clone(),
@@ -505,7 +506,7 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
         seed_router_contract_data(&paths).await;
         paths
     });
-    let config = runtime_task_context(&paths);
+    let config = runtime.block_on(runtime_task_context(&paths));
     let log_config = runtime_config_for_paths(&paths);
 
     let complete_logs = capture_router_logs_async_result(&log_config, {
@@ -569,16 +570,20 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&invalid_root).expect("auth cleanup invalid fixture root should exist");
-    let failure_runtime = TaskRuntimeContext {
-        database_file: invalid_root.clone(),
-        ..config
-    };
+    let failure_runtime = runtime.block_on(async {
+        TaskRuntimeContext {
+            main_db: DatabaseHandle::file_backed(invalid_root.join("database.sqlite"))
+                .await
+                .expect("test db should open"),
+            ..config
+        }
+    });
     let failure_logs = capture_router_logs_async_result(&log_config, async move {
         komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
             &failure_runtime,
         )
         .await
-        .expect_err("auth cleanup should fail when db path is a directory")
+        .expect_err("auth cleanup should fail when db has no schema")
         .to_string()
     })
     .0;
@@ -589,7 +594,7 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
 
     assert!(
         field_str(failure, "error")
-            .is_some_and(|value| value.contains("failed to open sqlite database")),
+            .is_some_and(|value| value.contains("failed to clean up authentication activity")),
         "auth cleanup failure should keep sqlite error context: {failure:?}",
     );
 

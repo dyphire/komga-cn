@@ -1,5 +1,5 @@
+use super::TaskRuntimeContext;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
-use komga_application::task_processing::TaskRuntimeContext;
 
 pub(super) async fn execute_task(
     runtime: &TaskRuntimeContext,

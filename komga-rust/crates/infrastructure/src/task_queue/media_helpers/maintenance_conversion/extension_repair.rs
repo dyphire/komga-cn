@@ -41,7 +41,7 @@ pub(in crate::task_queue) async fn repair_extension(
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    let database_file = runtime.database_file.clone();
+    let database_file = runtime.main_db.database_file().to_path_buf();
     let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
 
     let Some(row) = load_book_for_extension_repair(database_file.as_path(), book_id)
@@ -216,7 +216,7 @@ mod tests {
 
         seed_extension_repair_fixture(&fixture, "books/repair-book.epub", "application/zip").await;
 
-        let runtime = fixture.runtime_context(true, true);
+        let runtime = fixture.runtime_context(true, true).await;
 
         repair_extension(&runtime, "book-1")
             .await
@@ -273,7 +273,7 @@ mod tests {
 
         seed_extension_repair_fixture(&fixture, "books/repair-book.pdf", "application/pdf").await;
 
-        let runtime = fixture.runtime_context(true, true);
+        let runtime = fixture.runtime_context(true, true).await;
 
         repair_extension(&runtime, "book-1")
             .await
@@ -340,7 +340,7 @@ mod tests {
         )
         .await;
 
-        let skipped_runtime = skipped_fixture.runtime_context(true, true);
+        let skipped_runtime = skipped_fixture.runtime_context(true, true).await;
 
         repair_extension(&skipped_runtime, "book-1")
             .await
@@ -363,7 +363,7 @@ mod tests {
         )
         .await;
 
-        let candidate_runtime = candidate_fixture.runtime_context(true, true);
+        let candidate_runtime = candidate_fixture.runtime_context(true, true).await;
 
         repair_extension(&candidate_runtime, "book-1")
             .await

@@ -182,10 +182,6 @@ pub async fn persisted_api_key_metadata(
     headers: &HeaderMap,
     database_file: &Path,
 ) -> Option<PersistedApiKeyMetadata> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let api_key = api_key_header_value(headers)?;
     let api_key_hash = sha512_hex(&api_key);
     let pool = connect_read_pool(database_file).await.ok()?;
@@ -210,10 +206,6 @@ pub async fn persisted_update_password_by_user_id(
     user_id: &str,
     password: &str,
 ) -> Option<bool> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let hashed_password = hash_bcrypt_password(password, DEFAULT_COST).ok()?;
     let pool = connect_write_pool(database_file).await.ok()?;
     let update = sqlx::query("UPDATE USER SET PASSWORD = ? WHERE ID = ?")
@@ -230,10 +222,6 @@ pub async fn persisted_create_api_key(
     user_id: &str,
     comment: &str,
 ) -> Option<PersistedApiKey> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let generated_key = generated_api_key_secret(user_id);
     let generated_key_hash = sha512_hex(&generated_key);
     let generated_id = generated_api_key_id(user_id);
@@ -280,10 +268,6 @@ pub async fn persisted_api_key_comment_exists(
     user_id: &str,
     comment: &str,
 ) -> Option<bool> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let normalized_comment = comment.trim();
     if normalized_comment.is_empty() {
         return Some(false);
@@ -306,10 +290,6 @@ pub async fn persisted_list_api_keys(
     database_file: &Path,
     user_id: &str,
 ) -> Option<Vec<PersistedApiKey>> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_read_pool(database_file).await.ok()?;
     let rows = sqlx::query(
         "SELECT ID, USER_ID, COMMENT, CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
@@ -338,10 +318,6 @@ pub async fn persisted_delete_api_key_by_id(
     user_id: &str,
     api_key_id: &str,
 ) -> Option<bool> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_write_pool(database_file).await.ok()?;
     let delete = sqlx::query("DELETE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ?")
         .bind(api_key_id)
@@ -356,10 +332,6 @@ pub async fn persisted_list_authentication_activity(
     database_file: &Path,
     user_id: Option<&str>,
 ) -> Option<Vec<PersistedAuthenticationActivity>> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_read_pool(database_file).await.ok()?;
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
@@ -425,10 +397,6 @@ pub async fn persisted_list_authentication_activity(
 }
 
 pub async fn persisted_cleanup_authentication_activity(database_file: &Path) -> Option<u64> {
-    if !database_file.exists() {
-        return Some(0);
-    }
-
     let pool = connect_write_pool(database_file).await.ok()?;
     let deleted = sqlx::query(
         "DELETE FROM AUTHENTICATION_ACTIVITY WHERE datetime(DATE_TIME) < datetime('now', '-1 month')",
@@ -444,10 +412,6 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
     user_id: &str,
     api_key_id: &str,
 ) -> Option<PersistedAuthenticationActivity> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query(
         r#"
@@ -499,10 +463,6 @@ pub async fn persisted_record_successful_authentication_activity(
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> Option<()> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_write_pool(database_file).await.ok()?;
     let insert_with_user_id = sqlx::query(
         r#"
@@ -576,10 +536,6 @@ pub async fn persisted_record_failed_authentication_activity(
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> Option<()> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let normalized_email = email
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -756,10 +712,6 @@ fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
 }
 
 async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
-    if !database_file.exists() {
-        return None;
-    }
-
     let pool = connect_read_pool(database_file).await.ok()?;
     let user_rows = sqlx::query(
         "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER ORDER BY EMAIL",

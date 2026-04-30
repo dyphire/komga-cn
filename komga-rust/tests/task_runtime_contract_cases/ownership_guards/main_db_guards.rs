@@ -31,7 +31,7 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -140,7 +140,7 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
@@ -235,7 +235,7 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
 
     let runtime = TaskRuntimeContext {
         owns_main_database: false,
-        ..runtime_task_context(&paths)
+        ..runtime_task_context(&paths).await
     };
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler

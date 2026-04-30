@@ -1,5 +1,5 @@
-use komga_application::task_processing::TaskRuntimeContext;
 use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
+use komga_infrastructure::task_queue::TaskRuntimeContext;
 pub use komga_infrastructure::task_queue::worker_runtime::{
     RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal,
 };
@@ -20,20 +20,20 @@ pub async fn prepare_task_queue(
     startup_search_task: Option<&'static str>,
 ) -> RuntimeBackgroundState {
     komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-        crate::config::task_runtime_context(config),
+        crate::config::task_runtime_context(config).await,
         startup_search_task,
     )
     .await
 }
 
-pub fn spawn_runtime_workers(
+pub async fn spawn_runtime_workers(
     task_queue: SharedTaskQueue,
     task_execution_pool: TaskExecutionPoolHandle,
     config: RuntimeConfig,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> WorkerRuntimeGuard {
-    let runtime: TaskRuntimeContext = crate::config::task_runtime_context(&config);
+    let runtime: TaskRuntimeContext = crate::config::task_runtime_context(&config).await;
     let (internal_shutdown_tx, internal_shutdown_rx) = watch::channel(false);
     if let Some(mut external_shutdown_rx) = shutdown_rx {
         let forward_shutdown_tx = internal_shutdown_tx.clone();

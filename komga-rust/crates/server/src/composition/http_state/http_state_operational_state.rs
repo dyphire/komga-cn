@@ -310,10 +310,12 @@ mod tests {
                 komga_config::profile::RuntimeProfile::LiveLocaldb,
             );
             let task_execution_pool = TaskExecutionPoolHandle::new(
-                crate::config::task_runtime_context(&config).task_pool_size,
+                crate::config::task_runtime_context(&config)
+                    .await
+                    .task_pool_size,
             );
             let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-                crate::config::task_runtime_context(&config),
+                crate::config::task_runtime_context(&config).await,
                 "rust-main",
             )));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
@@ -348,10 +350,12 @@ mod tests {
         let config =
             RuntimeConfig::for_runtime_profile(komga_config::profile::RuntimeProfile::LiveLocaldb);
         let task_execution_pool = TaskExecutionPoolHandle::new(
-            crate::config::task_runtime_context(&config).task_pool_size,
+            crate::config::task_runtime_context(&config)
+                .await
+                .task_pool_size,
         );
         let task_queue = Arc::new(Mutex::new(TaskQueueScheduler::for_runtime(
-            crate::config::task_runtime_context(&config),
+            crate::config::task_runtime_context(&config).await,
             "rust-main",
         )));
         let task_wakeup = Arc::new(tokio::sync::Notify::new());

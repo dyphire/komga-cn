@@ -245,10 +245,6 @@ async fn load_import_series_target(
     database_file: &Path,
     series_id: &str,
 ) -> Result<Option<ImportSeriesTarget>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open series target db: {error}"))?;
@@ -279,10 +275,6 @@ async fn load_import_upgrade_book_target(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<ImportUpgradeBookTarget>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open upgrade book target db: {error}"))?;
@@ -323,10 +315,6 @@ fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
 }
 
 async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String> {
-    if !database_file.exists() {
-        return Ok(Vec::new());
-    }
-
     let pool = connect_read_pool(database_file)
         .await
         .map_err(|error| format!("open library roots db: {error}"))?;
@@ -567,7 +555,7 @@ async fn migrate_upgraded_book_identity(
     library_root: &Path,
     destination_file: &Path,
 ) -> Result<(), String> {
-    if old_book_id == new_book_id || !database_file.exists() {
+    if old_book_id == new_book_id {
         return Ok(());
     }
 
@@ -754,10 +742,6 @@ async fn persist_book_imported_event(
     source_file: &Path,
     upgrade: bool,
 ) -> Result<(), String> {
-    if !database_file.exists() {
-        return Ok(());
-    }
-
     let event_id = generated_historical_event_id();
     let destination_name = destination_file.to_string_lossy().to_string();
     let source_name = source_file.to_string_lossy().to_string();

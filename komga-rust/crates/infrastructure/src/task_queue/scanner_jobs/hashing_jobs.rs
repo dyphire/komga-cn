@@ -186,10 +186,10 @@ async fn execute_remove_hashed_pages(
 mod tests {
     use super::*;
     use crate::sqlite::connect_test_pool;
+    use crate::task_queue::TaskRuntimeContext;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use komga_application::task_processing::TaskQueueAdminPort;
-    use komga_application::task_processing::TaskRuntimeContext;
     use serde_json::json;
     use sqlx::{Row, SqlitePool};
     use std::io::Write;
@@ -320,7 +320,7 @@ mod tests {
             .expect("remove-hashed-pages failure fixture media row should be inserted");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, false);
+        let runtime = fixture.runtime_context(false, false).await;
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
             "book-1".to_string(),
             vec![super::super::HashedPageToDelete {
@@ -391,7 +391,7 @@ mod tests {
             .expect("media page row should be inserted for missing page hash finder fixture");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, true);
+        let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test");
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
@@ -476,7 +476,7 @@ mod tests {
             .expect("media page row should be inserted for disabled page-hash fixture");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, true);
+        let runtime = fixture.runtime_context(false, true).await;
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test");
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 3, None)
@@ -622,7 +622,7 @@ mod tests {
             .expect("remove-hashed-pages second page hash row should be inserted");
         pool.close().await;
 
-        let runtime = fixture.runtime_context(false, false);
+        let runtime = fixture.runtime_context(false, false).await;
         let mut scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-test");
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(

@@ -20,11 +20,11 @@ const STARTUP_BANNER_TEMPLATE: &str =
     include_str!("../../../../../komga/src/main/resources/banner.txt");
 const APPLICATION_VERSION_PLACEHOLDER: &str = "${application.version}";
 
-pub(crate) fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
+pub(crate) async fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig) {
     let build = current_build_metadata();
     let rendered_banner = render_startup_banner(build.version.as_str());
     let _ = crate::logging::emit_display(rendered_banner.as_str());
-    let task_runtime = crate::config::task_runtime_context(config);
+    let task_runtime = crate::config::task_runtime_context(config).await;
     let config_dir = config
         .config_dir
         .as_ref()

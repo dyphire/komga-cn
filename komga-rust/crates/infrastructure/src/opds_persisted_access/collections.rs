@@ -19,10 +19,6 @@ pub async fn load_publishers(
     database_file: &Path,
     allowed_library_ids: &Option<HashSet<String>>,
 ) -> Result<Vec<String>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID
@@ -76,10 +72,6 @@ pub async fn load_collections(
     database_file: &Path,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = if let Some(library_id) = library_id {
         sqlx::query(
@@ -133,10 +125,6 @@ pub async fn load_collection(
     database_file: &Path,
     collection_id: &str,
 ) -> Result<Option<PersistedNamedRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
@@ -162,10 +150,6 @@ pub async fn load_collection_books(
     database_file: &Path,
     collection_id: &str,
 ) -> Result<Vec<PersistedBookFeedRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME,
@@ -210,10 +194,6 @@ pub async fn load_collection_series(
     collection_id: &str,
     ordered: bool,
 ) -> Result<Vec<PersistedSeriesRecord>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let query = if ordered {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,

@@ -311,10 +311,6 @@ pub async fn load_book_progression(
     book_id: &str,
     user_id_value: &str,
 ) -> Result<Option<Value>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book progression db: {error}"))?;
@@ -377,10 +373,6 @@ pub async fn load_book_page_count(
     database_file: &Path,
     book_id: &str,
 ) -> Result<Option<u64>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open book page-count db: {error}"))?;
@@ -433,7 +425,7 @@ pub async fn readlist_tachiyomi_counters(
     ordered_book_ids: &[String],
     user_id_value: &str,
 ) -> Result<(u64, u64, u64, u64, u64), String> {
-    if !database_file.exists() || ordered_book_ids.is_empty() {
+    if ordered_book_ids.is_empty() {
         return Ok((0, 0, 0, 0, 0));
     }
 
@@ -511,10 +503,6 @@ pub async fn persist_readlist_tachiyomi_progress(
     user_id_value: &str,
     last_book_read: usize,
 ) -> Result<Option<()>, String> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open readlist tachiyomi write db: {error}"))?;

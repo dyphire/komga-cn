@@ -1,5 +1,5 @@
 use super::*;
-use komga_application::task_processing::TaskRuntimeContext;
+use crate::task_queue::TaskRuntimeContext;
 
 mod hashing_jobs;
 mod scan_flow;

@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::sqlite::{connect_read_pool, connect_write_pool};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DatabaseHandle {
     database_file: PathBuf,
     read_pool: SqlitePool,

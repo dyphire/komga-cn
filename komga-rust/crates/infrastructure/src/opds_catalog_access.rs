@@ -121,10 +121,6 @@ pub async fn load_browse_series_navigation_entries(
     page: usize,
     size: usize,
 ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), sqlx::Error> {
-    if !database_file.exists() {
-        return Ok((vec![], 0));
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
@@ -217,10 +213,6 @@ pub async fn load_browse_publisher_entries(
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Result<Vec<BrowsePublisherEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT
@@ -261,10 +253,6 @@ pub async fn load_keep_reading_books(
     user_id: &str,
     library_id: Option<&str>,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
@@ -382,10 +370,6 @@ pub async fn load_on_deck_books(
     user_id: &str,
     library_id: Option<&str>,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
@@ -538,10 +522,6 @@ pub async fn load_latest_books_paged(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
@@ -690,10 +670,6 @@ pub async fn load_latest_series_paged(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
@@ -760,10 +736,6 @@ pub async fn load_library_series(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
@@ -812,10 +784,6 @@ pub async fn load_series_page(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
@@ -897,10 +865,6 @@ OFFSET ?"#,
 pub async fn load_all_readlists(
     database_file: &Path,
 ) -> Result<Vec<OpdsReadlistEntry>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT

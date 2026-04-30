@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use komga_infrastructure::database_handle::DatabaseHandle;
 
 #[tokio::test]
 async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_external_owned() {
@@ -20,7 +21,9 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         .expect("book payload rewrite should succeed for blocked scan-output contract");
 
     let runtime = TaskRuntimeContext {
-        database_file: fixture.paths.main_db.clone(),
+        main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: fixture.paths.tasks_db.clone(),
         lucene_data_directory: fixture.config.lucene_data_directory.clone(),
         consumes_queue: true,
@@ -88,7 +91,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
     fs::write(&book_path, updated_payload)
         .expect("book payload rewrite should succeed for unknown task contract");
 
-    let runtime = runtime_task_context_from_config(&fixture.config);
+    let runtime = runtime_task_context_from_config(&fixture.config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(TaskQueueRecord::new(
@@ -173,7 +176,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     tasks_pool.close().await;
 
     let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-        runtime_task_context_from_config(&fixture.config),
+        runtime_task_context_from_config(&fixture.config).await,
         None,
     )
     .await;
@@ -234,7 +237,9 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
     tasks_pool.close().await;
 
     let runtime = TaskRuntimeContext {
-        database_file: fixture.paths.main_db.clone(),
+        main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
+            .await
+            .expect("test db should open"),
         tasks_db_file: fixture.paths.tasks_db.clone(),
         lucene_data_directory: fixture.config.lucene_data_directory.clone(),
         consumes_queue: false,
@@ -299,7 +304,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-payload-wins")
         .expect("initial scan-library payload precedence fixture should be written");
 
-    let runtime = runtime_task_context_from_config(&fixture.config);
+    let runtime = runtime_task_context_from_config(&fixture.config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
@@ -363,7 +368,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     .expect("legacy scan-library task row should be inserted for payload precedence");
     tasks_pool.close().await;
 
-    let runtime = runtime_task_context_from_config(&fixture.config);
+    let runtime = runtime_task_context_from_config(&fixture.config).await;
     let mut replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     replay
         .process_available(&runtime)
@@ -410,7 +415,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
     let initial_page_size = write_scannable_cbz_fixture(&book_path, b"page-before-underscore")
         .expect("initial underscore scan fixture should be written");
 
-    let runtime = runtime_task_context_from_config(&fixture.config);
+    let runtime = runtime_task_context_from_config(&fixture.config).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main");
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))

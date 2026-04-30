@@ -1,11 +1,11 @@
 use super::*;
 use std::collections::BTreeSet;
 
+use super::TaskRuntimeContext;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::search::runtime_tasks::{
     sync_entity_upsert_from_database, sync_series_and_oneshot_books_after_metadata_update,
 };
-use komga_application::task_processing::TaskRuntimeContext;
 
 pub(super) async fn refresh_book_metadata(
     runtime: &TaskRuntimeContext,
@@ -17,7 +17,7 @@ pub(super) async fn refresh_book_metadata(
     }
 
     let outcome = crate::metadata::refresh_book_metadata(
-        runtime.database_file.as_path(),
+        runtime.main_db.database_file(),
         book_id,
         capabilities,
     )
@@ -26,7 +26,7 @@ pub(super) async fn refresh_book_metadata(
 
     if runtime.owns_search_index {
         sync_entity_upsert_from_database(
-            runtime.database_file.as_path(),
+            runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             SearchEntityType::Book,
             book_id,
@@ -35,7 +35,7 @@ pub(super) async fn refresh_book_metadata(
         .map_err(TaskExecutionError::runtime)?;
         for readlist_id in &outcome.changed_readlist_ids {
             sync_entity_upsert_from_database(
-                runtime.database_file.as_path(),
+                runtime.main_db.database_file(),
                 runtime.lucene_data_directory.as_path(),
                 SearchEntityType::ReadList,
                 readlist_id,
@@ -56,13 +56,13 @@ pub(super) async fn refresh_series_metadata(
         return Ok(());
     }
 
-    crate::metadata::refresh_series_metadata(runtime.database_file.as_path(), series_id)
+    crate::metadata::refresh_series_metadata(runtime.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
         sync_series_and_oneshot_books_after_metadata_update(
-            runtime.database_file.as_path(),
+            runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             series_id,
         )
@@ -81,13 +81,13 @@ pub(super) async fn aggregate_series_metadata(
         return Ok(());
     }
 
-    crate::metadata::aggregate_series_metadata(runtime.database_file.as_path(), series_id)
+    crate::metadata::aggregate_series_metadata(runtime.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
     if runtime.owns_search_index {
         sync_entity_upsert_from_database(
-            runtime.database_file.as_path(),
+            runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             SearchEntityType::Series,
             series_id,
@@ -107,7 +107,7 @@ pub(super) async fn refresh_book_local_artwork(
         return Ok(());
     }
 
-    crate::metadata::refresh_book_local_artwork(runtime.database_file.as_path(), book_id)
+    crate::metadata::refresh_book_local_artwork(runtime.main_db.database_file(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -120,7 +120,7 @@ pub(super) async fn generate_book_thumbnail(
         return Ok(());
     }
 
-    crate::metadata::generate_book_thumbnail(runtime.database_file.as_path(), book_id)
+    crate::metadata::generate_book_thumbnail(runtime.main_db.database_file(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
@@ -133,7 +133,7 @@ pub(super) async fn refresh_series_local_artwork(
         return Ok(());
     }
 
-    crate::metadata::refresh_series_local_artwork(runtime.database_file.as_path(), series_id)
+    crate::metadata::refresh_series_local_artwork(runtime.main_db.database_file(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }

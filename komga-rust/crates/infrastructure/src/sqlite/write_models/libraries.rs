@@ -111,10 +111,6 @@ pub async fn load_persisted_library_write_model(
     database_file: &Path,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryWriteModel>, sqlx::Error> {
-    if !database_file.exists() {
-        return Ok(None);
-    }
-
     let pool = connect_write_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID,
@@ -187,10 +183,6 @@ pub async fn validate_library_before_persist(
         return Err("library root must be a directory".to_string());
     }
 
-    if !database_file.exists() {
-        return Ok(());
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open library validation db: {error}"))?;
@@ -228,10 +220,6 @@ pub async fn library_book_ids_with_empty_hash(
     library_id: &str,
     koreader: bool,
 ) -> Result<Vec<String>, String> {
-    if !database_file.exists() {
-        return Ok(vec![]);
-    }
-
     let pool = connect_write_pool(database_file)
         .await
         .map_err(|error| format!("open library hash query db: {error}"))?;
