@@ -242,19 +242,30 @@ mod tests {
     };
     use komga_infrastructure::task_queue::TaskRuntimeContext;
     use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
+    use std::path::PathBuf;
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::sync::Mutex;
 
-    async fn test_task_runtime_context() -> TaskRuntimeContext {
+    static NEXT_TEST_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn test_temp_root() -> PathBuf {
+        let sequence = NEXT_TEST_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "komga-operational-state-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time should be after unix epoch")
-                .as_nanos()
+            "komga-operational-state-test-{}-{nanos}-{sequence}",
+            std::process::id(),
         ));
-        std::fs::create_dir_all(&root).expect("test temp dir should be created");
+        std::fs::create_dir(&root).expect("test temp dir should be created");
+        root
+    }
+
+    async fn test_task_runtime_context() -> TaskRuntimeContext {
+        let root = test_temp_root();
         let main_db = DatabaseHandle::file_backed(root.join("database.sqlite"))
             .await
             .expect("test db should open");
