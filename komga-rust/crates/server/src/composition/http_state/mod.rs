@@ -61,7 +61,6 @@ use sha2::Digest;
 use tokio::sync::watch;
 
 use crate::runtime::background_workers::RuntimeBackgroundState;
-use crate::runtime::background_workers::WorkerRuntimeGuard;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 
@@ -78,7 +77,6 @@ pub fn compose_http_runtime(
     db: DatabaseHandle,
     tasks_db: DatabaseHandle,
     background: RuntimeBackgroundState,
-    _worker_runtime_guard: Option<WorkerRuntimeGuard>,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> HttpAppState {

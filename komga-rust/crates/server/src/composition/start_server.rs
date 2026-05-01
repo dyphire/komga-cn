@@ -1,4 +1,4 @@
-use axum::Router;
+use axum::{Extension, Router};
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
@@ -81,7 +81,7 @@ pub async fn build_router_with_config(
         None,
     )
     .await;
-    finalize_router_startup(
+    let router = finalize_router_startup(
         compose_http_runtime(
             config,
             DatabaseHandle::file_backed(config.database_file.clone())
@@ -91,13 +91,13 @@ pub async fn build_router_with_config(
                 .await
                 .expect("tasks database handle should initialize"),
             background,
-            Some(worker_runtime_guard),
             None,
             startup_timing.clone(),
         ),
         startup_timing,
         startup_started_at,
-    )
+    );
+    router.layer(Extension(worker_runtime_guard))
 }
 
 pub async fn build_router_without_runtime_workers(
@@ -116,7 +116,6 @@ pub async fn build_router_without_runtime_workers(
                 .await
                 .expect("tasks database handle should initialize"),
             background,
-            None,
             None,
             startup_timing.clone(),
         ),
@@ -157,13 +156,13 @@ pub async fn serve_with_config(
                 .await
                 .expect("tasks database handle should initialize"),
             background,
-            Some(worker_runtime_guard),
             Some(shutdown_tx.clone()),
             startup_timing.clone(),
         ),
         startup_timing,
         startup_started_at,
-    );
+    )
+    .layer(Extension(worker_runtime_guard));
 
     serve_router_with_shutdown_timeout(
         listener,

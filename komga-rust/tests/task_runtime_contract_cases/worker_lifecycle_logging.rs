@@ -154,6 +154,46 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
     );
 }
 
+#[tokio::test]
+async fn router_keeps_runtime_workers_alive_for_http_enqueued_tasks() {
+    let ctx = TestFixture::builder("router-worker-lifecycle-http-enqueue")
+        .with_seed(|paths| async move {
+            let empty_root = paths.config_dir.join("empty-library-root");
+            std::fs::create_dir_all(&empty_root).expect("empty library root should be created");
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("library root update db should open");
+            sqlx::query("UPDATE LIBRARY SET ROOT = ?, SCAN_STARTUP = ? WHERE ID = ?")
+                .bind(empty_root.to_string_lossy().to_string())
+                .bind(false)
+                .bind("library-1")
+                .execute(&pool)
+                .await
+                .expect("library root should be updated for runtime worker contract");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/libraries/library-1/scan")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library scan request should build"),
+        )
+        .await
+        .expect("library scan request should complete");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    wait_for_empty_task_queue(ctx.paths()).await;
+}
+
 #[test]
 fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_idle() {
     let executor = tokio::runtime::Builder::new_current_thread()
@@ -284,6 +324,37 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         field_str(failure, "error")
             .is_some_and(|value| value.contains("unsupported library scan interval: FUTURE_VALUE")),
         "periodic scan failure should emit actionable worker-level error context: {failure:?}",
+    );
+}
+
+async fn wait_for_empty_task_queue(paths: &RuntimeDbPaths) {
+    let pool = connect_test_pool(paths.tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open while waiting for background worker");
+    let drained = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
+                .fetch_one(&pool)
+                .await
+                .expect("task count should be queryable");
+            if row.get::<i64, _>("COUNT") == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM TASK")
+        .fetch_one(&pool)
+        .await
+        .expect("final task count should be queryable");
+    let remaining = row.get::<i64, _>("COUNT");
+    pool.close().await;
+
+    assert!(
+        drained,
+        "runtime worker should drain HTTP-enqueued task; remaining={remaining}",
     );
 }
 
