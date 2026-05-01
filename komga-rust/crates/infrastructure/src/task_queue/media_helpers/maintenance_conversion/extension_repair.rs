@@ -44,7 +44,7 @@ pub(in crate::task_queue) async fn repair_extension(
     let database_file = runtime.main_db.database_file().to_path_buf();
     let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
 
-    let Some(row) = load_book_for_extension_repair(&runtime.task_write_pool, book_id)
+    let Some(row) = load_book_for_extension_repair(&runtime.task_read_pool, book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {

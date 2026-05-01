@@ -79,7 +79,7 @@ impl FileRotation {
             .filter(|value| !value.trim().is_empty())
             .map(|value| Self::parse(value.as_str()))
             .transpose()?
-            .map_or(Ok(Self::Never), Ok)
+            .map_or(Ok(Self::Daily), Ok)
     }
 
     fn parse(value: &str) -> Result<Self, LoggingInitError> {

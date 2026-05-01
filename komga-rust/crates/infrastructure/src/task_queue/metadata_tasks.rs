@@ -23,7 +23,7 @@ pub(super) async fn refresh_book_metadata(
 
     if runtime.owns_search_index {
         sync_entity_upsert_from_database(
-            &runtime.task_write_pool,
+            &runtime.task_read_pool,
             runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             SearchEntityType::Book,
@@ -33,7 +33,7 @@ pub(super) async fn refresh_book_metadata(
         .map_err(TaskExecutionError::runtime)?;
         for readlist_id in &outcome.changed_readlist_ids {
             sync_entity_upsert_from_database(
-                &runtime.task_write_pool,
+                &runtime.task_read_pool,
                 runtime.main_db.database_file(),
                 runtime.lucene_data_directory.as_path(),
                 SearchEntityType::ReadList,
@@ -61,7 +61,7 @@ pub(super) async fn refresh_series_metadata(
 
     if runtime.owns_search_index {
         sync_series_and_oneshot_books_after_metadata_update(
-            &runtime.task_write_pool,
+            &runtime.task_read_pool,
             runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             series_id,
@@ -87,7 +87,7 @@ pub(super) async fn aggregate_series_metadata(
 
     if runtime.owns_search_index {
         sync_entity_upsert_from_database(
-            &runtime.task_write_pool,
+            &runtime.task_read_pool,
             runtime.main_db.database_file(),
             runtime.lucene_data_directory.as_path(),
             SearchEntityType::Series,

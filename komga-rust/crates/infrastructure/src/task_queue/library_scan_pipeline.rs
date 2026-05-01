@@ -43,6 +43,7 @@ async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScan
 #[derive(Clone, Debug)]
 pub struct SqliteFilesystemLibraryScanPipeline {
     owns_main_database: bool,
+    task_read_pool: SqlitePool,
     task_write_pool: SqlitePool,
 }
 
@@ -50,6 +51,7 @@ impl SqliteFilesystemLibraryScanPipeline {
     pub fn for_runtime(runtime: &TaskRuntimeContext) -> Self {
         Self {
             owns_main_database: runtime.owns_main_database,
+            task_read_pool: runtime.task_read_pool.clone(),
             task_write_pool: runtime.task_write_pool.clone(),
         }
     }
@@ -58,7 +60,7 @@ impl SqliteFilesystemLibraryScanPipeline {
         &self,
     ) -> Result<Vec<komga_application::task_processing::LibraryScanProfile>, TaskProcessingError>
     {
-        load_library_scan_profiles(&self.task_write_pool)
+        load_library_scan_profiles(&self.task_read_pool)
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("load library scan profiles: {error}"))
@@ -181,7 +183,7 @@ impl SqliteFilesystemLibraryScanPipeline {
         library_id: &str,
         executed_scan: &ExecutedLibraryScan,
     ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
-        collect_follow_up_tasks(&self.task_write_pool, library_id, executed_scan).await
+        collect_follow_up_tasks(&self.task_read_pool, library_id, executed_scan).await
     }
 }
 
@@ -367,10 +369,12 @@ async fn collect_follow_up_tasks(
 
 impl Default for SqliteFilesystemLibraryScanPipeline {
     fn default() -> Self {
+        let pool = sqlx::SqlitePool::connect_lazy(":memory:")
+            .expect("lazy in-memory pool should not fail");
         Self {
             owns_main_database: true,
-            task_write_pool: sqlx::SqlitePool::connect_lazy(":memory:")
-                .expect("lazy in-memory pool should not fail"),
+            task_read_pool: pool.clone(),
+            task_write_pool: pool,
         }
     }
 }
@@ -413,6 +417,7 @@ impl SqliteFilesystemLibraryScanPipeline {
     pub fn from_pools(write_pool: SqlitePool) -> Self {
         Self {
             owns_main_database: true,
+            task_read_pool: write_pool.clone(),
             task_write_pool: write_pool,
         }
     }

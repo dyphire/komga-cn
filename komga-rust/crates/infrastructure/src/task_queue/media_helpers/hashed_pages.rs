@@ -176,7 +176,7 @@ pub(in crate::task_queue) async fn load_book_archive_source(
 ) -> Result<Option<BookArchiveSource>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
     Ok(
-        load_persisted_book_archive_source(&runtime.task_write_pool, book_id)
+        load_persisted_book_archive_source(&runtime.task_read_pool, book_id)
             .await
             .map_err(TaskExecutionError::runtime)?
             .map(|source| BookArchiveSource {
@@ -194,7 +194,7 @@ async fn load_book_hashed_pages(
     book_id: &str,
 ) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
     let runtime = runtime.task_runtime_context();
-    load_persisted_book_hashed_pages(&runtime.task_write_pool, book_id)
+    load_persisted_book_hashed_pages(&runtime.task_read_pool, book_id)
         .await
         .map(|pages| {
             pages

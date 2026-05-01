@@ -21,7 +21,7 @@ pub(in crate::task_queue) async fn analyze_book(
         });
     }
 
-    let Some(input) = analyze_book_input(&runtime.task_write_pool, &book_id)
+    let Some(input) = analyze_book_input(&runtime.task_read_pool, &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
