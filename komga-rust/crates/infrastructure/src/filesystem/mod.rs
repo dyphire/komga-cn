@@ -11,7 +11,7 @@ pub mod import;
 pub mod media_access;
 pub mod transient_books;
 
-pub(crate) fn remove_file_after_release(path: &Path) -> io::Result<bool> {
+pub fn remove_file_after_release(path: &Path) -> io::Result<bool> {
     let deadline = Instant::now() + FILE_RELEASE_RETRY_DEADLINE;
 
     loop {

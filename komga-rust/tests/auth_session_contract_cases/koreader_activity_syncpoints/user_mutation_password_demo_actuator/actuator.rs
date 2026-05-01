@@ -1387,7 +1387,7 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
     let app = ctx.app().clone();
     let auth_token = ctx.login_admin().await;
     ctx.close_shared_pools().await;
-    std::fs::remove_file(&ctx.paths().tasks_db)
+    komga_infrastructure::filesystem::remove_file_after_release(&ctx.paths().tasks_db)
         .expect("tasks db should be removable for health down test");
 
     let response = app

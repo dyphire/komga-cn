@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use sqlx::Row;
 use sqlx::SqlitePool;
 
-use crate::sqlite::{connect_task_pool, default_read_max_connections};
+use crate::sqlite::{connect_shared_pool, default_read_max_connections};
 
 pub(super) fn task_target_from_id<'a>(id: &'a str, simple_type: &str) -> Option<&'a str> {
     id.strip_prefix(simple_type).and_then(|suffix| {
@@ -74,7 +74,7 @@ impl SqliteTaskQueueStore {
             return None;
         }
 
-        let tasks_pool = connect_task_pool(&tasks_db_file, default_read_max_connections())
+        let tasks_pool = connect_shared_pool(&tasks_db_file, default_read_max_connections())
             .await
             .expect("tasks sqlite pool should open for task persistence");
 
