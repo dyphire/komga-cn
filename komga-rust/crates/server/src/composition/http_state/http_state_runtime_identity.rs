@@ -1,4 +1,3 @@
-use super::*;
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, CreateAuthUserInput, KoboStoreSyncMergeResult, KoboSyncPage,
@@ -10,12 +9,8 @@ use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity_access;
 use komga_interfaces::state::{
-    AuthenticationActivityWriteInput, IdentityService,
-    KoboMetadataRecord as InterfacesKoboMetadataRecord,
-    KoreaderBookLookupError as InterfacesKoreaderBookLookupError,
-    KoreaderBookTarget as InterfacesKoreaderBookTarget,
-    PersistedBookMediaFile as InterfacesPersistedBookMediaFile,
-    PersistedReadProgressRecord as InterfacesPersistedReadProgressRecord,
+    AuthenticationActivityWriteInput, IdentityService, KoboMetadataRecord, KoreaderBookLookupError,
+    KoreaderBookTarget, PersistedBookMediaFile, PersistedReadProgressRecord,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -340,7 +335,7 @@ impl IdentityService for RuntimeIdentityService {
     async fn load_book_media_file(
         &self,
         book_id: String,
-    ) -> Result<Option<InterfacesPersistedBookMediaFile>, sqlx::Error> {
+    ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_media_file(
             self.db.database_file(),
             &book_id,
@@ -352,7 +347,7 @@ impl IdentityService for RuntimeIdentityService {
     async fn load_kobo_metadata_record(
         &self,
         book_id: String,
-    ) -> Result<Option<InterfacesKoboMetadataRecord>, sqlx::Error> {
+    ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_kobo_metadata_record(
             self.db.database_file(),
             &book_id,
@@ -385,7 +380,7 @@ impl IdentityService for RuntimeIdentityService {
     async fn load_koreader_book_target(
         &self,
         book_hash: String,
-    ) -> Result<Option<InterfacesKoreaderBookTarget>, InterfacesKoreaderBookLookupError> {
+    ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
         infrastructure_runtime_identity_access::load_koreader_book_target(
             self.db.database_file(),
             &book_hash,
@@ -399,7 +394,7 @@ impl IdentityService for RuntimeIdentityService {
         &self,
         book_id: String,
         user_id: String,
-    ) -> Result<Option<InterfacesPersistedReadProgressRecord>, sqlx::Error> {
+    ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_read_progress(
             self.db.database_file(),
             &book_id,
@@ -479,12 +474,16 @@ impl IdentityService for RuntimeIdentityService {
         &self,
         input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
-        infrastructure_runtime_identity::create_auth_user(self.db.database_file(), input).await
+        infrastructure_runtime_identity_access::create_auth_user(self.db.database_file(), input)
+            .await
     }
 
     async fn delete_auth_user(&self, target_user_id: String) -> Result<bool, sqlx::Error> {
-        infrastructure_runtime_identity::delete_auth_user(self.db.database_file(), &target_user_id)
-            .await
+        infrastructure_runtime_identity_access::delete_auth_user(
+            self.db.database_file(),
+            &target_user_id,
+        )
+        .await
     }
 
     async fn update_auth_user(
@@ -492,7 +491,7 @@ impl IdentityService for RuntimeIdentityService {
         target_user_id: String,
         patch: UpdateAuthUserInput,
     ) -> Result<UpdateAuthUserResult, sqlx::Error> {
-        infrastructure_runtime_identity::update_auth_user(
+        infrastructure_runtime_identity_access::update_auth_user(
             self.db.database_file(),
             &target_user_id,
             patch,
@@ -507,8 +506,8 @@ impl IdentityService for RuntimeIdentityService {
 
 fn map_persisted_book_media_file(
     record: infrastructure_runtime_identity_access::PersistedBookMediaFile,
-) -> InterfacesPersistedBookMediaFile {
-    InterfacesPersistedBookMediaFile {
+) -> PersistedBookMediaFile {
+    PersistedBookMediaFile {
         file_name: record.file_name,
         media_type: record.media_type,
         file_path: record.file_path,
@@ -517,8 +516,8 @@ fn map_persisted_book_media_file(
 
 fn map_persisted_read_progress_record(
     record: infrastructure_runtime_identity_access::PersistedReadProgressRecord,
-) -> InterfacesPersistedReadProgressRecord {
-    InterfacesPersistedReadProgressRecord {
+) -> PersistedReadProgressRecord {
+    PersistedReadProgressRecord {
         page: record.page,
         completed: record.completed,
         created: record.created,
@@ -531,8 +530,8 @@ fn map_persisted_read_progress_record(
 
 fn map_koreader_book_target(
     record: infrastructure_runtime_identity_access::KoreaderBookTarget,
-) -> InterfacesKoreaderBookTarget {
-    InterfacesKoreaderBookTarget {
+) -> KoreaderBookTarget {
+    KoreaderBookTarget {
         id: record.id,
         page_count: record.page_count,
         media_type: record.media_type,
@@ -541,8 +540,8 @@ fn map_koreader_book_target(
 
 fn map_kobo_metadata_record(
     record: infrastructure_runtime_identity_access::KoboMetadataRecord,
-) -> InterfacesKoboMetadataRecord {
-    InterfacesKoboMetadataRecord {
+) -> KoboMetadataRecord {
+    KoboMetadataRecord {
         title: record.title,
         summary: record.summary,
         release_date: record.release_date,
@@ -567,13 +566,13 @@ fn map_kobo_metadata_record(
 
 fn map_koreader_lookup_error(
     error: infrastructure_runtime_identity_access::KoreaderBookLookupError,
-) -> InterfacesKoreaderBookLookupError {
+) -> KoreaderBookLookupError {
     match error {
         infrastructure_runtime_identity_access::KoreaderBookLookupError::Persistence => {
-            InterfacesKoreaderBookLookupError::Persistence
+            KoreaderBookLookupError::Persistence
         }
         infrastructure_runtime_identity_access::KoreaderBookLookupError::Conflict => {
-            InterfacesKoreaderBookLookupError::Conflict
+            KoreaderBookLookupError::Conflict
         }
     }
 }

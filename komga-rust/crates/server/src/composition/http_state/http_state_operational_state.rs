@@ -16,7 +16,7 @@ use sqlx::SqlitePool;
 use komga_application::task_processing::TaskEngine;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore as InfrastructureServerSettingsStore;
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 use komga_infrastructure::task_queue::{RuntimeTaskEngine, TaskExecutionPoolHandle};
 
 #[derive(Clone)]
@@ -124,13 +124,13 @@ pub(super) fn create_task_engine(
 
 #[derive(Clone)]
 pub(super) struct RuntimeServerSettingsService {
-    store: InfrastructureServerSettingsStore,
+    store: ServerSettingsStore,
 }
 
 impl RuntimeServerSettingsService {
     pub(super) fn new(database_file: &Path) -> Self {
         Self {
-            store: InfrastructureServerSettingsStore::new(database_file.to_path_buf()),
+            store: ServerSettingsStore::new(database_file.to_path_buf()),
         }
     }
 }
@@ -145,7 +145,7 @@ impl ServerSettingsService for RuntimeServerSettingsService {
     }
 
     async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
-        infrastructure_operational_settings::load_server_settings(&self.store)
+        operational_settings_access::load_server_settings(&self.store)
             .await
             .map(|settings| PersistedServerSettings {
                 delete_empty_collections: settings.delete_empty_collections,

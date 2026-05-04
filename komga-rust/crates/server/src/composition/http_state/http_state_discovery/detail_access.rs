@@ -82,9 +82,8 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
                 metadata_last_modified: row.metadata_last_modified,
                 media_epub_divina_compatible: row.media_epub_divina_compatible,
                 media_epub_is_kepub: row.media_epub_is_kepub,
-                read_progress: row
-                    .read_progress
-                    .map(|progress| PersistedBookReadProgressRecord {
+                read_progress: row.read_progress.map(|progress| {
+                    DiscoveryPersistedReadProgressRecord {
                         page: progress.page,
                         completed: progress.completed,
                         read_date: progress.read_date,
@@ -92,7 +91,8 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
                         last_modified: progress.last_modified,
                         device_id: progress.device_id,
                         device_name: progress.device_name,
-                    }),
+                    }
+                }),
                 deleted: row.deleted,
                 file_hash: row.file_hash,
                 oneshot: row.oneshot,
@@ -123,14 +123,13 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 
     async fn persisted_collections_exist(&self) -> Result<bool, String> {
-        infrastructure_detail_collections::persisted_collections_exist(self.db.database_file())
-            .await
+        collections::persisted_collections_exist(self.db.database_file()).await
     }
 
     async fn load_persisted_collections(
         &self,
     ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
-        infrastructure_detail_collections::load_persisted_collections(self.db.database_file())
+        collections::load_persisted_collections(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -149,54 +148,41 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         &self,
         collection_id: String,
     ) -> Result<Vec<String>, String> {
-        infrastructure_detail_collections::load_persisted_collection_series_ids(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
+        collections::load_persisted_collection_series_ids(self.db.database_file(), &collection_id)
+            .await
     }
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: String,
     ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
-        infrastructure_detail_collections::load_persisted_collection_detail(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
-        .map(|value| {
-            value.map(|row| PersistedCollectionAccessRecord {
-                id: row.id,
-                name: row.name,
-                ordered: row.ordered,
-                created_date: row.created_date,
-                last_modified_date: row.last_modified_date,
+        collections::load_persisted_collection_detail(self.db.database_file(), &collection_id)
+            .await
+            .map(|value| {
+                value.map(|row| PersistedCollectionAccessRecord {
+                    id: row.id,
+                    name: row.name,
+                    ordered: row.ordered,
+                    created_date: row.created_date,
+                    last_modified_date: row.last_modified_date,
+                })
             })
-        })
     }
 
     async fn load_series_library_id(&self, series_id: String) -> Result<Option<String>, String> {
-        infrastructure_detail_collections::load_series_library_id(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
+        collections::load_series_library_id(self.db.database_file(), &series_id).await
     }
 
     async fn load_series_restrictions(
         &self,
         series_id: String,
     ) -> Result<PersistedSeriesRestrictionRecord, String> {
-        infrastructure_detail_collections::load_series_restrictions(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
-        .map(|row| PersistedSeriesRestrictionRecord {
-            age_rating: row.age_rating,
-            labels: row.labels,
-        })
+        collections::load_series_restrictions(self.db.database_file(), &series_id)
+            .await
+            .map(|row| PersistedSeriesRestrictionRecord {
+                age_rating: row.age_rating,
+                labels: row.labels,
+            })
     }
 
     async fn persist_collection_create(
@@ -206,7 +192,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         ordered: bool,
         series_ids: Vec<String>,
     ) -> Result<(), String> {
-        infrastructure_detail_collections::persist_collection_create(
+        collections::persist_collection_create(
             self.db.database_file(),
             &collection_id,
             &name,
@@ -223,7 +209,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         ordered: bool,
         series_ids: Vec<String>,
     ) -> Result<bool, String> {
-        infrastructure_detail_collections::persist_collection_update(
+        collections::persist_collection_update(
             self.db.database_file(),
             &collection_id,
             &name,
@@ -234,11 +220,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 
     async fn delete_persisted_collection(&self, collection_id: String) -> Result<bool, String> {
-        infrastructure_detail_collections::delete_persisted_collection(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
+        collections::delete_persisted_collection(self.db.database_file(), &collection_id).await
     }
 
     async fn upsert_collection_search_document(
@@ -266,7 +248,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 
     async fn load_persisted_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
-        infrastructure_detail_readlists::load_persisted_readlists(self.db.database_file())
+        readlists::load_persisted_readlists(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -286,46 +268,40 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         &self,
         readlist_id: String,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
-        infrastructure_detail_readlists::load_persisted_readlist_detail(
-            self.db.database_file(),
-            &readlist_id,
-        )
-        .await
-        .map(|value| {
-            value.map(|row| PersistedReadlistRecord {
-                id: row.id,
-                name: row.name,
-                summary: row.summary,
-                ordered: row.ordered,
-                created_date: row.created_date,
-                last_modified_date: row.last_modified_date,
+        readlists::load_persisted_readlist_detail(self.db.database_file(), &readlist_id)
+            .await
+            .map(|value| {
+                value.map(|row| PersistedReadlistRecord {
+                    id: row.id,
+                    name: row.name,
+                    summary: row.summary,
+                    ordered: row.ordered,
+                    created_date: row.created_date,
+                    last_modified_date: row.last_modified_date,
+                })
             })
-        })
     }
 
     async fn load_persisted_readlist_book_rows(
         &self,
         readlist_id: String,
-    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-        infrastructure_detail_readlists::load_persisted_readlist_book_rows(
-            self.db.database_file(),
-            &readlist_id,
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| PersistedReadlistBookRecord {
-                    book_id: row.book_id,
-                    library_id: row.library_id,
-                })
-                .collect()
-        })
+    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
+        readlists::load_persisted_readlist_book_rows(self.db.database_file(), &readlist_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| DiscoveryPersistedReadlistBookRecord {
+                        book_id: row.book_id,
+                        library_id: row.library_id,
+                    })
+                    .collect()
+            })
     }
 
     async fn load_comicrack_match_candidates(
         &self,
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-        infrastructure_detail_readlists::load_comicrack_match_candidates(self.db.database_file())
+        readlists::load_comicrack_match_candidates(self.db.database_file())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -345,19 +321,16 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         &self,
         book_id: String,
     ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-        infrastructure_detail_readlists::load_persisted_book_authors(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| PersistedBookAuthorRecord {
-                    name: row.name,
-                    role: row.role,
-                })
-                .collect()
-        })
+        readlists::load_persisted_book_authors(self.db.database_file(), &book_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| PersistedBookAuthorRecord {
+                        name: row.name,
+                        role: row.role,
+                    })
+                    .collect()
+            })
     }
 
     async fn persist_readlist_create(
@@ -368,7 +341,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         ordered: bool,
         book_ids: Vec<String>,
     ) -> Result<(), String> {
-        infrastructure_detail_readlists::persist_readlist_create(
+        readlists::persist_readlist_create(
             self.db.database_file(),
             &readlist_id,
             &name,
@@ -387,7 +360,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
         ordered: bool,
         book_ids: Vec<String>,
     ) -> Result<bool, String> {
-        infrastructure_detail_readlists::persist_readlist_update(
+        readlists::persist_readlist_update(
             self.db.database_file(),
             &readlist_id,
             &name,
@@ -399,11 +372,7 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 
     async fn delete_persisted_readlist(&self, readlist_id: String) -> Result<bool, String> {
-        infrastructure_detail_readlists::delete_persisted_readlist(
-            self.db.database_file(),
-            &readlist_id,
-        )
-        .await
+        readlists::delete_persisted_readlist(self.db.database_file(), &readlist_id).await
     }
 
     async fn upsert_readlist_search_document(&self, readlist_id: String) -> Result<bool, String> {
@@ -515,21 +484,14 @@ impl DiscoveryDetailService for RuntimeDiscoveryDetailService {
     }
 
     async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
-        infrastructure_discovery_runtime_queries::load_series_total_book_counts(
-            self.db.database_file(),
-        )
-        .await
+        runtime_queries::load_series_total_book_counts(self.db.database_file()).await
     }
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
-        infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
-            self.db.database_file(),
-            &user_id,
-        )
-        .await
+        runtime_queries::load_series_read_progress_counts(self.db.database_file(), &user_id).await
     }
 
     async fn load_persisted_series_collections(

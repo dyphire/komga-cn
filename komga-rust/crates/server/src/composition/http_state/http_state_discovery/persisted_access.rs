@@ -41,9 +41,7 @@ fn search_scored_ids_or_empty(
         .unwrap_or_default()
 }
 
-fn persisted_book_summary(
-    row: infrastructure_discovery_models::BookSummary,
-) -> PersistedBookSummary {
+fn persisted_book_summary(row: models::BookSummary) -> PersistedBookSummary {
     PersistedBookSummary {
         id: row.id,
         series_id: row.series_id,
@@ -117,9 +115,7 @@ fn persisted_book_summary(
     }
 }
 
-fn persisted_book_browse_entry(
-    row: infrastructure_discovery_models::BookBrowseEntry,
-) -> PersistedBookBrowseEntry {
+fn persisted_book_browse_entry(row: models::BookBrowseEntry) -> PersistedBookBrowseEntry {
     PersistedBookBrowseEntry {
         id: row.id,
         library_id: row.library_id,
@@ -128,9 +124,7 @@ fn persisted_book_browse_entry(
     }
 }
 
-fn persisted_series_summary(
-    row: infrastructure_discovery_models::SeriesSummary,
-) -> PersistedSeriesSummary {
+fn persisted_series_summary(row: models::SeriesSummary) -> PersistedSeriesSummary {
     PersistedSeriesSummary {
         id: row.id,
         library_id: row.library_id,
@@ -234,7 +228,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_genres(
+        facets::load_persisted_genres(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -247,7 +241,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_tags(
+        facets::load_persisted_tags(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -260,7 +254,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_languages(
+        facets::load_persisted_languages(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -273,7 +267,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_publishers(
+        facets::load_persisted_publishers(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -286,7 +280,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_age_ratings(
+        facets::load_persisted_age_ratings(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -299,7 +293,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_sharing_labels(
+        facets::load_persisted_sharing_labels(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -312,7 +306,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_series_release_dates(
+        facets::load_persisted_series_release_dates(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -325,7 +319,7 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_facets::load_persisted_series_tags(
+        facets::load_persisted_series_tags(
             self.db.database_file(),
             library_ids.as_deref(),
             collection_id.as_deref(),
@@ -336,30 +330,20 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
     async fn load_collection_memberships(
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        infrastructure_discovery_library_mappings::load_collection_memberships(
-            self.db.database_file(),
-        )
-        .await
+        library_mappings::load_collection_memberships(self.db.database_file()).await
     }
 
     async fn load_collection_ordering(
         &self,
         collection_id: String,
     ) -> Result<HashMap<String, i64>, String> {
-        infrastructure_discovery_library_mappings::load_collection_ordering(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
+        library_mappings::load_collection_ordering(self.db.database_file(), &collection_id).await
     }
 
     async fn load_readlist_memberships(
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        infrastructure_discovery_library_mappings::load_readlist_memberships(
-            self.db.database_file(),
-        )
-        .await
+        library_mappings::load_readlist_memberships(self.db.database_file()).await
     }
 
     async fn load_persisted_book_tags(
@@ -368,18 +352,12 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         let scope = scope.map(|scope| match scope {
-            PersistedBookTagsScope::All => infrastructure_discovery_models::BookTagsScope::All,
-            PersistedBookTagsScope::Series(id) => {
-                infrastructure_discovery_models::BookTagsScope::Series(id)
-            }
-            PersistedBookTagsScope::Libraries(ids) => {
-                infrastructure_discovery_models::BookTagsScope::Libraries(ids)
-            }
-            PersistedBookTagsScope::ReadList(id) => {
-                infrastructure_discovery_models::BookTagsScope::ReadList(id)
-            }
+            PersistedBookTagsScope::All => models::BookTagsScope::All,
+            PersistedBookTagsScope::Series(id) => models::BookTagsScope::Series(id),
+            PersistedBookTagsScope::Libraries(ids) => models::BookTagsScope::Libraries(ids),
+            PersistedBookTagsScope::ReadList(id) => models::BookTagsScope::ReadList(id),
         });
-        infrastructure_discovery_runtime_queries::load_persisted_book_tags(
+        runtime_queries::load_persisted_book_tags(
             self.db.database_file(),
             scope.as_ref(),
             authorized_library_ids.as_deref(),
@@ -388,40 +366,25 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
     }
 
     async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
-        infrastructure_discovery_runtime_queries::persisted_utc_date_minus_days(
-            self.db.database_file(),
-            days,
-        )
-        .await
+        runtime_queries::persisted_utc_date_minus_days(self.db.database_file(), days).await
     }
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: String,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
-        infrastructure_discovery_runtime_queries::load_series_read_progress_counts(
-            self.db.database_file(),
-            &user_id,
-        )
-        .await
+        runtime_queries::load_series_read_progress_counts(self.db.database_file(), &user_id).await
     }
 
     async fn load_series_read_dates(
         &self,
         user_id: String,
     ) -> Result<HashMap<String, String>, String> {
-        infrastructure_discovery_runtime_queries::load_series_read_dates(
-            self.db.database_file(),
-            &user_id,
-        )
-        .await
+        runtime_queries::load_series_read_dates(self.db.database_file(), &user_id).await
     }
 
     async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
-        infrastructure_discovery_runtime_queries::load_series_total_book_counts(
-            self.db.database_file(),
-        )
-        .await
+        runtime_queries::load_series_total_book_counts(self.db.database_file()).await
     }
 
     async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
@@ -478,7 +441,7 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_authors::load_persisted_author_names(
+        authors::load_persisted_author_names(
             self.db.database_file(),
             &search,
             authorized_library_ids.as_deref(),
@@ -490,7 +453,7 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
         &self,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_authors::load_persisted_author_roles(
+        authors::load_persisted_author_roles(
             self.db.database_file(),
             authorized_library_ids.as_deref(),
         )
@@ -503,21 +466,13 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String> {
         let mapped_scope = match scope {
-            PersistedAuthorsScope::All => infrastructure_discovery_models::AuthorsScope::All,
-            PersistedAuthorsScope::Libraries(ids) => {
-                infrastructure_discovery_models::AuthorsScope::Libraries(ids)
-            }
-            PersistedAuthorsScope::Collection(id) => {
-                infrastructure_discovery_models::AuthorsScope::Collection(id)
-            }
-            PersistedAuthorsScope::Series(id) => {
-                infrastructure_discovery_models::AuthorsScope::Series(id)
-            }
-            PersistedAuthorsScope::ReadList(id) => {
-                infrastructure_discovery_models::AuthorsScope::ReadList(id)
-            }
+            PersistedAuthorsScope::All => models::AuthorsScope::All,
+            PersistedAuthorsScope::Libraries(ids) => models::AuthorsScope::Libraries(ids),
+            PersistedAuthorsScope::Collection(id) => models::AuthorsScope::Collection(id),
+            PersistedAuthorsScope::Series(id) => models::AuthorsScope::Series(id),
+            PersistedAuthorsScope::ReadList(id) => models::AuthorsScope::ReadList(id),
         };
-        let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
+        let rows = authors::load_persisted_authors_by_scope(
             self.db.database_file(),
             &mapped_scope,
             authorized_library_ids.as_deref(),
@@ -536,10 +491,7 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
 #[async_trait::async_trait]
 impl DiscoveryLibraryMappingService for RuntimePersistedDiscoveryAccess {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-        infrastructure_discovery_library_mappings::load_persisted_library_ids(
-            self.db.database_file(),
-        )
-        .await
+        library_mappings::load_persisted_library_ids(self.db.database_file()).await
     }
 }
 
@@ -583,20 +535,15 @@ impl DiscoveryBookFeedService for RuntimePersistedDiscoveryAccess {
         &self,
         user_id: String,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
-            self.db.database_file(),
-            &user_id,
-        )
-        .await
-        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+        runtime_queries::load_persisted_ondeck_books(self.db.database_file(), &user_id)
+            .await
+            .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }
 
     async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
-            self.db.database_file(),
-        )
-        .await
-        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+        runtime_queries::load_persisted_duplicate_books(self.db.database_file())
+            .await
+            .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }
 }
 

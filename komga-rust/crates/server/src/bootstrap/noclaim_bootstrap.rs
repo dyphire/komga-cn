@@ -1,4 +1,4 @@
-use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
+use bcrypt::{DEFAULT_COST, hash};
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -63,7 +63,7 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
     let mut users_to_persist = Vec::with_capacity(initial_users.len());
 
     for user in &initial_users {
-        let hashed_password = match hash_bcrypt_password(user.password.as_str(), DEFAULT_COST) {
+        let hashed_password = match hash(user.password.as_str(), DEFAULT_COST) {
             Ok(hash) => hash,
             Err(error) => {
                 eprintln!(

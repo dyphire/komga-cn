@@ -20,8 +20,7 @@ use komga_interfaces::discovery::persisted::series_queries::{
     load_persisted_alphabetical_groups, load_persisted_series_page,
 };
 use komga_interfaces::discovery_auth::context::{
-    DiscoveryQueryContext as InterfacesDiscoveryQueryContext,
-    QueryRestrictions as InterfacesQueryRestrictions,
+    DiscoveryQueryContext as InterfacesDiscoveryQueryContext, QueryRestrictions,
 };
 use komga_interfaces::discovery_auth::principal::AgeRestrictionKind as InterfacesAgeRestrictionKind;
 use komga_interfaces::state::PersistedDiscoveryListDataSource;
@@ -44,22 +43,19 @@ fn to_interfaces_context(context: &DiscoveryQueryContext) -> InterfacesDiscovery
             .authorized_library_ids
             .as_ref()
             .map(|ids| ids.iter().map(|id| id.as_str().to_string()).collect()),
-        restrictions: context
-            .restrictions
-            .as_ref()
-            .map(|r| InterfacesQueryRestrictions {
-                age: r.age,
-                age_restriction: r.age_restriction.map(|kind| match kind {
-                    komga_domain::discovery::AgeRestrictionKind::AllowOnly => {
-                        InterfacesAgeRestrictionKind::AllowOnly
-                    }
-                    komga_domain::discovery::AgeRestrictionKind::Exclude => {
-                        InterfacesAgeRestrictionKind::Exclude
-                    }
-                }),
-                labels_allow: r.labels_allow.clone(),
-                labels_exclude: r.labels_exclude.clone(),
+        restrictions: context.restrictions.as_ref().map(|r| QueryRestrictions {
+            age: r.age,
+            age_restriction: r.age_restriction.map(|kind| match kind {
+                komga_domain::discovery::AgeRestrictionKind::AllowOnly => {
+                    InterfacesAgeRestrictionKind::AllowOnly
+                }
+                komga_domain::discovery::AgeRestrictionKind::Exclude => {
+                    InterfacesAgeRestrictionKind::Exclude
+                }
             }),
+            labels_allow: r.labels_allow.clone(),
+            labels_exclude: r.labels_exclude.clone(),
+        }),
     }
 }
 

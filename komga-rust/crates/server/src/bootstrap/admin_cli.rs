@@ -1,4 +1,4 @@
-use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
+use bcrypt::{DEFAULT_COST, hash};
 use std::fmt;
 use std::path::Path;
 
@@ -233,7 +233,7 @@ pub async fn run_admin_cli_commands(
     let password_updates = users
         .iter()
         .map(|user| {
-            hash_bcrypt_password(new_password, DEFAULT_COST)
+            hash(new_password, DEFAULT_COST)
                 .map(|hashed_password| (user.id.clone(), hashed_password))
                 .map_err(|error| {
                     AdminCliActionError::new(format!("failed to hash reset password: {error}"))

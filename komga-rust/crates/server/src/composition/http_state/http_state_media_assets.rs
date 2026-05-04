@@ -1,11 +1,11 @@
 use super::*;
 use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::filesystem::import as infrastructure_import;
-use komga_infrastructure::filesystem::media_access::db_queries as infrastructure_media_queries;
-use komga_infrastructure::filesystem::media_access::epub as infrastructure_epub;
-use komga_infrastructure::filesystem::media_access::hashes as infrastructure_hashes;
-use komga_infrastructure::filesystem::media_access::page_content as infrastructure_page_content;
-use komga_infrastructure::filesystem::media_access::read_progress as infrastructure_media_read_progress;
+use komga_infrastructure::filesystem::import;
+use komga_infrastructure::filesystem::media_access::db_queries;
+use komga_infrastructure::filesystem::media_access::epub;
+use komga_infrastructure::filesystem::media_access::hashes;
+use komga_infrastructure::filesystem::media_access::page_content;
+use komga_infrastructure::filesystem::media_access::read_progress;
 use komga_interfaces::state::{
     MediaAssetsService, PersistedMediaFileRecord, RuntimeBookMetadataService,
     RuntimeMediaImportService,
@@ -13,9 +13,7 @@ use komga_interfaces::state::{
 use serde_json::Value;
 
 struct ComposedMediaImportService {
-    inner: komga_application::media_assets::MediaImportService<
-        infrastructure_import::FilesystemImportPort,
-    >,
+    inner: komga_application::media_assets::MediaImportService<import::FilesystemImportPort>,
 }
 
 impl RuntimeMediaImportService for ComposedMediaImportService {
@@ -44,9 +42,7 @@ impl RuntimeMediaImportService for ComposedMediaImportService {
 }
 
 struct ComposedBookMetadataService {
-    inner: komga_application::media_assets::BookMetadataService<
-        infrastructure_metadata::SqliteBookMetadataPort,
-    >,
+    inner: komga_application::media_assets::BookMetadataService<metadata::SqliteBookMetadataPort>,
 }
 
 impl RuntimeBookMetadataService for ComposedBookMetadataService {
@@ -80,9 +76,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
     fn media_import_service(&self) -> Box<dyn RuntimeMediaImportService> {
         Box::new(ComposedMediaImportService {
             inner: komga_application::media_assets::MediaImportService::new(
-                infrastructure_import::FilesystemImportPort::new(
-                    self.db.database_file().to_path_buf(),
-                ),
+                import::FilesystemImportPort::new(self.db.database_file().to_path_buf()),
             ),
         })
     }
@@ -90,9 +84,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
     fn book_metadata_service(&self) -> Box<dyn RuntimeBookMetadataService> {
         Box::new(ComposedBookMetadataService {
             inner: komga_application::media_assets::BookMetadataService::new(
-                infrastructure_metadata::SqliteBookMetadataPort::new(
-                    self.db.database_file().to_path_buf(),
-                ),
+                metadata::SqliteBookMetadataPort::new(self.db.database_file().to_path_buf()),
             ),
         })
     }
@@ -117,89 +109,75 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         &self,
         book_id: String,
     ) -> Result<(), String> {
-        infrastructure_hashes::persist_book_page_hashes_from_media_content(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
+        hashes::persist_book_page_hashes_from_media_content(self.db.database_file(), &book_id).await
     }
 
     fn decode_epub_positions(&self, blob: Vec<u8>) -> Result<Vec<Value>, String> {
-        infrastructure_epub::decode_epub_positions_blob(blob.as_slice())
+        epub::decode_epub_positions_blob(blob.as_slice())
     }
 
     async fn load_epub_archive_positions(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<Value>> {
-        infrastructure_epub::load_epub_archive_positions(&media).await
+        epub::load_epub_archive_positions(&media).await
     }
 
     async fn read_media_file_bytes(&self, path: PathBuf) -> Option<Vec<u8>> {
-        infrastructure_page_content::read_media_file_bytes(path.as_path()).await
+        page_content::read_media_file_bytes(path.as_path()).await
     }
 
     async fn read_media_file_size(&self, path: PathBuf) -> Option<i64> {
-        infrastructure_page_content::read_media_file_size(path.as_path()).await
+        page_content::read_media_file_size(path.as_path()).await
     }
 
     async fn load_epub_cover_bytes(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<(Vec<u8>, String)> {
-        infrastructure_epub::load_epub_cover_bytes(&media).await
+        epub::load_epub_cover_bytes(&media).await
     }
 
     async fn load_persisted_book_media(
         &self,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::BookMediaRecord>, String> {
-        infrastructure_media_queries::load_persisted_book_media(self.db.database_file(), &book_id)
-            .await
+        db_queries::load_persisted_book_media(self.db.database_file(), &book_id).await
     }
 
     async fn load_persisted_book_media_files(
         &self,
         book_id: String,
     ) -> Result<Vec<String>, String> {
-        infrastructure_media_queries::load_persisted_book_media_files(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
+        db_queries::load_persisted_book_media_files(self.db.database_file(), &book_id).await
     }
 
     async fn load_persisted_media_file_records(
         &self,
         book_id: String,
     ) -> Result<Vec<PersistedMediaFileRecord>, String> {
-        infrastructure_media_queries::load_persisted_media_file_records(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| PersistedMediaFileRecord {
-                    file_name: row.file_name,
-                    media_type: row.media_type,
-                    sub_type: row.sub_type,
-                })
-                .collect()
-        })
+        db_queries::load_persisted_media_file_records(self.db.database_file(), &book_id)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| PersistedMediaFileRecord {
+                        file_name: row.file_name,
+                        media_type: row.media_type,
+                        sub_type: row.sub_type,
+                    })
+                    .collect()
+            })
     }
 
     async fn book_media_is_ready_status(&self, book_id: String) -> Result<bool, String> {
-        infrastructure_media_queries::book_media_is_ready_status(self.db.database_file(), &book_id)
-            .await
+        db_queries::book_media_is_ready_status(self.db.database_file(), &book_id).await
     }
 
     async fn load_persisted_book_pages(
         &self,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String> {
-        infrastructure_media_queries::load_persisted_book_pages(self.db.database_file(), &book_id)
-            .await
+        db_queries::load_persisted_book_pages(self.db.database_file(), &book_id).await
     }
 
     async fn load_persisted_book_page_row(
@@ -207,12 +185,8 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         book_id: String,
         page_number: u64,
     ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
-        infrastructure_media_queries::load_persisted_book_page_row(
-            self.db.database_file(),
-            &book_id,
-            page_number,
-        )
-        .await
+        db_queries::load_persisted_book_page_row(self.db.database_file(), &book_id, page_number)
+            .await
     }
 
     async fn resolve_book_page_bytes(
@@ -221,7 +195,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         page: komga_application::media_assets::BookPageRecord,
         page_number: u64,
     ) -> Option<Vec<u8>> {
-        infrastructure_page_content::resolve_book_page_bytes(&media, &page, page_number).await
+        page_content::resolve_book_page_bytes(&media, &page, page_number).await
     }
 
     async fn render_book_page_thumbnail(
@@ -231,13 +205,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         page_number: u64,
         max_edge: u32,
     ) -> Option<Vec<u8>> {
-        infrastructure_page_content::render_book_page_thumbnail(
-            &media,
-            &page,
-            page_number,
-            max_edge,
-        )
-        .await
+        page_content::render_book_page_thumbnail(&media, &page, page_number, max_edge).await
     }
 
     async fn load_archive_page_row(
@@ -245,14 +213,14 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         media: komga_application::media_assets::BookMediaRecord,
         page_number: u64,
     ) -> Option<komga_application::media_assets::BookPageRecord> {
-        infrastructure_page_content::load_archive_page_row(&media, page_number).await
+        page_content::load_archive_page_row(&media, page_number).await
     }
 
     async fn load_archive_page_rows(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
-        infrastructure_page_content::load_archive_page_rows(&media).await
+        page_content::load_archive_page_rows(&media).await
     }
 
     fn load_pdf_page_row(
@@ -260,14 +228,14 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         media: komga_application::media_assets::BookMediaRecord,
         page_number: u64,
     ) -> Option<komga_application::media_assets::BookPageRecord> {
-        infrastructure_page_content::load_pdf_page_row(&media, page_number)
+        page_content::load_pdf_page_row(&media, page_number)
     }
 
     fn load_generated_pdf_page_rows(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Vec<komga_application::media_assets::BookPageRecord> {
-        infrastructure_page_content::load_generated_pdf_page_rows(&media)
+        page_content::load_generated_pdf_page_rows(&media)
     }
 
     fn read_pdf_page_as_single_page_pdf(
@@ -275,30 +243,25 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         media: komga_application::media_assets::BookMediaRecord,
         page_number: u64,
     ) -> Option<Vec<u8>> {
-        infrastructure_page_content::read_pdf_page_as_single_page_pdf(&media, page_number)
+        page_content::read_pdf_page_as_single_page_pdf(&media, page_number)
     }
 
     fn detect_pdf_page_count(
         &self,
         media: komga_application::media_assets::BookMediaRecord,
     ) -> Option<u64> {
-        infrastructure_page_content::detect_pdf_page_count(&media)
+        page_content::detect_pdf_page_count(&media)
     }
 
     async fn load_persisted_epub_extension_blob(
         &self,
         book_id: String,
     ) -> Result<Option<(String, Vec<u8>)>, String> {
-        infrastructure_media_queries::load_persisted_epub_extension_blob(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
+        db_queries::load_persisted_epub_extension_blob(self.db.database_file(), &book_id).await
     }
 
     async fn load_series_book_ids(&self, series_id: String) -> Result<Vec<String>, String> {
-        infrastructure_media_queries::load_series_book_ids(self.db.database_file(), &series_id)
-            .await
+        db_queries::load_series_book_ids(self.db.database_file(), &series_id).await
     }
 
     async fn refresh_series_read_progress_row(
@@ -306,7 +269,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         series_id: String,
         user_id: String,
     ) -> Result<(), String> {
-        infrastructure_media_read_progress::refresh_series_read_progress_row(
+        read_progress::refresh_series_read_progress_row(
             self.db.database_file(),
             &series_id,
             &user_id,
@@ -319,7 +282,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         series_id: String,
         user_id: String,
     ) -> Result<(), String> {
-        infrastructure_media_read_progress::delete_series_read_progress_row(
+        read_progress::delete_series_read_progress_row(
             self.db.database_file(),
             &series_id,
             &user_id,
@@ -332,12 +295,8 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         series_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String> {
-        infrastructure_media_read_progress::load_series_tachiyomi_progress(
-            self.db.database_file(),
-            &series_id,
-            &user_id,
-        )
-        .await
+        read_progress::load_series_tachiyomi_progress(self.db.database_file(), &series_id, &user_id)
+            .await
     }
 
     async fn load_book_progression(
@@ -345,8 +304,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         book_id: String,
         user_id: String,
     ) -> Result<Option<Value>, String> {
-        infrastructure_metadata::load_book_progression(self.db.database_file(), &book_id, &user_id)
-            .await
+        metadata::load_book_progression(self.db.database_file(), &book_id, &user_id).await
     }
 
     async fn persist_read_progress(
@@ -357,7 +315,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         completed: bool,
         locator: Option<Value>,
     ) -> Result<(), String> {
-        infrastructure_metadata::persist_read_progress(
+        metadata::persist_read_progress(
             self.db.database_file(),
             &book_id,
             &user_id,
@@ -373,12 +331,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         book_id: String,
         user_id: String,
     ) -> Result<(), String> {
-        infrastructure_metadata::delete_persisted_read_progress(
-            self.db.database_file(),
-            &book_id,
-            &user_id,
-        )
-        .await
+        metadata::delete_persisted_read_progress(self.db.database_file(), &book_id, &user_id).await
     }
 
     async fn readlist_tachiyomi_counters(
@@ -386,12 +339,8 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         ordered_book_ids: Vec<String>,
         user_id: String,
     ) -> Result<(u64, u64, u64, u64, u64), String> {
-        infrastructure_metadata::readlist_tachiyomi_counters(
-            self.db.database_file(),
-            &ordered_book_ids,
-            &user_id,
-        )
-        .await
+        metadata::readlist_tachiyomi_counters(self.db.database_file(), &ordered_book_ids, &user_id)
+            .await
     }
 
     async fn persist_readlist_tachiyomi_progress(
@@ -400,7 +349,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         user_id: String,
         last_book_read: usize,
     ) -> Result<Option<()>, String> {
-        infrastructure_metadata::persist_readlist_tachiyomi_progress(
+        metadata::persist_readlist_tachiyomi_progress(
             self.db.database_file(),
             &ordered_book_ids,
             &user_id,
@@ -413,24 +362,21 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         &self,
         book_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-        infrastructure_metadata::load_selected_book_thumbnail(self.db.database_file(), &book_id)
-            .await
+        metadata::load_selected_book_thumbnail(self.db.database_file(), &book_id).await
     }
 
     async fn load_book_thumbnail_by_id(
         &self,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-        infrastructure_metadata::load_book_thumbnail_by_id(self.db.database_file(), &thumbnail_id)
-            .await
+        metadata::load_book_thumbnail_by_id(self.db.database_file(), &thumbnail_id).await
     }
 
     async fn load_persisted_book_thumbnails(
         &self,
         book_id: String,
     ) -> Result<Vec<komga_application::media_assets::EntityThumbnailRecord>, String> {
-        infrastructure_metadata::load_persisted_book_thumbnails(self.db.database_file(), &book_id)
-            .await
+        metadata::load_persisted_book_thumbnails(self.db.database_file(), &book_id).await
     }
 
     async fn insert_book_thumbnail(
@@ -442,7 +388,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::EntityThumbnailRecord, String> {
-        infrastructure_metadata::insert_book_thumbnail(
+        metadata::insert_book_thumbnail(
             self.db.database_file(),
             &book_id,
             thumbnail.as_slice(),
@@ -455,22 +401,18 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
     }
 
     async fn select_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
-        infrastructure_metadata::select_book_thumbnail(self.db.database_file(), &thumbnail_id).await
+        metadata::select_book_thumbnail(self.db.database_file(), &thumbnail_id).await
     }
 
     async fn delete_book_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
-        infrastructure_metadata::delete_book_thumbnail(self.db.database_file(), &thumbnail_id).await
+        metadata::delete_book_thumbnail(self.db.database_file(), &thumbnail_id).await
     }
 
     async fn load_persisted_readlist_thumbnails(
         &self,
         readlist_id: String,
     ) -> Result<Vec<komga_application::media_assets::ReadlistThumbnailRecord>, String> {
-        infrastructure_metadata::load_persisted_readlist_thumbnails(
-            self.db.database_file(),
-            &readlist_id,
-        )
-        .await
+        metadata::load_persisted_readlist_thumbnails(self.db.database_file(), &readlist_id).await
     }
 
     async fn insert_readlist_thumbnail(
@@ -482,7 +424,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::ReadlistThumbnailRecord, String> {
-        infrastructure_metadata::insert_readlist_thumbnail(
+        metadata::insert_readlist_thumbnail(
             self.db.database_file(),
             &readlist_id,
             thumbnail.as_slice(),
@@ -499,12 +441,8 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::select_readlist_thumbnail(
-            self.db.database_file(),
-            &readlist_id,
-            &thumbnail_id,
-        )
-        .await
+        metadata::select_readlist_thumbnail(self.db.database_file(), &readlist_id, &thumbnail_id)
+            .await
     }
 
     async fn delete_readlist_thumbnail(
@@ -512,23 +450,16 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         readlist_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::delete_readlist_thumbnail(
-            self.db.database_file(),
-            &readlist_id,
-            &thumbnail_id,
-        )
-        .await
+        metadata::delete_readlist_thumbnail(self.db.database_file(), &readlist_id, &thumbnail_id)
+            .await
     }
 
     async fn load_persisted_collection_thumbnails(
         &self,
         collection_id: String,
     ) -> Result<Vec<komga_application::media_assets::CollectionThumbnailRecord>, String> {
-        infrastructure_metadata::load_persisted_collection_thumbnails(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
+        metadata::load_persisted_collection_thumbnails(self.db.database_file(), &collection_id)
+            .await
     }
 
     async fn insert_collection_thumbnail(
@@ -540,7 +471,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::CollectionThumbnailRecord, String> {
-        infrastructure_metadata::insert_collection_thumbnail(
+        metadata::insert_collection_thumbnail(
             self.db.database_file(),
             &collection_id,
             thumbnail.as_slice(),
@@ -553,8 +484,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
     }
 
     async fn select_collection_thumbnail(&self, thumbnail_id: String) -> Result<bool, String> {
-        infrastructure_metadata::select_collection_thumbnail(self.db.database_file(), &thumbnail_id)
-            .await
+        metadata::select_collection_thumbnail(self.db.database_file(), &thumbnail_id).await
     }
 
     async fn delete_collection_thumbnail(
@@ -562,7 +492,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         collection_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::delete_collection_thumbnail(
+        metadata::delete_collection_thumbnail(
             self.db.database_file(),
             &collection_id,
             &thumbnail_id,
@@ -574,27 +504,21 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         &self,
         series_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-        infrastructure_metadata::load_selected_series_thumbnail(self.db.database_file(), &series_id)
-            .await
+        metadata::load_selected_series_thumbnail(self.db.database_file(), &series_id).await
     }
 
     async fn load_persisted_series_thumbnails(
         &self,
         series_id: String,
     ) -> Result<Vec<komga_application::media_assets::SeriesThumbnailRecord>, String> {
-        infrastructure_metadata::load_persisted_series_thumbnails(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
+        metadata::load_persisted_series_thumbnails(self.db.database_file(), &series_id).await
     }
 
     async fn load_series_thumbnail_by_id(
         &self,
         thumbnail_id: String,
     ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-        infrastructure_metadata::load_series_thumbnail_by_id(self.db.database_file(), &thumbnail_id)
-            .await
+        metadata::load_series_thumbnail_by_id(self.db.database_file(), &thumbnail_id).await
     }
 
     async fn insert_series_thumbnail(
@@ -606,7 +530,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         height: i64,
         selected: bool,
     ) -> Result<komga_application::media_assets::SeriesThumbnailRecord, String> {
-        infrastructure_metadata::insert_series_thumbnail(
+        metadata::insert_series_thumbnail(
             self.db.database_file(),
             &series_id,
             thumbnail.as_slice(),
@@ -623,12 +547,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::select_series_thumbnail(
-            self.db.database_file(),
-            &series_id,
-            &thumbnail_id,
-        )
-        .await
+        metadata::select_series_thumbnail(self.db.database_file(), &series_id, &thumbnail_id).await
     }
 
     async fn delete_series_thumbnail(
@@ -636,54 +555,39 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         series_id: String,
         thumbnail_id: String,
     ) -> Result<bool, String> {
-        infrastructure_metadata::delete_series_thumbnail(
-            self.db.database_file(),
-            &series_id,
-            &thumbnail_id,
-        )
-        .await
+        metadata::delete_series_thumbnail(self.db.database_file(), &series_id, &thumbnail_id).await
     }
 
     async fn load_persisted_readlist_name(
         &self,
         readlist_id: String,
     ) -> Result<Option<String>, String> {
-        infrastructure_metadata::load_persisted_readlist_name(self.db.database_file(), &readlist_id)
-            .await
+        metadata::load_persisted_readlist_name(self.db.database_file(), &readlist_id).await
     }
 
     async fn load_book_restrictions(
         &self,
         book_id: String,
     ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
-        infrastructure_media_queries::load_book_restrictions(self.db.database_file(), &book_id)
-            .await
+        db_queries::load_book_restrictions(self.db.database_file(), &book_id).await
     }
 
     async fn load_readlist_archive_entries(
         &self,
         readlist_id: String,
     ) -> Result<Vec<(String, PathBuf)>, String> {
-        infrastructure_media_queries::load_readlist_archive_entries(
-            self.db.database_file(),
-            &readlist_id,
-        )
-        .await
+        db_queries::load_readlist_archive_entries(self.db.database_file(), &readlist_id).await
     }
 
     async fn load_series_archive_entries(
         &self,
         series_id: String,
     ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
-        infrastructure_media_queries::load_series_archive_entries(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
+        db_queries::load_series_archive_entries(self.db.database_file(), &series_id).await
     }
 
     fn is_font_resource(&self, resource_name: String) -> bool {
-        infrastructure_epub::is_font_resource(&resource_name)
+        epub::is_font_resource(&resource_name)
     }
 
     async fn read_epub_resource_bytes(
@@ -691,70 +595,52 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         epub_path: PathBuf,
         resource_name: String,
     ) -> Option<Vec<u8>> {
-        infrastructure_epub::read_epub_resource_bytes(epub_path.as_path(), &resource_name).await
+        epub::read_epub_resource_bytes(epub_path.as_path(), &resource_name).await
     }
 
     async fn load_persisted_manifest_book(
         &self,
         book_id: String,
     ) -> Result<Option<(String, String, String)>, String> {
-        infrastructure_media_queries::load_persisted_manifest_book(
-            self.db.database_file(),
-            &book_id,
-        )
-        .await
+        db_queries::load_persisted_manifest_book(self.db.database_file(), &book_id).await
     }
 
     async fn persisted_book_exists(&self, book_id: String) -> Result<bool, String> {
-        infrastructure_media_queries::persisted_book_exists(self.db.database_file(), &book_id).await
+        db_queries::persisted_book_exists(self.db.database_file(), &book_id).await
     }
 
     async fn persisted_book_ids(&self) -> Result<Vec<String>, String> {
-        infrastructure_media_queries::persisted_book_ids(self.db.database_file()).await
+        db_queries::persisted_book_ids(self.db.database_file()).await
     }
 
     async fn persisted_series_exists(&self, series_id: String) -> Result<bool, String> {
-        infrastructure_media_queries::persisted_series_exists(self.db.database_file(), &series_id)
-            .await
+        db_queries::persisted_series_exists(self.db.database_file(), &series_id).await
     }
 
     async fn load_persisted_series_oneshot(
         &self,
         series_id: String,
     ) -> Result<Option<bool>, String> {
-        infrastructure_media_queries::load_persisted_series_oneshot(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
+        db_queries::load_persisted_series_oneshot(self.db.database_file(), &series_id).await
     }
 
     async fn persisted_readlist_exists(&self, readlist_id: String) -> Result<bool, String> {
-        infrastructure_metadata::persisted_readlist_exists(self.db.database_file(), &readlist_id)
-            .await
+        metadata::persisted_readlist_exists(self.db.database_file(), &readlist_id).await
     }
 
     async fn persisted_collection_exists(&self, collection_id: String) -> Result<bool, String> {
-        infrastructure_metadata::persisted_collection_exists(
-            self.db.database_file(),
-            &collection_id,
-        )
-        .await
+        metadata::persisted_collection_exists(self.db.database_file(), &collection_id).await
     }
 
     async fn load_series_book_number_sorts(
         &self,
         series_id: String,
     ) -> Result<Vec<(String, f64)>, String> {
-        infrastructure_media_queries::load_series_book_number_sorts(
-            self.db.database_file(),
-            &series_id,
-        )
-        .await
+        db_queries::load_series_book_number_sorts(self.db.database_file(), &series_id).await
     }
 
     async fn load_book_page_count(&self, book_id: String) -> Result<Option<u64>, String> {
-        infrastructure_metadata::load_book_page_count(self.db.database_file(), &book_id).await
+        metadata::load_book_page_count(self.db.database_file(), &book_id).await
     }
 
     async fn persist_book_progression(
@@ -768,7 +654,7 @@ impl MediaAssetsService for RuntimeMediaAssetsService {
         device_name: Option<String>,
         locator: Option<Value>,
     ) -> Result<(), String> {
-        infrastructure_metadata::persist_book_progression(
+        metadata::persist_book_progression(
             self.db.database_file(),
             &book_id,
             &user_id,
