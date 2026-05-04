@@ -24,9 +24,11 @@ use crate::state::{
     OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
     ServerSettingsService, SseOperationalState, StartupTimingState, TransientBooksStore,
     tests::{
-        NoopDiscoveryDetailService, NoopMediaAssetsService, NoopOpdsCatalogService,
+        NoopDiscoveryAuthorService, NoopDiscoveryBookFeedService,
+        NoopDiscoveryCollectionSearchService, NoopDiscoveryDetailService,
+        NoopDiscoveryLibraryMappingService, NoopDiscoveryListService,
+        NoopDiscoveryReadlistSearchService, NoopMediaAssetsService, NoopOpdsCatalogService,
         NoopOpdsPersistedService, NoopOperationalRuntimeService, NoopOperationalSettingsService,
-        NoopPersistedDiscoveryService,
     },
 };
 
@@ -511,8 +513,13 @@ fn test_app_state(
             media_assets: Box::new(NoopMediaAssetsService),
             opds_catalog: Box::new(NoopOpdsCatalogService),
             opds_persisted: Box::new(NoopOpdsPersistedService),
-            discovery_persisted: Box::new(NoopPersistedDiscoveryService),
+            discovery_authors: Box::new(NoopDiscoveryAuthorService),
+            discovery_library_mapping: Box::new(NoopDiscoveryLibraryMappingService),
+            discovery_collection_search: Box::new(NoopDiscoveryCollectionSearchService),
+            discovery_readlist_search: Box::new(NoopDiscoveryReadlistSearchService),
+            discovery_book_feeds: Box::new(NoopDiscoveryBookFeedService),
             discovery_detail: Box::new(NoopDiscoveryDetailService),
+            discovery_list: Box::new(NoopDiscoveryListService),
         },
         operational,
     }

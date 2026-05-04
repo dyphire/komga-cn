@@ -1,14 +1,18 @@
 use komga_application::discovery::{
     BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
-    BookReadProgressReadModel,
+    BookReadProgressReadModel, BooksBrowseQuery,
 };
-use komga_application::discovery::{RuntimeBooksLatestQuery, RuntimeBooksListQuery};
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
+use komga_domain::discovery::{
+    BookCondition, BookSort, BookValueCondition, CompositeBookCondition, DateCondition,
+    DiscoveryError, DiscoveryQueryContext, FilterOperator, InclusionCondition, NumberCondition,
+    PageEnvelope, ReadStatusCondition, StringCondition,
+};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::map_sqlx_error;
 use crate::read_models::filters::{
-    SqlxWhereState, append_clause_sqlx, append_string_set_filter_sqlx, effective_library_ids,
+    SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx, append_like_clause_sqlx,
+    append_not_in_clause_sqlx, append_subquery_exists_clause, effective_library_ids,
     query_filters_sqlx,
 };
 
@@ -139,23 +143,14 @@ impl From<SqlxBookListRow> for BookReadModel {
 pub(in crate::read_models) async fn list_books_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &RuntimeBooksListQuery,
+    query: &BooksBrowseQuery,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
     list_books_sqlx_common(
         pool,
         context,
         query.page,
         query.size,
-        query.library_ids.as_deref(),
-        query.series_ids.as_deref(),
-        query.deleted,
-        query.oneshot,
-        query.tags.as_deref(),
-        query.read_statuses.as_deref(),
-        query.media_profiles.as_deref(),
-        query.media_statuses.as_deref(),
-        query.authors.as_deref(),
-        query.release_dates.as_deref(),
+        query.filter.condition.as_ref(),
         query.search.as_deref(),
         query.unpaged,
         book_ordering_from_sorts(&query.sort),
@@ -166,24 +161,15 @@ pub(in crate::read_models) async fn list_books_sqlx(
 pub(in crate::read_models) async fn list_books_latest_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &RuntimeBooksLatestQuery,
+    query: &BooksBrowseQuery,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
     list_books_sqlx_common(
         pool,
         context,
         query.page,
         query.size,
-        query.library_ids.as_deref(),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        query.filter.condition.as_ref(),
+        query.search.as_deref(),
         query.unpaged,
         BookOrdering::LastModifiedDesc,
     )
@@ -196,26 +182,16 @@ async fn list_books_sqlx_common(
     context: &DiscoveryQueryContext,
     page: usize,
     size: usize,
-    requested_library_ids: Option<&[String]>,
-    requested_series_ids: Option<&[String]>,
-    deleted: Option<bool>,
-    oneshot: Option<bool>,
-    tags: Option<&[String]>,
-    read_statuses: Option<&[String]>,
-    media_profiles: Option<&[String]>,
-    media_statuses: Option<&[String]>,
-    authors: Option<&[String]>,
-    release_dates: Option<&[String]>,
+    condition: Option<&BookCondition>,
     search: Option<&str>,
     unpaged: bool,
     ordering: BookOrdering,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-    let allowed = effective_library_ids(context, requested_library_ids);
+    let requested_library_ids = extract_book_library_ids(condition);
+    let allowed = effective_library_ids(context, requested_library_ids.as_deref());
     if allowed.as_ref().is_some_and(Vec::is_empty) {
         return Ok(PageEnvelope::from_slice(vec![], page, size.max(1), 0));
     }
-
-    let scoped_to_series = requested_series_ids.is_some_and(|series_ids| !series_ids.is_empty());
 
     let mut count_builder = QueryBuilder::<Sqlite>::new(
         r#"
@@ -225,21 +201,12 @@ async fn list_books_sqlx_common(
         "#,
     );
     let mut count_state = SqlxWhereState::default();
-    apply_books_filters_sqlx(
+    apply_book_filter_tree_sqlx(
         &mut count_builder,
         &mut count_state,
         context,
         allowed.as_ref(),
-        requested_series_ids,
-        deleted,
-        oneshot,
-        scoped_to_series,
-        tags,
-        read_statuses,
-        media_profiles,
-        media_statuses,
-        authors,
-        release_dates,
+        condition,
         search,
     );
     let total_elements = count_builder
@@ -287,21 +254,12 @@ async fn list_books_sqlx_common(
         .to_string();
     select_builder.push_bind(user_id);
     let mut select_state = SqlxWhereState::default();
-    apply_books_filters_sqlx(
+    apply_book_filter_tree_sqlx(
         &mut select_builder,
         &mut select_state,
         context,
         allowed.as_ref(),
-        requested_series_ids,
-        deleted,
-        oneshot,
-        scoped_to_series,
-        tags,
-        read_statuses,
-        media_profiles,
-        media_statuses,
-        authors,
-        release_dates,
+        condition,
         search,
     );
     select_builder.push(" ORDER BY ");
@@ -331,6 +289,179 @@ async fn list_books_sqlx_common(
         envelope_size,
         total_elements,
     ))
+}
+
+fn apply_book_filter_tree_sqlx<'args>(
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+    context: &DiscoveryQueryContext,
+    allowed_library_ids: Option<&Vec<String>>,
+    condition: Option<&BookCondition>,
+    search: Option<&str>,
+) {
+    query_filters_sqlx(
+        builder,
+        state,
+        "b.library_id",
+        allowed_library_ids,
+        search,
+        Some("b.title"),
+        context.restrictions.as_ref(),
+        "s",
+    );
+
+    let has_explicit_oneshot = condition.is_some_and(condition_has_oneshot);
+    if !has_explicit_oneshot {
+        append_bool_sqlx_filter("s.oneshot", false, builder, state);
+    }
+
+    if let Some(condition) = condition {
+        apply_book_condition_sqlx(condition, builder, state);
+    }
+}
+
+fn condition_has_oneshot(condition: &BookCondition) -> bool {
+    match condition {
+        BookCondition::Value(BookValueCondition::OneShot(_)) => true,
+        BookCondition::Composite(c) => c.conditions.iter().any(condition_has_oneshot),
+        _ => false,
+    }
+}
+
+fn apply_book_condition_sqlx<'args>(
+    condition: &BookCondition,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    match condition {
+        BookCondition::Value(value) => apply_book_value_condition_sqlx(value, builder, state),
+        BookCondition::Composite(CompositeBookCondition {
+            operator,
+            conditions,
+        }) => match operator {
+            FilterOperator::All => {
+                for c in conditions {
+                    apply_book_condition_sqlx(c, builder, state);
+                }
+            }
+            FilterOperator::Any => {
+                if conditions.is_empty() {
+                    return;
+                }
+                let prefix = if state.has_where {
+                    " AND ("
+                } else {
+                    " WHERE ("
+                };
+                builder.push(prefix);
+                for (i, c) in conditions.iter().enumerate() {
+                    if i > 0 {
+                        builder.push(" OR ");
+                    }
+                    apply_book_condition_sqlx(c, builder, state);
+                }
+                builder.push(")");
+                state.has_where = true;
+            }
+        },
+    }
+}
+
+fn apply_book_value_condition_sqlx<'args>(
+    value: &BookValueCondition,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    match value {
+        BookValueCondition::LibraryId(InclusionCondition::Include(ids)) => {
+            let str_ids: Vec<String> = ids.iter().map(|id| id.as_str().to_string()).collect();
+            append_in_clause_sqlx("b.library_id", &str_ids, builder, state);
+        }
+        BookValueCondition::LibraryId(InclusionCondition::Exclude(ids)) => {
+            for id in ids {
+                append_not_in_clause_sqlx("b.library_id", id.as_str(), builder, state);
+            }
+        }
+        BookValueCondition::SeriesId(InclusionCondition::Include(ids)) => {
+            let str_ids: Vec<String> = ids.iter().map(|id| id.as_str().to_string()).collect();
+            append_in_clause_sqlx("b.series_id", &str_ids, builder, state);
+        }
+        BookValueCondition::SeriesId(InclusionCondition::Exclude(ids)) => {
+            for id in ids {
+                append_not_in_clause_sqlx("b.series_id", id.as_str(), builder, state);
+            }
+        }
+        BookValueCondition::Deleted(val) => {
+            append_bool_sqlx_filter("b.deleted", *val, builder, state);
+        }
+        BookValueCondition::OneShot(val) => {
+            append_bool_sqlx_filter("s.oneshot", *val, builder, state);
+        }
+        BookValueCondition::Title(StringCondition::Contains(InclusionCondition::Include(v))) => {
+            for val in v {
+                append_like_clause_sqlx("b.title", &format!("%{val}%"), builder, state);
+            }
+        }
+        BookValueCondition::Title(StringCondition::Exact(InclusionCondition::Include(v))) => {
+            append_in_clause_sqlx("b.title", v, builder, state);
+        }
+        BookValueCondition::Title(StringCondition::StartsWith(InclusionCondition::Include(v))) => {
+            for val in v {
+                append_like_clause_sqlx("b.title", &format!("{val}%"), builder, state);
+            }
+        }
+        BookValueCondition::Title(StringCondition::EndsWith(InclusionCondition::Include(v))) => {
+            for val in v {
+                append_like_clause_sqlx("b.title", &format!("%{val}"), builder, state);
+            }
+        }
+        BookValueCondition::Tag(StringCondition::Contains(InclusionCondition::Include(v)))
+        | BookValueCondition::Tag(StringCondition::Exact(InclusionCondition::Include(v))) => {
+            append_subquery_exists_clause("book_tags", "book_id", "tag", v, builder, state);
+        }
+        BookValueCondition::ReadStatus(ReadStatusCondition::Include(v)) => {
+            append_in_clause_sqlx("b.read_status", v, builder, state);
+        }
+        BookValueCondition::MediaProfile(InclusionCondition::Include(v)) => {
+            append_in_clause_sqlx("b.media_profile", v, builder, state);
+        }
+        BookValueCondition::MediaStatus(InclusionCondition::Include(v)) => {
+            append_in_clause_sqlx("b.media_status", v, builder, state);
+        }
+        BookValueCondition::Author(StringCondition::Contains(InclusionCondition::Include(v)))
+        | BookValueCondition::Author(StringCondition::Exact(InclusionCondition::Include(v))) => {
+            append_subquery_exists_clause("book_authors", "book_id", "author", v, builder, state);
+        }
+        BookValueCondition::NumberSort(NumberCondition::Exact(InclusionCondition::Include(v))) => {
+            if v.len() == 1 {
+                if let Ok(num) = v[0].parse::<f64>() {
+                    append_clause_sqlx("b.number_sort = ", builder, state);
+                    builder.push_bind(num);
+                }
+            } else if !v.is_empty() {
+                append_clause_sqlx("b.number_sort IN (", builder, state);
+                let mut separated = builder.separated(",");
+                for val in v {
+                    if let Ok(num) = val.parse::<f64>() {
+                        separated.push_bind(num);
+                    }
+                }
+                separated.push_unseparated(")");
+            }
+        }
+        BookValueCondition::ReleaseDate(DateCondition::After(v)) => {
+            append_clause_sqlx("b.metadata_release_date > ", builder, state);
+            builder.push_bind(v.clone());
+        }
+        BookValueCondition::ReleaseDate(DateCondition::Before(v)) => {
+            append_clause_sqlx("b.metadata_release_date < ", builder, state);
+            builder.push_bind(v.clone());
+        }
+        BookValueCondition::ReleaseDate(DateCondition::Exact(InclusionCondition::Include(v))) => {
+            append_in_clause_sqlx("b.metadata_release_date", v, builder, state);
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
@@ -370,97 +501,29 @@ pub(super) fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> 
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn apply_books_filters_sqlx<'args>(
-    builder: &mut QueryBuilder<'args, Sqlite>,
-    state: &mut SqlxWhereState,
-    context: &DiscoveryQueryContext,
-    allowed_library_ids: Option<&Vec<String>>,
-    requested_series_ids: Option<&[String]>,
-    deleted: Option<bool>,
-    oneshot: Option<bool>,
-    scoped_to_series: bool,
-    tags: Option<&[String]>,
-    read_statuses: Option<&[String]>,
-    media_profiles: Option<&[String]>,
-    media_statuses: Option<&[String]>,
-    authors: Option<&[String]>,
-    release_dates: Option<&[String]>,
-    search: Option<&str>,
-) {
-    query_filters_sqlx(
-        builder,
-        state,
-        "b.library_id",
-        allowed_library_ids,
-        search,
-        Some("b.title"),
-        context.restrictions.as_ref(),
-        "s",
-    );
+fn extract_book_library_ids(condition: Option<&BookCondition>) -> Option<Vec<String>> {
+    let condition = condition?;
+    let mut ids = Vec::new();
+    collect_book_library_ids(condition, &mut ids);
+    if ids.is_empty() { None } else { Some(ids) }
+}
 
-    if let Some(series_ids) = requested_series_ids
-        && !series_ids.is_empty()
-    {
-        append_clause_sqlx("b.series_id IN (", builder, state);
-        let mut separated = builder.separated(",");
-        for series_id in series_ids {
-            separated.push_bind(series_id.clone());
+fn collect_book_library_ids(condition: &BookCondition, out: &mut Vec<String>) {
+    match condition {
+        BookCondition::Value(BookValueCondition::LibraryId(InclusionCondition::Include(
+            id_list,
+        ))) => {
+            for id in id_list {
+                out.push(id.as_str().to_string());
+            }
         }
-        separated.push_unseparated(")");
-    }
-
-    if let Some(value) = deleted {
-        append_bool_sqlx_filter("b.deleted", value, builder, state);
-    }
-
-    if let Some(value) = oneshot {
-        append_bool_sqlx_filter("s.oneshot", value, builder, state);
-    } else if !scoped_to_series {
-        append_bool_sqlx_filter("s.oneshot", false, builder, state);
-    }
-
-    if let Some(tag_values) = tags
-        && !tag_values.is_empty()
-    {
-        append_clause_sqlx(
-            "EXISTS (SELECT 1 FROM book_tags bt WHERE bt.book_id = b.id AND LOWER(bt.tag) IN (",
-            builder,
-            state,
-        );
-        let mut separated = builder.separated(",");
-        for value in tag_values {
-            separated.push_bind(value.to_ascii_lowercase());
+        BookCondition::Composite(c) => {
+            for child in &c.conditions {
+                collect_book_library_ids(child, out);
+            }
         }
-        separated.push_unseparated("))");
+        _ => {}
     }
-
-    append_string_set_filter_sqlx("b.read_status", read_statuses, builder, state, true);
-    append_string_set_filter_sqlx("b.media_profile", media_profiles, builder, state, true);
-    append_string_set_filter_sqlx("b.media_status", media_statuses, builder, state, true);
-
-    if let Some(author_values) = authors
-        && !author_values.is_empty()
-    {
-        append_clause_sqlx(
-            "EXISTS (SELECT 1 FROM book_authors ba WHERE ba.book_id = b.id AND LOWER(ba.author) IN (",
-            builder,
-            state,
-        );
-        let mut separated = builder.separated(",");
-        for value in author_values {
-            separated.push_bind(value.to_ascii_lowercase());
-        }
-        separated.push_unseparated("))");
-    }
-
-    append_string_set_filter_sqlx(
-        "b.metadata_release_date",
-        release_dates,
-        builder,
-        state,
-        false,
-    );
 }
 
 fn append_bool_sqlx_filter<'args>(
@@ -474,36 +537,28 @@ fn append_bool_sqlx_filter<'args>(
     builder.push_bind(i64::from(value));
 }
 
-fn book_ordering_from_sorts(sorts: &[String]) -> BookOrdering {
-    let Some(sort) = sorts.first() else {
-        return BookOrdering::NumberSortAsc;
-    };
-
-    match sort.as_str() {
-        "metadata.title,asc" | "metadata.title" | "title,asc" | "title" => BookOrdering::TitleAsc,
-        "createdDate,desc" | "created,desc" | "createdDate" | "created" => {
+fn book_ordering_from_sorts(sorts: &[BookSort]) -> BookOrdering {
+    match sorts.first() {
+        Some(BookSort::MetadataTitleAsc) | Some(BookSort::MetadataTitleDesc) => {
+            BookOrdering::TitleAsc
+        }
+        Some(BookSort::CreatedDateDesc) | Some(BookSort::CreatedDateAsc) => {
             BookOrdering::CreatedDateDesc
         }
-        "lastModifiedDate,desc" | "lastModified,desc" | "lastModifiedDate" | "lastModified" => {
+        Some(BookSort::LastModifiedDateDesc) | Some(BookSort::LastModifiedDateAsc) => {
             BookOrdering::LastModifiedDesc
         }
-        "readProgress.lastModified,asc" => BookOrdering::ReadProgressLastModifiedAsc,
-        "readProgress.lastModified,desc" | "readProgress.lastModified" => {
-            BookOrdering::ReadProgressLastModifiedDesc
-        }
-        "readProgress.readDate,asc" => BookOrdering::ReadProgressReadDateAsc,
-        "readProgress.readDate,desc" | "readProgress.readDate" => {
-            BookOrdering::ReadProgressReadDateDesc
-        }
-        "metadata.releaseDate,desc" | "metadata.releaseDate" => {
+        Some(BookSort::ReadProgressLastModifiedAsc) => BookOrdering::ReadProgressLastModifiedAsc,
+        Some(BookSort::ReadProgressLastModifiedDesc) => BookOrdering::ReadProgressLastModifiedDesc,
+        Some(BookSort::ReadProgressReadDateAsc) => BookOrdering::ReadProgressReadDateAsc,
+        Some(BookSort::ReadProgressReadDateDesc) => BookOrdering::ReadProgressReadDateDesc,
+        Some(BookSort::ReleaseDateDesc) | Some(BookSort::ReleaseDateAsc) => {
             BookOrdering::MetadataReleaseDateDesc
         }
-        "series,metadata.numberSort,asc"
-        | "metadata.numberSort,asc"
-        | "metadata.numberSort"
-        | "number,asc"
-        | "number" => BookOrdering::NumberSortAsc,
-        "seriesId,asc" | "seriesId" => BookOrdering::SeriesIdAsc,
+        Some(BookSort::NumberSortAsc) | Some(BookSort::NumberSortDesc) => {
+            BookOrdering::NumberSortAsc
+        }
+        Some(BookSort::SeriesIdAsc) => BookOrdering::SeriesIdAsc,
         _ => BookOrdering::NumberSortAsc,
     }
 }
@@ -536,54 +591,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn book_ordering_from_sorts_supports_runtime_aliases() {
+    fn book_ordering_from_sorts_supports_domain_sorts() {
         assert_eq!(
-            book_ordering_from_sorts(&["metadata.title,asc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::MetadataTitleAsc]),
             BookOrdering::TitleAsc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["created,desc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::CreatedDateDesc]),
             BookOrdering::CreatedDateDesc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["lastModified,desc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::LastModifiedDateDesc]),
             BookOrdering::LastModifiedDesc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["readProgress.lastModified,asc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::ReadProgressLastModifiedAsc]),
             BookOrdering::ReadProgressLastModifiedAsc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["readProgress.lastModified,desc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::ReadProgressLastModifiedDesc]),
             BookOrdering::ReadProgressLastModifiedDesc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["readProgress.readDate,asc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::ReadProgressReadDateAsc]),
             BookOrdering::ReadProgressReadDateAsc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["readProgress.readDate,desc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::ReadProgressReadDateDesc]),
             BookOrdering::ReadProgressReadDateDesc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["metadata.releaseDate,desc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::ReleaseDateDesc]),
             BookOrdering::MetadataReleaseDateDesc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["series,metadata.numberSort,asc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::NumberSortAsc]),
             BookOrdering::NumberSortAsc
         );
         assert_eq!(
-            book_ordering_from_sorts(&["metadata.numberSort,asc".to_string()]),
-            BookOrdering::NumberSortAsc
-        );
-        assert_eq!(
-            book_ordering_from_sorts(&["number,asc".to_string()]),
-            BookOrdering::NumberSortAsc
-        );
-        assert_eq!(
-            book_ordering_from_sorts(&["seriesId,asc".to_string()]),
+            book_ordering_from_sorts(&[BookSort::SeriesIdAsc]),
             BookOrdering::SeriesIdAsc
         );
+        assert_eq!(book_ordering_from_sorts(&[]), BookOrdering::NumberSortAsc);
     }
 }

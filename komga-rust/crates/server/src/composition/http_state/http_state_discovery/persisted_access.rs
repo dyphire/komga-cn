@@ -5,7 +5,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::SearchQueryLifecycle;
-use komga_interfaces::state::PersistedDiscoveryService;
+use komga_interfaces::state::{
+    DiscoveryAuthorService, DiscoveryBookFeedService, DiscoveryCollectionSearchService,
+    DiscoveryLibraryMappingService, DiscoveryReadlistSearchService,
+    PersistedDiscoveryListDataSource,
+};
 
 fn search_ids_or_empty(
     index_dir: &std::path::Path,
@@ -165,72 +169,13 @@ fn persisted_series_summary(
 }
 
 #[derive(Clone)]
-pub(super) struct RuntimePersistedDiscoveryService {
+pub(super) struct RuntimePersistedDiscoveryAccess {
     db: DatabaseHandle,
     index_dir: PathBuf,
 }
 
 #[async_trait::async_trait]
-impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
-    async fn load_persisted_author_names(
-        &self,
-        search: String,
-        authorized_library_ids: Option<Vec<String>>,
-    ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_authors::load_persisted_author_names(
-            self.db.database_file(),
-            &search,
-            authorized_library_ids.as_deref(),
-        )
-        .await
-    }
-
-    async fn load_persisted_author_roles(
-        &self,
-        authorized_library_ids: Option<Vec<String>>,
-    ) -> Result<Vec<String>, String> {
-        infrastructure_discovery_authors::load_persisted_author_roles(
-            self.db.database_file(),
-            authorized_library_ids.as_deref(),
-        )
-        .await
-    }
-
-    async fn load_persisted_authors_by_scope(
-        &self,
-        scope: PersistedAuthorsScope,
-        authorized_library_ids: Option<Vec<String>>,
-    ) -> Result<Vec<PersistedAuthorEntry>, String> {
-        let mapped_scope = match scope {
-            PersistedAuthorsScope::All => infrastructure_discovery_models::AuthorsScope::All,
-            PersistedAuthorsScope::Libraries(ids) => {
-                infrastructure_discovery_models::AuthorsScope::Libraries(ids)
-            }
-            PersistedAuthorsScope::Collection(id) => {
-                infrastructure_discovery_models::AuthorsScope::Collection(id)
-            }
-            PersistedAuthorsScope::Series(id) => {
-                infrastructure_discovery_models::AuthorsScope::Series(id)
-            }
-            PersistedAuthorsScope::ReadList(id) => {
-                infrastructure_discovery_models::AuthorsScope::ReadList(id)
-            }
-        };
-        let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
-            self.db.database_file(),
-            &mapped_scope,
-            authorized_library_ids.as_deref(),
-        )
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| PersistedAuthorEntry {
-                name: row.name,
-                role: row.role,
-            })
-            .collect())
-    }
-
+impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
     async fn load_book_poster_summaries(
         &self,
     ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
@@ -388,13 +333,6 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
         .await
     }
 
-    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-        infrastructure_discovery_library_mappings::load_persisted_library_ids(
-            self.db.database_file(),
-        )
-        .await
-    }
-
     async fn load_collection_memberships(
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
@@ -422,28 +360,6 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
             self.db.database_file(),
         )
         .await
-    }
-
-    async fn load_persisted_ondeck_books(
-        &self,
-        user_id: String,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
-            self.db.database_file(),
-            &user_id,
-        )
-        .await
-        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
-    }
-
-    async fn load_persisted_duplicate_books(
-        &self,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
-            self.db.database_file(),
-        )
-        .await
-        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }
 
     async fn load_persisted_book_tags(
@@ -530,44 +446,12 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
         infrastructure_discovery_series::load_persisted_series_count(self.db.database_file()).await
     }
 
-    async fn persisted_series_exist(&self) -> Result<bool, String> {
-        infrastructure_discovery_series::persisted_series_exist(self.db.database_file()).await
-    }
-
     async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String> {
         Ok(search_ids_or_empty(
             resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
                 .as_path(),
             &query,
             SearchEntityType::Book,
-            limit,
-        ))
-    }
-
-    async fn search_collection_ids(
-        &self,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
-        Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            &query,
-            SearchEntityType::Collection,
-            limit,
-        ))
-    }
-
-    async fn search_readlist_scored_ids(
-        &self,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
-        Ok(search_scored_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            &query,
-            SearchEntityType::ReadList,
             limit,
         ))
     }
@@ -587,12 +471,191 @@ impl PersistedDiscoveryService for RuntimePersistedDiscoveryService {
     }
 }
 
-pub(super) fn compose_persisted_discovery_service(
+#[async_trait::async_trait]
+impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
+    async fn load_author_names(
+        &self,
+        search: String,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_authors::load_persisted_author_names(
+            self.db.database_file(),
+            &search,
+            authorized_library_ids.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_author_roles(
+        &self,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String> {
+        infrastructure_discovery_authors::load_persisted_author_roles(
+            self.db.database_file(),
+            authorized_library_ids.as_deref(),
+        )
+        .await
+    }
+
+    async fn load_authors_by_scope(
+        &self,
+        scope: PersistedAuthorsScope,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<PersistedAuthorEntry>, String> {
+        let mapped_scope = match scope {
+            PersistedAuthorsScope::All => infrastructure_discovery_models::AuthorsScope::All,
+            PersistedAuthorsScope::Libraries(ids) => {
+                infrastructure_discovery_models::AuthorsScope::Libraries(ids)
+            }
+            PersistedAuthorsScope::Collection(id) => {
+                infrastructure_discovery_models::AuthorsScope::Collection(id)
+            }
+            PersistedAuthorsScope::Series(id) => {
+                infrastructure_discovery_models::AuthorsScope::Series(id)
+            }
+            PersistedAuthorsScope::ReadList(id) => {
+                infrastructure_discovery_models::AuthorsScope::ReadList(id)
+            }
+        };
+        let rows = infrastructure_discovery_authors::load_persisted_authors_by_scope(
+            self.db.database_file(),
+            &mapped_scope,
+            authorized_library_ids.as_deref(),
+        )
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PersistedAuthorEntry {
+                name: row.name,
+                role: row.role,
+            })
+            .collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl DiscoveryLibraryMappingService for RuntimePersistedDiscoveryAccess {
+    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
+        infrastructure_discovery_library_mappings::load_persisted_library_ids(
+            self.db.database_file(),
+        )
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl DiscoveryCollectionSearchService for RuntimePersistedDiscoveryAccess {
+    async fn search_collection_ids(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        Ok(search_ids_or_empty(
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
+            &query,
+            SearchEntityType::Collection,
+            limit,
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl DiscoveryReadlistSearchService for RuntimePersistedDiscoveryAccess {
+    async fn search_readlist_scored_ids(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, String> {
+        Ok(search_scored_ids_or_empty(
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
+            &query,
+            SearchEntityType::ReadList,
+            limit,
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl DiscoveryBookFeedService for RuntimePersistedDiscoveryAccess {
+    async fn load_ondeck_books(
+        &self,
+        user_id: String,
+    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        infrastructure_discovery_runtime_queries::load_persisted_ondeck_books(
+            self.db.database_file(),
+            &user_id,
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+    }
+
+    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        infrastructure_discovery_runtime_queries::load_persisted_duplicate_books(
+            self.db.database_file(),
+        )
+        .await
+        .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+    }
+}
+
+pub(super) fn compose_persisted_discovery_list_data_source(
     db: DatabaseHandle,
     lucene_data_directory: PathBuf,
-) -> Box<dyn PersistedDiscoveryService> {
+) -> Box<dyn PersistedDiscoveryListDataSource> {
     register_discovery_index_dir(db.database_file(), lucene_data_directory.as_path());
-    Box::new(RuntimePersistedDiscoveryService {
+    Box::new(RuntimePersistedDiscoveryAccess {
+        db,
+        index_dir: lucene_data_directory,
+    })
+}
+
+pub(super) fn compose_discovery_author_service(
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+) -> Box<dyn DiscoveryAuthorService> {
+    Box::new(RuntimePersistedDiscoveryAccess {
+        db,
+        index_dir: lucene_data_directory,
+    })
+}
+
+pub(super) fn compose_discovery_library_mapping_service(
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+) -> Box<dyn DiscoveryLibraryMappingService> {
+    Box::new(RuntimePersistedDiscoveryAccess {
+        db,
+        index_dir: lucene_data_directory,
+    })
+}
+
+pub(super) fn compose_discovery_collection_search_service(
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+) -> Box<dyn DiscoveryCollectionSearchService> {
+    Box::new(RuntimePersistedDiscoveryAccess {
+        db,
+        index_dir: lucene_data_directory,
+    })
+}
+
+pub(super) fn compose_discovery_readlist_search_service(
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+) -> Box<dyn DiscoveryReadlistSearchService> {
+    Box::new(RuntimePersistedDiscoveryAccess {
+        db,
+        index_dir: lucene_data_directory,
+    })
+}
+
+pub(super) fn compose_discovery_book_feed_service(
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+) -> Box<dyn DiscoveryBookFeedService> {
+    Box::new(RuntimePersistedDiscoveryAccess {
         db,
         index_dir: lucene_data_directory,
     })

@@ -192,7 +192,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
             1_000,
@@ -200,7 +200,7 @@ mod tests {
         )
         .with_simple_type("FindBooksToConvert");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
         assert_eq!(
             scheduler
@@ -294,7 +294,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             "FindBooksToConvert_library-1",
             1_000,
@@ -302,7 +302,7 @@ mod tests {
         )
         .with_simple_type("FindBooksToConvert");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
             scheduler.count_by_simple_type().await.is_empty(),
@@ -386,7 +386,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -394,7 +394,7 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -476,7 +476,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -484,10 +484,10 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let first = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let first = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(first, Some(Err(_))));
 
-        let second = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let second = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(second, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -606,7 +606,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, false).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("ConvertBook_{book_id}"),
             900,
@@ -614,7 +614,7 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let destination_path = fixture.library_root.join("books/book-1.cbz");
@@ -792,7 +792,7 @@ mod tests {
         tasks_pool.close().await;
 
         let runtime = fixture.runtime_context(true, true).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         let task = TaskQueueRecord::new(
             format!("RepairExtension_{book_id}"),
             1_000,
@@ -809,7 +809,7 @@ mod tests {
             .to_string(),
         );
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)

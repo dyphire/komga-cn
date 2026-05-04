@@ -1,18 +1,18 @@
 use std::mem;
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use komga_application::discovery::{
-    BookDetailQuery, BookDetailReadModel, BookReadModel, BookReadlistsQuery, BookResourceReadModel,
-    BookSiblingQuery, CollectionReadModel, DiscoveryQueryRepository, LibraryReadModel,
-    ReadListBooksQuery, ReadListDetailQuery, ReadListReadModel, RuntimeBooksLatestQuery,
-    RuntimeBooksListQuery, RuntimeReadListsQuery, SeriesCollectionsQuery, SeriesDetailQuery,
-    SeriesDetailReadModel, SeriesListQuery, SeriesReadModel, SeriesResourceReadModel,
+    BookReadModel, BookTagScope, BooksBrowseQuery, BooksFeedQuery, DiscoveryListService,
+    SeriesBrowseQuery, SeriesReadModel,
 };
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
+use komga_domain::discovery::{
+    BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesFilter,
+    UnsupportedDiscoverySemantics,
+};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 
 use super::queries;
-use super::queries::{books_media, readlists};
 use super::rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};
 use crate::sqlite::setup;
 
@@ -91,26 +91,6 @@ impl SqliteDiscoveryAdapter {
             .expect("pending rows lock should not be poisoned")
             .read_progress
             .push(row);
-    }
-
-    pub async fn get_readlist_book_sibling_previous(
-        &self,
-        context: &DiscoveryQueryContext,
-        readlist_id: &str,
-        book_id: &str,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::get_readlist_book_sibling_sqlx(pool, context, readlist_id, book_id, false).await
-    }
-
-    pub async fn get_readlist_book_sibling_next(
-        &self,
-        context: &DiscoveryQueryContext,
-        readlist_id: &str,
-        book_id: &str,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::get_readlist_book_sibling_sqlx(pool, context, readlist_id, book_id, true).await
     }
 
     async fn ready_pool(&self) -> Result<SqlitePool, DiscoveryError> {
@@ -475,19 +455,12 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
     }
 }
 
-impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
-    async fn list_libraries(
-        &self,
-        context: &DiscoveryQueryContext,
-    ) -> Result<Vec<LibraryReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        queries::list_libraries_sqlx(pool, context).await
-    }
-
+#[async_trait]
+impl DiscoveryListService for SqliteDiscoveryAdapter {
     async fn list_series(
         &self,
         context: &DiscoveryQueryContext,
-        query: SeriesListQuery,
+        query: SeriesBrowseQuery,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
         queries::series::list_series_sqlx(pool, context, &query).await
@@ -496,116 +469,185 @@ impl DiscoveryQueryRepository for SqliteDiscoveryAdapter {
     async fn list_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeBooksListQuery,
+        query: BooksBrowseQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        books_media::list_books_sqlx(pool, context, &query).await
+        queries::books_media::list_books_sqlx(pool, context, &query).await
     }
 
     async fn list_books_latest(
         &self,
         context: &DiscoveryQueryContext,
-        query: RuntimeBooksLatestQuery,
+        query: BooksFeedQuery,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
-        books_media::list_books_latest_sqlx(pool, context, &query).await
+        let feed_query = BooksBrowseQuery {
+            filter: BookFilter {
+                condition: query.library_ids.map(|ids| {
+                    use komga_domain::common_ids::LibraryId;
+                    use komga_domain::discovery::{
+                        BookCondition, BookValueCondition, CompositeBookCondition, FilterOperator,
+                        InclusionCondition,
+                    };
+                    if ids.len() == 1 {
+                        BookCondition::Value(BookValueCondition::LibraryId(
+                            InclusionCondition::Include(vec![LibraryId::from(
+                                ids.into_iter().next().unwrap(),
+                            )]),
+                        ))
+                    } else {
+                        BookCondition::Composite(CompositeBookCondition {
+                            operator: FilterOperator::Any,
+                            conditions: ids
+                                .into_iter()
+                                .map(|id| {
+                                    BookCondition::Value(BookValueCondition::LibraryId(
+                                        InclusionCondition::Include(vec![LibraryId::from(id)]),
+                                    ))
+                                })
+                                .collect(),
+                        })
+                    }
+                }),
+                direct_browse_book_id: None,
+            },
+            sort: vec![],
+            search: None,
+            page: query.page,
+            size: query.size,
+            unpaged: query.unpaged,
+        };
+        queries::books_media::list_books_latest_sqlx(pool, context, &feed_query).await
     }
 
-    async fn list_readlist_books(
+    async fn list_series_alphabetical_groups(
         &self,
-        context: &DiscoveryQueryContext,
-        query: ReadListBooksQuery,
-    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::list_readlist_books_sqlx(pool, context, &query).await
+        _context: &DiscoveryQueryContext,
+        _filter: SeriesFilter,
+        _search: Option<String>,
+    ) -> Result<Vec<serde_json::Value>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "alphabetical groups not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn list_readlists(
+    async fn list_genres(
         &self,
-        context: &DiscoveryQueryContext,
-        query: RuntimeReadListsQuery,
-    ) -> Result<PageEnvelope<ReadListReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::list_readlists_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn resolve_series_resource(
+    async fn list_tags(
         &self,
-        series_id: &str,
-    ) -> Result<Option<SeriesResourceReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        queries::series::resolve_series_resource_sqlx(pool, series_id).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn get_series_detail(
+    async fn list_languages(
         &self,
-        context: &DiscoveryQueryContext,
-        query: SeriesDetailQuery,
-    ) -> Result<Option<SeriesDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        queries::series::get_series_detail_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn resolve_book_resource(
+    async fn list_publishers(
         &self,
-        book_id: &str,
-    ) -> Result<Option<BookResourceReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        books_media::resolve_book_resource_sqlx(pool, book_id).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn get_book_detail(
+    async fn list_age_ratings(
         &self,
-        context: &DiscoveryQueryContext,
-        query: BookDetailQuery,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        books_media::get_book_detail_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn get_book_sibling_previous(
+    async fn list_sharing_labels(
         &self,
-        context: &DiscoveryQueryContext,
-        query: BookSiblingQuery,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        books_media::get_book_sibling_previous_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn get_book_sibling_next(
+    async fn list_series_tags(
         &self,
-        context: &DiscoveryQueryContext,
-        query: BookSiblingQuery,
-    ) -> Result<Option<BookDetailReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        books_media::get_book_sibling_next_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn list_book_readlists(
+    async fn list_series_release_dates(
         &self,
-        context: &DiscoveryQueryContext,
-        query: BookReadlistsQuery,
-    ) -> Result<Vec<ReadListReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::list_book_readlists_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<Vec<String>>,
+        _: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 
-    async fn get_readlist_detail(
+    async fn list_book_tags(
         &self,
-        context: &DiscoveryQueryContext,
-        query: ReadListDetailQuery,
-    ) -> Result<Option<ReadListReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::get_readlist_detail_sqlx(pool, context, &query).await
-    }
-
-    async fn list_series_collections(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: SeriesCollectionsQuery,
-    ) -> Result<Vec<CollectionReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
-        readlists::list_series_collections_sqlx(pool, context, &query).await
+        _: &DiscoveryQueryContext,
+        _: Option<BookTagScope>,
+        _: Option<Vec<String>>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        Err(DiscoveryError::UnsupportedSemantics(
+            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
+                "facets not supported in runtime adapter".to_string(),
+            ),
+        ))
     }
 }
 

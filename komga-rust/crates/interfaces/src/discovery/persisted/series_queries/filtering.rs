@@ -3,7 +3,7 @@ use super::common_helpers::{
     normalized_text_matches,
 };
 use super::*;
-use crate::state::PersistedDiscoveryService;
+use crate::state::PersistedDiscoveryListDataSource;
 use regex::{Regex, RegexBuilder};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -69,7 +69,7 @@ fn random_sort_keys(series: &[PersistedSeriesSummary]) -> HashMap<String, u64> {
 }
 
 pub async fn load_persisted_series_page(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
@@ -309,7 +309,9 @@ pub async fn load_persisted_series_page(
             return Ok(page);
         };
 
-        let read_progress = load_series_read_progress_counts(backend, user_id).await?;
+        let read_progress = backend
+            .load_series_read_progress_counts(user_id.to_string())
+            .await?;
 
         if let Some(read_statuses) = filters.read_statuses.as_ref() {
             series = filter_rows(series, |row| {
@@ -337,7 +339,7 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(complete) = filters.complete {
-        let total_book_counts = load_series_total_book_counts(backend).await?;
+        let total_book_counts = backend.load_series_total_book_counts().await?;
         series = filter_rows(series, |row| {
             let Some(total_book_count) = total_book_counts.get(&row.id).copied() else {
                 return false;
@@ -428,6 +430,14 @@ pub async fn load_persisted_series_page(
             row.age_rating
                 .map(|rating| age_ratings.contains(&rating))
                 .unwrap_or(false)
+        });
+    }
+
+    if let Some(age_ratings_or_empty) = filters.age_ratings_or_empty.as_ref() {
+        series = filter_rows(series, |row| {
+            row.age_rating
+                .map(|rating| age_ratings_or_empty.contains(&rating))
+                .unwrap_or(true)
         });
     }
 
@@ -585,8 +595,9 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(release_date_in_last_days) = filters.release_date_in_last_days
-        && let Some(cutoff) =
-            persisted_utc_date_minus_days(backend, release_date_in_last_days).await?
+        && let Some(cutoff) = backend
+            .persisted_utc_date_minus_days(release_date_in_last_days)
+            .await?
     {
         series = filter_rows(series, |row| {
             matches_optional_value(
@@ -598,8 +609,9 @@ pub async fn load_persisted_series_page(
     }
 
     if let Some(release_date_not_in_last_days) = filters.release_date_not_in_last_days
-        && let Some(cutoff) =
-            persisted_utc_date_minus_days(backend, release_date_not_in_last_days).await?
+        && let Some(cutoff) = backend
+            .persisted_utc_date_minus_days(release_date_not_in_last_days)
+            .await?
     {
         series = filter_rows(series, |row| {
             matches_optional_value(
@@ -727,7 +739,7 @@ pub async fn load_persisted_series_page(
         )
     }) {
         if let Some(user_id) = context.user_id.as_deref() {
-            load_series_read_dates(backend, user_id).await?
+            backend.load_series_read_dates(user_id.to_string()).await?
         } else {
             HashMap::new()
         }

@@ -1,18 +1,19 @@
-use crate::state::PersistedDiscoveryService;
+use crate::state::PersistedDiscoveryListDataSource;
 
+use super::models::SeriesFilterCriteria;
 use super::*;
 
 pub async fn load_persisted_alphabetical_groups(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
-    filters: RuntimeSeriesFilters,
+    filters: SeriesFilterCriteria,
     full_text_search: Option<String>,
 ) -> Result<Vec<Value>, String> {
     let page = load_persisted_series_page(
         backend,
         context,
         PersistedSeriesBrowseQuery::from_filters(
-            filters.into_criteria(),
+            filters,
             full_text_search,
             0,
             usize::MAX,

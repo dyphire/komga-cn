@@ -1,9 +1,11 @@
 #![allow(unused_variables)]
 
-use std::collections::BTreeSet;
-
 use super::*;
+use komga_application::discovery::{
+    BookTagScope, BooksBrowseQuery, BooksFeedQuery, DiscoveryListService, SeriesBrowseQuery,
+};
 use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
+use komga_domain::discovery::PageEnvelope;
 #[derive(Default)]
 pub(crate) struct NoopOperationalRuntimeService;
 #[async_trait]
@@ -1036,179 +1038,49 @@ impl OpdsPersistedService for NoopOpdsPersistedService {
 }
 
 #[derive(Default)]
-pub(crate) struct NoopPersistedDiscoveryService;
+pub(crate) struct NoopDiscoveryAuthorService;
+
 #[async_trait]
-impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
-    async fn load_persisted_author_names(
+impl DiscoveryAuthorService for NoopDiscoveryAuthorService {
+    async fn load_author_names(
         &self,
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_author_roles(
+
+    async fn load_author_roles(
         &self,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_authors_by_scope(
+
+    async fn load_authors_by_scope(
         &self,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String> {
         panic!("unused test service")
     }
-    async fn load_book_poster_summaries(
-        &self,
-    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_book_summaries(
-        &self,
-        user_id: Option<String>,
-    ) -> Result<Vec<PersistedBookSummary>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_book_summaries_by_ids(
-        &self,
-        user_id: Option<String>,
-        ids: Vec<String>,
-    ) -> Result<Vec<PersistedBookSummary>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_book_count(&self) -> Result<usize, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_genres(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_tags(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_languages(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_publishers(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_age_ratings(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_sharing_labels(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_series_release_dates(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_series_tags(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopDiscoveryLibraryMappingService;
+
+#[async_trait]
+impl DiscoveryLibraryMappingService for NoopDiscoveryLibraryMappingService {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
-    async fn load_collection_memberships(
-        &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        panic!("unused test service")
-    }
-    async fn load_collection_ordering(
-        &self,
-        collection_id: String,
-    ) -> Result<HashMap<String, i64>, String> {
-        panic!("unused test service")
-    }
-    async fn load_readlist_memberships(
-        &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_ondeck_books(
-        &self,
-        user_id: String,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_duplicate_books(
-        &self,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_book_tags(
-        &self,
-        scope: Option<PersistedBookTagsScope>,
-        authorized_library_ids: Option<Vec<String>>,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_series_read_progress_counts(
-        &self,
-        user_id: String,
-    ) -> Result<HashMap<String, (i64, i64)>, String> {
-        panic!("unused test service")
-    }
-    async fn load_series_read_dates(
-        &self,
-        user_id: String,
-    ) -> Result<HashMap<String, String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_series_summaries_by_ids(
-        &self,
-        ids: Vec<String>,
-    ) -> Result<Vec<PersistedSeriesSummary>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_series_count(&self) -> Result<usize, String> {
-        panic!("unused test service")
-    }
-    async fn persisted_series_exist(&self) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopDiscoveryCollectionSearchService;
+
+#[async_trait]
+impl DiscoveryCollectionSearchService for NoopDiscoveryCollectionSearchService {
     async fn search_collection_ids(
         &self,
         query: String,
@@ -1216,6 +1088,13 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     ) -> Result<Vec<String>, String> {
         panic!("unused test service")
     }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopDiscoveryReadlistSearchService;
+
+#[async_trait]
+impl DiscoveryReadlistSearchService for NoopDiscoveryReadlistSearchService {
     async fn search_readlist_scored_ids(
         &self,
         query: String,
@@ -1223,11 +1102,128 @@ impl PersistedDiscoveryService for NoopPersistedDiscoveryService {
     ) -> Result<Vec<(f32, String)>, String> {
         panic!("unused test service")
     }
-    async fn search_series_scored_ids(
+}
+
+#[derive(Default)]
+pub(crate) struct NoopDiscoveryBookFeedService;
+
+#[async_trait]
+impl DiscoveryBookFeedService for NoopDiscoveryBookFeedService {
+    async fn load_ondeck_books(
         &self,
-        query: String,
-        limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
+        user_id: String,
+    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        panic!("unused test service")
+    }
+
+    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+        panic!("unused test service")
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopDiscoveryListService;
+#[async_trait]
+impl DiscoveryListService for NoopDiscoveryListService {
+    async fn list_series(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _query: SeriesBrowseQuery,
+    ) -> Result<PageEnvelope<komga_application::discovery::SeriesReadModel>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_books(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _query: BooksBrowseQuery,
+    ) -> Result<PageEnvelope<komga_application::discovery::BookReadModel>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_books_latest(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _query: BooksFeedQuery,
+    ) -> Result<PageEnvelope<komga_application::discovery::BookReadModel>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_series_alphabetical_groups(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _filter: komga_domain::discovery::SeriesFilter,
+        _search: Option<String>,
+    ) -> Result<Vec<serde_json::Value>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_genres(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_tags(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_languages(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_publishers(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_age_ratings(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_sharing_labels(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_series_tags(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_series_release_dates(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _library_ids: Option<Vec<String>>,
+        _collection_id: Option<String>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        panic!("unused test service")
+    }
+    async fn list_book_tags(
+        &self,
+        _context: &DiscoveryQueryContext,
+        _scope: Option<BookTagScope>,
+        _library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, DiscoveryError> {
         panic!("unused test service")
     }
 }

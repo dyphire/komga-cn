@@ -2,123 +2,168 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[async_trait]
-pub trait PersistedDiscoveryService: Send + Sync {
-    async fn load_persisted_author_names(
+pub trait DiscoveryAuthorService: Send + Sync {
+    async fn load_author_names(
         &self,
         search: String,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String>;
-    async fn load_persisted_author_roles(
+
+    async fn load_author_roles(
         &self,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, String>;
-    async fn load_persisted_authors_by_scope(
+
+    async fn load_authors_by_scope(
         &self,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<PersistedAuthorEntry>, String>;
-    async fn load_book_poster_summaries(
-        &self,
-    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String>;
-    async fn load_persisted_book_summaries(
-        &self,
-        user_id: Option<String>,
-    ) -> Result<Vec<PersistedBookSummary>, String>;
-    async fn load_persisted_book_summaries_by_ids(
-        &self,
-        user_id: Option<String>,
-        ids: Vec<String>,
-    ) -> Result<Vec<PersistedBookSummary>, String>;
-    async fn load_persisted_book_count(&self) -> Result<usize, String>;
-    async fn load_persisted_genres(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_tags(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_languages(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_publishers(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_age_ratings(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_sharing_labels(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_series_release_dates(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
-    async fn load_persisted_series_tags(
-        &self,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, String>;
+}
+
+#[async_trait]
+pub trait DiscoveryLibraryMappingService: Send + Sync {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
-    async fn load_collection_memberships(
-        &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String>;
-    async fn load_collection_ordering(
-        &self,
-        collection_id: String,
-    ) -> Result<HashMap<String, i64>, String>;
-    async fn load_readlist_memberships(&self)
-    -> Result<BTreeMap<String, BTreeSet<String>>, String>;
-    async fn load_persisted_ondeck_books(
-        &self,
-        user_id: String,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String>;
-    async fn load_persisted_duplicate_books(&self)
-    -> Result<Vec<PersistedBookBrowseEntry>, String>;
-    async fn load_persisted_book_tags(
-        &self,
-        scope: Option<PersistedBookTagsScope>,
-        authorized_library_ids: Option<Vec<String>>,
-    ) -> Result<Vec<String>, String>;
-    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String>;
-    async fn load_series_read_progress_counts(
-        &self,
-        user_id: String,
-    ) -> Result<HashMap<String, (i64, i64)>, String>;
-    async fn load_series_read_dates(
-        &self,
-        user_id: String,
-    ) -> Result<HashMap<String, String>, String>;
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String>;
-    async fn load_persisted_series_summaries_by_ids(
-        &self,
-        ids: Vec<String>,
-    ) -> Result<Vec<PersistedSeriesSummary>, String>;
-    async fn load_persisted_series_count(&self) -> Result<usize, String>;
-    async fn persisted_series_exist(&self) -> Result<bool, String>;
-    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String>;
+}
+
+#[async_trait]
+pub trait DiscoveryCollectionSearchService: Send + Sync {
     async fn search_collection_ids(
         &self,
         query: String,
         limit: usize,
     ) -> Result<Vec<String>, String>;
+}
+
+#[async_trait]
+pub trait DiscoveryReadlistSearchService: Send + Sync {
     async fn search_readlist_scored_ids(
         &self,
         query: String,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String>;
+}
+
+#[async_trait]
+pub trait DiscoveryBookFeedService: Send + Sync {
+    async fn load_ondeck_books(
+        &self,
+        user_id: String,
+    ) -> Result<Vec<PersistedBookBrowseEntry>, String>;
+
+    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String>;
+}
+
+#[async_trait]
+pub trait PersistedDiscoveryListDataSource: Send + Sync {
+    async fn load_book_poster_summaries(
+        &self,
+    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String>;
+
+    async fn load_persisted_book_summaries(
+        &self,
+        user_id: Option<String>,
+    ) -> Result<Vec<PersistedBookSummary>, String>;
+
+    async fn load_persisted_book_summaries_by_ids(
+        &self,
+        user_id: Option<String>,
+        ids: Vec<String>,
+    ) -> Result<Vec<PersistedBookSummary>, String>;
+
+    async fn load_persisted_book_count(&self) -> Result<usize, String>;
+
+    async fn load_persisted_genres(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_tags(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_languages(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_publishers(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_age_ratings(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_sharing_labels(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_series_release_dates(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_series_tags(
+        &self,
+        library_ids: Option<Vec<String>>,
+        collection_id: Option<String>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_collection_memberships(
+        &self,
+    ) -> Result<BTreeMap<String, BTreeSet<String>>, String>;
+
+    async fn load_collection_ordering(
+        &self,
+        collection_id: String,
+    ) -> Result<HashMap<String, i64>, String>;
+
+    async fn load_readlist_memberships(&self)
+    -> Result<BTreeMap<String, BTreeSet<String>>, String>;
+
+    async fn load_persisted_book_tags(
+        &self,
+        scope: Option<PersistedBookTagsScope>,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, String>;
+
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String>;
+
+    async fn load_series_read_progress_counts(
+        &self,
+        user_id: String,
+    ) -> Result<HashMap<String, (i64, i64)>, String>;
+
+    async fn load_series_read_dates(
+        &self,
+        user_id: String,
+    ) -> Result<HashMap<String, String>, String>;
+
+    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
+
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String>;
+
+    async fn load_persisted_series_summaries_by_ids(
+        &self,
+        ids: Vec<String>,
+    ) -> Result<Vec<PersistedSeriesSummary>, String>;
+
+    async fn load_persisted_series_count(&self) -> Result<usize, String>;
+
+    async fn search_book_ids(&self, query: String, limit: usize) -> Result<Vec<String>, String>;
+
     async fn search_series_scored_ids(
         &self,
         query: String,

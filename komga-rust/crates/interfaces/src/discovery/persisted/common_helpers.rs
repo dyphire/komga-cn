@@ -8,13 +8,6 @@ pub enum TextMatchMode {
     EndsWith,
 }
 
-pub struct RuntimeListRequest {
-    pub sorts: Vec<String>,
-    pub page: usize,
-    pub size: usize,
-    pub unpaged: bool,
-}
-
 pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     let values = query_values(query, key)
         .into_iter()
@@ -22,23 +15,6 @@ pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
         .map(decode_query_component)
         .collect::<Vec<_>>();
     (!values.is_empty()).then_some(values)
-}
-
-pub fn runtime_list_request(query: &str) -> RuntimeListRequest {
-    RuntimeListRequest {
-        sorts: query_values(query, "sort")
-            .into_iter()
-            .map(decode_query_component)
-            .collect(),
-        page: query_value(query, "page")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0),
-        size: query_value(query, "size")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(20)
-            .max(1),
-        unpaged: query_bool(query, "unpaged"),
-    }
 }
 
 pub fn first_group_key(title: &str) -> String {
@@ -87,6 +63,14 @@ pub fn internal_error_response(error: String) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": error })),
+    )
+        .into_response()
+}
+
+pub fn discovery_error_response(error: DiscoveryError) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": format!("{error:?}") })),
     )
         .into_response()
 }
@@ -190,26 +174,6 @@ pub fn page_payload(content: Vec<Value>, metadata: PagePayloadMetadata) -> Value
     })
 }
 
-pub fn invalid_runtime_series_list_response(error: DiscoveryError) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": format!("invalid runtime series request: {error:?}"),
-        })),
-    )
-        .into_response()
-}
-
-pub fn invalid_runtime_books_list_response(error: DiscoveryError) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": format!("invalid runtime books request: {error:?}"),
-        })),
-    )
-        .into_response()
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -266,15 +230,5 @@ mod tests {
         assert_eq!(payload.pointer("/pageable/offset"), Some(&json!(40)));
         assert_eq!(payload.get("totalPages"), Some(&json!(3)));
         assert_eq!(payload.get("numberOfElements"), Some(&json!(1)));
-    }
-
-    #[test]
-    fn runtime_list_request_decodes_sort_and_defaults_size() {
-        let request = super::runtime_list_request("sort=title%2Casc&page=3&unpaged=true");
-
-        assert_eq!(request.sorts, vec!["title,asc"]);
-        assert_eq!(request.page, 3);
-        assert_eq!(request.size, 20);
-        assert!(request.unpaged);
     }
 }

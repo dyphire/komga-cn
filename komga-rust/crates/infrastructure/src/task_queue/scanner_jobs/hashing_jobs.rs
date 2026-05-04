@@ -392,13 +392,13 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-finder-test").await;
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
         let result =
-            execute_and_enqueue(&mut scheduler, &runtime, &finder_task, Some("library-1")).await;
+            execute_and_enqueue(&scheduler, &runtime, &finder_task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -479,14 +479,14 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, true).await;
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "missing-page-hash-disabled-test")
                 .await;
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 3, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
         let result =
-            execute_and_enqueue(&mut scheduler, &runtime, &finder_task, Some("library-1")).await;
+            execute_and_enqueue(&scheduler, &runtime, &finder_task, Some("library-1")).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
             scheduler
@@ -628,7 +628,7 @@ mod tests {
         pool.close().await;
 
         let runtime = fixture.runtime_context(false, false).await;
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-test").await;
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
             book_id.to_string(),
@@ -646,7 +646,7 @@ mod tests {
             .with_simple_type("RemoveHashedPages")
             .with_payload(payload);
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -738,13 +738,13 @@ mod tests {
             false,
         )
         .await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(
+        let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-missing-file-test",
         )
         .await;
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages missing-file should fail");
         };
@@ -767,13 +767,13 @@ mod tests {
             true,
         )
         .await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(
+        let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "remove-hashed-pages-unsupported-media-test",
         )
         .await;
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages unsupported-media should fail");
         };
@@ -796,11 +796,11 @@ mod tests {
             true,
         )
         .await;
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-not-ready-test")
                 .await;
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages not-ready should fail");
         };

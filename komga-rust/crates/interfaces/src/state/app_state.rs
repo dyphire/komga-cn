@@ -1,4 +1,5 @@
 use super::*;
+use komga_application::discovery::DiscoveryListService;
 
 pub struct HttpServices {
     pub library_catalog: Box<dyn LibraryCatalogService>,
@@ -10,8 +11,13 @@ pub struct HttpServices {
     pub media_assets: Box<dyn MediaAssetsService>,
     pub opds_catalog: Box<dyn OpdsCatalogService>,
     pub opds_persisted: Box<dyn OpdsPersistedService>,
-    pub discovery_persisted: Box<dyn PersistedDiscoveryService>,
+    pub discovery_authors: Box<dyn DiscoveryAuthorService>,
+    pub discovery_library_mapping: Box<dyn DiscoveryLibraryMappingService>,
+    pub discovery_collection_search: Box<dyn DiscoveryCollectionSearchService>,
+    pub discovery_readlist_search: Box<dyn DiscoveryReadlistSearchService>,
+    pub discovery_book_feeds: Box<dyn DiscoveryBookFeedService>,
     pub discovery_detail: Box<dyn DiscoveryDetailService>,
+    pub discovery_list: Box<dyn DiscoveryListService>,
 }
 
 pub struct HttpAppState {

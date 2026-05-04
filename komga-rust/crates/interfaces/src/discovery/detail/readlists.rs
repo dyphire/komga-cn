@@ -107,7 +107,7 @@ pub async fn readlists(
                     // pre-filtered result set.
                     let ranked_hits = match app
                         .services
-                        .discovery_persisted
+                        .discovery_readlist_search
                         .search_readlist_scored_ids(
                             search_group.to_string(),
                             READLIST_SEARCH_CANDIDATE_LIMIT,

@@ -123,7 +123,7 @@ impl SseFrame {
             serde_json::Value::Null
         } else {
             serde_json::from_str::<serde_json::Value>(&data)
-                .unwrap_or_else(|_| serde_json::Value::String(data))
+                .unwrap_or(serde_json::Value::String(data))
         };
 
         Ok(Some(ParsedEvent {

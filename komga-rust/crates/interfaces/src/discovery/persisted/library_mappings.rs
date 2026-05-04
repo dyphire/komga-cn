@@ -1,4 +1,4 @@
-use crate::state::PersistedDiscoveryService;
+use crate::state::{DiscoveryLibraryMappingService, PersistedDiscoveryListDataSource};
 
 use super::*;
 
@@ -9,13 +9,13 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
 }
 
 pub async fn load_persisted_library_ids(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn DiscoveryLibraryMappingService,
 ) -> Result<Vec<String>, String> {
     backend.load_persisted_library_ids().await
 }
 
 pub async fn remap_requested_library_ids_for_persisted(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn DiscoveryLibraryMappingService,
     requested: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
     let requested = requested?;
@@ -62,13 +62,13 @@ pub async fn remap_requested_library_ids_for_persisted(
 }
 
 pub async fn load_collection_memberships(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     backend.load_collection_memberships().await
 }
 
 pub async fn load_collection_ordering(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
     backend
@@ -77,7 +77,7 @@ pub async fn load_collection_ordering(
 }
 
 pub async fn load_readlist_memberships(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     backend.load_readlist_memberships().await
 }

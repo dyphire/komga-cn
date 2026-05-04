@@ -12,7 +12,7 @@ pub(super) enum SqlValue {
 
 #[derive(Default)]
 pub(super) struct SqlxWhereState {
-    has_where: bool,
+    pub(super) has_where: bool,
     pub(super) params: Vec<SqlValue>,
 }
 
@@ -134,90 +134,84 @@ pub(super) fn append_clause_sqlx<'args>(
     builder.push(clause);
 }
 
-pub(super) fn append_string_set_filter_sqlx<'args>(
+pub(super) fn append_bool_sqlx_filter<'args>(
     column: &str,
-    values: Option<&[String]>,
-    builder: &mut QueryBuilder<'args, Sqlite>,
-    state: &mut SqlxWhereState,
-    lowercase: bool,
-) {
-    if let Some(values) = values
-        && !values.is_empty()
-    {
-        let lhs = if lowercase {
-            format!("LOWER({column})")
-        } else {
-            column.to_string()
-        };
-        push_sqlx_clause_prefix(builder, state);
-        builder.push(format!(r#"{lhs} IN ("#));
-        {
-            let mut separated = builder.separated(",");
-            for value in values {
-                if lowercase {
-                    let lowered = value.to_ascii_lowercase();
-                    separated.push_bind(lowered.clone());
-                    state.params.push(SqlValue::Text(lowered));
-                } else {
-                    separated.push_bind(value.clone());
-                    state.params.push(SqlValue::Text(value.clone()));
-                }
-            }
-            separated.push_unseparated(r#")"#);
-        }
-    }
-}
-
-pub(super) fn append_u16_set_filter_sqlx<'args>(
-    column: &str,
-    values: Option<&[u16]>,
+    value: bool,
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
 ) {
-    if let Some(values) = values
-        && !values.is_empty()
-    {
-        push_sqlx_clause_prefix(builder, state);
-        builder.push(format!(r#"{column} IN ("#));
-        {
-            let mut separated = builder.separated(",");
-            for value in values {
-                separated.push_bind(*value as i64);
-                state.params.push(SqlValue::Integer(*value as i64));
-            }
-            separated.push_unseparated(r#")"#);
-        }
+    push_sqlx_clause_prefix(builder, state);
+    if value {
+        builder.push(format!("{column} = 1"));
+    } else {
+        builder.push(format!("{column} = 0"));
     }
 }
 
-pub(super) fn append_exists_series_filter_sqlx<'args>(
-    table: &str,
+pub(super) fn append_like_clause_sqlx<'args>(
+    column: &str,
+    pattern: &str,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    push_sqlx_clause_prefix(builder, state);
+    builder.push(format!("{column} LIKE "));
+    builder.push_bind(pattern.to_string());
+    state.params.push(SqlValue::Text(pattern.to_string()));
+}
+
+pub(super) fn append_subquery_exists_clause<'args>(
+    join_table: &str,
+    fk_column: &str,
     value_column: &str,
-    values: Option<&[String]>,
+    values: &[String],
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
 ) {
-    if let Some(values) = values
-        && !values.is_empty()
-    {
-        push_sqlx_clause_prefix(builder, state);
-        builder.push(format!(
-            r#"EXISTS (
-    SELECT 1
-    FROM {table} f
-    WHERE f.series_id = s.id
-      AND LOWER(f.{value_column}) IN ("#
-        ));
-        {
-            let mut separated = builder.separated(",");
-            for value in values {
-                let lowered = value.to_ascii_lowercase();
-                separated.push_bind(lowered.clone());
-                state.params.push(SqlValue::Text(lowered));
-            }
-            separated.push_unseparated(r#"))"#);
-        }
+    if values.is_empty() {
+        return;
     }
+    push_sqlx_clause_prefix(builder, state);
+    builder.push(format!(
+        r#"EXISTS (
+    SELECT 1
+    FROM {join_table} f
+    WHERE f.{fk_column} = s.id
+      AND f.{value_column} IN ("#
+    ));
+    {
+        let mut separated = builder.separated(",");
+        for value in values {
+            separated.push_bind(value.clone());
+            state.params.push(SqlValue::Text(value.clone()));
+        }
+        separated.push_unseparated(r#"))"#);
+    }
+}
+
+pub(super) fn append_comparison_sqlx<'args>(
+    column: &str,
+    op: &str,
+    value: &str,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    push_sqlx_clause_prefix(builder, state);
+    builder.push(format!("{column} {op} "));
+    builder.push_bind(value.to_string());
+    state.params.push(SqlValue::Text(value.to_string()));
+}
+
+pub(super) fn append_not_in_clause_sqlx<'args>(
+    column: &str,
+    value: &str,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    push_sqlx_clause_prefix(builder, state);
+    builder.push(format!("{column} != "));
+    builder.push_bind(value.to_string());
+    state.params.push(SqlValue::Text(value.to_string()));
 }
 
 pub(super) fn effective_library_ids(
@@ -267,10 +261,7 @@ mod tests {
     use komga_domain::discovery::{AgeRestrictionKind, QueryRestrictions};
     use sqlx::{Execute, QueryBuilder, Sqlite};
 
-    use super::{
-        SqlValue, SqlxWhereState, append_clause_sqlx, append_exists_series_filter_sqlx,
-        append_string_set_filter_sqlx, append_u16_set_filter_sqlx, query_filters_sqlx,
-    };
+    use super::{SqlValue, SqlxWhereState, query_filters_sqlx};
 
     #[test]
     fn sqlx_query_filters_preserve_restriction_clause_and_bind_order() {
@@ -326,60 +317,6 @@ FROM series s"#,
                 SqlValue::Integer(16),
                 SqlValue::Text("allow-b".to_string()),
                 SqlValue::Text("allow-a".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn sqlx_extended_predicates_preserve_exists_lowercase_and_parameter_order() {
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            r#"SELECT s.id
-FROM series s"#,
-        );
-        let mut state = SqlxWhereState::default();
-        append_clause_sqlx("s.deleted = 0", &mut builder, &mut state);
-        append_string_set_filter_sqlx(
-            "s.read_status",
-            Some(&["READ".to_string(), "UNREAD".to_string()]),
-            &mut builder,
-            &mut state,
-            true,
-        );
-        append_exists_series_filter_sqlx(
-            "series_genres",
-            "genre",
-            Some(&["Fantasy".to_string(), "Drama".to_string()]),
-            &mut builder,
-            &mut state,
-        );
-        append_string_set_filter_sqlx(
-            "s.release_date",
-            Some(&["2024-01-01".to_string()]),
-            &mut builder,
-            &mut state,
-            false,
-        );
-        append_u16_set_filter_sqlx("s.age_rating", Some(&[10, 16]), &mut builder, &mut state);
-
-        let query = builder.build();
-        assert!(query.sql().ends_with(
-            r#"WHERE s.deleted = 0 AND LOWER(s.read_status) IN (?,?) AND EXISTS (
-    SELECT 1
-    FROM series_genres f
-    WHERE f.series_id = s.id
-      AND LOWER(f.genre) IN (?,?)) AND s.release_date IN (?) AND s.age_rating IN (?,?)"#
-        ));
-
-        assert_eq!(
-            state.params,
-            vec![
-                SqlValue::Text("read".to_string()),
-                SqlValue::Text("unread".to_string()),
-                SqlValue::Text("fantasy".to_string()),
-                SqlValue::Text("drama".to_string()),
-                SqlValue::Text("2024-01-01".to_string()),
-                SqlValue::Integer(10),
-                SqlValue::Integer(16),
             ]
         );
     }

@@ -90,7 +90,28 @@ pub fn compose_http_runtime(
         db.clone(),
         config.lucene_data_directory.clone(),
     );
-    let discovery_persisted = http_state_discovery::compose_persisted_discovery_service(
+    let discovery_authors = http_state_discovery::compose_discovery_author_service(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    );
+    let discovery_library_mapping = http_state_discovery::compose_discovery_library_mapping_service(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    );
+    let discovery_collection_search =
+        http_state_discovery::compose_discovery_collection_search_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        );
+    let discovery_readlist_search = http_state_discovery::compose_discovery_readlist_search_service(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    );
+    let discovery_book_feeds = http_state_discovery::compose_discovery_book_feed_service(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    );
+    let discovery_list = http_state_discovery::compose_discovery_list_service(
         db.clone(),
         config.lucene_data_directory.clone(),
     );
@@ -149,8 +170,13 @@ pub fn compose_http_runtime(
         media_assets: media_assets_service,
         opds_catalog: Box::new(opds_catalog),
         opds_persisted: Box::new(opds_persisted),
-        discovery_persisted,
+        discovery_authors,
+        discovery_library_mapping,
+        discovery_collection_search,
+        discovery_readlist_search,
+        discovery_book_feeds,
         discovery_detail: discovery_detail_service,
+        discovery_list,
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,

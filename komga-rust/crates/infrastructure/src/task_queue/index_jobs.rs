@@ -443,12 +443,12 @@ mod tests {
             task_write_pool,
             task_read_pool,
         };
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test").await;
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task, None).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -524,13 +524,13 @@ mod tests {
             task_write_pool,
             task_read_pool,
         };
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test")
                 .await;
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &finder_task, None).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task, None).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let mut generated = Vec::new();
@@ -561,12 +561,12 @@ mod tests {
     async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
         let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
         let runtime = fixture.runtime_context(false, false).await;
-        let mut scheduler =
+        let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test").await;
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -634,7 +634,7 @@ mod tests {
         let fixture =
             seed_analyze_book_dimension_fixture("analyze-book-dimensions-disabled", false).await;
         let runtime = fixture.runtime_context(false, false).await;
-        let mut scheduler = TaskQueueScheduler::for_runtime(
+        let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-disabled-dimensions-test",
         )
@@ -642,7 +642,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         assert_eq!(
@@ -767,7 +767,7 @@ mod tests {
             task_write_pool,
             task_read_pool,
         };
-        let mut scheduler = TaskQueueScheduler::for_runtime(
+        let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-adjust-test",
         )
@@ -775,7 +775,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)
@@ -982,7 +982,7 @@ mod tests {
             task_write_pool,
             task_read_pool,
         };
-        let mut scheduler = TaskQueueScheduler::for_runtime(
+        let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-keep-test",
         )
@@ -990,7 +990,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&mut scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)

@@ -6,16 +6,10 @@ use axum::body::Bytes;
 use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::{
-    DiscoveryRequestValidation, bootstrap_series_id_for_runtime_shape, query_validation_mode,
-    reject_bootstrap_shape_mismatch, requested_library_ids_for_runtime_shape,
-};
-use komga_domain::discovery::{DirectBrowseBooksListFamily, DiscoveryError};
+use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 
-use crate::identity_access::auth::{
-    require_request_admin, require_request_auth, resolved_request_auth_user, user_id,
-};
+use crate::identity_access::auth::require_request_auth;
 
 use super::helpers::{
     books_page_payload, extract_full_text_search, mark_runtime_owned, query_bool, query_value,
@@ -26,7 +20,6 @@ use crate::state::HttpAppState;
 pub mod books;
 pub mod detail;
 mod facets;
-mod filters;
 pub mod persisted;
 pub mod series;
 mod series_routes;

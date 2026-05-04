@@ -1,15 +1,12 @@
-use super::persisted::common_helpers::decode_query_component;
-use super::persisted::delegates::{
-    authors_v2_page_payload, internal_error_response, load_persisted_age_ratings,
-    load_persisted_author_names, load_persisted_author_roles, load_persisted_authors_by_scope,
-    load_persisted_genres, load_persisted_languages, load_persisted_publishers,
-    load_persisted_series_release_dates, load_persisted_series_tags, load_persisted_sharing_labels,
-    load_persisted_tags,
+use super::persisted::authors_queries::authors_v2_page_payload;
+use super::persisted::common_helpers::{
+    decode_query_component, discovery_error_response, internal_error_response,
 };
 use super::persisted::models::PersistedAuthorsScope;
 use super::*;
 use crate::discovery_auth::context::DiscoveryQueryContext;
 use crate::discovery_auth::state::DiscoveryAuthState;
+use crate::helpers::to_domain_query_context;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")
@@ -42,16 +39,6 @@ async fn resolve_query_context_or_unauthorized(
 struct CollectionFacetScope {
     context: DiscoveryQueryContext,
     collection_id: Option<String>,
-}
-
-impl CollectionFacetScope {
-    fn authorized_library_ids(&self) -> Option<&[String]> {
-        self.context.authorized_library_ids.as_deref()
-    }
-
-    fn collection_id(&self) -> Option<&str> {
-        self.collection_id.as_deref()
-    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -97,12 +84,11 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
         Err(response) => return response,
     };
 
-    match load_persisted_author_names(
-        app.services.discovery_persisted.as_ref(),
-        &search,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    match app
+        .services
+        .discovery_authors
+        .load_author_names(search, context.authorized_library_ids)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
@@ -126,11 +112,11 @@ pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
         Err(response) => return response,
     };
 
-    match load_persisted_author_roles(
-        app.services.discovery_persisted.as_ref(),
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    match app
+        .services
+        .discovery_authors
+        .load_author_roles(context.authorized_library_ids)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => internal_error_response(error),
@@ -179,12 +165,11 @@ pub(super) async fn authors_deprecated_get(
         PersistedAuthorsScope::All
     };
 
-    let mut authors = match load_persisted_authors_by_scope(
-        app.services.discovery_persisted.as_ref(),
-        &scope,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    let mut authors = match app
+        .services
+        .discovery_authors
+        .load_authors_by_scope(scope, context.authorized_library_ids)
+        .await
     {
         Ok(values) => values,
         Err(error) => return internal_error_response(error),
@@ -257,12 +242,11 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
         PersistedAuthorsScope::All
     };
 
-    let mut authors = match load_persisted_authors_by_scope(
-        app.services.discovery_persisted.as_ref(),
-        &scope,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    let mut authors = match app
+        .services
+        .discovery_authors
+        .load_authors_by_scope(scope, context.authorized_library_ids)
+        .await
     {
         Ok(values) => values,
         Err(error) => return internal_error_response(error),
@@ -299,15 +283,16 @@ pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Respons
         Err(response) => return response,
     };
 
-    match load_persisted_genres(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_genres(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -329,15 +314,16 @@ pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response 
         Err(response) => return response,
     };
 
-    match load_persisted_tags(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_tags(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -359,15 +345,16 @@ pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
         Err(response) => return response,
     };
 
-    match load_persisted_series_tags(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_series_tags(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -389,15 +376,16 @@ pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Resp
         Err(response) => return response,
     };
 
-    match load_persisted_languages(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_languages(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -419,15 +407,16 @@ pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
         Err(response) => return response,
     };
 
-    match load_persisted_publishers(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_publishers(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -449,15 +438,16 @@ pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
         Err(response) => return response,
     };
 
-    match load_persisted_age_ratings(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_age_ratings(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -479,15 +469,16 @@ pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) ->
         Err(response) => return response,
     };
 
-    match load_persisted_sharing_labels(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_sharing_labels(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }
 
@@ -509,14 +500,15 @@ pub async fn series_release_dates(headers: HeaderMap, uri: Uri, app: &HttpAppSta
         Err(response) => return response,
     };
 
-    match load_persisted_series_release_dates(
-        app.services.discovery_persisted.as_ref(),
-        scope.authorized_library_ids(),
-        scope.collection_id(),
-    )
-    .await
+    let authorized_library_ids = scope.context.authorized_library_ids.clone();
+    let domain_context = to_domain_query_context(scope.context);
+    match app
+        .services
+        .discovery_list
+        .list_series_release_dates(&domain_context, authorized_library_ids, scope.collection_id)
+        .await
     {
         Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => discovery_error_response(error),
     }
 }

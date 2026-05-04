@@ -1,42 +1,5 @@
-use crate::state::PersistedDiscoveryService;
-
 use super::common_helpers::{PagePayloadMetadata, page_payload};
 use super::*;
-
-pub async fn load_persisted_author_names(
-    backend: &dyn PersistedDiscoveryService,
-    search: &str,
-    authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
-    backend
-        .load_persisted_author_names(
-            search.to_string(),
-            authorized_library_ids.map(|ids| ids.to_vec()),
-        )
-        .await
-}
-
-pub async fn load_persisted_author_roles(
-    backend: &dyn PersistedDiscoveryService,
-    authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
-    backend
-        .load_persisted_author_roles(authorized_library_ids.map(|ids| ids.to_vec()))
-        .await
-}
-
-pub async fn load_persisted_authors_by_scope(
-    backend: &dyn PersistedDiscoveryService,
-    scope: &PersistedAuthorsScope,
-    authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<PersistedAuthorEntry>, String> {
-    backend
-        .load_persisted_authors_by_scope(
-            scope.clone(),
-            authorized_library_ids.map(|ids| ids.to_vec()),
-        )
-        .await
-}
 
 pub fn authors_v2_page_payload(
     authors: Vec<PersistedAuthorEntry>,

@@ -8,6 +8,7 @@ pub struct LibraryReadModel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesReadModel {
     pub id: String,
+    pub name: String,
     pub title: String,
 }
 

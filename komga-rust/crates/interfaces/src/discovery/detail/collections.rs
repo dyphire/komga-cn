@@ -1,9 +1,9 @@
 use super::collections_support::PersistedCollectionWriteInput;
 use super::*;
 use crate::discovery::persisted::common_helpers::decode_query_component;
-use crate::discovery::series::series_list;
+use crate::discovery::series::{parse_series_filter_from_json, series_read_model_page_payload};
 use crate::discovery::series_routes::author_query_to_author_match;
-use crate::helpers::validation_error_response;
+use crate::helpers::{mark_runtime_owned, to_domain_query_context, validation_error_response};
 use crate::state::HttpAppState;
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
@@ -12,6 +12,7 @@ use icu::collator::{
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
+use komga_application::discovery::SeriesBrowseQuery;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -135,14 +136,51 @@ pub async fn collection_series(
         }
     });
 
-    let adjusted_uri = collection_series_runtime_uri(&uri, collection.ordered);
-    let response = series_list(
-        State(app),
-        headers,
-        adjusted_uri,
-        Bytes::from(body.to_string()),
-    )
-    .await;
+    let filter = match parse_series_filter_from_json(body.get("condition")) {
+        Ok(f) => f,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("invalid series filter: {e:?}") })),
+            )
+                .into_response();
+        }
+    };
+
+    let unpaged = collection.ordered || query_bool(query_string, "unpaged");
+    let page = query_value(query_string, "page")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query_string, "size")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(20)
+        .max(1);
+
+    let domain_context = to_domain_query_context(visible_context);
+
+    let result = match app
+        .services
+        .discovery_list
+        .list_series(
+            &domain_context,
+            SeriesBrowseQuery {
+                filter,
+                sort: vec![],
+                search: None,
+                page,
+                size,
+                unpaged,
+            },
+        )
+        .await
+    {
+        Ok(page) => page,
+        Err(e) => return internal_error_response(format!("{e:?}")),
+    };
+
+    let mut response =
+        Json(series_read_model_page_payload(result, !unpaged, false)).into_response();
+    mark_runtime_owned(&mut response);
 
     if !collection.ordered {
         return response;
@@ -163,34 +201,6 @@ async fn visible_collection_series_ids(
         }
     }
     Ok(visible_series_ids)
-}
-
-fn collection_series_runtime_uri(uri: &Uri, force_unpaged: bool) -> Uri {
-    let mut query_parts = uri
-        .query()
-        .unwrap_or_default()
-        .split('&')
-        .filter(|part| !part.is_empty())
-        .filter(|part| {
-            let key = part.split('=').next().unwrap_or_default();
-            key != "sort" && (!force_unpaged || key != "unpaged")
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if force_unpaged {
-        query_parts.push("unpaged=true".to_string());
-    }
-
-    let path_and_query = if query_parts.is_empty() {
-        uri.path().to_string()
-    } else {
-        format!("{}?{}", uri.path(), query_parts.join("&"))
-    };
-
-    Uri::builder()
-        .path_and_query(path_and_query)
-        .build()
-        .unwrap_or_else(|_| uri.clone())
 }
 
 async fn ordered_collection_series_response(
@@ -453,7 +463,7 @@ pub async fn collections(
     if let Some(search) = search.as_ref() {
         let ranked_ids: Vec<String> = match app
             .services
-            .discovery_persisted
+            .discovery_collection_search
             .search_collection_ids(search.to_string(), search_limit)
             .await
         {

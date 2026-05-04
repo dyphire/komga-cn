@@ -31,6 +31,7 @@ pub enum StringCondition {
     StartsWith(InclusionCondition<String>),
     EndsWith(InclusionCondition<String>),
     IsEmpty,
+    IsNotEmpty,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,9 +39,36 @@ pub enum DateCondition {
     Exact(InclusionCondition<String>),
     Before(String),
     After(String),
+    Contains(InclusionCondition<String>),
+    StartsWith(InclusionCondition<String>),
+    EndsWith(InclusionCondition<String>),
     WithinLastDays(i64),
     OutsideLastDays(i64),
     IsEmpty,
+    IsNotEmpty,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NumberCondition {
+    Exact(InclusionCondition<String>),
+    GreaterThan(String),
+    LessThan(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgeRatingCondition {
+    Exact(InclusionCondition<u16>),
+    ExactOrEmpty(Vec<u16>),
+    GreaterThan(u16),
+    LessThan(u16),
+    IsEmpty,
+    IsNotEmpty,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BookPosterCondition {
+    pub thumbnail_type: Option<String>,
+    pub selected: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,12 +96,13 @@ pub enum SeriesValueCondition {
     Tag(StringCondition),
     Language(InclusionCondition<String>),
     Publisher(InclusionCondition<String>),
-    AgeRating(InclusionCondition<u16>),
+    AgeRating(AgeRatingCondition),
     ReleaseDate(DateCondition),
     SharingLabel(StringCondition),
     SeriesStatus(SeriesStatusCondition),
     Complete(bool),
     Author(StringCondition),
+    ExcludeNewlyAdded(bool),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,11 +114,16 @@ pub enum BookValueCondition {
     Deleted(bool),
     OneShot(bool),
     Tag(StringCondition),
+    Genre(StringCondition),
+    Language(InclusionCondition<String>),
+    Publisher(InclusionCondition<String>),
+    AgeRating(InclusionCondition<u16>),
     ReadStatus(ReadStatusCondition),
     MediaProfile(InclusionCondition<String>),
     MediaStatus(InclusionCondition<String>),
     Author(StringCondition),
-    NumberSort(InclusionCondition<String>),
+    Poster(InclusionCondition<BookPosterCondition>),
+    NumberSort(NumberCondition),
     ReleaseDate(DateCondition),
 }
 

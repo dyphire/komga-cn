@@ -32,10 +32,3 @@ impl DiscoveryQueryContext {
         }
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DirectBrowseBooksListFamily {
-    BrowseSeriesPaged,
-    BrowseBookSiblingsUnpaged,
-    BrowseOneshotBootstrap,
-}

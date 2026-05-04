@@ -1,30 +1,24 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::state::PersistedDiscoveryService;
+use crate::state::PersistedDiscoveryListDataSource;
 
 use super::common_helpers::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
-    normalized_text_matches, runtime_list_request,
+    normalized_text_matches,
 };
 use super::*;
-use crate::discovery::filters::{
-    OperatorValidationMode, exact_oneshot_bootstrap_series_id, parse_runtime_books_filters,
-    parse_runtime_books_filters_with_mode, restrict_books_filters_to_persisted_shape,
-    webui_bridge_books_filters_from_payload,
-};
-use crate::discovery_auth::state::DiscoveryAuthState;
 use komga_application::discovery::{
     BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
 };
 
 pub async fn load_book_poster_summaries(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
 ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
     backend.load_book_poster_summaries().await
 }
 
 pub async fn load_persisted_books_page(
-    backend: &dyn PersistedDiscoveryService,
+    backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,
 ) -> Result<PageEnvelope<BookReadModel>, String> {
@@ -760,188 +754,4 @@ fn compare_relevance_ranks(
         (Some(left), Some(right)) => right.cmp(&left),
         _ => std::cmp::Ordering::Equal,
     }
-}
-
-pub async fn runtime_owned_persisted_books_page(
-    backend: &dyn PersistedDiscoveryService,
-    context: &DiscoveryQueryContext,
-    filters: &RuntimeBooksFilters,
-    sorts: &[String],
-    full_text_search: Option<String>,
-    page: usize,
-    size: usize,
-    unpaged: bool,
-) -> Option<Result<PageEnvelope<BookReadModel>, String>> {
-    let sort_modes = parse_persisted_books_sort_modes(sorts, full_text_search.as_deref());
-    Some(
-        load_persisted_books_page(
-            backend,
-            context,
-            PersistedBooksBrowseQuery::from_runtime_filters(
-                filters,
-                full_text_search,
-                page,
-                size,
-                unpaged,
-                sort_modes,
-            ),
-        )
-        .await,
-    )
-}
-
-pub fn parse_persisted_books_sort_modes(
-    sorts: &[String],
-    full_text_search: Option<&str>,
-) -> Vec<PersistedBooksSortMode> {
-    let has_full_text_search = full_text_search
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some();
-    let mut modes = sorts
-        .iter()
-        .filter_map(|sort| match sort.as_str() {
-            "series,metadata.numberSort,asc" => Some(PersistedBooksSortMode::NumberSortAsc),
-            "metadata.title,asc" | "title,asc" => Some(PersistedBooksSortMode::TitleAsc),
-            "createdDate,desc" | "created,desc" => Some(PersistedBooksSortMode::CreatedDateDesc),
-            "lastModifiedDate,desc" | "lastModified,desc" => {
-                Some(PersistedBooksSortMode::LastModifiedDateDesc)
-            }
-            "readProgress.lastModified,asc" => {
-                Some(PersistedBooksSortMode::ReadProgressLastModifiedDateAsc)
-            }
-            "readProgress.lastModified,desc" | "readProgress.lastModified" => {
-                Some(PersistedBooksSortMode::ReadProgressLastModifiedDateDesc)
-            }
-            "readProgress.readDate,asc" => Some(PersistedBooksSortMode::ReadProgressReadDateAsc),
-            "readProgress.readDate,desc" | "readProgress.readDate" => {
-                Some(PersistedBooksSortMode::ReadProgressReadDateDesc)
-            }
-            "metadata.releaseDate,desc" => Some(PersistedBooksSortMode::ReleaseDateDesc),
-            "metadata.numberSort,asc" | "number,asc" => Some(PersistedBooksSortMode::NumberSortAsc),
-            "seriesId,asc" => Some(PersistedBooksSortMode::SeriesIdAsc),
-            "relevance,asc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceAsc),
-            "relevance,desc" if has_full_text_search => Some(PersistedBooksSortMode::RelevanceDesc),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    modes.dedup();
-    if modes.is_empty() && sorts.is_empty() && has_full_text_search {
-        modes.push(PersistedBooksSortMode::RelevanceDesc);
-    }
-    modes
-}
-
-pub async fn runtime_owned_books_list_response(
-    backend: &dyn PersistedDiscoveryService,
-    headers: &HeaderMap,
-    uri: &Uri,
-    payload: Option<&Value>,
-    full_text_search: Option<String>,
-    auth_state: &DiscoveryAuthState,
-    identity: &dyn crate::state::IdentityService,
-    strict_runtime_shape: bool,
-) -> Option<Response> {
-    let query_string = uri.query().unwrap_or_default();
-    let request = runtime_list_request(query_string);
-    let sorts = request.sorts;
-    let persisted_sort_modes =
-        parse_persisted_books_sort_modes(&sorts, full_text_search.as_deref());
-    let page = request.page;
-    let size = request.size;
-    let unpaged = request.unpaged;
-    let mut oneshot_bootstrap_series_id = exact_oneshot_bootstrap_series_id(payload);
-
-    if reject_bootstrap_shape_mismatch(
-        strict_runtime_shape,
-        oneshot_bootstrap_series_id.is_some(),
-        !query_string.trim().is_empty(),
-    ) {
-        return None;
-    }
-
-    oneshot_bootstrap_series_id =
-        bootstrap_series_id_for_runtime_shape(strict_runtime_shape, oneshot_bootstrap_series_id);
-
-    let validation_mode = OperatorValidationMode::from(query_validation_mode(strict_runtime_shape));
-
-    let mut filters = match if validation_mode.is_strict() {
-        parse_runtime_books_filters_with_mode(
-            payload.and_then(|value| value.get("condition")),
-            validation_mode,
-        )
-    } else {
-        parse_runtime_books_filters(payload.and_then(|value| value.get("condition")))
-    } {
-        Ok(filters) => filters,
-        Err(error) => {
-            if strict_runtime_shape {
-                return Some(invalid_runtime_books_list_response(error));
-            } else {
-                webui_bridge_books_filters_from_payload(payload)
-            }
-        }
-    };
-
-    if !strict_runtime_shape {
-        restrict_books_filters_to_persisted_shape(&mut filters);
-        filters.criteria.library_ids = remap_requested_library_ids_for_persisted(
-            backend,
-            filters.criteria.library_ids.as_ref(),
-        )
-        .await;
-    }
-
-    let requested_library_ids = requested_library_ids_for_runtime_shape(
-        strict_runtime_shape,
-        filters.criteria.library_ids.clone(),
-    );
-    let context = match auth_state
-        .resolve_query_context_with_persistence(identity, headers, requested_library_ids.as_deref())
-        .await
-    {
-        Some(context) => context,
-        None => return Some(StatusCode::UNAUTHORIZED.into_response()),
-    };
-
-    if let Some(series_id) = oneshot_bootstrap_series_id.clone() {
-        filters.direct_browse_family = Some(DirectBrowseBooksListFamily::BrowseOneshotBootstrap);
-        filters.criteria.series_ids = Some(vec![series_id]);
-    }
-
-    let is_admin = context.is_admin;
-
-    if let Some(persisted_page) = runtime_owned_persisted_books_page(
-        backend,
-        &context,
-        &filters,
-        &sorts,
-        full_text_search.clone(),
-        page,
-        size,
-        unpaged,
-    )
-    .await
-    {
-        match persisted_page {
-            Ok(page) => {
-                let sorted = !persisted_sort_modes.is_empty();
-                let mut response =
-                    Json(books_page_payload(page, is_admin, !unpaged, sorted)).into_response();
-                mark_runtime_owned(&mut response);
-                return Some(response);
-            }
-            Err(error) => {
-                return Some(
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": format!("runtime books list failed: {error}") })),
-                    )
-                        .into_response(),
-                );
-            }
-        }
-    }
-
-    None
 }

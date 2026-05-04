@@ -1,16 +1,4 @@
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext, PageEnvelope};
-
-use super::query_service::{DiscoveryQueries, DiscoveryQueryRepository};
-use super::read_models::{BookReadModel, ReadListReadModel};
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReadListsQuery {
-    pub page: usize,
-    pub size: usize,
-    pub library_ids: Option<Vec<String>>,
-    pub search: Option<String>,
-    pub unpaged: bool,
-    pub sort: Vec<String>,
-}
+use komga_domain::discovery::DiscoveryError;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeReadListsQuery {
@@ -43,28 +31,6 @@ pub struct ReadListDetailQuery {
 pub enum ReadListBooksOwnership {
     RuntimeOwned,
     DependencyOnly,
-}
-
-impl<R> DiscoveryQueries<R>
-where
-    R: DiscoveryQueryRepository,
-{
-    pub async fn get_readlist_detail(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: ReadListDetailQuery,
-    ) -> Result<Option<ReadListReadModel>, DiscoveryError> {
-        self.repository.get_readlist_detail(context, query).await
-    }
-
-    pub async fn list_readlist_books(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: ReadListBooksQuery,
-    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        classify_readlist_books_query(&query)?;
-        self.repository.list_readlist_books(context, query).await
-    }
 }
 
 pub fn classify_readlist_books_query(

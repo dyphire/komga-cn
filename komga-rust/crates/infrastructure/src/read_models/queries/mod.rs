@@ -1,96 +1,10 @@
-use komga_application::discovery::LibraryReadModel;
-use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
-use sqlx::{QueryBuilder, Sqlite, SqlitePool};
-
-pub(super) mod book_detail;
 pub(super) mod books;
 pub(super) mod books_media;
 pub(super) mod libraries;
-pub(super) mod readlists;
 pub(super) mod series;
-use super::filters::{SqlxWhereState, append_in_clause_sqlx, effective_library_ids};
 
-#[derive(sqlx::FromRow)]
-struct SqlxLibraryRow {
-    id: String,
-    name: String,
-    root: String,
-}
-
-impl From<SqlxLibraryRow> for LibraryReadModel {
-    fn from(value: SqlxLibraryRow) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            root: value.root,
-        }
-    }
-}
-
-pub(in crate::read_models) async fn list_libraries_sqlx(
-    pool: SqlitePool,
-    context: &DiscoveryQueryContext,
-) -> Result<Vec<LibraryReadModel>, DiscoveryError> {
-    let allowed = effective_library_ids(context, None);
-    if allowed.as_ref().is_some_and(Vec::is_empty) {
-        return Ok(vec![]);
-    }
-
-    let mut builder = QueryBuilder::<Sqlite>::new(
-        r#"SELECT id, name, root
-FROM libraries"#,
-    );
-    let mut state = SqlxWhereState::default();
-    if let Some(allowed_ids) = allowed.as_ref() {
-        append_in_clause_sqlx("id", allowed_ids, &mut builder, &mut state);
-    }
-    builder.push(r#" ORDER BY name COLLATE NOCASE ASC"#);
-
-    let rows = builder
-        .build_query_as::<SqlxLibraryRow>()
-        .fetch_all(&pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-    Ok(rows.into_iter().map(LibraryReadModel::from).collect())
-}
+use komga_domain::discovery::DiscoveryError;
 
 pub(super) fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {
     DiscoveryError::Persistence(error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn libraries_query_cluster_exposes_sqlx_entrypoints() {
-        let _ = super::libraries::list_persisted_libraries_sqlx;
-        let _ = super::libraries::get_persisted_library_sqlx;
-    }
-
-    #[test]
-    fn series_query_cluster_exposes_sqlx_entrypoints() {
-        let _ = super::series::list_series_sqlx;
-        let _ = super::series::get_series_detail_sqlx;
-        let _ = super::series::resolve_series_resource_sqlx;
-    }
-
-    #[test]
-    fn books_media_query_cluster_exposes_sqlx_entrypoints() {
-        let _ = super::books_media::list_books_sqlx;
-        let _ = super::books_media::list_books_latest_sqlx;
-        let _ = super::books_media::get_book_detail_sqlx;
-        let _ = super::books_media::get_book_sibling_previous_sqlx;
-        let _ = super::books_media::get_book_sibling_next_sqlx;
-        let _ = super::books_media::resolve_book_resource_sqlx;
-    }
-
-    #[test]
-    fn readlists_collections_query_cluster_exposes_sqlx_entrypoints() {
-        let _ = super::readlists::list_readlists_sqlx;
-        let _ = super::readlists::get_readlist_detail_sqlx;
-        let _ = super::readlists::list_readlist_books_sqlx;
-        let _ = super::readlists::list_book_readlists_sqlx;
-        let _ = super::readlists::get_readlist_book_sibling_sqlx;
-        let _ = super::readlists::list_series_collections_sqlx;
-    }
 }
