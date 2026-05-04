@@ -21,14 +21,3 @@ pub struct DiscoveryQueryContext {
     pub authorized_library_ids: Option<Vec<LibraryId>>,
     pub restrictions: Option<QueryRestrictions>,
 }
-
-impl DiscoveryQueryContext {
-    pub fn allow_all() -> Self {
-        Self {
-            user_id: None,
-            is_admin: true,
-            authorized_library_ids: None,
-            restrictions: None,
-        }
-    }
-}

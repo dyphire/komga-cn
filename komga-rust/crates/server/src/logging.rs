@@ -16,25 +16,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use komga_config::env_config::RuntimeConfig;
 
 pub const DEFAULT_ENV_FILTER: &str = "info,hyper=warn,h2=warn,sqlx=warn";
-pub const SHARED_EVENT_FIELDS: &[&str] = &[
-    "event",
-    "request_id",
-    "method",
-    "route",
-    "path",
-    "status_code",
-    "outcome",
-    "latency_ms",
-    "first_byte_ms",
-    "user_id",
-    "task_id",
-    "task_type",
-    "worker_id",
-    "attempt",
-    "error",
-];
-pub const STDERR_OUTPUT_CONTRACT: &str = "compact human-readable logs to stderr";
-pub const FILE_OUTPUT_CONTRACT: &str = "newline-delimited JSON logs to the active logfile path";
 const LOG_FILE_ROTATION_ENV: &str = "KOMGA_RUST_LOG_FILE_ROTATION";
 
 static GLOBAL_LOGGING_RUNTIME: OnceLock<InstalledLoggingRuntime> = OnceLock::new();

@@ -88,10 +88,6 @@ impl TaskProcessingError {
             message: message.into(),
         }
     }
-
-    pub fn is_unsupported_task(&self) -> bool {
-        self.message.starts_with("unsupported runtime task type: ")
-    }
 }
 
 impl std::fmt::Display for TaskProcessingError {
@@ -144,10 +140,6 @@ impl TaskQueueOrchestrator {
             tasks: Vec::new(),
             next_order: 0,
         }
-    }
-
-    pub fn set_task_pool_size(&mut self, task_pool_size: usize) {
-        self.task_pool_size = task_pool_size.max(1);
     }
 
     pub fn tasks(&self) -> &[TaskQueueRecord] {

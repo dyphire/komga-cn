@@ -62,17 +62,6 @@ pub fn require_admin(identity: &dyn IdentityService, headers: &HeaderMap) -> Opt
     }
 }
 
-pub fn require_file_download(
-    identity: &dyn IdentityService,
-    headers: &HeaderMap,
-) -> Option<Response> {
-    match resolved_auth_user(identity, headers) {
-        Some(user) if user_is_admin(&user) || user_has_role(&user, "FILE_DOWNLOAD") => None,
-        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
-        None => Some(StatusCode::UNAUTHORIZED.into_response()),
-    }
-}
-
 pub fn resolved_auth_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
     record_resolved_auth_user(identity.auth_token_user(headers.clone()))
 }

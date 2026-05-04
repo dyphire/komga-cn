@@ -49,19 +49,6 @@ pub fn decode_or_passthrough_sync_token(value: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KoboSyncDeltas {
-    pub new_entitlement: Vec<Value>,
-    pub deleted_entitlement: Vec<Value>,
-    pub new_tag: Vec<Value>,
-    pub deleted_tag: Vec<Value>,
-    pub new_book_metadata: Vec<Value>,
-    pub deleted_book_metadata: Vec<Value>,
-    pub new_reading_state: Vec<Value>,
-    pub deleted_reading_state: Vec<Value>,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KoboSyncBookSnapshot {
     pub id: String,

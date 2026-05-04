@@ -74,14 +74,6 @@ where
         Self { lifecycle }
     }
 
-    pub fn ensure_startup_ready(&self) -> Result<(), DiscoveryIndexError> {
-        if self.lifecycle.startup_recover()? == DiscoveryIndexStartupState::RequiresExplicitRebuild
-        {
-            self.lifecycle.reset_for_rebuild()?;
-        }
-        Ok(())
-    }
-
     pub fn rebuild_index(
         &self,
         docs: &[DiscoveryIndexDocument],

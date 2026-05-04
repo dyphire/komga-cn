@@ -74,10 +74,6 @@ pub fn request_context_path(headers: &HeaderMap) -> String {
     normalized.trim_end_matches('/').to_string()
 }
 
-pub fn request_host(headers: &HeaderMap) -> String {
-    request_host_with_port(headers, None)
-}
-
 fn request_host_with_port(headers: &HeaderMap, fallback_port: Option<u16>) -> String {
     let forwarded_host = headers
         .get("x-forwarded-host")

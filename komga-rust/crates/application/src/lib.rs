@@ -3,6 +3,5 @@ pub mod identity_access;
 pub mod library_catalog;
 pub mod media_assets;
 pub mod operational;
-pub mod platform_runtime;
 pub mod runtime_sse;
 pub mod task_processing;

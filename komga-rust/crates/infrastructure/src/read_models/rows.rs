@@ -13,11 +13,6 @@ impl LibraryRow {
             root: String::new(),
         }
     }
-
-    pub fn with_root(mut self, root: &str) -> Self {
-        self.root = root.to_string();
-        self
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,114 +64,6 @@ impl SeriesRow {
             url: format!("/library/{library_id}/{id}"),
         }
     }
-
-    pub fn with_url(mut self, url: &str) -> Self {
-        self.url = url.to_string();
-        self
-    }
-
-    pub fn with_last_modified(mut self, last_modified: &str) -> Self {
-        self.last_modified = last_modified.to_string();
-        self
-    }
-
-    pub fn with_file_last_modified(mut self, file_last_modified: &str) -> Self {
-        self.file_last_modified = file_last_modified.to_string();
-        self
-    }
-
-    pub fn with_labels<I, S>(mut self, labels: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.labels = labels
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
-    }
-
-    pub fn with_age_rating(mut self, age_rating: u16) -> Self {
-        self.age_rating = Some(age_rating);
-        self
-    }
-
-    pub fn with_genres<I, S>(mut self, genres: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.genres = genres
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
-    }
-
-    pub fn with_tags<I, S>(mut self, tags: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.tags = tags
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
-    }
-
-    pub fn with_language(mut self, language: &str) -> Self {
-        self.language = language.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_publisher(mut self, publisher: &str) -> Self {
-        self.publisher = publisher.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_release_date(mut self, release_date: &str) -> Self {
-        self.release_date = Some(release_date.to_string());
-        self
-    }
-
-    pub fn with_status(mut self, status: &str) -> Self {
-        self.status = status.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_complete(mut self, complete: bool) -> Self {
-        self.complete = complete;
-        self
-    }
-
-    pub fn with_read_status(mut self, read_status: &str) -> Self {
-        self.read_status = read_status.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_authors<I, S>(mut self, authors: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.authors = authors
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
-    }
-
-    pub fn with_deleted(mut self, deleted: bool) -> Self {
-        self.deleted = deleted;
-        self
-    }
-
-    pub fn with_oneshot(mut self, oneshot: bool) -> Self {
-        self.oneshot = oneshot;
-        self
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -212,28 +99,6 @@ impl ReadListRow {
             last_modified_date: "2026-01-01T00:00:00Z".to_string(),
         }
     }
-
-    pub fn with_summary(mut self, summary: &str) -> Self {
-        self.summary = summary.to_string();
-        self
-    }
-
-    pub fn with_ordered(mut self, ordered: bool) -> Self {
-        self.ordered = ordered;
-        self
-    }
-
-    pub fn with_book_ids<I, S>(mut self, book_ids: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.book_ids = book_ids
-            .into_iter()
-            .map(|it| it.as_ref().to_string())
-            .collect();
-        self
-    }
 }
 
 impl CollectionRow {
@@ -246,23 +111,6 @@ impl CollectionRow {
             created_date: "2026-01-01T00:00:00Z".to_string(),
             last_modified_date: "2026-01-01T00:00:00Z".to_string(),
         }
-    }
-
-    pub fn with_ordered(mut self, ordered: bool) -> Self {
-        self.ordered = ordered;
-        self
-    }
-
-    pub fn with_series_ids<I, S>(mut self, series_ids: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.series_ids = series_ids
-            .into_iter()
-            .map(|it| it.as_ref().to_string())
-            .collect();
-        self
     }
 }
 
@@ -317,27 +165,6 @@ impl ReadProgressRow {
             device_name: "Device 1".to_string(),
         }
     }
-
-    pub fn with_read_date(mut self, read_date: &str) -> Self {
-        self.read_date = read_date.to_string();
-        self
-    }
-
-    pub fn with_created(mut self, created: &str) -> Self {
-        self.created = created.to_string();
-        self
-    }
-
-    pub fn with_last_modified(mut self, last_modified: &str) -> Self {
-        self.last_modified = last_modified.to_string();
-        self
-    }
-
-    pub fn with_device(mut self, device_id: &str, device_name: &str) -> Self {
-        self.device_id = device_id.to_string();
-        self.device_name = device_name.to_string();
-        self
-    }
 }
 
 impl BookRow {
@@ -364,81 +191,5 @@ impl BookRow {
             read_status: String::new(),
             authors: vec![],
         }
-    }
-
-    pub fn with_url(mut self, url: &str) -> Self {
-        self.url = url.to_string();
-        self
-    }
-
-    pub fn with_last_modified(mut self, last_modified: &str) -> Self {
-        self.last_modified = last_modified.to_string();
-        self
-    }
-
-    pub fn with_size_bytes(mut self, size_bytes: u64) -> Self {
-        self.size_bytes = size_bytes;
-        self
-    }
-
-    pub fn with_media(mut self, status: &str, media_type: &str, pages_count: u32) -> Self {
-        self.media_status = status.to_string();
-        self.media_type = media_type.to_string();
-        self.media_pages_count = pages_count;
-        self
-    }
-
-    pub fn with_media_profile(mut self, media_profile: &str) -> Self {
-        self.media_profile = media_profile.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_release_date(mut self, release_date: &str) -> Self {
-        self.metadata_release_date = Some(release_date.to_string());
-        self
-    }
-
-    pub fn with_number_sort(mut self, number_sort: i32) -> Self {
-        self.number_sort = number_sort;
-        self
-    }
-
-    pub fn with_deleted(mut self, deleted: bool) -> Self {
-        self.deleted = deleted;
-        self
-    }
-
-    pub fn with_oneshot(mut self, oneshot: bool) -> Self {
-        self.oneshot = oneshot;
-        self
-    }
-
-    pub fn with_tags<I, S>(mut self, tags: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.tags = tags
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
-    }
-
-    pub fn with_read_status(mut self, read_status: &str) -> Self {
-        self.read_status = read_status.to_ascii_lowercase();
-        self
-    }
-
-    pub fn with_authors<I, S>(mut self, authors: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.authors = authors
-            .into_iter()
-            .map(|it| it.as_ref().to_ascii_lowercase())
-            .collect();
-        self
     }
 }

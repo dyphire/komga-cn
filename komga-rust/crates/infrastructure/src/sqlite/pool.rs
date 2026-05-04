@@ -304,10 +304,6 @@ impl SqliteTempPool {
         &self.pool
     }
 
-    pub fn persistence_context(&self) -> SqlitePersistenceContext {
-        SqlitePersistenceContext::new(self.pool.clone())
-    }
-
     pub fn db_path(&self) -> &Path {
         &self.db_path
     }
