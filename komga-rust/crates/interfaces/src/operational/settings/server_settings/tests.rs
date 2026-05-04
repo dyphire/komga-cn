@@ -16,7 +16,7 @@ use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
 };
 
-use crate::OperationalState;
+use crate::state::OperationalState;
 use crate::identity_access::auth::session_token_for_user_with_runtime_key;
 use crate::state::default_test_identity_service;
 use crate::state::{
