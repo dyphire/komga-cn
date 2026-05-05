@@ -4216,9 +4216,9 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rxing"
-version = "0.8.6"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc56bde1cf7f3c9cc908ef2670efede68bbad283acb6674b709aa3befdab451d"
+checksum = "a3aefd165a3981417d9b5b8557ee04aae5eb8acf1596804bd52fb1d4828edc45"
 dependencies = [
  "chrono",
  "chrono-tz",
