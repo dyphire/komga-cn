@@ -2,13 +2,6 @@ use super::*;
 use komga_infrastructure::sqlite::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-
-fn delete_runtime_sse_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 async fn enqueue_delete_book(scheduler: &mut TaskQueueScheduler, book_id: &str) {
     scheduler
@@ -311,7 +304,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
 
 #[tokio::test]
 async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
-    let _guard = delete_runtime_sse_lock().lock().await;
+    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-delete-book-sse-book-changed").await;
 
     let delete_dir = ctx.paths().config_dir.join("delete-book-sse");
@@ -347,7 +340,20 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
     );
     let book_changed = events
         .iter()
-        .find(|event| event.name == "BookChanged")
+        .find(|event| {
+            event.name == "BookChanged"
+                && event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
+                && event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some("series-1")
+                && event
+                    .payload
+                    .get("libraryId")
+                    .and_then(|value| value.as_str())
+                    == Some("library-1")
+        })
         .expect("delete-book runtime should emit BookChanged SSE");
 
     assert_eq!(
@@ -1067,7 +1073,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
 
 #[tokio::test]
 async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
-    let _guard = delete_runtime_sse_lock().lock().await;
+    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-delete-series-sse-series-changed").await;
 
     let series_dir = ctx.paths().config_dir.join("delete-series-sse/series-1");
@@ -1110,7 +1116,19 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
     );
     let series_changed = events
         .iter()
-        .find(|event| event.name == "SeriesChanged")
+        .find(|event| {
+            event.name == "SeriesChanged"
+                && event
+                    .payload
+                    .get("seriesId")
+                    .and_then(|value| value.as_str())
+                    == Some("series-1")
+                && event
+                    .payload
+                    .get("libraryId")
+                    .and_then(|value| value.as_str())
+                    == Some("library-1")
+        })
         .expect("delete-series runtime should emit SeriesChanged SSE");
 
     assert_eq!(
