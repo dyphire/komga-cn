@@ -1,5 +1,4 @@
-use axum::{Extension, Router};
-use komga_infrastructure::database_handle::DatabaseHandle;
+use axum::Router;
 use komga_infrastructure::search::index_lifecycle::{
     SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
@@ -14,7 +13,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::composition::http_state::compose_http_runtime;
-use crate::runtime::background_workers::{prepare_task_queue, spawn_runtime_workers};
+use crate::runtime::{StartedTaskRuntime, TaskRuntimeMode};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::WriterKind;
 
@@ -72,32 +71,22 @@ pub async fn build_router_with_config(
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> Router {
-    let background = prepare_task_queue(config, None).await;
-    let worker_runtime_guard = spawn_runtime_workers(
-        background.task_queue.clone(),
-        background.task_execution_pool.clone(),
-        config.clone(),
-        background.task_wakeup.clone(),
-        None,
+    let task_runtime = StartedTaskRuntime::start(
+        config,
+        TaskRuntimeMode::WorkersEnabled {
+            startup_search_task: None,
+            shutdown_rx: None,
+        },
     )
-    .await;
+    .await
+    .expect("task runtime should start");
+    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
     let router = finalize_router_startup(
-        compose_http_runtime(
-            config,
-            DatabaseHandle::file_backed(config.database_file.clone())
-                .await
-                .expect("database handle should initialize"),
-            DatabaseHandle::file_backed(config.tasks_db_file.clone())
-                .await
-                .expect("tasks database handle should initialize"),
-            background,
-            None,
-            startup_timing.clone(),
-        ),
+        compose_http_runtime(config, runtime_parts, None, startup_timing.clone()),
         startup_timing,
         startup_started_at,
     );
-    router.layer(Extension(worker_runtime_guard))
+    router_lifecycle.attach(router)
 }
 
 pub async fn build_router_without_runtime_workers(
@@ -105,23 +94,21 @@ pub async fn build_router_without_runtime_workers(
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> Router {
-    let background = prepare_task_queue(config, None).await;
-    finalize_router_startup(
-        compose_http_runtime(
-            config,
-            DatabaseHandle::file_backed(config.database_file.clone())
-                .await
-                .expect("database handle should initialize"),
-            DatabaseHandle::file_backed(config.tasks_db_file.clone())
-                .await
-                .expect("tasks database handle should initialize"),
-            background,
-            None,
-            startup_timing.clone(),
-        ),
+    let task_runtime = StartedTaskRuntime::start(
+        config,
+        TaskRuntimeMode::WorkersDisabled {
+            startup_search_task: None,
+        },
+    )
+    .await
+    .expect("task runtime should start");
+    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
+    let router = finalize_router_startup(
+        compose_http_runtime(config, runtime_parts, None, startup_timing.clone()),
         startup_timing,
         startup_started_at,
-    )
+    );
+    router_lifecycle.attach(router)
 }
 
 pub async fn serve_with_config(
@@ -136,33 +123,26 @@ pub async fn serve_with_config(
     let startup_search_task = startup_search_plan.startup_task;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let background = prepare_task_queue(&config, startup_search_task).await;
-    let worker_shutdown_rx = shutdown_rx.clone();
-    let worker_runtime_guard = spawn_runtime_workers(
-        background.task_queue.clone(),
-        background.task_execution_pool.clone(),
-        config.clone(),
-        background.task_wakeup.clone(),
-        Some(worker_shutdown_rx),
+    let task_runtime = StartedTaskRuntime::start(
+        &config,
+        TaskRuntimeMode::WorkersEnabled {
+            startup_search_task,
+            shutdown_rx: Some(shutdown_rx.clone()),
+        },
     )
-    .await;
+    .await?;
+    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
     let router = finalize_router_startup(
         compose_http_runtime(
             &config,
-            DatabaseHandle::file_backed(config.database_file.clone())
-                .await
-                .expect("database handle should initialize"),
-            DatabaseHandle::file_backed(config.tasks_db_file.clone())
-                .await
-                .expect("tasks database handle should initialize"),
-            background,
+            runtime_parts,
             Some(shutdown_tx.clone()),
             startup_timing.clone(),
         ),
         startup_timing,
         startup_started_at,
-    )
-    .layer(Extension(worker_runtime_guard));
+    );
+    let router = router_lifecycle.attach(router);
 
     serve_router_with_shutdown_timeout(
         listener,

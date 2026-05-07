@@ -3,7 +3,6 @@ use super::*;
 use std::collections::BTreeMap;
 
 use crate::build_metadata::current_build_metadata;
-use crate::runtime::background_workers::{SharedTaskQueue, TaskQueueWakeSignal};
 use async_trait::async_trait;
 use komga_application::library_catalog::{
     CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
@@ -13,11 +12,9 @@ use komga_application::library_catalog::{
 use komga_application::operational::PersistedServerSettings;
 use sqlx::SqlitePool;
 
-use komga_application::task_processing::TaskEngine;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use komga_infrastructure::library_catalog::SqliteLibraryCatalogAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_infrastructure::task_queue::{RuntimeTaskEngine, TaskExecutionPoolHandle};
 
 #[derive(Clone)]
 pub(super) struct SqliteLibraryCatalogService {
@@ -108,18 +105,6 @@ impl LibraryCatalogService for SqliteLibraryCatalogService {
         let service = LibraryTaskService::new(self.adapter.clone());
         service.empty_trash(&library_id).await
     }
-}
-
-pub(super) fn create_task_engine(
-    task_queue: SharedTaskQueue,
-    task_wakeup: TaskQueueWakeSignal,
-    task_execution_pool: TaskExecutionPoolHandle,
-) -> Box<dyn TaskEngine> {
-    Box::new(RuntimeTaskEngine::new(
-        task_queue,
-        task_execution_pool,
-        task_wakeup,
-    ))
 }
 
 #[derive(Clone)]
@@ -234,14 +219,15 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use komga_application::task_processing::TaskQueueRecord;
+    use komga_application::task_processing::{TaskEngine, TaskQueueRecord};
     use komga_infrastructure::database_handle::DatabaseHandle;
     use komga_infrastructure::sqlite::{
         connect_task_pool, connect_task_write_pool, default_read_max_connections,
     };
-    use komga_infrastructure::task_queue::TaskRuntimeContext;
     use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
+    use komga_infrastructure::task_queue::{
+        RuntimeTaskEngine, TaskExecutionPoolHandle, TaskRuntimeContext,
+    };
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -310,8 +296,11 @@ mod tests {
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let engine =
-                create_task_engine(task_queue.clone(), task_wakeup.clone(), task_execution_pool);
+            let engine: Box<dyn TaskEngine> = Box::new(RuntimeTaskEngine::new(
+                task_queue.clone(),
+                task_execution_pool,
+                task_wakeup.clone(),
+            ));
 
             engine
                 .enqueue_task_records(vec![scan_library_task()], urgent)
@@ -340,8 +329,11 @@ mod tests {
             TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
         ));
         let task_wakeup = Arc::new(tokio::sync::Notify::new());
-        let engine =
-            create_task_engine(task_queue, task_wakeup.clone(), task_execution_pool.clone());
+        let engine: Box<dyn TaskEngine> = Box::new(RuntimeTaskEngine::new(
+            task_queue,
+            task_execution_pool.clone(),
+            task_wakeup.clone(),
+        ));
 
         engine
             .apply_task_pool_size(3)

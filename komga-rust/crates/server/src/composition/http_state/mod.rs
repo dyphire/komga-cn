@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections, readlists,
     series as infrastructure_detail_series,
@@ -41,7 +40,7 @@ use komga_interfaces::state::{
 use sha2::Digest;
 use tokio::sync::watch;
 
-use crate::runtime::background_workers::RuntimeBackgroundState;
+use crate::runtime::HttpRuntimeParts;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 
@@ -55,12 +54,15 @@ mod http_state_runtime_identity;
 
 pub fn compose_http_runtime(
     config: &RuntimeConfig,
-    db: DatabaseHandle,
-    tasks_db: DatabaseHandle,
-    background: RuntimeBackgroundState,
+    runtime: HttpRuntimeParts,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> HttpAppState {
+    let HttpRuntimeParts {
+        main_db: db,
+        tasks_db,
+        task_engine,
+    } = runtime;
     let runtime_identity_service =
         http_state_runtime_identity::compose_runtime_identity_service(db.clone());
     let operational_runtime_service: Box<dyn OperationalRuntimeService> = Box::new(
@@ -135,11 +137,7 @@ pub fn compose_http_runtime(
                 db.write_pool().clone(),
             ),
         ),
-        task_queue: http_state_operational_state::create_task_engine(
-            background.task_queue,
-            background.task_wakeup,
-            background.task_execution_pool,
-        ),
+        task_queue: task_engine,
         server_settings: Box::new(
             http_state_operational_state::RuntimeServerSettingsService::new(
                 config.database_file.as_path(),

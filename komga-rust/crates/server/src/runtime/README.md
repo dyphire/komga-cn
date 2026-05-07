@@ -1,11 +1,11 @@
 # server::runtime
 
 This subtree owns the thin runtime wrappers that remain in `komga-server`.
-It exists so `server` can expose bootstrap and background-worker entry points without re-owning the concrete worker implementation.
+It exists so `server` can expose bootstrap and task-runtime lifecycle entry points without re-owning the concrete worker implementation.
 
 ## Files in this subtree
 
-- `background_workers.rs`: forwards task-queue preparation and worker spawning into `komga_infrastructure::task_queue`, while keeping `RuntimeConfig` to `TaskRuntimeContext` wiring at the server boundary.
+- `background_workers.rs`: owns the `StartedTaskRuntime` facade that turns `RuntimeConfig` into HTTP runtime parts plus a router-attached lifecycle guard.
 - `startup_scan.rs`: forwards startup library-scan bootstrap into the infrastructure task queue runtime.
 
 ## Keep outside this subtree
