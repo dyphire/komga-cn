@@ -38,7 +38,7 @@ pub struct PersistedWebLinkEntry {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct SeriesFilterCriteria {
+pub(crate) struct SeriesFilterCriteria {
     pub library_ids: Option<Vec<String>>,
     pub collection_ids: Option<Vec<String>>,
     pub titles: Option<Vec<String>>,
@@ -105,7 +105,7 @@ pub struct SeriesFilterCriteria {
 }
 
 #[derive(Clone)]
-pub struct PersistedSeriesBrowseQuery {
+pub(crate) struct PersistedSeriesBrowseQuery {
     pub filters: SeriesFilterCriteria,
     pub sharing_labels_contains_groups: Vec<Vec<String>>,
     pub search: Option<String>,
@@ -151,7 +151,7 @@ impl DerefMut for PersistedSeriesBrowseQuery {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PersistedSeriesSortMode {
+pub(crate) enum PersistedSeriesSortMode {
     TitleAsc,
     TitleDesc,
     NameAsc,
@@ -211,7 +211,7 @@ pub struct PersistedSeriesSummary {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct BooksFilterCriteria {
+pub(crate) struct BooksFilterCriteria {
     pub library_ids: Option<Vec<String>>,
     pub series_ids: Option<Vec<String>>,
     pub series_ids_excluded: Option<Vec<String>>,
@@ -274,7 +274,7 @@ pub struct BooksFilterCriteria {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PersistedBooksSortMode {
+pub(crate) enum PersistedBooksSortMode {
     TitleAsc,
     CreatedDateDesc,
     LastModifiedDateDesc,
@@ -290,7 +290,7 @@ pub enum PersistedBooksSortMode {
 }
 
 #[derive(Clone)]
-pub struct PersistedBooksBrowseQuery {
+pub(crate) struct PersistedBooksBrowseQuery {
     pub filters: BooksFilterCriteria,
     pub search: Option<String>,
     pub page: usize,

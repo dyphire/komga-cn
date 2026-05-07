@@ -3,7 +3,7 @@ use crate::state::PersistedDiscoveryListDataSource;
 use super::models::SeriesFilterCriteria;
 use super::*;
 
-pub async fn load_persisted_alphabetical_groups(
+pub(crate) async fn load_persisted_alphabetical_groups(
     backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
     filters: SeriesFilterCriteria,

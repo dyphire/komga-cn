@@ -18,11 +18,14 @@ use super::helpers::{
 use crate::state::HttpAppState;
 
 pub mod books;
+mod browse_service;
 pub mod detail;
 mod facets;
 pub mod persisted;
 pub mod series;
 mod series_routes;
+
+pub use browse_service::compose_persisted_discovery_list_service;
 
 pub(super) async fn authors_names_route(
     State(app): State<Arc<HttpAppState>>,

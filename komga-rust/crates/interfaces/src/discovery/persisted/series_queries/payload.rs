@@ -3,7 +3,7 @@ use super::*;
 
 use crate::helpers::{normalized_date_time, normalized_file_last_modified};
 
-pub fn series_page_payload(
+pub(crate) fn series_page_payload(
     page: PageEnvelope<PersistedSeriesSummary>,
     paged: bool,
     sorted: bool,

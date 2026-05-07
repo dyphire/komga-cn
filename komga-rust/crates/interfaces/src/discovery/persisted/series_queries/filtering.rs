@@ -68,7 +68,7 @@ fn random_sort_keys(series: &[PersistedSeriesSummary]) -> HashMap<String, u64> {
         .collect()
 }
 
-pub async fn load_persisted_series_page(
+pub(crate) async fn load_persisted_series_page(
     backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,

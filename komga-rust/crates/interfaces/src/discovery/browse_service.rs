@@ -1,7 +1,22 @@
+use crate::discovery::persisted::books_queries::load_persisted_books_page;
+use crate::discovery::persisted::models::{
+    BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery, PersistedBooksSortMode,
+    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
+    SeriesFilterCriteria,
+};
+use crate::discovery::persisted::series_queries::{
+    load_persisted_alphabetical_groups, load_persisted_series_page,
+};
+use crate::discovery_auth::context::{
+    DiscoveryQueryContext as InterfacesDiscoveryQueryContext, QueryRestrictions,
+};
+use crate::discovery_auth::principal::AgeRestrictionKind as InterfacesAgeRestrictionKind;
+use crate::state::PersistedDiscoveryListDataSource;
 use async_trait::async_trait;
 use komga_application::discovery::{
-    BookReadModel, BookTagScope, BooksBrowseQuery, BooksFeedQuery, DiscoveryListService,
-    SeriesBrowseQuery, SeriesReadModel,
+    BookReadModel, BookTagScope, BooksBrowseQuery, BooksBrowseRequest, BooksFeedQuery,
+    DiscoveryBrowseService, DiscoveryListService, LatestBooksRequest, SeriesBrowseQuery,
+    SeriesBrowseRequest, SeriesReadModel,
 };
 use komga_domain::discovery::PageEnvelope;
 use komga_domain::discovery::{
@@ -10,28 +25,32 @@ use komga_domain::discovery::{
     NumberCondition, ReadStatusCondition, SeriesCondition, SeriesFilter, SeriesSort,
     SeriesStatusCondition, SeriesValueCondition, StringCondition,
 };
-use komga_interfaces::discovery::persisted::books_queries::load_persisted_books_page;
-use komga_interfaces::discovery::persisted::models::{
-    BooksFilterCriteria, PersistedBookTagsScope, PersistedBooksBrowseQuery, PersistedBooksSortMode,
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
-    SeriesFilterCriteria,
-};
-use komga_interfaces::discovery::persisted::series_queries::{
-    load_persisted_alphabetical_groups, load_persisted_series_page,
-};
-use komga_interfaces::discovery_auth::context::{
-    DiscoveryQueryContext as InterfacesDiscoveryQueryContext, QueryRestrictions,
-};
-use komga_interfaces::discovery_auth::principal::AgeRestrictionKind as InterfacesAgeRestrictionKind;
-use komga_interfaces::state::PersistedDiscoveryListDataSource;
 
-pub struct PersistedDiscoveryListAdapter {
+pub fn compose_persisted_discovery_list_service(
+    persisted: Box<dyn PersistedDiscoveryListDataSource>,
+) -> Box<dyn DiscoveryListService> {
+    Box::new(PersistedDiscoveryListFacade::new(persisted))
+}
+
+struct PersistedDiscoveryBrowseService {
     persisted: Box<dyn PersistedDiscoveryListDataSource>,
 }
 
-impl PersistedDiscoveryListAdapter {
-    pub fn new(persisted: Box<dyn PersistedDiscoveryListDataSource>) -> Self {
+impl PersistedDiscoveryBrowseService {
+    fn new(persisted: Box<dyn PersistedDiscoveryListDataSource>) -> Self {
         Self { persisted }
+    }
+}
+
+struct PersistedDiscoveryListFacade {
+    browse: PersistedDiscoveryBrowseService,
+}
+
+impl PersistedDiscoveryListFacade {
+    fn new(persisted: Box<dyn PersistedDiscoveryListDataSource>) -> Self {
+        Self {
+            browse: PersistedDiscoveryBrowseService::new(persisted),
+        }
     }
 }
 
@@ -628,22 +647,22 @@ fn apply_book_value_condition(condition: &BookValueCondition, criteria: &mut Boo
 }
 
 #[async_trait]
-impl DiscoveryListService for PersistedDiscoveryListAdapter {
+impl DiscoveryBrowseService for PersistedDiscoveryBrowseService {
     async fn list_series(
         &self,
         context: &DiscoveryQueryContext,
-        query: SeriesBrowseQuery,
+        request: SeriesBrowseRequest,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let interfaces_context = to_interfaces_context(context);
-        let sort_modes = series_sort_to_persisted(&query.sort);
-        let criteria = series_filter_to_criteria(&query.filter);
+        let sort_modes = series_sort_to_persisted(&request.sort);
+        let criteria = series_filter_to_criteria(&request.filter);
 
         let persisted_query = PersistedSeriesBrowseQuery::from_filters(
             criteria,
-            query.search,
-            query.page,
-            query.size,
-            query.unpaged,
+            request.search,
+            request.page.page,
+            request.page.size,
+            request.page.unpaged,
             sort_modes,
         );
 
@@ -668,18 +687,18 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
     async fn list_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: BooksBrowseQuery,
+        request: BooksBrowseRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let interfaces_context = to_interfaces_context(context);
-        let sort_modes = book_sort_to_persisted(&query.sort);
-        let criteria = book_filter_to_criteria(&query.filter);
+        let sort_modes = book_sort_to_persisted(&request.sort);
+        let criteria = book_filter_to_criteria(&request.filter);
 
         let persisted_query = PersistedBooksBrowseQuery::from_filters(
             criteria,
-            query.search,
-            query.page,
-            query.size,
-            query.unpaged,
+            request.search,
+            request.page.page,
+            request.page.size,
+            request.page.unpaged,
             sort_modes,
         );
 
@@ -688,28 +707,55 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
             .map_err(DiscoveryError::Persistence)
     }
 
-    async fn list_books_latest(
+    async fn list_latest_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: BooksFeedQuery,
+        request: LatestBooksRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let interfaces_context = to_interfaces_context(context);
 
         let persisted_query = PersistedBooksBrowseQuery::from_filters(
             BooksFilterCriteria {
-                library_ids: query.library_ids,
+                library_ids: request.library_ids,
                 ..BooksFilterCriteria::default()
             },
             None,
-            query.page,
-            query.size,
-            query.unpaged,
+            request.page.page,
+            request.page.size,
+            request.page.unpaged,
             vec![PersistedBooksSortMode::LastModifiedDateDesc],
         );
 
         load_persisted_books_page(&*self.persisted, &interfaces_context, persisted_query)
             .await
             .map_err(DiscoveryError::Persistence)
+    }
+}
+
+#[async_trait]
+impl DiscoveryListService for PersistedDiscoveryListFacade {
+    async fn list_series(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: SeriesBrowseQuery,
+    ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
+        self.browse.list_series(context, query.into()).await
+    }
+
+    async fn list_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksBrowseQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        self.browse.list_books(context, query.into()).await
+    }
+
+    async fn list_books_latest(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksFeedQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        self.browse.list_latest_books(context, query.into()).await
     }
 
     async fn list_series_alphabetical_groups(
@@ -721,9 +767,14 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         let interfaces_context = to_interfaces_context(context);
         let criteria = series_filter_to_criteria(&filter);
 
-        load_persisted_alphabetical_groups(&*self.persisted, &interfaces_context, criteria, search)
-            .await
-            .map_err(DiscoveryError::Persistence)
+        load_persisted_alphabetical_groups(
+            &*self.browse.persisted,
+            &interfaces_context,
+            criteria,
+            search,
+        )
+        .await
+        .map_err(DiscoveryError::Persistence)
     }
 
     async fn list_genres(
@@ -732,7 +783,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_genres(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -744,7 +796,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_tags(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -756,7 +809,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_languages(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -768,7 +822,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_publishers(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -780,7 +835,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_age_ratings(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -792,7 +848,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_sharing_labels(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -804,7 +861,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_series_tags(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -816,7 +874,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
         library_ids: Option<Vec<String>>,
         collection_id: Option<String>,
     ) -> Result<Vec<String>, DiscoveryError> {
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_series_release_dates(library_ids, collection_id)
             .await
             .map_err(DiscoveryError::Persistence)
@@ -834,7 +893,8 @@ impl DiscoveryListService for PersistedDiscoveryListAdapter {
             BookTagScope::Libraries(ids) => PersistedBookTagsScope::Libraries(ids),
             BookTagScope::ReadList(id) => PersistedBookTagsScope::ReadList(id),
         });
-        self.persisted
+        self.browse
+            .persisted
             .load_persisted_book_tags(persisted_scope, library_ids)
             .await
             .map_err(DiscoveryError::Persistence)

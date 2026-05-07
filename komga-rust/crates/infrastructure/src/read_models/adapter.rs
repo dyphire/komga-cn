@@ -3,8 +3,9 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use komga_application::discovery::{
-    BookReadModel, BookTagScope, BooksBrowseQuery, BooksFeedQuery, DiscoveryListService,
-    SeriesBrowseQuery, SeriesReadModel,
+    BookReadModel, BookTagScope, BooksBrowseQuery, BooksBrowseRequest, BooksFeedQuery,
+    DiscoveryBrowseService, DiscoveryListService, LatestBooksRequest, SeriesBrowseQuery,
+    SeriesBrowseRequest, SeriesReadModel,
 };
 use komga_domain::discovery::{
     BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesFilter,
@@ -456,34 +457,36 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
 }
 
 #[async_trait]
-impl DiscoveryListService for SqliteDiscoveryAdapter {
+impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
     async fn list_series(
         &self,
         context: &DiscoveryQueryContext,
-        query: SeriesBrowseQuery,
+        request: SeriesBrowseRequest,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
+        let query = SeriesBrowseQuery::from(request);
         queries::series::list_series_sqlx(pool, context, &query).await
     }
 
     async fn list_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: BooksBrowseQuery,
+        request: BooksBrowseRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
+        let query = BooksBrowseQuery::from(request);
         queries::books_media::list_books_sqlx(pool, context, &query).await
     }
 
-    async fn list_books_latest(
+    async fn list_latest_books(
         &self,
         context: &DiscoveryQueryContext,
-        query: BooksFeedQuery,
+        request: LatestBooksRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
         let pool = self.ready_pool().await?;
         let feed_query = BooksBrowseQuery {
             filter: BookFilter {
-                condition: query.library_ids.map(|ids| {
+                condition: request.library_ids.map(|ids| {
                     use komga_domain::common_ids::LibraryId;
                     use komga_domain::discovery::{
                         BookCondition, BookValueCondition, CompositeBookCondition, FilterOperator,
@@ -513,11 +516,38 @@ impl DiscoveryListService for SqliteDiscoveryAdapter {
             },
             sort: vec![],
             search: None,
-            page: query.page,
-            size: query.size,
-            unpaged: query.unpaged,
+            page: request.page.page,
+            size: request.page.size,
+            unpaged: request.page.unpaged,
         };
         queries::books_media::list_books_latest_sqlx(pool, context, &feed_query).await
+    }
+}
+
+#[async_trait]
+impl DiscoveryListService for SqliteDiscoveryAdapter {
+    async fn list_series(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: SeriesBrowseQuery,
+    ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
+        DiscoveryBrowseService::list_series(self, context, query.into()).await
+    }
+
+    async fn list_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksBrowseQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        DiscoveryBrowseService::list_books(self, context, query.into()).await
+    }
+
+    async fn list_books_latest(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: BooksFeedQuery,
+    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+        DiscoveryBrowseService::list_latest_books(self, context, query.into()).await
     }
 
     async fn list_series_alphabetical_groups(

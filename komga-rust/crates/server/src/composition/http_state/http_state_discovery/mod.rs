@@ -12,7 +12,6 @@ use komga_interfaces::state::{
     DiscoveryLibraryMappingService, DiscoveryReadlistSearchService,
 };
 
-mod browse_access;
 mod detail_access;
 mod index_dirs;
 mod persisted_access;
@@ -30,7 +29,7 @@ pub(super) fn compose_discovery_list_service(
 ) -> Box<dyn DiscoveryListService> {
     let persisted =
         persisted_access::compose_persisted_discovery_list_data_source(db, lucene_data_directory);
-    Box::new(browse_access::PersistedDiscoveryListAdapter::new(persisted))
+    komga_interfaces::discovery::compose_persisted_discovery_list_service(persisted)
 }
 
 pub(super) fn compose_discovery_author_service(

@@ -17,7 +17,7 @@ pub async fn load_book_poster_summaries(
     backend.load_book_poster_summaries().await
 }
 
-pub async fn load_persisted_books_page(
+pub(crate) async fn load_persisted_books_page(
     backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,

@@ -7,7 +7,8 @@ mod series;
 
 pub use books::{BookDetailQuery, BookReadlistsQuery, BookSiblingQuery};
 pub use browse::{
-    BookTagScope, BooksBrowseQuery, BooksFeedQuery, DiscoveryListService, SeriesBrowseQuery,
+    BookTagScope, BooksBrowseQuery, BooksBrowseRequest, BooksFeedQuery, DiscoveryBrowseService,
+    DiscoveryListService, LatestBooksRequest, PageRequest, SeriesBrowseQuery, SeriesBrowseRequest,
 };
 pub use index_maintenance::{
     DiscoveryIndexDocument, DiscoveryIndexEntityType, DiscoveryIndexError, DiscoveryIndexEvent,
