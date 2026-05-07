@@ -1,6 +1,3 @@
-use std::mem;
-use std::sync::Mutex;
-
 use async_trait::async_trait;
 use komga_application::discovery::{
     BookReadModel, BookTagScope, BooksBrowseQuery, BooksBrowseRequest, BooksFeedQuery,
@@ -11,448 +8,58 @@ use komga_domain::discovery::{
     BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesFilter,
     UnsupportedDiscoverySemantics,
 };
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::SqlitePool;
 
 use super::queries;
 use super::rows::{BookRow, CollectionRow, LibraryRow, ReadListRow, ReadProgressRow, SeriesRow};
-use crate::sqlite::setup;
-
-#[derive(Default)]
-struct PendingRows {
-    libraries: Vec<LibraryRow>,
-    series: Vec<SeriesRow>,
-    collections: Vec<CollectionRow>,
-    read_lists: Vec<ReadListRow>,
-    books: Vec<BookRow>,
-    read_progress: Vec<ReadProgressRow>,
-}
+use crate::sqlite::{fixtures, setup};
 
 pub struct SqliteDiscoveryAdapter {
-    pending: Mutex<PendingRows>,
-    pool: Mutex<Option<SqlitePool>>,
-}
-
-impl Default for SqliteDiscoveryAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
+    pool: SqlitePool,
 }
 
 impl SqliteDiscoveryAdapter {
-    pub fn new() -> Self {
-        Self {
-            pending: Mutex::new(PendingRows::default()),
-            pool: Mutex::new(None),
-        }
-    }
-
-    pub fn insert_library(&mut self, row: LibraryRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .libraries
-            .push(row);
-    }
-
-    pub fn insert_series(&mut self, row: SeriesRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .series
-            .push(row);
-    }
-
-    pub fn insert_collection(&mut self, row: CollectionRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .collections
-            .push(row);
-    }
-
-    pub fn insert_read_list(&mut self, row: ReadListRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .read_lists
-            .push(row);
-    }
-
-    pub fn insert_book(&mut self, row: BookRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .books
-            .push(row);
-    }
-
-    pub fn insert_read_progress(&mut self, row: ReadProgressRow) {
-        self.pending
-            .lock()
-            .expect("pending rows lock should not be poisoned")
-            .read_progress
-            .push(row);
-    }
-
-    async fn ready_pool(&self) -> Result<SqlitePool, DiscoveryError> {
-        self.ensure_pool_initialized().await?;
-        self.flush_pending_rows().await?;
-
-        let pool_guard = self
-            .pool
-            .lock()
-            .expect("discovery pool lock should not be poisoned");
-        Ok(pool_guard
-            .as_ref()
-            .expect("pool should be initialized")
-            .clone())
-    }
-
-    async fn ensure_pool_initialized(&self) -> Result<(), DiscoveryError> {
-        let needs_init = self
-            .pool
-            .lock()
-            .expect("discovery pool lock should not be poisoned")
-            .is_none();
-        if !needs_init {
-            return Ok(());
-        }
-
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+    pub async fn new() -> Result<Self, DiscoveryError> {
+        let pool = setup::open_in_memory_database()
             .await
             .map_err(map_sqlx_error)?;
-        setup::bootstrap_read_model_pool(&pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        let mut pool_guard = self
-            .pool
-            .lock()
-            .expect("discovery pool lock should not be poisoned");
-        if pool_guard.is_none() {
-            *pool_guard = Some(pool);
-        }
-        Ok(())
+        Ok(Self { pool })
     }
 
-    async fn flush_pending_rows(&self) -> Result<(), DiscoveryError> {
-        let pending = {
-            let mut guard = self
-                .pending
-                .lock()
-                .expect("pending rows lock should not be poisoned");
-            mem::take(&mut *guard)
-        };
-
-        if pending.libraries.is_empty()
-            && pending.series.is_empty()
-            && pending.collections.is_empty()
-            && pending.read_lists.is_empty()
-            && pending.books.is_empty()
-            && pending.read_progress.is_empty()
-        {
-            return Ok(());
-        }
-
-        let pool = {
-            let pool_guard = self
-                .pool
-                .lock()
-                .expect("discovery pool lock should not be poisoned");
-            pool_guard
-                .as_ref()
-                .expect("pool should be initialized before flush")
-                .clone()
-        };
-
-        for row in pending.libraries {
-            sqlx::query(
-                r#"INSERT INTO libraries (id, name, root)
-VALUES (?1, ?2, ?3)"#,
-            )
-            .bind(row.id)
-            .bind(row.name)
-            .bind(row.root)
-            .execute(&pool)
+    pub async fn insert_library(&self, row: LibraryRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_library(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
-        }
+            .map_err(map_sqlx_error)
+    }
 
-        for row in pending.series {
-            let SeriesRow {
-                id,
-                library_id,
-                title,
-                labels,
-                genres,
-                tags,
-                language,
-                publisher,
-                age_rating,
-                release_date,
-                status,
-                complete,
-                read_status,
-                authors,
-                deleted,
-                oneshot,
-                created,
-                last_modified,
-                file_last_modified,
-                url,
-            } = row;
-
-            sqlx::query(
-                r#"INSERT INTO series (id, library_id, title, age_rating, language, publisher,
-   release_date, status, complete, read_status, deleted, oneshot, created, last_modified,
-   file_last_modified, url)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"#,
-            )
-            .bind(&id)
-            .bind(&library_id)
-            .bind(&title)
-            .bind(age_rating)
-            .bind(&language)
-            .bind(&publisher)
-            .bind(release_date)
-            .bind(&status)
-            .bind(complete)
-            .bind(&read_status)
-            .bind(deleted)
-            .bind(oneshot)
-            .bind(&created)
-            .bind(&last_modified)
-            .bind(&file_last_modified)
-            .bind(&url)
-            .execute(&pool)
+    pub async fn insert_series(&self, row: SeriesRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_series(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
+            .map_err(map_sqlx_error)
+    }
 
-            for label in labels {
-                sqlx::query(
-                    r#"INSERT INTO series_labels (series_id, label)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(label)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-
-            for genre in genres {
-                sqlx::query(
-                    r#"INSERT INTO series_genres (series_id, genre)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(genre)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-
-            for tag in tags {
-                sqlx::query(
-                    r#"INSERT INTO series_tags (series_id, tag)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(tag)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-
-            for author in authors {
-                sqlx::query(
-                    r#"INSERT INTO series_authors (series_id, author)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(author)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-        }
-
-        for row in pending.collections {
-            let CollectionRow {
-                id,
-                name,
-                ordered,
-                series_ids,
-                created_date,
-                last_modified_date,
-            } = row;
-
-            sqlx::query(
-                r#"INSERT INTO collections (id, name, ordered, created_date, last_modified_date)
-VALUES (?1, ?2, ?3, ?4, ?5)"#,
-            )
-            .bind(&id)
-            .bind(name)
-            .bind(ordered)
-            .bind(created_date)
-            .bind(last_modified_date)
-            .execute(&pool)
+    pub async fn insert_collection(&self, row: CollectionRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_collection(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
+            .map_err(map_sqlx_error)
+    }
 
-            for (index, series_id) in series_ids.iter().enumerate() {
-                sqlx::query(
-                    r#"INSERT INTO collection_series (collection_id, series_id, position)
-VALUES (?1, ?2, ?3)"#,
-                )
-                .bind(&id)
-                .bind(series_id)
-                .bind(index as i64)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-        }
-
-        for row in pending.read_lists {
-            let ReadListRow {
-                id,
-                name,
-                summary,
-                ordered,
-                book_ids,
-                created_date,
-                last_modified_date,
-            } = row;
-
-            sqlx::query(
-                r#"INSERT INTO readlists (id, name, summary, ordered, created_date, last_modified_date)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6)"#,
-            )
-            .bind(&id)
-            .bind(name)
-            .bind(summary)
-            .bind(ordered)
-            .bind(created_date)
-            .bind(last_modified_date)
-            .execute(&pool)
+    pub async fn insert_read_list(&self, row: ReadListRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_read_list(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
+            .map_err(map_sqlx_error)
+    }
 
-            for (index, book_id) in book_ids.iter().enumerate() {
-                sqlx::query(
-                    r#"INSERT INTO readlist_books (readlist_id, book_id, position)
-VALUES (?1, ?2, ?3)"#,
-                )
-                .bind(&id)
-                .bind(book_id)
-                .bind(index as i64)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-        }
-
-        for row in pending.books {
-            let BookRow {
-                id,
-                series_id,
-                library_id,
-                title,
-                url,
-                created,
-                last_modified,
-                file_last_modified,
-                size_bytes,
-                media_status,
-                media_profile,
-                media_type,
-                media_pages_count,
-                metadata_release_date,
-                number_sort,
-                deleted,
-                oneshot,
-                tags,
-                read_status,
-                authors,
-            } = row;
-
-            sqlx::query(
-                r#"INSERT INTO books (id, series_id, library_id, title, url, created, last_modified,
-   file_last_modified, size_bytes, media_status, media_profile, media_type,
-   media_pages_count, metadata_release_date, number_sort, read_status, deleted, oneshot)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"#,
-            )
-            .bind(&id)
-            .bind(&series_id)
-            .bind(&library_id)
-            .bind(&title)
-            .bind(&url)
-            .bind(&created)
-            .bind(&last_modified)
-            .bind(&file_last_modified)
-            .bind(size_bytes as i64)
-            .bind(&media_status)
-            .bind(&media_profile)
-            .bind(&media_type)
-            .bind(media_pages_count as i64)
-            .bind(metadata_release_date)
-            .bind(number_sort)
-            .bind(&read_status)
-            .bind(deleted)
-            .bind(oneshot)
-            .execute(&pool)
+    pub async fn insert_book(&self, row: BookRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_book(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
+            .map_err(map_sqlx_error)
+    }
 
-            for tag in tags {
-                sqlx::query(
-                    r#"INSERT INTO book_tags (book_id, tag)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(tag)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-
-            for author in authors {
-                sqlx::query(
-                    r#"INSERT INTO book_authors (book_id, author)
-VALUES (?1, ?2)"#,
-                )
-                .bind(&id)
-                .bind(author)
-                .execute(&pool)
-                .await
-                .map_err(map_sqlx_error)?;
-            }
-        }
-
-        for row in pending.read_progress {
-            sqlx::query(
-                r#"INSERT INTO read_progress (book_id, user_id, page, completed, read_date, created,
-   last_modified, device_id, device_name)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
-            )
-            .bind(row.book_id)
-            .bind(row.user_id)
-            .bind(row.page)
-            .bind(row.completed)
-            .bind(row.read_date)
-            .bind(row.created)
-            .bind(row.last_modified)
-            .bind(row.device_id)
-            .bind(row.device_name)
-            .execute(&pool)
+    pub async fn insert_read_progress(&self, row: ReadProgressRow) -> Result<(), DiscoveryError> {
+        fixtures::insert_read_progress(&self.pool, row)
             .await
-            .map_err(map_sqlx_error)?;
-        }
-
-        Ok(())
+            .map_err(map_sqlx_error)
     }
 }
 
@@ -463,9 +70,8 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: SeriesBrowseRequest,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
         let query = SeriesBrowseQuery::from(request);
-        queries::series::list_series_sqlx(pool, context, &query).await
+        queries::series::list_series_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_books(
@@ -473,9 +79,8 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: BooksBrowseRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
         let query = BooksBrowseQuery::from(request);
-        queries::books_media::list_books_sqlx(pool, context, &query).await
+        queries::books_media::list_books_sqlx(self.pool.clone(), context, &query).await
     }
 
     async fn list_latest_books(
@@ -483,7 +88,6 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: LatestBooksRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let pool = self.ready_pool().await?;
         let feed_query = BooksBrowseQuery {
             filter: BookFilter {
                 condition: request.library_ids.map(|ids| {
@@ -520,7 +124,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
             size: request.page.size,
             unpaged: request.page.unpaged,
         };
-        queries::books_media::list_books_latest_sqlx(pool, context, &feed_query).await
+        queries::books_media::list_books_latest_sqlx(self.pool.clone(), context, &feed_query).await
     }
 }
 
