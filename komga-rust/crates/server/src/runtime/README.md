@@ -5,7 +5,7 @@ It exists so `server` can expose bootstrap and task-runtime lifecycle entry poin
 
 ## Files in this subtree
 
-- `background_workers.rs`: owns the `StartedTaskRuntime` facade that turns `RuntimeConfig` into HTTP runtime parts plus a router-attached lifecycle guard.
+- `background_workers.rs`: owns the `TaskRuntime` facade that turns `RuntimeConfig` into HTTP runtime parts plus a router-attached lifecycle guard.
 - `startup_scan.rs`: forwards startup library-scan bootstrap into the infrastructure task queue runtime.
 
 ## Keep outside this subtree

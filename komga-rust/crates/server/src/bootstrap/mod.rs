@@ -1,16 +1,13 @@
 use std::collections::BTreeMap;
-use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
-use crate::composition::start_server;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
 use komga_infrastructure::operational_settings_access::load_server_settings;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_interfaces::state::StartupTimingState;
 
 pub mod admin_cli;
 pub mod noclaim_bootstrap;
@@ -171,14 +168,9 @@ async fn run_server() {
         })
         .expect("failed to bind address");
 
-    start_server::serve_with_config(
-        listener,
-        config,
-        StartupTimingState::default(),
-        Instant::now(),
-    )
-    .await
-    .expect("server error");
+    crate::app::serve(listener, config)
+        .await
+        .expect("server error");
 }
 
 pub(crate) async fn validate_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {
@@ -285,13 +277,6 @@ fn schema_gate_failure(
         "Startup schema gate failed",
     );
     std::io::Error::other(error_message)
-}
-
-pub(crate) async fn resolve_runtime_config_from_process_env() -> std::io::Result<RuntimeConfig> {
-    let base_config = RuntimeConfig::from_env()
-        .map_err(|error| std::io::Error::other(format!("invalid runtime config: {error}")))?;
-    validate_startup_schema_gate(&base_config).await?;
-    resolve_runtime_config_with_database(base_config).await
 }
 
 pub(crate) async fn resolve_runtime_config_with_database(

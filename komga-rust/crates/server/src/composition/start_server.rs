@@ -1,7 +1,4 @@
 use axum::Router;
-use komga_infrastructure::search::index_lifecycle::{
-    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
-};
 use komga_infrastructure::sqlite::close_all_shared_pools;
 use komga_interfaces::state::StartupTimingState;
 use std::net::SocketAddr;
@@ -13,136 +10,83 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::composition::http_state::compose_http_runtime;
-use crate::runtime::{StartedTaskRuntime, TaskRuntimeMode};
+use crate::runtime::{TaskRuntime, TaskRuntimeMode};
 use komga_config::env_config::RuntimeConfig;
-use komga_config::writer_ownership::WriterKind;
-
-#[derive(Clone, Copy)]
-struct StartupSearchPlan {
-    writer_decision: komga_config::writer_ownership::WriterDecision,
-    lifecycle: &'static str,
-    startup_task: Option<&'static str>,
-}
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
-pub(crate) fn prepare_startup_search_task(
+pub(crate) async fn build_router(
     config: &RuntimeConfig,
-) -> std::io::Result<Option<&'static str>> {
-    Ok(plan_startup_search_task(config)?.startup_task)
-}
-
-fn plan_startup_search_task(config: &RuntimeConfig) -> std::io::Result<StartupSearchPlan> {
-    let writer_decision = config.writer_decision(WriterKind::SearchIndex);
-    if !writer_decision.allows_write() {
-        return Ok(StartupSearchPlan {
-            writer_decision,
-            lifecycle: "skipped_writer_blocked",
-            startup_task: None,
-        });
-    }
-
-    match decide_startup_lifecycle(config.lucene_data_directory.as_path()) {
-        Ok(SearchStartupLifecycle::Ready) => Ok(StartupSearchPlan {
-            writer_decision,
-            lifecycle: "ready",
-            startup_task: None,
-        }),
-        Ok(SearchStartupLifecycle::RebuildRequired) => {
-            prepare_for_rebuild(config.lucene_data_directory.as_path()).map_err(|error| {
-                std::io::Error::other(format!(
-                    "search startup rebuild preparation failed: {error}"
-                ))
-            })?;
-            Ok(StartupSearchPlan {
-                writer_decision,
-                lifecycle: "rebuild_required",
-                startup_task: Some("RebuildIndex"),
-            })
-        }
-        Err(error) => Err(std::io::Error::other(format!(
-            "search startup lifecycle decision failed: {error}"
-        ))),
-    }
-}
-
-pub async fn build_router_with_config(
-    config: &RuntimeConfig,
+    mode: TaskRuntimeMode,
+    shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
-) -> Router {
-    let task_runtime = StartedTaskRuntime::start(
-        config,
-        TaskRuntimeMode::WorkersEnabled {
-            startup_search_task: None,
-            shutdown_rx: None,
-        },
-    )
-    .await
-    .expect("task runtime should start");
-    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
+) -> std::io::Result<Router> {
+    let task_runtime = TaskRuntime::start(config, mode).await?;
+    let router_parts = task_runtime.into_router_parts();
     let router = finalize_router_startup(
-        compose_http_runtime(config, runtime_parts, None, startup_timing.clone()),
+        compose_http_runtime(
+            config,
+            router_parts.http,
+            shutdown_trigger,
+            startup_timing.clone(),
+        ),
         startup_timing,
         startup_started_at,
     );
-    router_lifecycle.attach(router)
+    Ok(router_parts.lifecycle.attach(router))
 }
 
-pub async fn build_router_without_runtime_workers(
+pub(crate) async fn build_router_with_config(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
-) -> Router {
-    let task_runtime = StartedTaskRuntime::start(
+) -> std::io::Result<Router> {
+    build_router(
         config,
-        TaskRuntimeMode::WorkersDisabled {
-            startup_search_task: None,
-        },
-    )
-    .await
-    .expect("task runtime should start");
-    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
-    let router = finalize_router_startup(
-        compose_http_runtime(config, runtime_parts, None, startup_timing.clone()),
+        TaskRuntimeMode::WorkersEnabled { shutdown_rx: None },
+        None,
         startup_timing,
         startup_started_at,
-    );
-    router_lifecycle.attach(router)
+    )
+    .await
 }
 
-pub async fn serve_with_config(
+pub(crate) async fn build_router_without_runtime_workers(
+    config: &RuntimeConfig,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
+) -> std::io::Result<Router> {
+    build_router(
+        config,
+        TaskRuntimeMode::WorkersDisabled,
+        None,
+        startup_timing,
+        startup_started_at,
+    )
+    .await
+}
+
+pub(crate) async fn serve(
     listener: TcpListener,
     config: RuntimeConfig,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
 ) -> std::io::Result<()> {
     crate::bootstrap::emit_startup_banner_and_runtime_event(&config).await;
-    let startup_search_plan = plan_startup_search_task_with_logging(&config)?;
-    emit_server_bind_event(&listener);
-    let startup_search_task = startup_search_plan.startup_task;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let task_runtime = StartedTaskRuntime::start(
+    let router = build_router(
         &config,
         TaskRuntimeMode::WorkersEnabled {
-            startup_search_task,
             shutdown_rx: Some(shutdown_rx.clone()),
         },
-    )
-    .await?;
-    let (runtime_parts, router_lifecycle) = task_runtime.into_parts();
-    let router = finalize_router_startup(
-        compose_http_runtime(
-            &config,
-            runtime_parts,
-            Some(shutdown_tx.clone()),
-            startup_timing.clone(),
-        ),
+        Some(shutdown_tx.clone()),
         startup_timing,
         startup_started_at,
-    );
-    let router = router_lifecycle.attach(router);
+    )
+    .await?;
+    emit_server_bind_event(&listener);
 
     serve_router_with_shutdown_timeout(
         listener,
@@ -282,55 +226,6 @@ pub(crate) async fn shutdown_runtime_for_contract() {
     complete_shutdown_lifecycle().await;
 }
 
-fn plan_startup_search_task_with_logging(
-    config: &RuntimeConfig,
-) -> std::io::Result<StartupSearchPlan> {
-    match plan_startup_search_task(config) {
-        Ok(startup_search_plan) => {
-            emit_search_startup_event(config, startup_search_plan, None);
-            Ok(startup_search_plan)
-        }
-        Err(error) => {
-            emit_search_startup_event(config, failed_search_startup_plan(config), Some(&error));
-            Err(error)
-        }
-    }
-}
-
-fn emit_search_startup_event(
-    config: &RuntimeConfig,
-    startup_search_plan: StartupSearchPlan,
-    error: Option<&std::io::Error>,
-) {
-    let error_message = error.map_or_else(String::new, std::string::ToString::to_string);
-
-    if error.is_some() {
-        tracing::error!(
-            event = "search_startup_decision",
-            outcome = search_startup_outcome(startup_search_plan, error),
-            search_writer_decision = search_writer_decision_label(startup_search_plan.writer_decision),
-            search_writer_reason = search_writer_reason(startup_search_plan.writer_decision),
-            search_startup_lifecycle = startup_search_plan.lifecycle,
-            startup_task = startup_search_plan.startup_task.unwrap_or(""),
-            lucene_data_directory = %config.lucene_data_directory.display(),
-            error = error_message.as_str(),
-            "Resolved startup search decision",
-        );
-    } else {
-        tracing::info!(
-            event = "search_startup_decision",
-            outcome = search_startup_outcome(startup_search_plan, error),
-            search_writer_decision = search_writer_decision_label(startup_search_plan.writer_decision),
-            search_writer_reason = search_writer_reason(startup_search_plan.writer_decision),
-            search_startup_lifecycle = startup_search_plan.lifecycle,
-            startup_task = startup_search_plan.startup_task.unwrap_or(""),
-            lucene_data_directory = %config.lucene_data_directory.display(),
-            error = error_message.as_str(),
-            "Resolved startup search decision",
-        );
-    }
-}
-
 fn emit_server_bind_event(listener: &TcpListener) {
     let bind_address = listener
         .local_addr()
@@ -357,48 +252,6 @@ async fn complete_shutdown_lifecycle() {
         outcome = "closed",
         "Closed shared sqlite pools",
     );
-}
-
-fn search_writer_decision_label(
-    decision: komga_config::writer_ownership::WriterDecision,
-) -> &'static str {
-    match decision {
-        komga_config::writer_ownership::WriterDecision::Allowed => "allowed",
-        komga_config::writer_ownership::WriterDecision::Isolated => "isolated",
-        komga_config::writer_ownership::WriterDecision::Blocked { .. } => "blocked",
-    }
-}
-
-fn search_writer_reason(decision: komga_config::writer_ownership::WriterDecision) -> &'static str {
-    match decision {
-        komga_config::writer_ownership::WriterDecision::Allowed
-        | komga_config::writer_ownership::WriterDecision::Isolated => "",
-        komga_config::writer_ownership::WriterDecision::Blocked { reason } => reason,
-    }
-}
-
-fn failed_search_startup_plan(config: &RuntimeConfig) -> StartupSearchPlan {
-    StartupSearchPlan {
-        writer_decision: config.writer_decision(WriterKind::SearchIndex),
-        lifecycle: "failed",
-        startup_task: None,
-    }
-}
-
-fn search_startup_outcome(
-    startup_search_plan: StartupSearchPlan,
-    error: Option<&std::io::Error>,
-) -> &'static str {
-    if error.is_some() {
-        return "failed";
-    }
-
-    match startup_search_plan.lifecycle {
-        "ready" => "ready",
-        "rebuild_required" => "rebuild_required",
-        "skipped_writer_blocked" => "skipped",
-        _ => "ready",
-    }
 }
 
 #[cfg(test)]

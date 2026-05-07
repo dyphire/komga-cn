@@ -7,6 +7,7 @@ use std::pin::Pin;
 use axum::Router;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
+use komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle;
 use komga_infrastructure::search::runtime_tasks::rebuild_index_from_database;
 use komga_infrastructure::sqlite::connect_task_write_pool;
 
@@ -164,6 +165,8 @@ impl TestFixtureBuilder {
 
         if self.with_search_index {
             rebuild_search_index(&paths, &config).await;
+        } else {
+            bootstrap_empty_search_index(&config);
         }
 
         let app = match self.router_mode {
@@ -277,6 +280,11 @@ fn build_demo_config(paths: &RuntimeDbPaths) -> RuntimeConfig {
 
     RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
         .expect("demo runtime config should resolve fixture paths")
+}
+
+fn bootstrap_empty_search_index(config: &RuntimeConfig) {
+    SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+        .expect("search-ready fixture should bootstrap an empty search index");
 }
 
 async fn rebuild_search_index(paths: &RuntimeDbPaths, config: &RuntimeConfig) {

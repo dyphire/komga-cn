@@ -6,11 +6,10 @@ use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
 use komga_interfaces::state::{RuntimeProfile, StartupTimingState};
 
-pub async fn build_router() -> Router {
-    let config = crate::bootstrap::resolve_runtime_config_from_process_env()
-        .await
-        .expect("invalid runtime config");
-    build_router_with_config(&config).await
+pub async fn build_router(config: &RuntimeConfig) -> std::io::Result<Router> {
+    let startup_started_at = Instant::now();
+    let startup_timing = StartupTimingState::default();
+    start_server::build_router_with_config(config, startup_timing, startup_started_at).await
 }
 
 pub async fn build_router_with_profile(profile: RuntimeProfile) -> Router {
@@ -22,56 +21,28 @@ pub async fn build_router_with_profile(profile: RuntimeProfile) -> Router {
 }
 
 pub async fn build_router_with_config(config: &RuntimeConfig) -> Router {
-    let startup_started_at = Instant::now();
-    let startup_timing = StartupTimingState::default();
-    if matches!(
-        config.runtime_profile,
-        komga_config::profile::RuntimeProfile::LiveLocaldb
-    ) {
-        crate::runtime::startup_scan::bootstrap_library_scan(config).await;
-    }
-    start_server::build_router_with_config(config, startup_timing, startup_started_at).await
+    build_router(config).await.expect("router should build")
 }
 
 pub async fn build_router_without_runtime_workers_for_contract(config: &RuntimeConfig) -> Router {
     let startup_started_at = Instant::now();
     let startup_timing = StartupTimingState::default();
-    if matches!(
-        config.runtime_profile,
-        komga_config::profile::RuntimeProfile::LiveLocaldb
-    ) {
-        crate::runtime::startup_scan::bootstrap_library_scan(config).await;
-    }
     start_server::build_router_without_runtime_workers(config, startup_timing, startup_started_at)
         .await
+        .expect("router should build without runtime workers")
 }
 
-pub fn prepare_startup_search_task_for_contract(
-    config: &RuntimeConfig,
-) -> std::io::Result<Option<&'static str>> {
-    start_server::prepare_startup_search_task(config)
-}
-
-pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
-    let config = crate::bootstrap::resolve_runtime_config_from_process_env()
-        .await
-        .expect("invalid runtime config");
-    serve_with_config(listener, config).await
+pub async fn serve(listener: TcpListener, config: RuntimeConfig) -> std::io::Result<()> {
+    let startup_started_at = Instant::now();
+    let startup_timing = StartupTimingState::default();
+    start_server::serve(listener, config, startup_timing, startup_started_at).await
 }
 
 pub async fn serve_with_config(
     listener: TcpListener,
     config: RuntimeConfig,
 ) -> std::io::Result<()> {
-    let startup_started_at = Instant::now();
-    let startup_timing = StartupTimingState::default();
-    if matches!(
-        config.runtime_profile,
-        komga_config::profile::RuntimeProfile::LiveLocaldb
-    ) {
-        crate::runtime::startup_scan::bootstrap_library_scan(&config).await;
-    }
-    start_server::serve_with_config(listener, config, startup_timing, startup_started_at).await
+    serve(listener, config).await
 }
 
 pub async fn validate_startup_schema_gate_for_contract(

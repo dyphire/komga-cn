@@ -1,3 +1,3 @@
 mod background_workers;
-pub(crate) use background_workers::{HttpRuntimeParts, StartedTaskRuntime, TaskRuntimeMode};
+pub(crate) use background_workers::{HttpRuntimeParts, TaskRuntime, TaskRuntimeMode};
 pub mod startup_scan;

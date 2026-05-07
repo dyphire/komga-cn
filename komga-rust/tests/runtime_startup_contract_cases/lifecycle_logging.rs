@@ -21,6 +21,11 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
             .await
             .expect("startup lifecycle test listener should bind")
     });
+    runtime.block_on(async {
+        komga_server::app::validate_startup_schema_gate_for_contract(&config)
+            .await
+            .expect("startup lifecycle schema should initialize")
+    });
     config.bind_address = listener
         .local_addr()
         .expect("startup lifecycle test listener should expose local addr");
