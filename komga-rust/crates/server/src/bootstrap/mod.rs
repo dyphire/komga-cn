@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
@@ -8,6 +9,7 @@ use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
 use komga_infrastructure::operational_settings_access::load_server_settings;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_interfaces::state::StartupTimingState;
 
 pub mod admin_cli;
 pub mod noclaim_bootstrap;
@@ -77,12 +79,13 @@ pub(crate) async fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig
 }
 
 pub async fn run_process() {
+    let startup_started_at = Instant::now();
     match admin_cli::parse_startup_cli(std::env::args().skip(1)) {
         Ok(admin_cli::StartupCliPreflight::Help) => {
             println!("{}", admin_cli::render_usage());
         }
         Ok(admin_cli::StartupCliPreflight::Admin(commands)) => run_admin_action(commands).await,
-        Ok(admin_cli::StartupCliPreflight::Server) => run_server().await,
+        Ok(admin_cli::StartupCliPreflight::Server) => run_server(startup_started_at).await,
         Err(error) => {
             eprintln!("{}\n\n{}", error, admin_cli::render_usage());
             std::process::exit(2);
@@ -143,7 +146,7 @@ fn ensure_existing_admin_database(database_file: &std::path::Path) -> std::io::R
     }
 }
 
-async fn run_server() {
+async fn run_server(startup_started_at: Instant) {
     let base_config = RuntimeConfig::from_env().expect("invalid runtime config");
     crate::logging::init_global(&base_config).expect("failed to initialize logging");
     validate_startup_schema_gate(&base_config)
@@ -168,9 +171,14 @@ async fn run_server() {
         })
         .expect("failed to bind address");
 
-    crate::app::serve(listener, config)
-        .await
-        .expect("server error");
+    crate::app::serve_with_startup_timing(
+        listener,
+        config,
+        StartupTimingState::default(),
+        startup_started_at,
+    )
+    .await
+    .expect("server error");
 }
 
 pub(crate) async fn validate_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {

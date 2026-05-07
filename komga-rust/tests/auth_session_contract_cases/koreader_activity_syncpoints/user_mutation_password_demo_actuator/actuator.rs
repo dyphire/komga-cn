@@ -887,13 +887,13 @@ async fn router_actuator_metric_detail_uses_runtime_startup_timings_for_admin() 
     let started_seconds = measurement_value(&started_payload, "TOTAL_TIME");
     let ready_seconds = measurement_value(&ready_payload, "TOTAL_TIME");
 
-    assert!(
-        started_seconds > 0.0,
-        "application.started.time should be positive: {started_payload:?}"
+    assert_eq!(
+        started_seconds, 0.0,
+        "router-only fixtures should not report server startup timing: {started_payload:?}"
     );
-    assert!(
-        ready_seconds >= started_seconds,
-        "application.ready.time should be >= application.started.time: started={started_seconds}, ready={ready_seconds}"
+    assert_eq!(
+        ready_seconds, 0.0,
+        "router-only fixtures should not report TCP server readiness: {ready_payload:?}"
     );
 }
 

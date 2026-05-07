@@ -1,7 +1,9 @@
 use axum::Router;
 use komga_infrastructure::sqlite::close_all_shared_pools;
 use komga_interfaces::state::StartupTimingState;
+use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;
+use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::net::TcpListener;
@@ -20,34 +22,29 @@ pub(crate) async fn build_router(
     mode: TaskRuntimeMode,
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
-    startup_started_at: Instant,
 ) -> std::io::Result<Router> {
     let task_runtime = TaskRuntime::start(config, mode).await?;
     let router_parts = task_runtime.into_router_parts();
-    let router = finalize_router_startup(
-        compose_http_runtime(
-            config,
-            router_parts.http,
-            shutdown_trigger,
-            startup_timing.clone(),
-        ),
-        startup_timing,
-        startup_started_at,
+    let app = compose_http_runtime(
+        config,
+        router_parts.http,
+        shutdown_trigger,
+        startup_timing.clone(),
     );
-    Ok(router_parts.lifecycle.attach(router))
+    let router = build_http_router(app);
+    let router = router_parts.lifecycle.attach(router);
+    Ok(router)
 }
 
 pub(crate) async fn build_router_with_config(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
-    startup_started_at: Instant,
 ) -> std::io::Result<Router> {
     build_router(
         config,
         TaskRuntimeMode::WorkersEnabled { shutdown_rx: None },
         None,
         startup_timing,
-        startup_started_at,
     )
     .await
 }
@@ -55,14 +52,12 @@ pub(crate) async fn build_router_with_config(
 pub(crate) async fn build_router_without_runtime_workers(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
-    startup_started_at: Instant,
 ) -> std::io::Result<Router> {
     build_router(
         config,
         TaskRuntimeMode::WorkersDisabled,
         None,
         startup_timing,
-        startup_started_at,
     )
     .await
 }
@@ -82,8 +77,7 @@ pub(crate) async fn serve(
             shutdown_rx: Some(shutdown_rx.clone()),
         },
         Some(shutdown_tx.clone()),
-        startup_timing,
-        startup_started_at,
+        startup_timing.clone(),
     )
     .await?;
     emit_server_bind_event(&listener);
@@ -93,6 +87,8 @@ pub(crate) async fn serve(
         router,
         shutdown_tx,
         shutdown_rx,
+        startup_timing,
+        startup_started_at,
         SHUTDOWN_GRACE_PERIOD,
     )
     .await
@@ -103,11 +99,15 @@ async fn serve_router_with_shutdown_timeout(
     router: Router,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
+    startup_timing: StartupTimingState,
+    startup_started_at: Instant,
     shutdown_grace_period: Duration,
 ) -> std::io::Result<()> {
     let (shutdown_lifecycle_tx, mut shutdown_lifecycle_rx) = oneshot::channel();
+    let (server_ready_tx, server_ready_rx) = oneshot::channel();
+    startup_timing.record_application_started(startup_started_at.elapsed());
     let mut server = tokio::spawn(async move {
-        axum::serve(
+        let server = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
@@ -115,9 +115,30 @@ async fn serve_router_with_shutdown_timeout(
             shutdown_tx,
             shutdown_rx,
             shutdown_lifecycle_tx,
-        ))
+        ));
+        let server = server.into_future();
+        tokio::pin!(server);
+        let mut server_ready_tx = Some(server_ready_tx);
+        // Readiness is tied to the serve future entering its accept loop, not just to router
+        // construction or task spawning.
+        std::future::poll_fn(move |cx| {
+            let result = Future::poll(server.as_mut(), cx);
+            if matches!(&result, Poll::Pending)
+                && let Some(server_ready_tx) = server_ready_tx.take()
+            {
+                let _ = server_ready_tx.send(());
+            }
+            result
+        })
         .await
     });
+
+    tokio::select! {
+        _ = server_ready_rx => {
+            startup_timing.record_application_ready(startup_started_at.elapsed());
+        },
+        result = &mut server => return flatten_server_task_result(result),
+    }
 
     tokio::select! {
         result = &mut server => flatten_server_task_result(result),
@@ -130,17 +151,6 @@ async fn serve_router_with_shutdown_timeout(
 
 fn build_http_router(app: komga_interfaces::state::HttpAppState) -> Router {
     komga_interfaces::router::build_router(app)
-}
-
-fn finalize_router_startup(
-    app: komga_interfaces::state::HttpAppState,
-    startup_timing: StartupTimingState,
-    startup_started_at: Instant,
-) -> Router {
-    startup_timing.record_application_started(startup_started_at.elapsed());
-    let router = build_http_router(app);
-    startup_timing.record_application_ready(startup_started_at.elapsed());
-    router
 }
 
 async fn shutdown_signal(
@@ -272,12 +282,16 @@ mod tests {
             .expect("test listener should expose local addr");
         let router = Router::new().route("/hold", get(|| async { "ok" }));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let startup_timing = StartupTimingState::default();
+        let startup_started_at = Instant::now() - Duration::from_millis(250);
 
         let server = tokio::spawn(serve_router_with_shutdown_timeout(
             listener,
             router,
             shutdown_tx.clone(),
             shutdown_rx,
+            startup_timing.clone(),
+            startup_started_at,
             Duration::from_millis(100),
         ));
 
@@ -299,6 +313,16 @@ mod tests {
             assert!(read > 0, "response should include the keep-alive payload");
             response.extend_from_slice(&buffer[..read]);
         }
+
+        let snapshot = startup_timing.snapshot();
+        assert!(
+            snapshot.application_started_time_seconds >= 0.25,
+            "server startup should record started before serving requests: {snapshot:?}",
+        );
+        assert!(
+            snapshot.application_ready_time_seconds >= snapshot.application_started_time_seconds,
+            "server readiness should not precede started timing: {snapshot:?}",
+        );
 
         shutdown_tx
             .send(true)
