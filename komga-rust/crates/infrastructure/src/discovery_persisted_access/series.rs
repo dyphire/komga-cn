@@ -72,7 +72,15 @@ async fn fetch_persisted_series_summary_rows(
                    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
                   COALESCE(GROUP_CONCAT(DISTINCT smg.GENRE), '') AS GENRES,
                   COALESCE(GROUP_CONCAT(DISTINCT smt.TAG), '') AS TAGS,
-                  COALESCE(GROUP_CONCAT(DISTINCT smat.TITLE), '') AS ALTERNATE_TITLES,
+                  COALESCE(
+                    GROUP_CONCAT(
+                      DISTINCT CASE
+                        WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
+                        ELSE smat.LABEL || '::' || smat.TITLE
+                      END
+                    ),
+                    ''
+                  ) AS ALTERNATE_TITLES,
                   COALESCE(
                     GROUP_CONCAT(
                       DISTINCT CASE

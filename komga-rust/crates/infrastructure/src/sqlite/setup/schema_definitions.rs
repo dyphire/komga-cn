@@ -37,6 +37,7 @@ pub(super) const READ_FIXTURE_SCHEMA_STATEMENTS: &[&str] = &[
         status TEXT NOT NULL DEFAULT '',
         complete INTEGER NOT NULL DEFAULT 0,
         read_status TEXT NOT NULL DEFAULT '',
+        book_count INTEGER NOT NULL DEFAULT 0,
         deleted INTEGER NOT NULL DEFAULT 0,
         oneshot INTEGER NOT NULL DEFAULT 0,
         created TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',

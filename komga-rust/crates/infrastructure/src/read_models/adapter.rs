@@ -288,3 +288,270 @@ impl DiscoveryListService for SqliteDiscoveryAdapter {
 fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {
     DiscoveryError::Persistence(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use komga_application::discovery::{BooksBrowseQuery, DiscoveryListService};
+    use komga_domain::common_ids::{ReadListId, SeriesId};
+    use komga_domain::discovery::{
+        BookCondition, BookFilter, BookValueCondition, CompositeBookCondition,
+        CompositeSeriesCondition, DiscoveryQueryContext, FilterOperator, InclusionCondition,
+        SeriesCondition, SeriesFilter, SeriesValueCondition, StringCondition,
+    };
+
+    use super::*;
+
+    fn query_context() -> DiscoveryQueryContext {
+        DiscoveryQueryContext {
+            user_id: None,
+            is_admin: true,
+            authorized_library_ids: None,
+            restrictions: None,
+        }
+    }
+
+    fn query_with(condition: BookCondition) -> BooksBrowseQuery {
+        BooksBrowseQuery {
+            filter: BookFilter {
+                condition: Some(condition),
+                direct_browse_book_id: None,
+            },
+            ..BooksBrowseQuery::default()
+        }
+    }
+
+    fn series_query_with(condition: SeriesCondition) -> SeriesBrowseQuery {
+        SeriesBrowseQuery {
+            filter: SeriesFilter {
+                condition: Some(condition),
+            },
+            ..SeriesBrowseQuery::default()
+        }
+    }
+
+    async fn insert_library_series_and_books(
+        adapter: &SqliteDiscoveryAdapter,
+        mut series: SeriesRow,
+        books: Vec<BookRow>,
+    ) {
+        adapter
+            .insert_library(LibraryRow::new("library-1", "Library 1"))
+            .await
+            .unwrap();
+        series.library_id = "library-1".to_string();
+        adapter.insert_series(series).await.unwrap();
+        for book in books {
+            adapter.insert_book(book).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn list_books_scoped_to_series_includes_oneshot_series_books() {
+        let adapter = SqliteDiscoveryAdapter::new().await.unwrap();
+        let mut series = SeriesRow::new("series-1", "library-1", "One Shot");
+        series.oneshot = true;
+        insert_library_series_and_books(
+            &adapter,
+            series,
+            vec![BookRow::new("book-1", "series-1", "library-1", "Book 1")],
+        )
+        .await;
+
+        let page = DiscoveryListService::list_books(
+            &adapter,
+            &query_context(),
+            query_with(BookCondition::Value(BookValueCondition::SeriesId(
+                InclusionCondition::Include(vec![SeriesId::from("series-1")]),
+            ))),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_books_tag_filter_matches_book_tags() {
+        let adapter = SqliteDiscoveryAdapter::new().await.unwrap();
+        insert_library_series_and_books(
+            &adapter,
+            SeriesRow::new("series-1", "library-1", "Series 1"),
+            vec![
+                BookRow {
+                    tags: vec!["favorite".to_string()],
+                    ..BookRow::new("book-1", "series-1", "library-1", "Book 1")
+                },
+                BookRow {
+                    tags: vec!["other".to_string()],
+                    ..BookRow::new("book-2", "series-1", "library-1", "Book 2")
+                },
+            ],
+        )
+        .await;
+
+        let page = DiscoveryListService::list_books(
+            &adapter,
+            &query_context(),
+            query_with(BookCondition::Value(BookValueCondition::Tag(
+                StringCondition::Exact(InclusionCondition::Include(vec!["favorite".to_string()])),
+            ))),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_books_readlist_filter_matches_readlist_books() {
+        let adapter = SqliteDiscoveryAdapter::new().await.unwrap();
+        insert_library_series_and_books(
+            &adapter,
+            SeriesRow::new("series-1", "library-1", "Series 1"),
+            vec![
+                BookRow::new("book-1", "series-1", "library-1", "Book 1"),
+                BookRow::new("book-2", "series-1", "library-1", "Book 2"),
+            ],
+        )
+        .await;
+        adapter
+            .insert_read_list(ReadListRow {
+                book_ids: vec!["book-2".to_string()],
+                ..ReadListRow::new("readlist-1", "Read List 1")
+            })
+            .await
+            .unwrap();
+
+        let page = DiscoveryListService::list_books(
+            &adapter,
+            &query_context(),
+            query_with(BookCondition::Value(BookValueCondition::ReadListId(
+                InclusionCondition::Include(vec![ReadListId::from("readlist-1")]),
+            ))),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_books_any_condition_combines_children_with_or() {
+        let adapter = SqliteDiscoveryAdapter::new().await.unwrap();
+        insert_library_series_and_books(
+            &adapter,
+            SeriesRow::new("series-1", "library-1", "Series 1"),
+            vec![
+                BookRow {
+                    tags: vec!["favorite".to_string()],
+                    ..BookRow::new("book-1", "series-1", "library-1", "Book 1")
+                },
+                BookRow {
+                    tags: vec!["queued".to_string()],
+                    ..BookRow::new("book-2", "series-1", "library-1", "Book 2")
+                },
+                BookRow {
+                    tags: vec!["other".to_string()],
+                    ..BookRow::new("book-3", "series-1", "library-1", "Book 3")
+                },
+            ],
+        )
+        .await;
+
+        let tag_condition = |tag: &str| {
+            BookCondition::Value(BookValueCondition::Tag(StringCondition::Exact(
+                InclusionCondition::Include(vec![tag.to_string()]),
+            )))
+        };
+        let page = DiscoveryListService::list_books(
+            &adapter,
+            &query_context(),
+            query_with(BookCondition::Composite(CompositeBookCondition {
+                operator: FilterOperator::Any,
+                conditions: vec![tag_condition("favorite"), tag_condition("queued")],
+            })),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-1", "book-2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_series_any_condition_combines_children_with_or() {
+        let adapter = SqliteDiscoveryAdapter::new().await.unwrap();
+        adapter
+            .insert_library(LibraryRow::new("library-1", "Library 1"))
+            .await
+            .unwrap();
+        adapter
+            .insert_series(SeriesRow {
+                tags: vec!["favorite".to_string()],
+                ..SeriesRow::new("series-1", "library-1", "Series 1")
+            })
+            .await
+            .unwrap();
+        adapter
+            .insert_series(SeriesRow {
+                tags: vec!["queued".to_string()],
+                ..SeriesRow::new("series-2", "library-1", "Series 2")
+            })
+            .await
+            .unwrap();
+        adapter
+            .insert_series(SeriesRow {
+                tags: vec!["other".to_string()],
+                ..SeriesRow::new("series-3", "library-1", "Series 3")
+            })
+            .await
+            .unwrap();
+
+        let tag_condition = |tag: &str| {
+            SeriesCondition::Value(SeriesValueCondition::Tag(StringCondition::Exact(
+                InclusionCondition::Include(vec![tag.to_string()]),
+            )))
+        };
+        let page = DiscoveryListService::list_series(
+            &adapter,
+            &query_context(),
+            series_query_with(SeriesCondition::Composite(CompositeSeriesCondition {
+                operator: FilterOperator::Any,
+                conditions: vec![tag_condition("favorite"), tag_condition("queued")],
+            })),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|series| series.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["series-1", "series-2"]
+        );
+    }
+}

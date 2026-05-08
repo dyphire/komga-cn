@@ -12,8 +12,7 @@ use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use super::map_sqlx_error;
 use crate::read_models::filters::{
     SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx, append_like_clause_sqlx,
-    append_not_in_clause_sqlx, append_subquery_exists_clause, effective_library_ids,
-    query_filters_sqlx,
+    append_not_in_clause_sqlx, effective_library_ids, query_filters_sqlx,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,7 +310,8 @@ fn apply_book_filter_tree_sqlx<'args>(
     );
 
     let has_explicit_oneshot = condition.is_some_and(condition_has_oneshot);
-    if !has_explicit_oneshot {
+    let scoped_to_series = condition.is_some_and(condition_has_series_id);
+    if !has_explicit_oneshot && !scoped_to_series {
         append_bool_sqlx_filter("s.oneshot", false, builder, state);
     }
 
@@ -324,6 +324,14 @@ fn condition_has_oneshot(condition: &BookCondition) -> bool {
     match condition {
         BookCondition::Value(BookValueCondition::OneShot(_)) => true,
         BookCondition::Composite(c) => c.conditions.iter().any(condition_has_oneshot),
+        _ => false,
+    }
+}
+
+fn condition_has_series_id(condition: &BookCondition) -> bool {
+    match condition {
+        BookCondition::Value(BookValueCondition::SeriesId(_)) => true,
+        BookCondition::Composite(c) => c.conditions.iter().any(condition_has_series_id),
         _ => false,
     }
 }
@@ -348,20 +356,20 @@ fn apply_book_condition_sqlx<'args>(
                 if conditions.is_empty() {
                     return;
                 }
-                let prefix = if state.has_where {
-                    " AND ("
-                } else {
-                    " WHERE ("
-                };
-                builder.push(prefix);
+                append_clause_sqlx("(", builder, state);
                 for (i, c) in conditions.iter().enumerate() {
                     if i > 0 {
                         builder.push(" OR ");
                     }
-                    apply_book_condition_sqlx(c, builder, state);
+                    builder.push(
+                        "b.id IN (SELECT b.id FROM books b JOIN series s ON s.id = b.series_id",
+                    );
+                    let mut child_state = SqlxWhereState::default();
+                    apply_book_condition_sqlx(c, builder, &mut child_state);
+                    state.params.extend(child_state.params);
+                    builder.push(")");
                 }
                 builder.push(")");
-                state.has_where = true;
             }
         },
     }
@@ -391,63 +399,50 @@ fn apply_book_value_condition_sqlx<'args>(
                 append_not_in_clause_sqlx("b.series_id", id.as_str(), builder, state);
             }
         }
+        BookValueCondition::ReadListId(ids) => {
+            append_readlist_condition_sqlx(ids, builder, state);
+        }
         BookValueCondition::Deleted(val) => {
             append_bool_sqlx_filter("b.deleted", *val, builder, state);
         }
         BookValueCondition::OneShot(val) => {
             append_bool_sqlx_filter("s.oneshot", *val, builder, state);
         }
-        BookValueCondition::Title(StringCondition::Contains(InclusionCondition::Include(v))) => {
-            for val in v {
-                append_like_clause_sqlx("b.title", &format!("%{val}%"), builder, state);
-            }
+        BookValueCondition::Title(condition) => {
+            append_string_condition_sqlx("b.title", condition, builder, state);
         }
-        BookValueCondition::Title(StringCondition::Exact(InclusionCondition::Include(v))) => {
-            append_in_clause_sqlx("b.title", v, builder, state);
-        }
-        BookValueCondition::Title(StringCondition::StartsWith(InclusionCondition::Include(v))) => {
-            for val in v {
-                append_like_clause_sqlx("b.title", &format!("{val}%"), builder, state);
-            }
-        }
-        BookValueCondition::Title(StringCondition::EndsWith(InclusionCondition::Include(v))) => {
-            for val in v {
-                append_like_clause_sqlx("b.title", &format!("%{val}"), builder, state);
-            }
-        }
-        BookValueCondition::Tag(StringCondition::Contains(InclusionCondition::Include(v)))
-        | BookValueCondition::Tag(StringCondition::Exact(InclusionCondition::Include(v))) => {
-            append_subquery_exists_clause("book_tags", "book_id", "tag", v, builder, state);
+        BookValueCondition::Tag(condition) => {
+            append_book_text_relation_condition_sqlx("book_tags", "tag", condition, builder, state);
         }
         BookValueCondition::ReadStatus(ReadStatusCondition::Include(v)) => {
             append_in_clause_sqlx("b.read_status", v, builder, state);
         }
+        BookValueCondition::ReadStatus(ReadStatusCondition::Exclude(v)) => {
+            append_string_excludes_sqlx("b.read_status", v, builder, state);
+        }
         BookValueCondition::MediaProfile(InclusionCondition::Include(v)) => {
             append_in_clause_sqlx("b.media_profile", v, builder, state);
+        }
+        BookValueCondition::MediaProfile(InclusionCondition::Exclude(v)) => {
+            append_string_excludes_sqlx("b.media_profile", v, builder, state);
         }
         BookValueCondition::MediaStatus(InclusionCondition::Include(v)) => {
             append_in_clause_sqlx("b.media_status", v, builder, state);
         }
-        BookValueCondition::Author(StringCondition::Contains(InclusionCondition::Include(v)))
-        | BookValueCondition::Author(StringCondition::Exact(InclusionCondition::Include(v))) => {
-            append_subquery_exists_clause("book_authors", "book_id", "author", v, builder, state);
+        BookValueCondition::MediaStatus(InclusionCondition::Exclude(v)) => {
+            append_string_excludes_sqlx("b.media_status", v, builder, state);
         }
-        BookValueCondition::NumberSort(NumberCondition::Exact(InclusionCondition::Include(v))) => {
-            if v.len() == 1 {
-                if let Ok(num) = v[0].parse::<f64>() {
-                    append_clause_sqlx("b.number_sort = ", builder, state);
-                    builder.push_bind(num);
-                }
-            } else if !v.is_empty() {
-                append_clause_sqlx("b.number_sort IN (", builder, state);
-                let mut separated = builder.separated(",");
-                for val in v {
-                    if let Ok(num) = val.parse::<f64>() {
-                        separated.push_bind(num);
-                    }
-                }
-                separated.push_unseparated(")");
-            }
+        BookValueCondition::Author(condition) => {
+            append_book_text_relation_condition_sqlx(
+                "book_authors",
+                "author",
+                condition,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::NumberSort(condition) => {
+            append_number_condition_sqlx("b.number_sort", condition, builder, state);
         }
         BookValueCondition::ReleaseDate(DateCondition::After(v)) => {
             append_clause_sqlx("b.metadata_release_date > ", builder, state);
@@ -460,7 +455,455 @@ fn apply_book_value_condition_sqlx<'args>(
         BookValueCondition::ReleaseDate(DateCondition::Exact(InclusionCondition::Include(v))) => {
             append_in_clause_sqlx("b.metadata_release_date", v, builder, state);
         }
+        BookValueCondition::ReleaseDate(DateCondition::Exact(InclusionCondition::Exclude(v))) => {
+            append_string_excludes_sqlx("b.metadata_release_date", v, builder, state);
+        }
+        BookValueCondition::ReleaseDate(DateCondition::Contains(InclusionCondition::Include(
+            v,
+        ))) => {
+            append_string_patterns_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::Contains,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::Contains(InclusionCondition::Exclude(
+            v,
+        ))) => {
+            append_string_pattern_excludes_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::Contains,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::StartsWith(
+            InclusionCondition::Include(v),
+        )) => {
+            append_string_patterns_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::StartsWith,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::StartsWith(
+            InclusionCondition::Exclude(v),
+        )) => {
+            append_string_pattern_excludes_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::StartsWith,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::EndsWith(InclusionCondition::Include(
+            v,
+        ))) => {
+            append_string_patterns_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::EndsWith,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::EndsWith(InclusionCondition::Exclude(
+            v,
+        ))) => {
+            append_string_pattern_excludes_sqlx(
+                "b.metadata_release_date",
+                v,
+                PatternKind::EndsWith,
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::IsEmpty) => {
+            append_clause_sqlx(
+                "(b.metadata_release_date IS NULL OR b.metadata_release_date = '')",
+                builder,
+                state,
+            );
+        }
+        BookValueCondition::ReleaseDate(DateCondition::IsNotEmpty) => {
+            append_clause_sqlx(
+                "(b.metadata_release_date IS NOT NULL AND b.metadata_release_date != '')",
+                builder,
+                state,
+            );
+        }
         _ => {}
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PatternKind {
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+fn append_readlist_condition_sqlx<'args>(
+    condition: &InclusionCondition<komga_domain::common_ids::ReadListId>,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    let (include, ids) = match condition {
+        InclusionCondition::Include(ids) => (true, ids),
+        InclusionCondition::Exclude(ids) => (false, ids),
+    };
+    if ids.is_empty() {
+        return;
+    }
+
+    if include {
+        append_clause_sqlx(
+            "EXISTS (SELECT 1 FROM readlist_books rlb WHERE rlb.book_id = b.id AND rlb.readlist_id IN (",
+            builder,
+            state,
+        );
+    } else {
+        append_clause_sqlx(
+            "NOT EXISTS (SELECT 1 FROM readlist_books rlb WHERE rlb.book_id = b.id AND rlb.readlist_id IN (",
+            builder,
+            state,
+        );
+    }
+
+    let mut separated = builder.separated(",");
+    for id in ids {
+        separated.push_bind(id.as_str().to_string());
+    }
+    separated.push_unseparated("))");
+}
+
+fn append_string_condition_sqlx<'args>(
+    column: &str,
+    condition: &StringCondition,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(v)) => {
+            append_in_clause_sqlx(column, v, builder, state);
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(v)) => {
+            append_string_excludes_sqlx(column, v, builder, state);
+        }
+        StringCondition::Contains(InclusionCondition::Include(v)) => {
+            append_string_patterns_sqlx(column, v, PatternKind::Contains, builder, state);
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(v)) => {
+            append_string_pattern_excludes_sqlx(column, v, PatternKind::Contains, builder, state);
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(v)) => {
+            append_string_patterns_sqlx(column, v, PatternKind::StartsWith, builder, state);
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(v)) => {
+            append_string_pattern_excludes_sqlx(column, v, PatternKind::StartsWith, builder, state);
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(v)) => {
+            append_string_patterns_sqlx(column, v, PatternKind::EndsWith, builder, state);
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(v)) => {
+            append_string_pattern_excludes_sqlx(column, v, PatternKind::EndsWith, builder, state);
+        }
+        StringCondition::IsEmpty => {
+            append_clause_sqlx(
+                &format!("({column} IS NULL OR {column} = '')"),
+                builder,
+                state,
+            );
+        }
+        StringCondition::IsNotEmpty => {
+            append_clause_sqlx(
+                &format!("({column} IS NOT NULL AND {column} != '')"),
+                builder,
+                state,
+            );
+        }
+    }
+}
+
+fn append_string_excludes_sqlx<'args>(
+    column: &str,
+    values: &[String],
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    for value in values {
+        append_not_in_clause_sqlx(column, value, builder, state);
+    }
+}
+
+fn append_string_patterns_sqlx<'args>(
+    column: &str,
+    values: &[String],
+    kind: PatternKind,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    for value in values {
+        append_like_clause_sqlx(column, &pattern_value(value, kind), builder, state);
+    }
+}
+
+fn append_string_pattern_excludes_sqlx<'args>(
+    column: &str,
+    values: &[String],
+    kind: PatternKind,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    for value in values {
+        append_clause_sqlx(&format!("{column} NOT LIKE "), builder, state);
+        builder.push_bind(pattern_value(value, kind));
+    }
+}
+
+fn append_book_text_relation_condition_sqlx<'args>(
+    table: &str,
+    value_column: &str,
+    condition: &StringCondition,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                true,
+                None,
+                builder,
+                state,
+            );
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                false,
+                None,
+                builder,
+                state,
+            );
+        }
+        StringCondition::Contains(InclusionCondition::Include(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                true,
+                Some(PatternKind::Contains),
+                builder,
+                state,
+            );
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                false,
+                Some(PatternKind::Contains),
+                builder,
+                state,
+            );
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                true,
+                Some(PatternKind::StartsWith),
+                builder,
+                state,
+            );
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                false,
+                Some(PatternKind::StartsWith),
+                builder,
+                state,
+            );
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                true,
+                Some(PatternKind::EndsWith),
+                builder,
+                state,
+            );
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(values)) => {
+            append_book_text_relation_values_sqlx(
+                table,
+                value_column,
+                values,
+                false,
+                Some(PatternKind::EndsWith),
+                builder,
+                state,
+            );
+        }
+        StringCondition::IsEmpty => {
+            append_clause_sqlx(
+                &format!(
+                    "NOT EXISTS (SELECT 1 FROM {table} f WHERE f.book_id = b.id AND f.{value_column} != '')"
+                ),
+                builder,
+                state,
+            );
+        }
+        StringCondition::IsNotEmpty => {
+            append_clause_sqlx(
+                &format!(
+                    "EXISTS (SELECT 1 FROM {table} f WHERE f.book_id = b.id AND f.{value_column} != '')"
+                ),
+                builder,
+                state,
+            );
+        }
+    }
+}
+
+fn append_book_text_relation_values_sqlx<'args>(
+    table: &str,
+    value_column: &str,
+    values: &[String],
+    include: bool,
+    pattern: Option<PatternKind>,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    if values.is_empty() {
+        return;
+    }
+
+    if include {
+        append_clause_sqlx(
+            &format!("EXISTS (SELECT 1 FROM {table} f WHERE f.book_id = b.id AND "),
+            builder,
+            state,
+        );
+    } else {
+        append_clause_sqlx(
+            &format!("NOT EXISTS (SELECT 1 FROM {table} f WHERE f.book_id = b.id AND "),
+            builder,
+            state,
+        );
+    }
+
+    match pattern {
+        Some(kind) => {
+            builder.push("(");
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    builder.push(" OR ");
+                }
+                builder.push(format!("LOWER(f.{value_column}) LIKE "));
+                builder.push_bind(pattern_value(&value.to_ascii_lowercase(), kind));
+            }
+            builder.push("))");
+        }
+        None => {
+            builder.push(format!("LOWER(f.{value_column}) IN ("));
+            let mut separated = builder.separated(",");
+            for value in values {
+                separated.push_bind(value.to_ascii_lowercase());
+            }
+            separated.push_unseparated("))");
+        }
+    }
+}
+
+fn append_number_condition_sqlx<'args>(
+    column: &str,
+    condition: &NumberCondition,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    match condition {
+        NumberCondition::Exact(InclusionCondition::Include(values)) => {
+            append_number_values_sqlx(column, values, true, builder, state);
+        }
+        NumberCondition::Exact(InclusionCondition::Exclude(values)) => {
+            append_number_values_sqlx(column, values, false, builder, state);
+        }
+        NumberCondition::GreaterThan(value) => {
+            if let Ok(number) = value.parse::<f64>() {
+                append_clause_sqlx(&format!("{column} > "), builder, state);
+                builder.push_bind(number);
+            }
+        }
+        NumberCondition::LessThan(value) => {
+            if let Ok(number) = value.parse::<f64>() {
+                append_clause_sqlx(&format!("{column} < "), builder, state);
+                builder.push_bind(number);
+            }
+        }
+    }
+}
+
+fn append_number_values_sqlx<'args>(
+    column: &str,
+    values: &[String],
+    include: bool,
+    builder: &mut QueryBuilder<'args, Sqlite>,
+    state: &mut SqlxWhereState,
+) {
+    let parsed = values
+        .iter()
+        .filter_map(|value| value.parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        return;
+    }
+
+    if parsed.len() == 1 {
+        append_clause_sqlx(
+            &format!("{column} {} ", if include { "=" } else { "!=" }),
+            builder,
+            state,
+        );
+        builder.push_bind(parsed[0]);
+        return;
+    }
+
+    append_clause_sqlx(
+        &format!("{column} {} (", if include { "IN" } else { "NOT IN" }),
+        builder,
+        state,
+    );
+    let mut separated = builder.separated(",");
+    for number in parsed {
+        separated.push_bind(number);
+    }
+    separated.push_unseparated(")");
+}
+
+fn pattern_value(value: &str, kind: PatternKind) -> String {
+    match kind {
+        PatternKind::Contains => format!("%{value}%"),
+        PatternKind::StartsWith => format!("{value}%"),
+        PatternKind::EndsWith => format!("%{value}"),
     }
 }
 

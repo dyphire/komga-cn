@@ -53,14 +53,14 @@ fn series_payload(series: &PersistedSeriesSummary) -> Value {
         "sharingLabelsLock": false,
         "links": [],
         "linksLock": false,
-        "alternateTitles": series.alternate_titles.clone(),
+        "alternateTitles": alternate_title_payloads(&series.alternate_titles),
         "alternateTitlesLock": false,
         "created": normalized_date_time(&series.metadata_created),
         "lastModified": normalized_date_time(&series.metadata_last_modified)
     });
 
     let books_metadata = json!({
-        "authors": series.books_metadata_authors.clone(),
+        "authors": aggregated_author_payloads(&series.books_metadata_authors),
         "tags": series.books_metadata_tags.clone(),
         "releaseDate": series.books_metadata_release_date.clone(),
         "summary": series.books_metadata_summary.as_str(),
@@ -86,6 +86,36 @@ fn series_payload(series: &PersistedSeriesSummary) -> Value {
         "deleted": series.deleted,
         "oneshot": series.oneshot
     })
+}
+
+fn aggregated_author_payloads(raw: &[String]) -> Vec<Value> {
+    raw.iter()
+        .map(|entry| match entry.split_once("::") {
+            Some((name, role)) => json!({
+                "name": name,
+                "role": role
+            }),
+            None => json!({
+                "name": entry,
+                "role": ""
+            }),
+        })
+        .collect()
+}
+
+fn alternate_title_payloads(raw: &[String]) -> Vec<Value> {
+    raw.iter()
+        .map(|entry| match entry.split_once("::") {
+            Some((label, title)) => json!({
+                "label": label,
+                "title": title
+            }),
+            None => json!({
+                "label": "",
+                "title": entry
+            }),
+        })
+        .collect()
 }
 
 #[cfg(test)]

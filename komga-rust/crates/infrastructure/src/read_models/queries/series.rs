@@ -8,10 +8,11 @@ use komga_domain::discovery::{
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::super::filters::{
-    SqlxWhereState, append_bool_sqlx_filter, append_comparison_sqlx, append_in_clause_sqlx,
-    append_like_clause_sqlx, append_not_in_clause_sqlx, append_subquery_exists_clause,
-    effective_library_ids, query_filters_sqlx,
+    SqlxWhereState, append_bool_sqlx_filter, append_clause_sqlx, append_comparison_sqlx,
+    append_in_clause_sqlx, append_like_clause_sqlx, append_not_in_clause_sqlx,
+    append_subquery_exists_clause, effective_library_ids, query_filters_sqlx,
 };
+use super::books::parse_csv_values;
 use super::map_sqlx_error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,15 +27,66 @@ enum SeriesOrdering {
 #[derive(sqlx::FromRow)]
 struct SqlxSeriesListRow {
     id: String,
+    library_id: String,
+    name: String,
     title: String,
+    title_sort: String,
+    labels: String,
+    created: String,
+    last_modified: String,
+    file_last_modified: String,
+    book_count: i64,
+    status: String,
+    summary: String,
+    reading_direction: String,
+    publisher: String,
+    age_rating: Option<i64>,
+    language: String,
+    genres: String,
+    tags: String,
+    release_date: Option<String>,
+    deleted: bool,
+    oneshot: bool,
 }
 
 impl From<SqlxSeriesListRow> for SeriesReadModel {
     fn from(value: SqlxSeriesListRow) -> Self {
+        let books_count = value.book_count.max(0) as u64;
+
         Self {
             id: value.id,
-            name: value.title.clone(),
+            library_id: value.library_id,
+            name: value.name,
             title: value.title,
+            title_sort: value.title_sort,
+            labels: parse_csv_values(&value.labels),
+            created: value.created.clone(),
+            last_modified: value.last_modified.clone(),
+            file_last_modified: value.file_last_modified,
+            books_count,
+            books_read_count: 0,
+            books_unread_count: books_count,
+            books_in_progress_count: 0,
+            status: value.status,
+            summary: value.summary,
+            reading_direction: value.reading_direction,
+            publisher: value.publisher,
+            age_rating: value.age_rating.map(|rating| rating.max(0) as u16),
+            language: value.language,
+            genres: parse_csv_values(&value.genres),
+            tags: parse_csv_values(&value.tags),
+            alternate_titles: vec![],
+            metadata_created: value.created,
+            metadata_last_modified: value.last_modified,
+            books_metadata_authors: vec![],
+            books_metadata_tags: vec![],
+            books_metadata_release_date: value.release_date,
+            books_metadata_summary: String::new(),
+            books_metadata_summary_number: String::new(),
+            books_metadata_created: String::new(),
+            books_metadata_last_modified: String::new(),
+            deleted: value.deleted,
+            oneshot: value.oneshot,
         }
     }
 }
@@ -81,14 +133,29 @@ pub(in crate::read_models) async fn list_series_sqlx(
         r#"
             SELECT s.id AS id,
                    s.library_id AS library_id,
+                   s.title AS name,
                    s.title AS title,
+                   s.title AS title_sort,
                    s.created AS created,
                    s.last_modified AS last_modified,
+                   s.file_last_modified AS file_last_modified,
                    s.release_date AS release_date,
                    s.book_count AS book_count,
-                   COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels
+                   s.status AS status,
+                   '' AS summary,
+                   '' AS reading_direction,
+                   s.publisher AS publisher,
+                   s.age_rating AS age_rating,
+                   s.language AS language,
+                   CAST(s.deleted AS BOOLEAN) AS deleted,
+                   CAST(s.oneshot AS BOOLEAN) AS oneshot,
+                   COALESCE(GROUP_CONCAT(DISTINCT sl.label), '') AS labels,
+                   COALESCE(GROUP_CONCAT(DISTINCT sg.genre), '') AS genres,
+                   COALESCE(GROUP_CONCAT(DISTINCT st.tag), '') AS tags
             FROM series s
             LEFT JOIN series_labels sl ON sl.series_id = s.id
+            LEFT JOIN series_genres sg ON sg.series_id = s.id
+            LEFT JOIN series_tags st ON st.series_id = s.id
         "#,
     );
     let mut select_state = SqlxWhereState::default();
@@ -101,9 +168,22 @@ pub(in crate::read_models) async fn list_series_sqlx(
     );
     select_builder.push(
         r#"
-            GROUP BY s.id, s.library_id, s.title, s.created, s.last_modified, s.release_date, s.book_count ORDER BY
+            GROUP BY s.id,
+                     s.library_id,
+                     s.title,
+                     s.created,
+                     s.last_modified,
+                     s.file_last_modified,
+                     s.release_date,
+                     s.book_count,
+                     s.status,
+                     s.publisher,
+                     s.age_rating,
+                     s.language,
+                     s.deleted,
+                     s.oneshot
+            ORDER BY
         "#,
-
     );
     select_builder.push(series_order_sql(series_ordering_from_sorts(&query.sort)));
     select_builder.push(" LIMIT ");
@@ -191,20 +271,18 @@ fn apply_series_condition_sqlx<'args>(
                 if conditions.is_empty() {
                     return;
                 }
-                let prefix = if state.has_where {
-                    " AND ("
-                } else {
-                    " WHERE ("
-                };
-                builder.push(prefix);
+                append_clause_sqlx("(", builder, state);
                 for (i, c) in conditions.iter().enumerate() {
                     if i > 0 {
                         builder.push(" OR ");
                     }
-                    apply_series_condition_sqlx(c, builder, state);
+                    builder.push("s.id IN (SELECT s.id FROM series s");
+                    let mut child_state = SqlxWhereState::default();
+                    apply_series_condition_sqlx(c, builder, &mut child_state);
+                    state.params.extend(child_state.params);
+                    builder.push(")");
                 }
                 builder.push(")");
-                state.has_where = true;
             }
         },
     }

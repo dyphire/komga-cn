@@ -1299,7 +1299,7 @@ pub(crate) async fn load_persisted_series_page(
     }
 
     let total_elements = series.len();
-    let content = if query.unpaged {
+    let mut content = if query.unpaged {
         series
     } else {
         let offset = query.page.saturating_mul(query.size);
@@ -1315,6 +1315,19 @@ pub(crate) async fn load_persisted_series_page(
     } else {
         query.size.max(1)
     };
+
+    if let Some(user_id) = context.user_id.as_deref() {
+        let read_progress = backend.load_series_read_progress_counts(user_id).await?;
+        for row in &mut content {
+            let (read_count, in_progress_count) =
+                read_progress.get(&row.id).copied().unwrap_or_default();
+            row.books_read_count = read_count.max(0) as u64;
+            row.books_in_progress_count = in_progress_count.max(0) as u64;
+            row.books_unread_count = row
+                .books_count
+                .saturating_sub(row.books_read_count + row.books_in_progress_count);
+        }
+    }
 
     Ok(PageEnvelope::from_slice(
         content,
