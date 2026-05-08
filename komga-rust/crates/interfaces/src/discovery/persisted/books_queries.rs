@@ -6,15 +6,493 @@ use super::common_helpers::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
     normalized_text_matches,
 };
+use super::models::PersistedBookSummary;
 use super::*;
 use komga_application::discovery::{
     BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
+};
+use komga_domain::discovery::{
+    BookCondition, BookPosterCondition, BookValueCondition, DateCondition, FilterOperator,
+    InclusionCondition, NumberCondition, ReadStatusCondition, StringCondition,
 };
 
 pub async fn load_book_poster_summaries(
     backend: &dyn PersistedDiscoveryListDataSource,
 ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
     backend.load_book_poster_summaries().await
+}
+
+struct BookConditionEvaluationData {
+    user_id_present: bool,
+    readlist_memberships: Option<BTreeMap<String, BTreeSet<String>>>,
+    posters: Option<HashMap<String, Vec<PersistedBookPosterSummary>>>,
+    release_date_cutoffs: HashMap<i64, Option<String>>,
+}
+
+impl BookConditionEvaluationData {
+    async fn load(
+        backend: &dyn PersistedDiscoveryListDataSource,
+        context: &DiscoveryQueryContext,
+        condition: &BookCondition,
+    ) -> Result<Self, String> {
+        let readlist_memberships = if condition_needs_readlist_memberships(condition) {
+            Some(backend.load_readlist_memberships().await?)
+        } else {
+            None
+        };
+        let posters = if condition_needs_posters(condition) {
+            Some(load_book_poster_summaries(backend).await?)
+        } else {
+            None
+        };
+        let mut release_date_offsets = BTreeSet::new();
+        collect_release_date_offsets(condition, &mut release_date_offsets);
+        let mut release_date_cutoffs = HashMap::new();
+        for days in release_date_offsets {
+            release_date_cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
+        }
+
+        Ok(Self {
+            user_id_present: context.user_id.is_some(),
+            readlist_memberships,
+            posters,
+            release_date_cutoffs,
+        })
+    }
+}
+
+fn condition_needs_readlist_memberships(condition: &BookCondition) -> bool {
+    match condition {
+        BookCondition::Value(BookValueCondition::ReadListId(_)) => true,
+        BookCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .any(condition_needs_readlist_memberships),
+        _ => false,
+    }
+}
+
+fn condition_needs_posters(condition: &BookCondition) -> bool {
+    match condition {
+        BookCondition::Value(BookValueCondition::Poster(_)) => true,
+        BookCondition::Composite(composite) => {
+            composite.conditions.iter().any(condition_needs_posters)
+        }
+        _ => false,
+    }
+}
+
+fn collect_release_date_offsets(condition: &BookCondition, offsets: &mut BTreeSet<i64>) {
+    match condition {
+        BookCondition::Value(BookValueCondition::ReleaseDate(
+            DateCondition::WithinLastDays(days) | DateCondition::OutsideLastDays(days),
+        )) => {
+            offsets.insert(*days);
+        }
+        BookCondition::Composite(composite) => {
+            for child in &composite.conditions {
+                collect_release_date_offsets(child, offsets);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn first_readlist_sort_id(condition: Option<&BookCondition>) -> Option<&str> {
+    fn visit(condition: &BookCondition) -> Option<&str> {
+        match condition {
+            BookCondition::Value(BookValueCondition::ReadListId(InclusionCondition::Include(
+                values,
+            ))) => values.first().map(|value| value.as_str()),
+            BookCondition::Composite(composite) => composite.conditions.iter().find_map(visit),
+            _ => None,
+        }
+    }
+
+    condition.and_then(visit)
+}
+
+fn row_matches_book_condition(
+    row: &PersistedBookSummary,
+    condition: &BookCondition,
+    data: &BookConditionEvaluationData,
+) -> bool {
+    match condition {
+        BookCondition::Value(value) => row_matches_book_value_condition(row, value, data),
+        BookCondition::Composite(composite) => match composite.operator {
+            FilterOperator::All => composite
+                .conditions
+                .iter()
+                .all(|condition| row_matches_book_condition(row, condition, data)),
+            FilterOperator::Any => {
+                composite.conditions.is_empty()
+                    || composite
+                        .conditions
+                        .iter()
+                        .any(|condition| row_matches_book_condition(row, condition, data))
+            }
+        },
+    }
+}
+
+fn row_matches_book_value_condition(
+    row: &PersistedBookSummary,
+    condition: &BookValueCondition,
+    data: &BookConditionEvaluationData,
+) -> bool {
+    match condition {
+        BookValueCondition::LibraryId(inc) => {
+            matches_string_inclusion(row.library_id.as_str(), inc, |id| id.as_str())
+        }
+        BookValueCondition::SeriesId(inc) => {
+            matches_string_inclusion(row.series_id.as_str(), inc, |id| id.as_str())
+        }
+        BookValueCondition::ReadListId(inc) => matches_readlist_condition(row, inc, data),
+        BookValueCondition::Title(condition) => matches_string_condition(&row.title, condition),
+        BookValueCondition::Deleted(value) => row.deleted == *value,
+        BookValueCondition::OneShot(value) => row.oneshot == *value,
+        BookValueCondition::Tag(condition) => {
+            matches_string_list_condition(&row.metadata_tags, condition)
+        }
+        BookValueCondition::Genre(condition) => {
+            matches_string_list_condition(&row.genres, condition)
+        }
+        BookValueCondition::Language(inc) => {
+            matches_optional_string_inclusion(row.language.as_deref(), inc)
+        }
+        BookValueCondition::Publisher(inc) => {
+            matches_optional_string_inclusion(row.publisher.as_deref(), inc)
+        }
+        BookValueCondition::AgeRating(inc) => matches_optional_copy_inclusion(row.age_rating, inc),
+        BookValueCondition::ReadStatus(ReadStatusCondition::Include(values)) => {
+            data.user_id_present && any_ignore_ascii_case([row.read_status.as_str()], values)
+        }
+        BookValueCondition::ReadStatus(ReadStatusCondition::Exclude(values)) => {
+            data.user_id_present && !any_ignore_ascii_case([row.read_status.as_str()], values)
+        }
+        BookValueCondition::MediaProfile(inc) => {
+            let profile = media_profile_for_media_type(&row.media_type);
+            matches_string_inclusion(profile, inc, String::as_str)
+        }
+        BookValueCondition::MediaStatus(inc) => {
+            matches_string_inclusion(row.media_status.as_str(), inc, String::as_str)
+        }
+        BookValueCondition::Author(condition) => matches_author_condition(row, condition),
+        BookValueCondition::Poster(inc) => matches_poster_condition(row, inc, data),
+        BookValueCondition::NumberSort(condition) => {
+            matches_number_condition(row.metadata_number_sort, condition)
+        }
+        BookValueCondition::ReleaseDate(condition) => {
+            matches_date_condition(row.metadata_release_date.as_deref(), condition, data)
+        }
+    }
+}
+
+fn matches_string_inclusion<T>(
+    actual: &str,
+    condition: &InclusionCondition<T>,
+    value: impl Fn(&T) -> &str,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => values
+            .iter()
+            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+        InclusionCondition::Exclude(values) => !values
+            .iter()
+            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+    }
+}
+
+fn matches_optional_string_inclusion(
+    actual: Option<&str>,
+    condition: &InclusionCondition<String>,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => {
+            actual.is_some_and(|actual| any_ignore_ascii_case([actual], values))
+        }
+        InclusionCondition::Exclude(values) => actual
+            .map(|actual| !any_ignore_ascii_case([actual], values))
+            .unwrap_or(true),
+    }
+}
+
+fn matches_optional_copy_inclusion<T: Copy + PartialEq>(
+    actual: Option<T>,
+    condition: &InclusionCondition<T>,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => {
+            actual.is_some_and(|actual| values.contains(&actual))
+        }
+        InclusionCondition::Exclude(values) => actual
+            .map(|actual| !values.contains(&actual))
+            .unwrap_or(true),
+    }
+}
+
+fn matches_readlist_condition(
+    row: &PersistedBookSummary,
+    condition: &InclusionCondition<komga_domain::common_ids::ReadListId>,
+    data: &BookConditionEvaluationData,
+) -> bool {
+    let memberships = data
+        .readlist_memberships
+        .as_ref()
+        .and_then(|memberships| memberships.get(&row.id));
+    match condition {
+        InclusionCondition::Include(values) => memberships.is_some_and(|memberships| {
+            values
+                .iter()
+                .any(|value| memberships.contains(value.as_str()))
+        }),
+        InclusionCondition::Exclude(values) => memberships
+            .map(|memberships| {
+                !values
+                    .iter()
+                    .any(|value| memberships.contains(value.as_str()))
+            })
+            .unwrap_or(true),
+    }
+}
+
+fn matches_string_condition(actual: &str, condition: &StringCondition) -> bool {
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::Exact)
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::Exact)
+        }
+        StringCondition::Contains(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::Contains)
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::Contains)
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::EndsWith)
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::EndsWith)
+        }
+        StringCondition::IsEmpty => actual.is_empty(),
+        StringCondition::IsNotEmpty => !actual.is_empty(),
+    }
+}
+
+fn matches_string_list_condition(values: &[String], condition: &StringCondition) -> bool {
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Exact,
+            )
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Exact,
+            )
+        }
+        StringCondition::Contains(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Contains,
+            )
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Contains,
+            )
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::StartsWith,
+            )
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::StartsWith,
+            )
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::EndsWith,
+            )
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::EndsWith,
+            )
+        }
+        StringCondition::IsEmpty => values.is_empty(),
+        StringCondition::IsNotEmpty => !values.is_empty(),
+    }
+}
+
+fn matches_author_condition(row: &PersistedBookSummary, condition: &StringCondition) -> bool {
+    match condition {
+        StringCondition::Contains(InclusionCondition::Include(values)) => row
+            .metadata_authors
+            .iter()
+            .any(|author| author_contains_filter(&author.name, &author.role, values)),
+        StringCondition::Contains(InclusionCondition::Exclude(values)) => !row
+            .metadata_authors
+            .iter()
+            .any(|author| author_contains_filter(&author.name, &author.role, values)),
+        StringCondition::Exact(InclusionCondition::Include(values)) => row
+            .metadata_authors
+            .iter()
+            .any(|author| author_matches_filter(&author.name, &author.role, values)),
+        StringCondition::Exact(InclusionCondition::Exclude(values)) => !row
+            .metadata_authors
+            .iter()
+            .any(|author| author_matches_filter(&author.name, &author.role, values)),
+        StringCondition::IsEmpty => row.metadata_authors.is_empty(),
+        StringCondition::IsNotEmpty => !row.metadata_authors.is_empty(),
+        StringCondition::StartsWith(_) | StringCondition::EndsWith(_) => false,
+    }
+}
+
+fn matches_poster_condition(
+    row: &PersistedBookSummary,
+    condition: &InclusionCondition<BookPosterCondition>,
+    data: &BookConditionEvaluationData,
+) -> bool {
+    let posters = data
+        .posters
+        .as_ref()
+        .and_then(|posters| posters.get(&row.id));
+    match condition {
+        InclusionCondition::Include(conditions) => posters.is_some_and(|posters| {
+            posters.iter().any(|poster| {
+                conditions.iter().any(|condition| {
+                    poster_matches(
+                        poster,
+                        condition
+                            .thumbnail_type
+                            .as_ref()
+                            .map(|value| vec![value.clone()])
+                            .as_ref(),
+                        condition.selected,
+                    )
+                })
+            })
+        }),
+        InclusionCondition::Exclude(conditions) => posters
+            .map(|posters| {
+                !posters.iter().any(|poster| {
+                    conditions.iter().any(|condition| {
+                        poster_matches(
+                            poster,
+                            condition
+                                .thumbnail_type
+                                .as_ref()
+                                .map(|value| vec![value.clone()])
+                                .as_ref(),
+                            condition.selected,
+                        )
+                    })
+                })
+            })
+            .unwrap_or(true),
+    }
+}
+
+fn matches_number_condition(actual: f64, condition: &NumberCondition) -> bool {
+    match condition {
+        NumberCondition::Exact(InclusionCondition::Include(values)) => values.iter().any(|value| {
+            value
+                .parse::<f64>()
+                .map(|expected| (actual - expected).abs() <= f64::EPSILON)
+                .unwrap_or(false)
+        }),
+        NumberCondition::Exact(InclusionCondition::Exclude(values)) => {
+            !values.iter().any(|value| {
+                value
+                    .parse::<f64>()
+                    .map(|expected| (actual - expected).abs() <= f64::EPSILON)
+                    .unwrap_or(false)
+            })
+        }
+        NumberCondition::GreaterThan(value) => value
+            .parse::<f64>()
+            .map(|expected| actual > expected)
+            .unwrap_or(false),
+        NumberCondition::LessThan(value) => value
+            .parse::<f64>()
+            .map(|expected| actual < expected)
+            .unwrap_or(false),
+    }
+}
+
+fn matches_date_condition(
+    actual: Option<&str>,
+    condition: &DateCondition,
+    data: &BookConditionEvaluationData,
+) -> bool {
+    match condition {
+        DateCondition::Exact(InclusionCondition::Include(values)) => {
+            actual.is_some_and(|actual| values.iter().any(|value| value == actual))
+        }
+        DateCondition::Exact(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !values.iter().any(|value| value == actual))
+            .unwrap_or(true),
+        DateCondition::Before(value) => actual.is_some_and(|actual| actual < value.as_str()),
+        DateCondition::After(value) => actual.is_some_and(|actual| actual > value.as_str()),
+        DateCondition::Contains(InclusionCondition::Include(values)) => actual
+            .is_some_and(|actual| normalized_text_matches(actual, values, TextMatchMode::Contains)),
+        DateCondition::Contains(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::Contains))
+            .unwrap_or(true),
+        DateCondition::StartsWith(InclusionCondition::Include(values)) => {
+            actual.is_some_and(|actual| {
+                normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+            })
+        }
+        DateCondition::StartsWith(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::StartsWith))
+            .unwrap_or(true),
+        DateCondition::EndsWith(InclusionCondition::Include(values)) => actual
+            .is_some_and(|actual| normalized_text_matches(actual, values, TextMatchMode::EndsWith)),
+        DateCondition::EndsWith(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::EndsWith))
+            .unwrap_or(true),
+        DateCondition::WithinLastDays(days) => data
+            .release_date_cutoffs
+            .get(days)
+            .and_then(Option::as_deref)
+            .map(|cutoff| actual.is_some_and(|actual| actual > cutoff))
+            .unwrap_or(true),
+        DateCondition::OutsideLastDays(days) => data
+            .release_date_cutoffs
+            .get(days)
+            .and_then(Option::as_deref)
+            .map(|cutoff| actual.is_some_and(|actual| actual < cutoff))
+            .unwrap_or(true),
+        DateCondition::IsEmpty => actual.is_none(),
+        DateCondition::IsNotEmpty => actual.is_some(),
+    }
 }
 
 pub(crate) async fn load_persisted_books_page(
@@ -67,6 +545,14 @@ pub(crate) async fn load_persisted_books_page(
             row.age_rating
                 .map(|age_rating| age_rating < age)
                 .unwrap_or(true)
+        });
+    }
+
+    if let Some(condition) = query.condition.as_ref() {
+        let evaluation_data =
+            BookConditionEvaluationData::load(backend, context, condition).await?;
+        books = filter_rows(books, |row| {
+            row_matches_book_condition(row, condition, &evaluation_data)
         });
     }
 
@@ -569,6 +1055,22 @@ pub(crate) async fn load_persisted_books_page(
     }
 
     if !query.sort_modes.is_empty() {
+        let readlist_ordering = if query.sort_modes.iter().any(|sort_mode| {
+            matches!(
+                sort_mode,
+                PersistedBooksSortMode::ReadListNumberAsc
+                    | PersistedBooksSortMode::ReadListNumberDesc
+            )
+        }) {
+            if let Some(readlist_id) = first_readlist_sort_id(query.condition.as_ref()) {
+                Some(backend.load_readlist_ordering(readlist_id).await?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         books.sort_by(|left, right| {
             for sort_mode in &query.sort_modes {
                 let ordering = match sort_mode {
@@ -576,9 +1078,75 @@ pub(crate) async fn load_persisted_books_page(
                         .title
                         .to_ascii_lowercase()
                         .cmp(&right.title.to_ascii_lowercase()),
+                    PersistedBooksSortMode::TitleDesc => right
+                        .title
+                        .to_ascii_lowercase()
+                        .cmp(&left.title.to_ascii_lowercase()),
+                    PersistedBooksSortMode::NameAsc => left
+                        .name
+                        .to_ascii_lowercase()
+                        .cmp(&right.name.to_ascii_lowercase()),
+                    PersistedBooksSortMode::NameDesc => right
+                        .name
+                        .to_ascii_lowercase()
+                        .cmp(&left.name.to_ascii_lowercase()),
+                    PersistedBooksSortMode::SeriesTitleAsc => left
+                        .series_title_sort
+                        .to_ascii_lowercase()
+                        .cmp(&right.series_title_sort.to_ascii_lowercase()),
+                    PersistedBooksSortMode::SeriesTitleDesc => right
+                        .series_title_sort
+                        .to_ascii_lowercase()
+                        .cmp(&left.series_title_sort.to_ascii_lowercase()),
+                    PersistedBooksSortMode::CreatedDateAsc => left.created.cmp(&right.created),
                     PersistedBooksSortMode::CreatedDateDesc => right.created.cmp(&left.created),
+                    PersistedBooksSortMode::LastModifiedDateAsc => {
+                        left.last_modified.cmp(&right.last_modified)
+                    }
                     PersistedBooksSortMode::LastModifiedDateDesc => {
                         right.last_modified.cmp(&left.last_modified)
+                    }
+                    PersistedBooksSortMode::FileSizeAsc => left.size_bytes.cmp(&right.size_bytes),
+                    PersistedBooksSortMode::FileSizeDesc => right.size_bytes.cmp(&left.size_bytes),
+                    PersistedBooksSortMode::FileHashAsc => left.file_hash.cmp(&right.file_hash),
+                    PersistedBooksSortMode::FileHashDesc => right.file_hash.cmp(&left.file_hash),
+                    PersistedBooksSortMode::UrlAsc => left
+                        .url
+                        .to_ascii_lowercase()
+                        .cmp(&right.url.to_ascii_lowercase()),
+                    PersistedBooksSortMode::UrlDesc => right
+                        .url
+                        .to_ascii_lowercase()
+                        .cmp(&left.url.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaStatusAsc => left
+                        .media_status
+                        .to_ascii_lowercase()
+                        .cmp(&right.media_status.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaStatusDesc => right
+                        .media_status
+                        .to_ascii_lowercase()
+                        .cmp(&left.media_status.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaCommentAsc => left
+                        .media_comment
+                        .to_ascii_lowercase()
+                        .cmp(&right.media_comment.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaCommentDesc => right
+                        .media_comment
+                        .to_ascii_lowercase()
+                        .cmp(&left.media_comment.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaTypeAsc => left
+                        .media_type
+                        .to_ascii_lowercase()
+                        .cmp(&right.media_type.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaTypeDesc => right
+                        .media_type
+                        .to_ascii_lowercase()
+                        .cmp(&left.media_type.to_ascii_lowercase()),
+                    PersistedBooksSortMode::MediaPagesCountAsc => {
+                        left.media_pages_count.cmp(&right.media_pages_count)
+                    }
+                    PersistedBooksSortMode::MediaPagesCountDesc => {
+                        right.media_pages_count.cmp(&left.media_pages_count)
                     }
                     PersistedBooksSortMode::ReadProgressLastModifiedDateAsc => left
                         .read_progress
@@ -620,6 +1188,9 @@ pub(crate) async fn load_persisted_books_page(
                                 .as_ref()
                                 .and_then(|progress| progress.read_date.as_deref()),
                         ),
+                    PersistedBooksSortMode::ReleaseDateAsc => {
+                        left.metadata_release_date.cmp(&right.metadata_release_date)
+                    }
                     PersistedBooksSortMode::ReleaseDateDesc => {
                         right.metadata_release_date.cmp(&left.metadata_release_date)
                     }
@@ -627,7 +1198,27 @@ pub(crate) async fn load_persisted_books_page(
                         .metadata_number_sort
                         .partial_cmp(&right.metadata_number_sort)
                         .unwrap_or(std::cmp::Ordering::Equal),
+                    PersistedBooksSortMode::NumberSortDesc => right
+                        .metadata_number_sort
+                        .partial_cmp(&left.metadata_number_sort)
+                        .unwrap_or(std::cmp::Ordering::Equal),
                     PersistedBooksSortMode::SeriesIdAsc => left.series_id.cmp(&right.series_id),
+                    PersistedBooksSortMode::ReadListNumberAsc => readlist_ordering
+                        .as_ref()
+                        .and_then(|ordering| ordering.get(&left.id))
+                        .cmp(
+                            &readlist_ordering
+                                .as_ref()
+                                .and_then(|ordering| ordering.get(&right.id)),
+                        ),
+                    PersistedBooksSortMode::ReadListNumberDesc => readlist_ordering
+                        .as_ref()
+                        .and_then(|ordering| ordering.get(&right.id))
+                        .cmp(
+                            &readlist_ordering
+                                .as_ref()
+                                .and_then(|ordering| ordering.get(&left.id)),
+                        ),
                     PersistedBooksSortMode::RelevanceAsc => {
                         compare_relevance_ranks(&relevance_ranks, &left.id, &right.id, false)
                     }
@@ -669,7 +1260,7 @@ pub(crate) async fn load_persisted_books_page(
                 series_id: row.series_id,
                 series_title: row.series_title,
                 library_id: row.library_id,
-                name: row.title.clone(),
+                name: row.name,
                 url: row.url,
                 number: row.number,
                 created: row.created,
@@ -745,8 +1336,10 @@ fn compare_relevance_ranks(
     let left_rank = relevance_ranks.get(left_id).copied();
     let right_rank = relevance_ranks.get(right_id).copied();
     match (left_rank, right_rank) {
-        (Some(left), Some(right)) if descending => left.cmp(&right),
-        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(left), Some(right)) if descending => right.cmp(&left),
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
         _ => std::cmp::Ordering::Equal,
     }
 }

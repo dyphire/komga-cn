@@ -26,7 +26,7 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
         Some("series"),
     )
     .await;
-    assert_eq!(relevance_desc_ids, vec!["series-2", "series-1", "series-3"]);
+    assert_eq!(relevance_desc_ids, vec!["series-3", "series-1", "series-2"]);
 
     let relevance_asc_ids = series_list_ids(
         ctx.app(),
@@ -35,7 +35,7 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
         Some("series"),
     )
     .await;
-    assert_eq!(relevance_asc_ids, vec!["series-3", "series-1", "series-2"]);
+    assert_eq!(relevance_asc_ids, vec!["series-2", "series-1", "series-3"]);
 
     let fielded_ids = series_list_ids(
         ctx.app(),
@@ -44,7 +44,7 @@ async fn router_discovery_series_list_locks_main_search_parity_for_retained_inpu
         Some("title:series"),
     )
     .await;
-    assert_eq!(fielded_ids, vec!["series-2", "series-1", "series-3"]);
+    assert_eq!(fielded_ids, vec!["series-3", "series-1", "series-2"]);
 
     let title_sort_ids = series_list_ids(
         ctx.app(),
@@ -134,10 +134,7 @@ async fn router_discovery_series_list_defaults_to_relevance_sort_when_full_text_
         series_list_ids(ctx.app(), &admin_token, None, Some("series")).await;
     assert_eq!(
         default_relevance_ids,
-        // Intentional exemption: Kotlin's default `Sort.by("relevance")` ordering is a Lucene-
-        // specific hit-order quirk. The Rust route keeps the implicit full-text path aligned with
-        // explicit `relevance,asc` score semantics instead of reproducing a backend-specific
-        // exception only for requests that omit `sort`.
+        // Kotlin uses Sort.by("relevance"), which is ascending unless the request overrides it.
         explicit_relevance_asc_ids
     );
 }

@@ -106,3 +106,29 @@ pub async fn load_readlist_memberships(
     }
     Ok(memberships)
 }
+
+pub async fn load_readlist_ordering(
+    database_file: &FsPath,
+    readlist_id: &str,
+) -> Result<HashMap<String, i64>, String> {
+    let pool = connect_read_pool(database_file)
+        .await
+        .map_err(|error| format!("open readlist ordering db: {error}"))?;
+
+    let rows = sqlx::query(
+        r#"SELECT BOOK_ID, NUMBER
+         FROM READLIST_BOOK
+         WHERE READLIST_ID = ?"#,
+    )
+    .bind(readlist_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| format!("query readlist ordering: {error}"))?;
+
+    let mut ordering = HashMap::new();
+    for row in rows {
+        ordering.insert(row.get::<String, _>("BOOK_ID"), row.get::<i64, _>("NUMBER"));
+    }
+
+    Ok(ordering)
+}

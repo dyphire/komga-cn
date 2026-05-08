@@ -1,5 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
+use komga_domain::discovery::{BookCondition, SeriesCondition};
+
 #[derive(Clone)]
 pub struct PersistedBookBrowseEntry {
     pub id: String,
@@ -107,6 +109,7 @@ pub(crate) struct SeriesFilterCriteria {
 #[derive(Clone)]
 pub(crate) struct PersistedSeriesBrowseQuery {
     pub filters: SeriesFilterCriteria,
+    pub condition: Option<SeriesCondition>,
     pub sharing_labels_contains_groups: Vec<Vec<String>>,
     pub search: Option<String>,
     pub page: usize,
@@ -126,6 +129,7 @@ impl PersistedSeriesBrowseQuery {
     ) -> Self {
         Self {
             filters,
+            condition: None,
             sharing_labels_contains_groups: vec![],
             search,
             page,
@@ -133,6 +137,11 @@ impl PersistedSeriesBrowseQuery {
             unpaged,
             sort_modes,
         }
+    }
+
+    pub fn with_condition(mut self, condition: Option<SeriesCondition>) -> Self {
+        self.condition = condition;
+        self
     }
 }
 
@@ -276,15 +285,40 @@ pub(crate) struct BooksFilterCriteria {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PersistedBooksSortMode {
     TitleAsc,
+    TitleDesc,
+    NameAsc,
+    NameDesc,
+    SeriesTitleAsc,
+    SeriesTitleDesc,
+    CreatedDateAsc,
     CreatedDateDesc,
+    LastModifiedDateAsc,
     LastModifiedDateDesc,
+    FileSizeAsc,
+    FileSizeDesc,
+    FileHashAsc,
+    FileHashDesc,
+    UrlAsc,
+    UrlDesc,
+    MediaStatusAsc,
+    MediaStatusDesc,
+    MediaCommentAsc,
+    MediaCommentDesc,
+    MediaTypeAsc,
+    MediaTypeDesc,
+    MediaPagesCountAsc,
+    MediaPagesCountDesc,
     ReadProgressLastModifiedDateAsc,
     ReadProgressLastModifiedDateDesc,
     ReadProgressReadDateAsc,
     ReadProgressReadDateDesc,
+    ReleaseDateAsc,
     ReleaseDateDesc,
     NumberSortAsc,
+    NumberSortDesc,
     SeriesIdAsc,
+    ReadListNumberAsc,
+    ReadListNumberDesc,
     RelevanceAsc,
     RelevanceDesc,
 }
@@ -292,6 +326,7 @@ pub(crate) enum PersistedBooksSortMode {
 #[derive(Clone)]
 pub(crate) struct PersistedBooksBrowseQuery {
     pub filters: BooksFilterCriteria,
+    pub condition: Option<BookCondition>,
     pub search: Option<String>,
     pub page: usize,
     pub size: usize,
@@ -310,12 +345,18 @@ impl PersistedBooksBrowseQuery {
     ) -> Self {
         Self {
             filters,
+            condition: None,
             search,
             page,
             size,
             unpaged,
             sort_modes,
         }
+    }
+
+    pub fn with_condition(mut self, condition: Option<BookCondition>) -> Self {
+        self.condition = condition;
+        self
     }
 }
 
@@ -339,7 +380,9 @@ pub struct PersistedBookSummary {
     pub series_id: String,
     pub library_id: String,
     pub series_title: String,
+    pub series_title_sort: String,
     pub title: String,
+    pub name: String,
     pub url: String,
     pub number: i32,
     pub created: String,

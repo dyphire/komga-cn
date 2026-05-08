@@ -47,7 +47,9 @@ fn persisted_book_summary(row: models::BookSummary) -> PersistedBookSummary {
         series_id: row.series_id,
         library_id: row.library_id,
         series_title: row.series_title,
+        series_title_sort: row.series_title_sort,
         title: row.title,
+        name: row.name,
         url: row.url,
         number: row.number,
         created: row.created,
@@ -312,6 +314,13 @@ impl PersistedDiscoveryListDataSource for RuntimePersistedDiscoveryAccess {
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         library_mappings::load_readlist_memberships(self.db.database_file()).await
+    }
+
+    async fn load_readlist_ordering(
+        &self,
+        readlist_id: &str,
+    ) -> Result<HashMap<String, i64>, String> {
+        library_mappings::load_readlist_ordering(self.db.database_file(), readlist_id).await
     }
 
     async fn load_persisted_book_tags(

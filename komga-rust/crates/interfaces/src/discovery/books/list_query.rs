@@ -205,6 +205,12 @@ fn parse_string_condition(
                 condition_type,
             )?],
         ))),
+        "doesnotcontain" => Ok(StringCondition::Contains(InclusionCondition::Exclude(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
         "isnot" => Ok(StringCondition::Exact(InclusionCondition::Exclude(vec![
             parse_required_lower_string_value(condition, condition_type)?,
         ]))),
@@ -217,7 +223,19 @@ fn parse_string_condition(
                 condition_type,
             )?],
         ))),
+        "doesnotbeginwith" => Ok(StringCondition::StartsWith(InclusionCondition::Exclude(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
         "endswith" => Ok(StringCondition::EndsWith(InclusionCondition::Include(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
+        "doesnotendwith" => Ok(StringCondition::EndsWith(InclusionCondition::Exclude(
             vec![parse_required_lower_string_value(
                 condition,
                 condition_type,
@@ -436,11 +454,15 @@ fn parse_single_book_value_condition(
             Ok(BookValueCondition::OneShot(value))
         }
         "LibraryId" => {
-            if operator != "is" {
-                return Err(DiscoveryError::InvalidSemantics(format!(
-                    "unsupported operator for LibraryId: {operator}",
-                )));
-            }
+            let include = match operator.as_str() {
+                "is" => true,
+                "isnot" => false,
+                _ => {
+                    return Err(DiscoveryError::InvalidSemantics(format!(
+                        "unsupported operator for LibraryId: {operator}",
+                    )));
+                }
+            };
             let value = parse_book_string_value(condition, "value")
                 .unwrap_or_default()
                 .trim()
@@ -450,9 +472,12 @@ fn parse_single_book_value_condition(
                     "LibraryId filter requires a non-empty value".to_string(),
                 ));
             }
-            Ok(BookValueCondition::LibraryId(InclusionCondition::Include(
-                vec![LibraryId::from(value)],
-            )))
+            let library_id = LibraryId::from(value);
+            Ok(BookValueCondition::LibraryId(if include {
+                InclusionCondition::Include(vec![library_id])
+            } else {
+                InclusionCondition::Exclude(vec![library_id])
+            }))
         }
         "SeriesId" => {
             let include = match operator.as_str() {
@@ -706,6 +731,28 @@ fn parse_legacy_keyed_book_condition(
     }
 
     let (key, value) = object.iter().next()?;
+    if let Some(operator) = match key.as_str() {
+        "allOf" => Some(FilterOperator::All),
+        "anyOf" => Some(FilterOperator::Any),
+        _ => None,
+    } {
+        let Some(children) = value.as_array() else {
+            return Some(Err(DiscoveryError::InvalidSemantics(format!(
+                "{key} composite filter must be an array",
+            ))));
+        };
+        let conditions = children
+            .iter()
+            .map(parse_book_condition_from_json)
+            .collect::<Result<Vec<_>, _>>();
+        return Some(conditions.map(|conditions| {
+            BookCondition::Composite(CompositeBookCondition {
+                operator,
+                conditions,
+            })
+        }));
+    }
+
     let condition_type = legacy_book_condition_type(key)?;
     let mut expanded = value.clone();
     let Value::Object(expanded_object) = &mut expanded else {
@@ -795,7 +842,7 @@ pub(super) fn parse_book_filter_from_json(
 
 pub(super) fn parse_book_sorts_from_json(sorts: Option<&Value>, has_search: bool) -> Vec<BookSort> {
     let Some(sort_values) = sorts.and_then(Value::as_array) else {
-        return vec![];
+        return parse_book_sorts_from_json_values(&[], has_search);
     };
 
     let strs: Vec<String> = sort_values
@@ -810,17 +857,37 @@ pub(super) fn parse_book_sorts_from_json_values(
     sorts: &[String],
     has_search: bool,
 ) -> Vec<BookSort> {
-    sorts
+    let mut result = sorts
         .iter()
         .filter_map(|s| {
             let trimmed = s.trim();
             match trimmed {
                 "metadata.title,asc" | "title,asc" | "title" => Some(BookSort::MetadataTitleAsc),
                 "metadata.title,desc" | "title,desc" => Some(BookSort::MetadataTitleDesc),
+                "name,asc" | "name" => Some(BookSort::NameAsc),
+                "name,desc" => Some(BookSort::NameDesc),
+                "series,asc" | "series" => Some(BookSort::SeriesTitleAsc),
+                "series,desc" => Some(BookSort::SeriesTitleDesc),
+                "createdDate,asc" | "created,asc" => Some(BookSort::CreatedDateAsc),
                 "createdDate,desc" | "created,desc" => Some(BookSort::CreatedDateDesc),
+                "lastModifiedDate,asc" | "lastModified,asc" => Some(BookSort::LastModifiedDateAsc),
                 "lastModifiedDate,desc" | "lastModified,desc" => {
                     Some(BookSort::LastModifiedDateDesc)
                 }
+                "fileSize,asc" | "size,asc" => Some(BookSort::FileSizeAsc),
+                "fileSize,desc" | "size,desc" => Some(BookSort::FileSizeDesc),
+                "fileHash,asc" | "fileHash" => Some(BookSort::FileHashAsc),
+                "fileHash,desc" => Some(BookSort::FileHashDesc),
+                "url,asc" | "url" => Some(BookSort::UrlAsc),
+                "url,desc" => Some(BookSort::UrlDesc),
+                "media.status,asc" | "media.status" => Some(BookSort::MediaStatusAsc),
+                "media.status,desc" => Some(BookSort::MediaStatusDesc),
+                "media.comment,asc" | "media.comment" => Some(BookSort::MediaCommentAsc),
+                "media.comment,desc" => Some(BookSort::MediaCommentDesc),
+                "media.mediaType,asc" | "media.mediaType" => Some(BookSort::MediaTypeAsc),
+                "media.mediaType,desc" => Some(BookSort::MediaTypeDesc),
+                "media.pagesCount,asc" | "media.pagesCount" => Some(BookSort::MediaPagesCountAsc),
+                "media.pagesCount,desc" => Some(BookSort::MediaPagesCountDesc),
                 "readProgress.lastModified,asc" => Some(BookSort::ReadProgressLastModifiedAsc),
                 "readProgress.lastModified,desc" | "readProgress.lastModified" => {
                     Some(BookSort::ReadProgressLastModifiedDesc)
@@ -829,15 +896,24 @@ pub(super) fn parse_book_sorts_from_json_values(
                 "readProgress.readDate,desc" | "readProgress.readDate" => {
                     Some(BookSort::ReadProgressReadDateDesc)
                 }
+                "metadata.releaseDate,asc" => Some(BookSort::ReleaseDateAsc),
                 "metadata.releaseDate,desc" => Some(BookSort::ReleaseDateDesc),
                 "metadata.numberSort,asc" | "number,asc" | "series,metadata.numberSort,asc" => {
                     Some(BookSort::NumberSortAsc)
                 }
+                "metadata.numberSort,desc" | "number,desc" => Some(BookSort::NumberSortDesc),
                 "seriesId,asc" => Some(BookSort::SeriesIdAsc),
+                "readList.number,asc" | "readList.number" => Some(BookSort::ReadListNumberAsc),
+                "readList.number,desc" => Some(BookSort::ReadListNumberDesc),
                 "relevance,asc" if has_search => Some(BookSort::RelevanceAsc),
                 "relevance,desc" if has_search => Some(BookSort::RelevanceDesc),
                 _ => None,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    result.dedup();
+    if result.is_empty() && sorts.is_empty() && has_search {
+        result.push(BookSort::RelevanceAsc);
+    }
+    result
 }

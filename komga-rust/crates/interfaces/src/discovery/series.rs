@@ -653,12 +653,42 @@ fn parse_series_string_condition(
                 condition_type,
             )?],
         ))),
+        "doesnotcontain" => Ok(StringCondition::Contains(InclusionCondition::Exclude(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
         "isnot" => Ok(StringCondition::Exact(InclusionCondition::Exclude(vec![
             parse_required_lower_string_value(condition, condition_type)?,
         ]))),
         "is" => Ok(StringCondition::Exact(InclusionCondition::Include(vec![
             parse_required_lower_string_value(condition, condition_type)?,
         ]))),
+        "beginswith" => Ok(StringCondition::StartsWith(InclusionCondition::Include(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
+        "doesnotbeginwith" => Ok(StringCondition::StartsWith(InclusionCondition::Exclude(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
+        "endswith" => Ok(StringCondition::EndsWith(InclusionCondition::Include(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
+        "doesnotendwith" => Ok(StringCondition::EndsWith(InclusionCondition::Exclude(
+            vec![parse_required_lower_string_value(
+                condition,
+                condition_type,
+            )?],
+        ))),
         _ => Err(DiscoveryError::InvalidSemantics(format!(
             "unsupported operator for {condition_type}: {operator}",
         ))),
@@ -817,30 +847,12 @@ fn parse_single_series_value_condition(
     let operator = parse_operator(condition);
 
     match condition_type {
-        "Title" => {
-            let value = parse_string_value(condition, "value")
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if value.is_empty() {
-                return Err(DiscoveryError::InvalidSemantics(
-                    "Title filter requires a non-empty value".to_string(),
-                ));
-            }
-            Ok(SeriesValueCondition::Title(match operator.as_str() {
-                "contains" => StringCondition::Contains(InclusionCondition::Include(vec![value])),
-                "isnot" => StringCondition::Exact(InclusionCondition::Exclude(vec![value])),
-                "is" => StringCondition::Exact(InclusionCondition::Include(vec![value])),
-                "beginswith" => {
-                    StringCondition::StartsWith(InclusionCondition::Include(vec![value]))
-                }
-                "endswith" => StringCondition::EndsWith(InclusionCondition::Include(vec![value])),
-                _ => {
-                    return Err(DiscoveryError::InvalidSemantics(format!(
-                        "unsupported operator for Title: {operator}",
-                    )));
-                }
-            }))
-        }
+        "Title" => Ok(SeriesValueCondition::Title(parse_series_string_condition(
+            condition, "Title",
+        )?)),
+        "TitleSort" => Ok(SeriesValueCondition::TitleSort(
+            parse_series_string_condition(condition, "TitleSort")?,
+        )),
         "Deleted" => {
             let value = match operator.as_str() {
                 "istrue" => true,
@@ -878,11 +890,15 @@ fn parse_single_series_value_condition(
             Ok(SeriesValueCondition::Complete(value))
         }
         "LibraryId" => {
-            if operator != "is" {
-                return Err(DiscoveryError::InvalidSemantics(format!(
-                    "unsupported operator for LibraryId: {operator}",
-                )));
-            }
+            let include = match operator.as_str() {
+                "is" => true,
+                "isnot" => false,
+                _ => {
+                    return Err(DiscoveryError::InvalidSemantics(format!(
+                        "unsupported operator for LibraryId: {operator}",
+                    )));
+                }
+            };
             let value = parse_string_value(condition, "value")
                 .unwrap_or_default()
                 .trim()
@@ -892,16 +908,23 @@ fn parse_single_series_value_condition(
                     "LibraryId filter requires a non-empty value".to_string(),
                 ));
             }
-            Ok(SeriesValueCondition::LibraryId(
-                InclusionCondition::Include(vec![LibraryId::from(value)]),
-            ))
+            let library_id = LibraryId::from(value);
+            Ok(SeriesValueCondition::LibraryId(if include {
+                InclusionCondition::Include(vec![library_id])
+            } else {
+                InclusionCondition::Exclude(vec![library_id])
+            }))
         }
         "CollectionId" => {
-            if operator != "is" {
-                return Err(DiscoveryError::InvalidSemantics(format!(
-                    "unsupported operator for CollectionId: {operator}",
-                )));
-            }
+            let include = match operator.as_str() {
+                "is" => true,
+                "isnot" => false,
+                _ => {
+                    return Err(DiscoveryError::InvalidSemantics(format!(
+                        "unsupported operator for CollectionId: {operator}",
+                    )));
+                }
+            };
             let value = parse_string_value(condition, "value")
                 .unwrap_or_default()
                 .trim()
@@ -911,9 +934,12 @@ fn parse_single_series_value_condition(
                     "CollectionId filter requires a non-empty value".to_string(),
                 ));
             }
-            Ok(SeriesValueCondition::CollectionId(
-                InclusionCondition::Include(vec![CollectionId::from(value)]),
-            ))
+            let collection_id = CollectionId::from(value);
+            Ok(SeriesValueCondition::CollectionId(if include {
+                InclusionCondition::Include(vec![collection_id])
+            } else {
+                InclusionCondition::Exclude(vec![collection_id])
+            }))
         }
         "Genre" => Ok(SeriesValueCondition::Genre(parse_series_string_condition(
             condition, "Genre",
@@ -1089,11 +1115,85 @@ fn parse_single_series_value_condition(
     }
 }
 
+fn legacy_series_condition_type(key: &str) -> Option<&'static str> {
+    match key {
+        "title" => Some("Title"),
+        "titleSort" => Some("TitleSort"),
+        "deleted" => Some("Deleted"),
+        "oneShot" | "oneshot" => Some("OneShot"),
+        "complete" => Some("Complete"),
+        "libraryId" => Some("LibraryId"),
+        "collectionId" => Some("CollectionId"),
+        "genre" => Some("Genre"),
+        "tag" => Some("Tag"),
+        "language" => Some("Language"),
+        "publisher" => Some("Publisher"),
+        "ageRating" => Some("AgeRating"),
+        "readStatus" => Some("ReadStatus"),
+        "sharingLabel" => Some("SharingLabel"),
+        "seriesStatus" => Some("SeriesStatus"),
+        "author" => Some("Author"),
+        "releaseDate" => Some("ReleaseDate"),
+        _ => None,
+    }
+}
+
+fn parse_legacy_keyed_series_condition(
+    condition: &Value,
+) -> Option<Result<SeriesCondition, DiscoveryError>> {
+    let object = condition.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+
+    let (key, value) = object.iter().next()?;
+    if let Some(operator) = match key.as_str() {
+        "allOf" => Some(FilterOperator::All),
+        "anyOf" => Some(FilterOperator::Any),
+        _ => None,
+    } {
+        let Some(children) = value.as_array() else {
+            return Some(Err(DiscoveryError::InvalidSemantics(format!(
+                "{key} composite filter must be an array",
+            ))));
+        };
+        let conditions = children
+            .iter()
+            .map(parse_series_condition_from_json)
+            .collect::<Result<Vec<_>, _>>();
+        return Some(conditions.map(|conditions| {
+            SeriesCondition::Composite(CompositeSeriesCondition {
+                operator,
+                conditions,
+            })
+        }));
+    }
+
+    let condition_type = legacy_series_condition_type(key)?;
+    let mut expanded = value.clone();
+    let Value::Object(expanded_object) = &mut expanded else {
+        return Some(Err(DiscoveryError::InvalidSemantics(format!(
+            "{key} filter must be an object",
+        ))));
+    };
+    expanded_object.insert(
+        "type".to_string(),
+        Value::String(condition_type.to_string()),
+    );
+    Some(parse_series_condition_from_json(&expanded))
+}
+
 fn parse_series_condition_from_json(condition: &Value) -> Result<SeriesCondition, DiscoveryError> {
     let condition_type = condition
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or_default();
+
+    if condition_type.is_empty()
+        && let Some(parsed) = parse_legacy_keyed_series_condition(condition)
+    {
+        return parsed;
+    }
 
     match condition_type {
         "AllOfSeries" => {

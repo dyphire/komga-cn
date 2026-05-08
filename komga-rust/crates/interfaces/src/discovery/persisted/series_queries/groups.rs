@@ -2,24 +2,26 @@ use crate::state::PersistedDiscoveryListDataSource;
 
 use super::models::SeriesFilterCriteria;
 use super::*;
+use komga_domain::discovery::SeriesCondition;
 
 pub(crate) async fn load_persisted_alphabetical_groups(
     backend: &dyn PersistedDiscoveryListDataSource,
     context: &DiscoveryQueryContext,
-    filters: SeriesFilterCriteria,
+    condition: Option<SeriesCondition>,
     full_text_search: Option<String>,
 ) -> Result<Vec<Value>, String> {
     let page = load_persisted_series_page(
         backend,
         context,
         PersistedSeriesBrowseQuery::from_filters(
-            filters,
+            SeriesFilterCriteria::default(),
             full_text_search,
             0,
             usize::MAX,
             true,
             vec![PersistedSeriesSortMode::TitleAsc],
-        ),
+        )
+        .with_condition(condition),
     )
     .await?;
 

@@ -161,6 +161,11 @@ pub trait PersistedDiscoveryListDataSource: Send + Sync {
     async fn load_readlist_memberships(&self)
     -> Result<BTreeMap<String, BTreeSet<String>>, String>;
 
+    async fn load_readlist_ordering(
+        &self,
+        readlist_id: &str,
+    ) -> Result<HashMap<String, i64>, String>;
+
     async fn load_persisted_book_tags(
         &self,
         scope: Option<PersistedBookTagsScope>,

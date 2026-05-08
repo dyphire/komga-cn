@@ -224,7 +224,7 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
-    if !persisted_book_exists_from_services(&app, book_id)
+    if !persisted_book_exists_from_services(app, book_id)
         .await
         .unwrap_or(false)
     {
@@ -355,7 +355,7 @@ async fn book_progression_get_response(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if !persisted_book_exists_from_services(&app, book_id)
+    if !persisted_book_exists_from_services(app, book_id)
         .await
         .unwrap_or(false)
     {
@@ -372,7 +372,7 @@ async fn book_progression_get_response(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_progression_from_services(&app, book_id, user_id(user)).await {
+    match load_book_progression_from_services(app, book_id, user_id(user)).await {
         Ok(Some(progression)) => (
             [(
                 header::CONTENT_TYPE,

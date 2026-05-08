@@ -130,7 +130,7 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
         Some("book"),
     )
     .await;
-    assert_eq!(relevance_desc_ids, vec!["book-2", "book-1", "book-3"]);
+    assert_eq!(relevance_desc_ids, vec!["book-3", "book-1", "book-2"]);
 
     let default_relevance_ids =
         books_list_ids(&ctx.app().clone(), &admin_token, None, Some("book")).await;
@@ -143,7 +143,7 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
         Some("book"),
     )
     .await;
-    assert_eq!(relevance_asc_ids, vec!["book-3", "book-1", "book-2"]);
+    assert_eq!(relevance_asc_ids, vec!["book-2", "book-1", "book-3"]);
 
     let fielded_ids = books_list_ids(
         &ctx.app().clone(),
@@ -152,7 +152,7 @@ async fn router_discovery_books_list_locks_main_search_parity_for_retained_input
         Some("title:book"),
     )
     .await;
-    assert_eq!(fielded_ids, vec!["book-2", "book-1", "book-3"]);
+    assert_eq!(fielded_ids, vec!["book-3", "book-1", "book-2"]);
 
     let invalid_query_ids = books_list_ids(
         &ctx.app().clone(),

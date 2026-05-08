@@ -4,6 +4,10 @@ use super::common_helpers::{
 };
 use super::*;
 use crate::state::PersistedDiscoveryListDataSource;
+use komga_domain::discovery::{
+    AgeRatingCondition, DateCondition, FilterOperator, InclusionCondition, ReadStatusCondition,
+    SeriesCondition, SeriesStatusCondition, SeriesValueCondition, StringCondition,
+};
 use regex::{Regex, RegexBuilder};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -42,9 +46,9 @@ fn compare_rank_order(
     let right_rank = order.get(right_id).copied();
     match (left_rank, right_rank) {
         (Some(left), Some(right)) if descending => {
-            left.cmp(&right).then_with(|| left_id.cmp(right_id))
+            right.cmp(&left).then_with(|| left_id.cmp(right_id))
         }
-        (Some(left), Some(right)) => right.cmp(&left).then_with(|| left_id.cmp(right_id)),
+        (Some(left), Some(right)) => left.cmp(&right).then_with(|| left_id.cmp(right_id)),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => left_id.cmp(right_id),
@@ -66,6 +70,460 @@ fn random_sort_keys(series: &[PersistedSeriesSummary]) -> HashMap<String, u64> {
             (row.id.clone(), hasher.finish())
         })
         .collect()
+}
+
+struct SeriesConditionEvaluationData {
+    user_id_present: bool,
+    collection_memberships: Option<BTreeMap<String, BTreeSet<String>>>,
+    read_progress: Option<HashMap<String, (i64, i64)>>,
+    total_book_counts: Option<HashMap<String, i64>>,
+    release_date_cutoffs: HashMap<i64, Option<String>>,
+}
+
+impl SeriesConditionEvaluationData {
+    async fn load(
+        backend: &dyn PersistedDiscoveryListDataSource,
+        context: &DiscoveryQueryContext,
+        condition: &SeriesCondition,
+    ) -> Result<Self, String> {
+        let collection_memberships = if condition_needs_collection_memberships(condition) {
+            Some(backend.load_collection_memberships().await?)
+        } else {
+            None
+        };
+        let read_progress = if condition_needs_read_progress(condition) {
+            if let Some(user_id) = context.user_id.as_deref() {
+                Some(backend.load_series_read_progress_counts(user_id).await?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let total_book_counts = if condition_needs_total_book_counts(condition) {
+            Some(backend.load_series_total_book_counts().await?)
+        } else {
+            None
+        };
+        let mut release_date_offsets = BTreeSet::new();
+        collect_series_release_date_offsets(condition, &mut release_date_offsets);
+        let mut release_date_cutoffs = HashMap::new();
+        for days in release_date_offsets {
+            release_date_cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
+        }
+
+        Ok(Self {
+            user_id_present: context.user_id.is_some(),
+            collection_memberships,
+            read_progress,
+            total_book_counts,
+            release_date_cutoffs,
+        })
+    }
+}
+
+fn condition_needs_collection_memberships(condition: &SeriesCondition) -> bool {
+    match condition {
+        SeriesCondition::Value(SeriesValueCondition::CollectionId(_)) => true,
+        SeriesCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .any(condition_needs_collection_memberships),
+        _ => false,
+    }
+}
+
+fn condition_needs_read_progress(condition: &SeriesCondition) -> bool {
+    match condition {
+        SeriesCondition::Value(SeriesValueCondition::ReadStatus(_)) => true,
+        SeriesCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .any(condition_needs_read_progress),
+        _ => false,
+    }
+}
+
+fn condition_needs_total_book_counts(condition: &SeriesCondition) -> bool {
+    match condition {
+        SeriesCondition::Value(SeriesValueCondition::Complete(_)) => true,
+        SeriesCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .any(condition_needs_total_book_counts),
+        _ => false,
+    }
+}
+
+fn collect_series_release_date_offsets(condition: &SeriesCondition, offsets: &mut BTreeSet<i64>) {
+    match condition {
+        SeriesCondition::Value(SeriesValueCondition::ReleaseDate(
+            DateCondition::WithinLastDays(days) | DateCondition::OutsideLastDays(days),
+        )) => {
+            offsets.insert(*days);
+        }
+        SeriesCondition::Composite(composite) => {
+            for child in &composite.conditions {
+                collect_series_release_date_offsets(child, offsets);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn condition_contains_deleted(condition: Option<&SeriesCondition>) -> bool {
+    fn visit(condition: &SeriesCondition) -> bool {
+        match condition {
+            SeriesCondition::Value(SeriesValueCondition::Deleted(_)) => true,
+            SeriesCondition::Composite(composite) => composite.conditions.iter().any(visit),
+            _ => false,
+        }
+    }
+
+    condition.is_some_and(visit)
+}
+
+fn first_collection_sort_id(condition: Option<&SeriesCondition>) -> Option<&str> {
+    fn visit(condition: &SeriesCondition) -> Option<&str> {
+        match condition {
+            SeriesCondition::Value(SeriesValueCondition::CollectionId(
+                InclusionCondition::Include(values),
+            )) => values.first().map(|value| value.as_str()),
+            SeriesCondition::Composite(composite) => composite.conditions.iter().find_map(visit),
+            _ => None,
+        }
+    }
+
+    condition.and_then(visit)
+}
+
+fn row_matches_series_condition(
+    row: &PersistedSeriesSummary,
+    condition: &SeriesCondition,
+    data: &SeriesConditionEvaluationData,
+) -> bool {
+    match condition {
+        SeriesCondition::Value(value) => row_matches_series_value_condition(row, value, data),
+        SeriesCondition::Composite(composite) => match composite.operator {
+            FilterOperator::All => composite
+                .conditions
+                .iter()
+                .all(|condition| row_matches_series_condition(row, condition, data)),
+            FilterOperator::Any => {
+                composite.conditions.is_empty()
+                    || composite
+                        .conditions
+                        .iter()
+                        .any(|condition| row_matches_series_condition(row, condition, data))
+            }
+        },
+    }
+}
+
+fn row_matches_series_value_condition(
+    row: &PersistedSeriesSummary,
+    condition: &SeriesValueCondition,
+    data: &SeriesConditionEvaluationData,
+) -> bool {
+    match condition {
+        SeriesValueCondition::LibraryId(inc) => {
+            matches_string_inclusion(row.library_id.as_str(), inc, |id| id.as_str())
+        }
+        SeriesValueCondition::CollectionId(inc) => matches_collection_condition(row, inc, data),
+        SeriesValueCondition::Title(condition) => matches_string_condition(&row.title, condition),
+        SeriesValueCondition::TitleSort(condition) => {
+            matches_string_condition(&row.title_sort, condition)
+        }
+        SeriesValueCondition::Deleted(value) => row.deleted == *value,
+        SeriesValueCondition::OneShot(value) => row.oneshot == *value,
+        SeriesValueCondition::ReadStatus(condition) => {
+            matches_series_read_status_condition(row, condition, data)
+        }
+        SeriesValueCondition::Genre(condition) => {
+            matches_string_values_condition(row.genres.iter().map(String::as_str), condition)
+        }
+        SeriesValueCondition::Tag(condition) => matches_string_values_condition(
+            row.tags
+                .iter()
+                .chain(row.books_metadata_tags.iter())
+                .map(String::as_str),
+            condition,
+        ),
+        SeriesValueCondition::Language(inc) => {
+            matches_non_empty_string_inclusion(&row.language, inc)
+        }
+        SeriesValueCondition::Publisher(inc) => {
+            matches_non_empty_string_inclusion(&row.publisher, inc)
+        }
+        SeriesValueCondition::AgeRating(condition) => {
+            matches_age_rating_condition(row.age_rating, condition)
+        }
+        SeriesValueCondition::ReleaseDate(condition) => {
+            matches_date_condition(row.books_metadata_release_date.as_deref(), condition, data)
+        }
+        SeriesValueCondition::SharingLabel(condition) => {
+            matches_string_values_condition(row.labels.iter().map(String::as_str), condition)
+        }
+        SeriesValueCondition::SeriesStatus(SeriesStatusCondition::Include(values)) => {
+            any_ignore_ascii_case([row.status.as_str()], values)
+        }
+        SeriesValueCondition::SeriesStatus(SeriesStatusCondition::Exclude(values)) => {
+            !any_ignore_ascii_case([row.status.as_str()], values)
+        }
+        SeriesValueCondition::Complete(value) => data
+            .total_book_counts
+            .as_ref()
+            .and_then(|counts| counts.get(&row.id))
+            .map(|count| (*count).max(0) as u64 == row.books_count)
+            .map(|complete| complete == *value)
+            .unwrap_or(false),
+        SeriesValueCondition::Author(condition) => matches_author_condition(row, condition),
+        SeriesValueCondition::ExcludeNewlyAdded(value) => {
+            !*value || row.created != row.last_modified
+        }
+    }
+}
+
+fn matches_string_inclusion<T>(
+    actual: &str,
+    condition: &InclusionCondition<T>,
+    value: impl Fn(&T) -> &str,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => values
+            .iter()
+            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+        InclusionCondition::Exclude(values) => !values
+            .iter()
+            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+    }
+}
+
+fn matches_non_empty_string_inclusion(
+    actual: &str,
+    condition: &InclusionCondition<String>,
+) -> bool {
+    let actual = (!actual.is_empty()).then_some(actual);
+    match condition {
+        InclusionCondition::Include(values) => {
+            actual.is_some_and(|actual| any_ignore_ascii_case([actual], values))
+        }
+        InclusionCondition::Exclude(values) => actual
+            .map(|actual| !any_ignore_ascii_case([actual], values))
+            .unwrap_or(false),
+    }
+}
+
+fn matches_collection_condition(
+    row: &PersistedSeriesSummary,
+    condition: &InclusionCondition<komga_domain::common_ids::CollectionId>,
+    data: &SeriesConditionEvaluationData,
+) -> bool {
+    let memberships = data
+        .collection_memberships
+        .as_ref()
+        .and_then(|memberships| memberships.get(&row.id));
+    match condition {
+        InclusionCondition::Include(values) => memberships.is_some_and(|memberships| {
+            values
+                .iter()
+                .any(|value| memberships.contains(value.as_str()))
+        }),
+        InclusionCondition::Exclude(values) => memberships
+            .map(|memberships| {
+                !values
+                    .iter()
+                    .any(|value| memberships.contains(value.as_str()))
+            })
+            .unwrap_or(true),
+    }
+}
+
+fn matches_series_read_status_condition(
+    row: &PersistedSeriesSummary,
+    condition: &ReadStatusCondition,
+    data: &SeriesConditionEvaluationData,
+) -> bool {
+    if !data.user_id_present {
+        return false;
+    }
+    let read_progress = data
+        .read_progress
+        .as_ref()
+        .and_then(|progress| progress.get(&row.id).copied());
+    match condition {
+        ReadStatusCondition::Include(values) => values
+            .iter()
+            .any(|status| series_matches_read_status(row, read_progress, status)),
+        ReadStatusCondition::Exclude(values) => !values
+            .iter()
+            .any(|status| series_matches_read_status(row, read_progress, status)),
+    }
+}
+
+fn matches_string_condition(actual: &str, condition: &StringCondition) -> bool {
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::Exact)
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::Exact)
+        }
+        StringCondition::Contains(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::Contains)
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::Contains)
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(values)) => {
+            normalized_text_matches(actual, values, TextMatchMode::EndsWith)
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(values)) => {
+            !normalized_text_matches(actual, values, TextMatchMode::EndsWith)
+        }
+        StringCondition::IsEmpty => actual.is_empty(),
+        StringCondition::IsNotEmpty => !actual.is_empty(),
+    }
+}
+
+fn matches_string_values_condition<'a>(
+    values: impl IntoIterator<Item = &'a str>,
+    condition: &StringCondition,
+) -> bool {
+    let values = values.into_iter().collect::<Vec<_>>();
+    match condition {
+        StringCondition::Exact(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::Exact)
+        }
+        StringCondition::Exact(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::Exact)
+        }
+        StringCondition::Contains(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::Contains)
+        }
+        StringCondition::Contains(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::Contains)
+        }
+        StringCondition::StartsWith(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::StartsWith)
+        }
+        StringCondition::StartsWith(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(
+                values.iter().copied(),
+                expected,
+                TextMatchMode::StartsWith,
+            )
+        }
+        StringCondition::EndsWith(InclusionCondition::Include(expected)) => {
+            any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::EndsWith)
+        }
+        StringCondition::EndsWith(InclusionCondition::Exclude(expected)) => {
+            !any_normalized_text_matches(values.iter().copied(), expected, TextMatchMode::EndsWith)
+        }
+        StringCondition::IsEmpty => values.is_empty(),
+        StringCondition::IsNotEmpty => !values.is_empty(),
+    }
+}
+
+fn matches_age_rating_condition(actual: Option<u16>, condition: &AgeRatingCondition) -> bool {
+    match condition {
+        AgeRatingCondition::Exact(InclusionCondition::Include(values)) => {
+            actual.is_some_and(|actual| values.contains(&actual))
+        }
+        AgeRatingCondition::Exact(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !values.contains(&actual))
+            .unwrap_or(true),
+        AgeRatingCondition::ExactOrEmpty(values) => actual
+            .map(|actual| values.contains(&actual))
+            .unwrap_or(true),
+        AgeRatingCondition::GreaterThan(value) => {
+            actual.map(|actual| actual > *value).unwrap_or(false)
+        }
+        AgeRatingCondition::LessThan(value) => {
+            actual.map(|actual| actual < *value).unwrap_or(false)
+        }
+        AgeRatingCondition::IsEmpty => actual.is_none(),
+        AgeRatingCondition::IsNotEmpty => actual.is_some(),
+    }
+}
+
+fn matches_author_condition(row: &PersistedSeriesSummary, condition: &StringCondition) -> bool {
+    match condition {
+        StringCondition::Contains(InclusionCondition::Include(values)) => row
+            .books_metadata_authors
+            .iter()
+            .any(|author| author_contains_filter_value(author, values)),
+        StringCondition::Contains(InclusionCondition::Exclude(values)) => !row
+            .books_metadata_authors
+            .iter()
+            .any(|author| author_contains_filter_value(author, values)),
+        StringCondition::Exact(InclusionCondition::Include(values)) => row
+            .books_metadata_authors
+            .iter()
+            .any(|author| author_matches_filter_value(author, values)),
+        StringCondition::Exact(InclusionCondition::Exclude(values)) => !row
+            .books_metadata_authors
+            .iter()
+            .any(|author| author_matches_filter_value(author, values)),
+        StringCondition::IsEmpty => row.books_metadata_authors.is_empty(),
+        StringCondition::IsNotEmpty => !row.books_metadata_authors.is_empty(),
+        StringCondition::StartsWith(_) | StringCondition::EndsWith(_) => false,
+    }
+}
+
+fn matches_date_condition(
+    actual: Option<&str>,
+    condition: &DateCondition,
+    data: &SeriesConditionEvaluationData,
+) -> bool {
+    match condition {
+        DateCondition::Exact(InclusionCondition::Include(values)) => {
+            actual.is_some_and(|actual| values.iter().any(|value| value == actual))
+        }
+        DateCondition::Exact(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !values.iter().any(|value| value == actual))
+            .unwrap_or(true),
+        DateCondition::Before(value) => actual.is_some_and(|actual| actual < value.as_str()),
+        DateCondition::After(value) => actual.is_some_and(|actual| actual > value.as_str()),
+        DateCondition::Contains(InclusionCondition::Include(values)) => actual
+            .is_some_and(|actual| normalized_text_matches(actual, values, TextMatchMode::Contains)),
+        DateCondition::Contains(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::Contains))
+            .unwrap_or(true),
+        DateCondition::StartsWith(InclusionCondition::Include(values)) => {
+            actual.is_some_and(|actual| {
+                normalized_text_matches(actual, values, TextMatchMode::StartsWith)
+            })
+        }
+        DateCondition::StartsWith(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::StartsWith))
+            .unwrap_or(true),
+        DateCondition::EndsWith(InclusionCondition::Include(values)) => actual
+            .is_some_and(|actual| normalized_text_matches(actual, values, TextMatchMode::EndsWith)),
+        DateCondition::EndsWith(InclusionCondition::Exclude(values)) => actual
+            .map(|actual| !normalized_text_matches(actual, values, TextMatchMode::EndsWith))
+            .unwrap_or(true),
+        DateCondition::WithinLastDays(days) => data
+            .release_date_cutoffs
+            .get(days)
+            .and_then(Option::as_deref)
+            .map(|cutoff| actual.is_some_and(|actual| actual > cutoff))
+            .unwrap_or(true),
+        DateCondition::OutsideLastDays(days) => data
+            .release_date_cutoffs
+            .get(days)
+            .and_then(Option::as_deref)
+            .map(|cutoff| actual.is_some_and(|actual| actual < cutoff))
+            .unwrap_or(true),
+        DateCondition::IsEmpty => actual.is_none(),
+        DateCondition::IsNotEmpty => actual.is_some(),
+    }
 }
 
 pub(crate) async fn load_persisted_series_page(
@@ -145,6 +603,14 @@ pub(crate) async fn load_persisted_series_page(
                 )
             });
         }
+    }
+
+    if let Some(condition) = query.condition.as_ref() {
+        let evaluation_data =
+            SeriesConditionEvaluationData::load(backend, context, condition).await?;
+        series = filter_rows(series, |row| {
+            row_matches_series_condition(row, condition, &evaluation_data)
+        });
     }
 
     if let Some(titles) = filters.titles.as_ref() {
@@ -291,8 +757,10 @@ pub(crate) async fn load_persisted_series_page(
         });
     }
 
-    let deleted = filters.deleted.unwrap_or_default();
-    series = filter_rows(series, |row| row.deleted == deleted);
+    if !condition_contains_deleted(query.condition.as_ref()) {
+        let deleted = filters.deleted.unwrap_or_default();
+        series = filter_rows(series, |row| row.deleted == deleted);
+    }
 
     if let Some(oneshot) = filters.oneshot {
         series = filter_rows(series, |row| row.oneshot == oneshot);
@@ -721,7 +1189,12 @@ pub(crate) async fn load_persisted_series_page(
                 | PersistedSeriesSortMode::CollectionNumberDesc
         )
     }) {
-        if let Some(collection_id) = filters.collection_ids.as_ref().and_then(|ids| ids.first()) {
+        if let Some(collection_id) = filters
+            .collection_ids
+            .as_ref()
+            .and_then(|ids| ids.first().map(String::as_str))
+            .or_else(|| first_collection_sort_id(query.condition.as_ref()))
+        {
             load_collection_ordering(backend, collection_id).await?
         } else {
             HashMap::new()
