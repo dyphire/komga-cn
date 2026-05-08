@@ -4,11 +4,10 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
-use crate::discovery::detail::load_persisted_book_series_id;
 use crate::media_assets::manifest_persistence::build_persisted_book_manifest;
 use crate::media_assets::types::{ManifestBuildOutcome, ManifestVariant};
 use crate::request_urls::app_absolute_url;
-use crate::state::HttpAppState;
+use crate::state::OpdsState;
 
 const OPDS_MANIFEST_CONTENT_TYPE: &str = "application/opds-publication+json";
 const OPDS_AUTH_CONTENT_TYPE: &str = "application/opds-authentication+json";
@@ -17,7 +16,7 @@ const PROGRESSION_CONTENT_TYPE: &str = "application/vnd.readium.progression+json
 
 pub(crate) async fn opds_manifest(
     headers: HeaderMap,
-    app: &HttpAppState,
+    app: &OpdsState,
     book_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -26,7 +25,7 @@ pub(crate) async fn opds_manifest(
 
 pub(crate) async fn opds_manifest_with_profile(
     headers: HeaderMap,
-    app: &HttpAppState,
+    app: &OpdsState,
     book_id: &str,
     profile: &str,
     user: &AuthUser,
@@ -36,7 +35,7 @@ pub(crate) async fn opds_manifest_with_profile(
 
 async fn opds_manifest_variant(
     headers: HeaderMap,
-    app: &HttpAppState,
+    app: &OpdsState,
     book_id: &str,
     profile: Option<&str>,
     user: &AuthUser,
@@ -45,12 +44,24 @@ async fn opds_manifest_variant(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    match build_persisted_book_manifest(app, user, &headers, book_id, variant).await {
+    match build_persisted_book_manifest(
+        app.media_assets.as_ref(),
+        app.discovery_detail.as_ref(),
+        user,
+        &headers,
+        book_id,
+        variant,
+    )
+    .await
+    {
         Ok(ManifestBuildOutcome::Found(_, mut payload)) => {
-            let series_id = load_persisted_book_series_id(app, book_id)
+            let series_id = app
+                .discovery_detail
+                .load_persisted_book_detail(book_id, None)
                 .await
                 .ok()
-                .flatten();
+                .flatten()
+                .map(|book| book.series_id);
             adapt_manifest_payload_to_opds(&mut payload, &headers, book_id, series_id.as_deref());
             (
                 StatusCode::OK,

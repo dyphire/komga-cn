@@ -98,7 +98,7 @@ pub async fn oauth2_login_code(
 
     if let Some(error) = query.error.as_deref() {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -110,7 +110,7 @@ pub async fn oauth2_login_code(
 
     let Some(code) = query.code.as_deref() else {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -122,7 +122,7 @@ pub async fn oauth2_login_code(
 
     let Some(received_state) = query.state.as_deref() else {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -133,7 +133,7 @@ pub async fn oauth2_login_code(
     };
     let Some(session_token) = oauth2_session_cookie_token(&headers) else {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -148,7 +148,7 @@ pub async fn oauth2_login_code(
         &registration_id,
     ) else {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -159,7 +159,7 @@ pub async fn oauth2_login_code(
     };
     if received_state != expected_state {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -177,7 +177,7 @@ pub async fn oauth2_login_code(
         Ok(payload) => payload,
         Err(error) => {
             return oauth2_login_error_response(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &connection_info,
                 client_name,
@@ -195,7 +195,7 @@ pub async fn oauth2_login_code(
 
     let Some(access_token) = access_token else {
         return oauth2_login_error_response(
-            app.root.as_ref(),
+            &app,
             &headers,
             &connection_info,
             client_name,
@@ -209,7 +209,7 @@ pub async fn oauth2_login_code(
         let claims = resolve_oidc_claims(client_config, &token_payload, access_token).await;
         let Some(email) = claims.email else {
             return oauth2_login_error_response(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &connection_info,
                 client_name,
@@ -223,7 +223,7 @@ pub async fn oauth2_login_code(
                 Some(true) => email,
                 Some(false) => {
                     return oauth2_login_error_response(
-                        app.root.as_ref(),
+                        &app,
                         &headers,
                         &connection_info,
                         client_name,
@@ -234,7 +234,7 @@ pub async fn oauth2_login_code(
                 }
                 None => {
                     return oauth2_login_error_response(
-                        app.root.as_ref(),
+                        &app,
                         &headers,
                         &connection_info,
                         client_name,
@@ -251,7 +251,7 @@ pub async fn oauth2_login_code(
         let email = resolve_oauth2_email(client_config, access_token).await;
         let Some(email) = email else {
             return oauth2_login_error_response(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &connection_info,
                 client_name,
@@ -263,7 +263,7 @@ pub async fn oauth2_login_code(
         email
     };
 
-    let allow_create = oauth2_account_creation_enabled(app.root.as_ref()).await;
+    let allow_create = oauth2_account_creation_enabled(&app).await;
     let user = match app
         .identity
         .service
@@ -273,7 +273,7 @@ pub async fn oauth2_login_code(
         Ok(Some(user)) => user,
         Ok(None) => {
             return oauth2_login_error_response(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &connection_info,
                 client_name,
@@ -620,7 +620,7 @@ fn oauth2_userinfo_candidates(
 }
 
 async fn oauth2_login_error_response(
-    app: &HttpAppState,
+    app: &IdentityAccessState,
     headers: &HeaderMap,
     connection_info: &RequestConnectionInfo,
     client_name: &str,
@@ -629,8 +629,8 @@ async fn oauth2_login_error_response(
 ) -> Response {
     let source = format!("OAuth2:{client_name}");
     let _ = app
-        .services
-        .runtime_identity
+        .identity
+        .service
         .persisted_record_failed_authentication_activity(
             email,
             authentication_activity_write_input(
@@ -669,7 +669,7 @@ fn oauth2_client_supports_github_email_lookup(client: &crate::state::OAuth2Clien
         })
 }
 
-async fn oauth2_account_creation_enabled(app: &HttpAppState) -> bool {
+async fn oauth2_account_creation_enabled(app: &IdentityAccessState) -> bool {
     let state = &app.operational;
     if state.oauth2_account_creation {
         return true;
@@ -687,7 +687,7 @@ async fn oauth2_account_creation_enabled(app: &HttpAppState) -> bool {
         return true;
     }
 
-    let Ok(settings) = app.services.server_settings.load_map().await else {
+    let Ok(settings) = app.server_settings.load_map().await else {
         return false;
     };
     [

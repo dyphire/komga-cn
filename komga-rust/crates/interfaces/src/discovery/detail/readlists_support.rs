@@ -2,7 +2,7 @@ use super::*;
 use komga_application::runtime_sse::register_runtime_sse_event;
 
 use crate::helpers::normalized_date_time;
-use crate::state::HttpAppState;
+use crate::state::DiscoveryState;
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 
@@ -61,14 +61,10 @@ pub struct ComicRackRequestMatchGroup {
 pub type PersistedVisibleReadlistBook = BookDetailReadModel;
 
 pub(super) async fn load_persisted_readlists(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     library_ids: Option<&[String]>,
 ) -> Result<Vec<ReadListReadModel>, String> {
-    let rows = app
-        .services
-        .discovery_detail
-        .load_persisted_readlists()
-        .await?;
+    let rows = app.discovery_detail.load_persisted_readlists().await?;
 
     let mut readlists = Vec::with_capacity(rows.len());
     for row in rows {
@@ -94,31 +90,26 @@ pub(super) async fn load_persisted_readlists(
 }
 
 pub async fn load_comicrack_match_candidates(
-    app: &HttpAppState,
+    app: &DiscoveryState,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-    app.services
-        .discovery_detail
-        .load_comicrack_match_candidates()
-        .await
+    app.discovery_detail.load_comicrack_match_candidates().await
 }
 
 pub async fn load_persisted_book_authors(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    app.services
-        .discovery_detail
+    app.discovery_detail
         .load_persisted_book_authors(book_id)
         .await
 }
 
 pub(super) async fn load_persisted_readlist_detail(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
     library_ids: Option<&[String]>,
 ) -> Result<Option<ReadListReadModel>, String> {
     let Some(row) = app
-        .services
         .discovery_detail
         .load_persisted_readlist_detail(readlist_id)
         .await?
@@ -144,12 +135,11 @@ pub(super) async fn load_persisted_readlist_detail(
 }
 
 async fn load_persisted_readlist_book_ids(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
     library_ids: Option<&[String]>,
 ) -> Result<(Vec<String>, bool), String> {
     let rows = app
-        .services
         .discovery_detail
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
@@ -206,12 +196,11 @@ pub fn merge_readlist_write_input(
 }
 
 pub async fn persist_readlist_create(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     input: &PersistedReadlistWriteInput,
 ) -> Result<String, String> {
     let readlist_id = generated_readlist_id();
-    app.services
-        .discovery_detail
+    app.discovery_detail
         .persist_readlist_create(
             &readlist_id,
             &input.name,
@@ -235,12 +224,11 @@ pub async fn persist_readlist_create(
 }
 
 pub async fn persist_readlist_update(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
     input: &PersistedReadlistWriteInput,
 ) -> Result<bool, String> {
     let updated = app
-        .services
         .discovery_detail
         .persist_readlist_update(
             readlist_id,
@@ -265,12 +253,11 @@ pub async fn persist_readlist_update(
 }
 
 pub async fn delete_persisted_readlist(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
 ) -> Result<bool, String> {
     let existing = load_persisted_readlist_detail(app, readlist_id, None).await?;
     let deleted = app
-        .services
         .discovery_detail
         .delete_persisted_readlist(readlist_id)
         .await?;
@@ -289,21 +276,19 @@ pub async fn delete_persisted_readlist(
 }
 
 pub async fn upsert_readlist_search_document(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .discovery_detail
+    app.discovery_detail
         .upsert_readlist_search_document(readlist_id)
         .await
 }
 
 pub async fn delete_readlist_search_document(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     readlist_id: &str,
 ) -> Result<(), String> {
-    app.services
-        .discovery_detail
+    app.discovery_detail
         .delete_readlist_search_document(readlist_id)
         .await
 }
@@ -434,7 +419,7 @@ pub fn comicrack_payload(name: &str, error_code: &str, requests: Vec<Value>) -> 
 }
 
 pub async fn match_comicrack_readlist(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     request: &ComicRackReadListRequest,
 ) -> Result<Value, String> {
     let readlists = load_persisted_readlists(app, None).await?;
@@ -559,14 +544,14 @@ fn decoded_query_values(query: &str, key: &str) -> Vec<String> {
 }
 
 pub(super) async fn load_visible_persisted_readlist_books(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     headers: &HeaderMap,
     readlist_id: &str,
     query: &PersistedReadlistBooksQuery,
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
     let auth_state = &app.discovery_auth;
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, headers, None)
         .await
     else {
         return Ok(None);
@@ -583,7 +568,6 @@ pub(super) async fn load_visible_persisted_readlist_books(
     }
 
     let rows = app
-        .services
         .discovery_detail
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
@@ -617,7 +601,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
         };
         let detail_query_context = match auth_state
             .resolve_detail_query_context_with_persistence(
-                &*app.services.runtime_identity,
+                &*app.identity.service,
                 headers,
                 &detail_context,
             )

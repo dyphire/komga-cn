@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
-use axum::extract::FromRef;
 use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
 use komga_application::operational::PersistedServerSettings;
@@ -20,17 +19,9 @@ use komga_application::task_processing::{
 use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
 use crate::state::{
-    BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices, LibraryCatalogService,
-    OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
-    ServerSettingsService, ServerSettingsState, SseOperationalState, StartupTimingState,
-    TransientBooksStore,
-    tests::{
-        NoopDiscoveryAuthorService, NoopDiscoveryBookFeedService,
-        NoopDiscoveryCollectionSearchService, NoopDiscoveryDetailService,
-        NoopDiscoveryLibraryMappingService, NoopDiscoveryListService,
-        NoopDiscoveryReadlistSearchService, NoopMediaAssetsService, NoopOpdsCatalogService,
-        NoopOpdsPersistedService, NoopOperationalRuntimeService, NoopOperationalSettingsService,
-    },
+    BookImportSseEvent, HttpServerRequestsState, OAuth2ClientConfig, OperationalBuildMetadata,
+    RemoteCacheEntry, RuntimeState, ServerSettingsService, ServerSettingsState,
+    SseOperationalState, StartupTimingState, TaskQueueState, TransientBooksStore,
 };
 
 #[tokio::test]
@@ -381,141 +372,16 @@ where
     fn wakeup(&self) {}
 }
 
-struct NoopLibraryCatalogService;
-
-#[async_trait]
-impl LibraryCatalogService for NoopLibraryCatalogService {
-    async fn list_libraries(
-        &self,
-        _context: komga_domain::discovery::DiscoveryQueryContext,
-    ) -> Result<
-        Vec<komga_application::library_catalog::LibraryRecord>,
-        komga_domain::discovery::DiscoveryError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn get_library(
-        &self,
-        _context: komga_domain::discovery::DiscoveryQueryContext,
-        _library_id: &str,
-    ) -> Result<
-        Option<komga_application::library_catalog::LibraryRecord>,
-        komga_domain::discovery::DiscoveryError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn create_library(
-        &self,
-        _changes: komga_application::library_catalog::LibraryChangeSet,
-    ) -> Result<
-        komga_application::library_catalog::CreateLibraryResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn update_library(
-        &self,
-        _library_id: &str,
-        _changes: komga_application::library_catalog::LibraryChangeSet,
-    ) -> Result<
-        komga_application::library_catalog::LibraryTaskResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn delete_library(
-        &self,
-        _library_id: &str,
-    ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn scan_library(
-        &self,
-        _library_id: &str,
-        _deep_scan: bool,
-    ) -> Result<
-        komga_application::library_catalog::LibraryTaskResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn analyze_library(
-        &self,
-        _library_id: &str,
-    ) -> Result<
-        komga_application::library_catalog::LibraryTaskResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn refresh_metadata(
-        &self,
-        _library_id: &str,
-    ) -> Result<
-        komga_application::library_catalog::LibraryTaskResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-
-    async fn empty_trash(
-        &self,
-        _library_id: &str,
-    ) -> Result<
-        komga_application::library_catalog::LibraryTaskResult,
-        komga_application::library_catalog::LibraryCatalogMutationError,
-    > {
-        panic!("library catalog should not be used in server settings tests")
-    }
-}
-
 fn test_app_state(
-    database_file: PathBuf,
+    _database_file: PathBuf,
     operational: OperationalState,
     task_queue: Arc<dyn TaskEngine>,
     server_settings: Arc<dyn ServerSettingsService>,
-) -> HttpAppState {
-    HttpAppState {
-        profile: crate::state::RuntimeProfile::LiveLocaldb,
-        read_progress: crate::state::ReadProgressState::default(),
-        discovery_auth: crate::discovery_auth::state::DiscoveryAuthState::default(),
-        auth_db: crate::state::AuthDatabaseState {
-            db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
-                database_file,
-                sqlx::sqlite::SqlitePoolOptions::new()
-                    .connect_lazy("sqlite::memory:")
-                    .expect("lazy in-memory pool should open"),
-            ),
-            demo_mode: false,
-            session_runtime_key: operational.remember_me_runtime_key.clone(),
-            remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
-        },
-        services: HttpServices {
-            library_catalog: Arc::new(NoopLibraryCatalogService),
-            task_queue,
-            server_settings,
-            runtime_identity: crate::state::default_test_identity_service(),
-            operational_runtime: Arc::new(NoopOperationalRuntimeService),
-            operational_settings: Arc::new(NoopOperationalSettingsService),
-            media_assets: Arc::new(NoopMediaAssetsService),
-            opds_catalog: Arc::new(NoopOpdsCatalogService),
-            opds_persisted: Arc::new(NoopOpdsPersistedService),
-            discovery_authors: Arc::new(NoopDiscoveryAuthorService),
-            discovery_library_mapping: Arc::new(NoopDiscoveryLibraryMappingService),
-            discovery_collection_search: Arc::new(NoopDiscoveryCollectionSearchService),
-            discovery_readlist_search: Arc::new(NoopDiscoveryReadlistSearchService),
-            discovery_book_feeds: Arc::new(NoopDiscoveryBookFeedService),
-            discovery_detail: Arc::new(NoopDiscoveryDetailService),
-            discovery_list: Arc::new(NoopDiscoveryListService),
-        },
-        operational,
+) -> ServerSettingsState {
+    ServerSettingsState {
+        runtime: operational.runtime,
+        server_settings,
+        task_queue: TaskQueueState { engine: task_queue },
     }
 }
 
@@ -584,8 +450,8 @@ fn admin_user() -> AuthUser {
     }
 }
 
-fn test_server_settings_state(app: &Arc<HttpAppState>) -> ServerSettingsState {
-    ServerSettingsState::from_ref(app)
+fn test_server_settings_state(app: &Arc<ServerSettingsState>) -> ServerSettingsState {
+    app.as_ref().clone()
 }
 
 fn unique_fixture_root(case_name: &str) -> PathBuf {

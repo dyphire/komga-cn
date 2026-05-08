@@ -41,16 +41,14 @@ pub async fn kobo_initialization(
         return status.into_response();
     }
 
-    let mut resources = match initialization_resources(app.root.as_ref(), &headers).await {
+    let mut resources = match initialization_resources(&app, &headers).await {
         Ok(resources) => resources,
         Err(status) => return status.into_response(),
     };
     apply_initialization_overrides(
         &mut resources,
         auth_token.as_str(),
-        kobo_request_base_url(app.root.as_ref(), &headers)
-            .await
-            .as_str(),
+        kobo_request_base_url(&app, &headers).await.as_str(),
     );
 
     let mut response = (StatusCode::OK, Json(json!({ "Resources": resources }))).into_response();
@@ -62,10 +60,10 @@ pub async fn kobo_initialization(
 }
 
 async fn initialization_resources(
-    app: &HttpAppState,
+    app: &IdentityAccessState,
     headers: &HeaderMap,
 ) -> Result<Value, StatusCode> {
-    if load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await {
+    if load_kobo_proxy_enabled(app.server_settings.as_ref()).await {
         match proxied_initialization_resources(headers).await {
             Ok(Some(resources)) => return Ok(resources),
             Err(status) if status == StatusCode::UNAUTHORIZED => return Err(status),

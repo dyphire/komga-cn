@@ -14,14 +14,13 @@ use crate::cache::{
     asset_etag, asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
     if_modified_since_matches, if_none_match_matches,
 };
-use crate::discovery::detail::{resolve_book_id_for_persisted, resolve_series_id_for_persisted};
 use crate::discovery_auth::principal::principal_from_user_payload;
 use crate::identity_access::auth::{
-    AuthUser, resolved_auth_user, resolved_request_auth_user, resolved_token, user_has_role,
-    user_id, user_is_admin, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
+    AuthUser, resolved_auth_user, resolved_request_auth_user, resolved_token, user_id,
+    user_is_admin, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::request_urls::app_absolute_url;
-use crate::state::{HttpAppState, PersistedMediaFileRecord};
+use crate::state::{MediaAssetsState, PersistedMediaFileRecord};
 use komga_application::task_processing::{
     BookPayload, SeriesPayload, TaskKind, TaskQueueRecord, TaskRequest,
 };
@@ -46,11 +45,11 @@ mod import;
 mod import_internals;
 pub(crate) mod manifest_persistence;
 mod manifests;
-mod media_helpers;
+pub(crate) mod media_helpers;
 mod operations;
 mod pages;
 pub(crate) mod read_progress;
-mod thumbnails;
+pub(crate) mod thumbnails;
 pub(crate) mod types;
 
 use self::access_control::{
@@ -77,120 +76,132 @@ use self::types::{
     ManifestVariant, PersistedBookMedia, PersistedBookPageRow,
 };
 
+async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id: &str) -> String {
+    let Some(index) = requested_book_id
+        .strip_prefix("book-")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return requested_book_id.to_string();
+    };
+
+    if index == 0 {
+        return requested_book_id.to_string();
+    }
+
+    if matches!(
+        app.discovery_detail
+            .load_persisted_book_resource(requested_book_id)
+            .await,
+        Ok(Some(_))
+    ) {
+        return requested_book_id.to_string();
+    }
+
+    match app
+        .discovery_detail
+        .load_book_id_by_sorted_position(index)
+        .await
+    {
+        Ok(Some(book_id)) => book_id,
+        _ => requested_book_id.to_string(),
+    }
+}
+
+async fn resolve_series_id_for_persisted(
+    app: &MediaAssetsState,
+    requested_series_id: &str,
+) -> String {
+    let Some(index) = requested_series_id
+        .strip_prefix("series-")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return requested_series_id.to_string();
+    };
+
+    if index == 0 {
+        return requested_series_id.to_string();
+    }
+
+    if matches!(
+        app.discovery_detail
+            .load_persisted_series_resource(requested_series_id)
+            .await,
+        Ok(Some(_))
+    ) {
+        return requested_series_id.to_string();
+    }
+
+    match app
+        .discovery_detail
+        .load_series_id_by_sorted_position(index)
+        .await
+    {
+        Ok(Some(series_id)) => series_id,
+        _ => requested_series_id.to_string(),
+    }
+}
+
 async fn load_persisted_book_media_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Option<PersistedBookMedia>, String> {
-    app.services
-        .media_assets
-        .load_persisted_book_media(book_id)
-        .await
+    app.media_assets.load_persisted_book_media(book_id).await
 }
 
 async fn load_persisted_book_pages_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String> {
-    app.services
-        .media_assets
-        .load_persisted_book_pages(book_id)
-        .await
-}
-
-async fn load_persisted_book_media_files_from_services(
-    app: &HttpAppState,
-    book_id: &str,
-) -> Result<Vec<String>, String> {
-    app.services
-        .media_assets
-        .load_persisted_book_media_files(book_id)
-        .await
-}
-
-async fn load_persisted_media_file_records_from_services(
-    app: &HttpAppState,
-    book_id: &str,
-) -> Result<Vec<PersistedMediaFileRecord>, String> {
-    app.services
-        .media_assets
-        .load_persisted_media_file_records(book_id)
-        .await
-}
-
-async fn load_persisted_manifest_book_from_services(
-    app: &HttpAppState,
-    book_id: &str,
-) -> Result<Option<(String, String, String)>, String> {
-    app.services
-        .media_assets
-        .load_persisted_manifest_book(book_id)
-        .await
+    app.media_assets.load_persisted_book_pages(book_id).await
 }
 
 async fn load_book_progression_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     user_id: &str,
 ) -> Result<Option<Value>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_book_progression(book_id, user_id)
         .await
 }
 
-async fn load_book_restrictions_from_services(
-    app: &HttpAppState,
-    book_id: &str,
-) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
-    app.services
-        .media_assets
-        .load_book_restrictions(book_id)
-        .await
-}
-
 async fn load_book_page_count_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Option<u64>, String> {
-    app.services
-        .media_assets
-        .load_book_page_count(book_id)
-        .await
+    app.media_assets.load_book_page_count(book_id).await
 }
 
 async fn persisted_readlist_exists_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .persisted_readlist_exists(readlist_id)
         .await
 }
 
 async fn load_persisted_book_page_row_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     page_number: u64,
 ) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_book_page_row(book_id, page_number)
         .await
 }
 
 async fn load_persisted_readlist_thumbnails_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
 ) -> Result<Vec<komga_application::media_assets::ReadlistThumbnailRecord>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_readlist_thumbnails(readlist_id)
         .await
 }
 
 async fn insert_readlist_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -198,116 +209,95 @@ async fn insert_readlist_thumbnail_from_services(
     height: i64,
     selected: bool,
 ) -> Result<komga_application::media_assets::ReadlistThumbnailRecord, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .insert_readlist_thumbnail(readlist_id, thumbnail, media_type, width, height, selected)
         .await
 }
 
 async fn select_readlist_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .select_readlist_thumbnail(readlist_id, thumbnail_id)
         .await
 }
 
 async fn delete_readlist_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .delete_readlist_thumbnail(readlist_id, thumbnail_id)
         .await
 }
 
 async fn book_media_is_ready_status_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
-        .book_media_is_ready_status(book_id)
-        .await
+    app.media_assets.book_media_is_ready_status(book_id).await
 }
 
 async fn load_series_book_ids_from_media_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Vec<String>, String> {
-    app.services
-        .media_assets
-        .load_series_book_ids(series_id)
-        .await
+    app.media_assets.load_series_book_ids(series_id).await
 }
 
 async fn load_selected_book_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-    app.services
-        .media_assets
-        .load_selected_book_thumbnail(book_id)
-        .await
+    app.media_assets.load_selected_book_thumbnail(book_id).await
 }
 
 async fn persisted_book_exists_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
-        .persisted_book_exists(book_id)
-        .await
+    app.media_assets.persisted_book_exists(book_id).await
 }
 
 async fn persisted_series_exists_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
-        .persisted_series_exists(series_id)
-        .await
+    app.media_assets.persisted_series_exists(series_id).await
 }
 
 async fn persisted_collection_exists_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .persisted_collection_exists(collection_id)
         .await
 }
 
 async fn load_book_thumbnail_by_id_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     thumbnail_id: &str,
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_book_thumbnail_by_id(thumbnail_id)
         .await
 }
 
 async fn load_persisted_book_thumbnails_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Vec<komga_application::media_assets::EntityThumbnailRecord>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_book_thumbnails(book_id)
         .await
 }
 
 async fn insert_book_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -315,87 +305,79 @@ async fn insert_book_thumbnail_from_services(
     height: i64,
     selected: bool,
 ) -> Result<komga_application::media_assets::EntityThumbnailRecord, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .insert_book_thumbnail(book_id, thumbnail, media_type, width, height, selected)
         .await
 }
 
 async fn select_book_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
-        .select_book_thumbnail(thumbnail_id)
-        .await
+    app.media_assets.select_book_thumbnail(thumbnail_id).await
 }
 
 async fn delete_book_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
-        .delete_book_thumbnail(thumbnail_id)
-        .await
+    app.media_assets.delete_book_thumbnail(thumbnail_id).await
 }
 
-async fn read_media_file_bytes_from_services(app: &HttpAppState, path: &FsPath) -> Option<Vec<u8>> {
-    app.services.media_assets.read_media_file_bytes(path).await
+async fn read_media_file_bytes_from_services(
+    app: &MediaAssetsState,
+    path: &FsPath,
+) -> Option<Vec<u8>> {
+    app.media_assets.read_media_file_bytes(path).await
 }
 
-async fn read_media_file_size_from_services(app: &HttpAppState, path: &FsPath) -> Option<i64> {
-    app.services.media_assets.read_media_file_size(path).await
+async fn read_media_file_size_from_services(app: &MediaAssetsState, path: &FsPath) -> Option<i64> {
+    app.media_assets.read_media_file_size(path).await
 }
 
-fn is_font_resource_from_services(app: &HttpAppState, resource_name: &str) -> bool {
-    app.services.media_assets.is_font_resource(resource_name)
+fn is_font_resource_from_services(app: &MediaAssetsState, resource_name: &str) -> bool {
+    app.media_assets.is_font_resource(resource_name)
 }
 
 async fn read_epub_resource_bytes_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     path: &FsPath,
     resource_name: &str,
 ) -> Option<Vec<u8>> {
-    app.services
-        .media_assets
+    app.media_assets
         .read_epub_resource_bytes(path, resource_name)
         .await
 }
 
 async fn load_persisted_readlist_name_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
 ) -> Result<Option<String>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_readlist_name(readlist_id)
         .await
 }
 
 async fn load_series_archive_entries_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_series_archive_entries(series_id)
         .await
 }
 
 async fn load_persisted_collection_thumbnails_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
 ) -> Result<Vec<komga_application::media_assets::CollectionThumbnailRecord>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_collection_thumbnails(collection_id)
         .await
 }
 
 async fn insert_collection_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -403,8 +385,7 @@ async fn insert_collection_thumbnail_from_services(
     height: i64,
     selected: bool,
 ) -> Result<komga_application::media_assets::CollectionThumbnailRecord, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .insert_collection_thumbnail(
             collection_id,
             thumbnail,
@@ -417,58 +398,53 @@ async fn insert_collection_thumbnail_from_services(
 }
 
 async fn select_collection_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .select_collection_thumbnail(thumbnail_id)
         .await
 }
 
 async fn delete_collection_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .delete_collection_thumbnail(collection_id, thumbnail_id)
         .await
 }
 
 async fn load_persisted_series_thumbnails_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Vec<komga_application::media_assets::SeriesThumbnailRecord>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_series_thumbnails(series_id)
         .await
 }
 
 async fn load_series_thumbnail_by_id_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     thumbnail_id: &str,
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_series_thumbnail_by_id(thumbnail_id)
         .await
 }
 
 async fn load_persisted_series_oneshot_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<bool>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_persisted_series_oneshot(series_id)
         .await
 }
 
 async fn insert_series_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -476,154 +452,125 @@ async fn insert_series_thumbnail_from_services(
     height: i64,
     selected: bool,
 ) -> Result<komga_application::media_assets::SeriesThumbnailRecord, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .insert_series_thumbnail(series_id, thumbnail, media_type, width, height, selected)
         .await
 }
 
 async fn select_series_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .select_series_thumbnail(series_id, thumbnail_id)
         .await
 }
 
 async fn delete_series_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .delete_series_thumbnail(series_id, thumbnail_id)
         .await
 }
 
 async fn load_epub_cover_bytes_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
 ) -> Option<(Vec<u8>, String)> {
-    app.services.media_assets.load_epub_cover_bytes(media).await
+    app.media_assets.load_epub_cover_bytes(media).await
 }
 
 async fn load_archive_page_row_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
     page_number: u64,
 ) -> Option<komga_application::media_assets::BookPageRecord> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_archive_page_row(media, page_number)
         .await
 }
 
 async fn load_archive_page_rows_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
 ) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
-    app.services
-        .media_assets
-        .load_archive_page_rows(media)
-        .await
+    app.media_assets.load_archive_page_rows(media).await
 }
 
 fn load_pdf_page_row_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
     page_number: u64,
 ) -> Option<komga_application::media_assets::BookPageRecord> {
-    app.services
-        .media_assets
-        .load_pdf_page_row(media, page_number)
+    app.media_assets.load_pdf_page_row(media, page_number)
 }
 
 fn load_generated_pdf_page_rows_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
 ) -> Vec<komga_application::media_assets::BookPageRecord> {
-    app.services
-        .media_assets
-        .load_generated_pdf_page_rows(media)
-}
-
-fn read_pdf_page_as_single_page_pdf_from_services(
-    app: &HttpAppState,
-    media: &PersistedBookMedia,
-    page_number: u64,
-) -> Option<Vec<u8>> {
-    app.services
-        .media_assets
-        .read_pdf_page_as_single_page_pdf(media, page_number)
-}
-
-fn detect_pdf_page_count_from_services(
-    app: &HttpAppState,
-    media: &PersistedBookMedia,
-) -> Option<u64> {
-    app.services.media_assets.detect_pdf_page_count(media)
+    app.media_assets.load_generated_pdf_page_rows(media)
 }
 
 async fn resolve_book_page_bytes_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
     page: &PersistedBookPageRow,
     page_number: u64,
 ) -> Option<Vec<u8>> {
-    app.services
-        .media_assets
+    app.media_assets
         .resolve_book_page_bytes(media, page, page_number)
         .await
 }
 
 async fn load_selected_series_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<komga_application::media_assets::EntityThumbnailBinary>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_selected_series_thumbnail(series_id)
         .await
 }
 
 async fn load_series_book_number_sorts_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Vec<(String, f64)>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_series_book_number_sorts(series_id)
         .await
 }
 
 async fn render_book_page_thumbnail_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     media: &PersistedBookMedia,
     page: &PersistedBookPageRow,
     page_number: u64,
     max_edge: u32,
 ) -> Option<Vec<u8>> {
-    app.services
-        .media_assets
+    app.media_assets
         .render_book_page_thumbnail(media, page, page_number, max_edge)
         .await
 }
 
 async fn process_task_side_effects(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     task_records: Vec<TaskQueueRecord>,
 ) -> Result<(), String> {
-    app.services
-        .task_queue
+    app.task_queue
+        .engine
         .enqueue_task_records(task_records, true)
         .await
 }
 
-async fn enqueue_task_records(app: &HttpAppState, task_records: Vec<TaskQueueRecord>) -> Response {
+async fn enqueue_task_records(
+    app: &MediaAssetsState,
+    task_records: Vec<TaskQueueRecord>,
+) -> Response {
     if let Err(error) = process_task_side_effects(app, task_records).await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,

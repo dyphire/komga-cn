@@ -252,14 +252,12 @@ pub struct IdentityState {
 
 #[derive(Clone)]
 pub struct IdentityAccessState {
-    pub root: Arc<HttpAppState>,
-    pub profile: RuntimeProfile,
-    pub auth_db: AuthDatabaseState,
-    pub operational: OperationalState,
-    pub read_progress: ReadProgressState,
-    pub identity: IdentityState,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub media_assets: Arc<dyn MediaAssetsService>,
+    pub(crate) discovery_auth: DiscoveryAuthState,
+    pub(crate) auth_db: AuthDatabaseState,
+    pub(crate) operational: OperationalState,
+    pub(crate) identity: IdentityState,
+    pub(crate) server_settings: Arc<dyn ServerSettingsService>,
+    pub(crate) media_assets: Arc<dyn MediaAssetsService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for IdentityState {
@@ -273,11 +271,9 @@ impl FromRef<Arc<HttpAppState>> for IdentityState {
 impl FromRef<Arc<HttpAppState>> for IdentityAccessState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            root: app.clone(),
-            profile: app.profile,
+            discovery_auth: app.discovery_auth.clone(),
             auth_db: app.auth_db.clone(),
             operational: app.operational.clone(),
-            read_progress: app.read_progress.clone(),
             identity: IdentityState::from_ref(app),
             server_settings: app.services.server_settings.clone(),
             media_assets: app.services.media_assets.clone(),

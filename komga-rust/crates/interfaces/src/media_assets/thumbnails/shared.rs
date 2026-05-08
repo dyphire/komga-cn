@@ -75,7 +75,7 @@ fn encode_image_bytes_as_small_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u
     Some(output.into_inner())
 }
 
-pub(super) fn response_from_thumbnail_bytes(
+pub(crate) fn response_from_thumbnail_bytes(
     headers: &HeaderMap,
     bytes: Vec<u8>,
     media_type: &str,
@@ -88,7 +88,7 @@ pub(super) fn response_from_thumbnail_bytes(
     asset_ok_response(media_type, bytes, Some(etag.as_str()), None)
 }
 
-pub(super) fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec<u8>) -> Response {
+pub(crate) fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec<u8>) -> Response {
     let Some(jpeg_bytes) = encode_image_bytes_as_jpeg(&bytes) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -96,7 +96,7 @@ pub(super) fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec
     response_from_thumbnail_bytes(headers, jpeg_bytes, "image/jpeg")
 }
 
-pub(super) fn response_from_thumbnail_small_jpeg_bytes(
+pub(crate) fn response_from_thumbnail_small_jpeg_bytes(
     headers: &HeaderMap,
     bytes: Vec<u8>,
     media_type: &str,
@@ -115,7 +115,7 @@ pub(super) fn set_one_hour_private_cache_control(response: &mut Response) {
     );
 }
 
-pub(super) fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
+pub(crate) fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
     match value {
         "MEDIUM" => 600,
         "LARGE" => 900,
@@ -125,7 +125,7 @@ pub(super) fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
 }
 
 pub(super) async fn load_book_thumbnail_source_bytes(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     media: &PersistedBookMedia,
 ) -> Option<Vec<u8>> {
@@ -177,7 +177,7 @@ pub(super) async fn load_book_thumbnail_source_bytes(
 }
 
 pub(super) async fn load_series_thumbnail(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     if let Some(thumbnail) = load_selected_series_thumbnail_from_services(app, series_id).await? {
@@ -196,7 +196,7 @@ pub(super) async fn load_series_thumbnail(
 }
 
 pub(super) async fn load_series_thumbnail_source_bytes(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Option<Vec<u8>> {
     match load_series_thumbnail(app, series_id).await {
@@ -206,12 +206,11 @@ pub(super) async fn load_series_thumbnail_source_bytes(
 }
 
 pub(super) async fn load_readlist_mosaic_bytes(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let book_ids = repeated_thumbnail_source_ids(
-        app.services
-            .discovery_detail
+        app.discovery_detail
             .load_persisted_readlist_book_rows(readlist_id)
             .await?
             .into_iter()
@@ -235,12 +234,11 @@ pub(super) async fn load_readlist_mosaic_bytes(
 }
 
 pub(super) async fn load_collection_mosaic_bytes(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let series_ids = repeated_thumbnail_source_ids(
-        app.services
-            .discovery_detail
+        app.discovery_detail
             .load_persisted_collection_series_ids(collection_id)
             .await?,
     );

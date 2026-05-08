@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn internal_error_response(error: impl std::fmt::Display) -> Response {
+pub(crate) fn internal_error_response(error: impl std::fmt::Display) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": error.to_string() })),
@@ -16,7 +16,7 @@ pub(crate) fn attachment_disposition(file_name: &str) -> String {
     )
 }
 
-pub(super) fn inline_disposition(file_name: &str) -> String {
+pub(crate) fn inline_disposition(file_name: &str) -> String {
     format!(
         "inline; filename=\"{}\"; filename*=UTF-8''{}",
         ascii_content_disposition_filename(file_name),

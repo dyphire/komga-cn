@@ -3,23 +3,21 @@ use axum::extract::FromRef;
 
 #[derive(Clone)]
 pub struct OpdsState {
-    pub root: Arc<HttpAppState>,
-    pub operational: OperationalState,
-    pub identity: IdentityState,
-    pub media_assets: Arc<dyn MediaAssetsService>,
-    pub opds_catalog: Arc<dyn OpdsCatalogService>,
-    pub opds_persisted: Arc<dyn OpdsPersistedService>,
+    pub(crate) server_settings: Arc<dyn ServerSettingsService>,
+    pub(crate) media_assets: Arc<dyn MediaAssetsService>,
+    pub(crate) opds_catalog: Arc<dyn OpdsCatalogService>,
+    pub(crate) opds_persisted: Arc<dyn OpdsPersistedService>,
+    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for OpdsState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            root: app.clone(),
-            operational: app.operational.clone(),
-            identity: IdentityState::from_ref(app),
+            server_settings: app.services.server_settings.clone(),
             media_assets: app.services.media_assets.clone(),
             opds_catalog: app.services.opds_catalog.clone(),
             opds_persisted: app.services.opds_persisted.clone(),
+            discovery_detail: app.services.discovery_detail.clone(),
         }
     }
 }

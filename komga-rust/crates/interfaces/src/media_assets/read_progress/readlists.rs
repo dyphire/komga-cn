@@ -4,18 +4,13 @@ use crate::state::MediaAssetsState;
 use axum::extract::State;
 
 async fn load_tachiyomi_readlist_book_ids(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<Option<Vec<String>>, String> {
-    let readlist_books = app
-        .services
-        .opds_persisted
-        .load_readlist_books(readlist_id)
-        .await?;
-    if readlist_books.is_empty() {
+    let visible_books = visible_readlist_books_for_user(app, readlist_id, user).await?;
+    if visible_books.is_empty() {
         let readlist_exists = app
-            .services
             .media_assets
             .load_persisted_readlist_name(readlist_id)
             .await?
@@ -25,15 +20,8 @@ async fn load_tachiyomi_readlist_book_ids(
                 .then_some(Vec::new()),
         );
     }
-    if !readlist_books
-        .iter()
-        .any(|book| user_can_access_library(user, &book.library_id))
-    {
-        return Ok(None);
-    }
-
     Ok(Some(
-        readlist_books.into_iter().map(|book| book.id).collect(),
+        visible_books.into_iter().map(|book| book.id).collect(),
     ))
 }
 
@@ -43,7 +31,7 @@ pub async fn readlist_tachiyomi_read_progress_get(
     Path(readlist_id): Path<String>,
 ) -> Response {
     let Some(ordered_book_ids) =
-        (match load_tachiyomi_readlist_book_ids(app.root.as_ref(), &readlist_id, &user).await {
+        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
             Ok(ordered_book_ids) => ordered_book_ids,
             Err(error) => return internal_error_response(error),
         })
@@ -96,7 +84,7 @@ pub async fn readlist_tachiyomi_read_progress_put(
     };
 
     let Some(ordered_book_ids) =
-        (match load_tachiyomi_readlist_book_ids(app.root.as_ref(), &readlist_id, &user).await {
+        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
             Ok(ordered_book_ids) => ordered_book_ids,
             Err(error) => return internal_error_response(error),
         })
@@ -108,24 +96,10 @@ pub async fn readlist_tachiyomi_read_progress_put(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    let visible_books =
-        match visible_readlist_books_for_user(app.root.as_ref(), &readlist_id, &user).await {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        };
-    if visible_books.is_empty() {
-        return StatusCode::NO_CONTENT.into_response();
-    }
-
-    let visible_book_ids = visible_books
-        .into_iter()
-        .map(|book| book.id)
-        .collect::<Vec<_>>();
-
     match app
         .media_assets
         .persist_readlist_tachiyomi_progress(
-            &visible_book_ids,
+            &ordered_book_ids,
             user_id(&user),
             last_book_read as usize,
         )

@@ -9,7 +9,7 @@ pub async fn book_detail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -38,12 +38,7 @@ pub async fn book_detail(
     };
 
     let is_admin = detail_query_context.is_admin;
-    match load_persisted_book_detail(
-        app.root.as_ref(),
-        &book_id,
-        detail_query_context.user_id.as_deref(),
-    )
-    .await
+    match load_persisted_book_detail(&app, &book_id, detail_query_context.user_id.as_deref()).await
     {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -57,9 +52,9 @@ pub async fn book_sibling_previous(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
+    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -89,7 +84,7 @@ pub async fn book_sibling_previous(
     let is_admin = detail_query_context.is_admin;
 
     match load_persisted_book_sibling_detail(
-        app.root.as_ref(),
+        &app,
         &book_id,
         PersistedBookSiblingDirection::Previous,
         detail_query_context.user_id.as_deref(),
@@ -108,9 +103,9 @@ pub async fn book_sibling_next(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
+    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -140,7 +135,7 @@ pub async fn book_sibling_next(
     let is_admin = detail_query_context.is_admin;
 
     match load_persisted_book_sibling_detail(
-        app.root.as_ref(),
+        &app,
         &book_id,
         PersistedBookSiblingDirection::Next,
         detail_query_context.user_id.as_deref(),
@@ -159,9 +154,9 @@ pub async fn book_readlists(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
+    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -190,7 +185,7 @@ pub async fn book_readlists(
     };
 
     let mut readlists = match load_persisted_readlists(
-        app.root.as_ref(),
+        &app,
         detail_query_context.authorized_library_ids.as_deref(),
     )
     .await
@@ -221,7 +216,7 @@ pub async fn book_readlists(
     let mut visible_readlists = Vec::with_capacity(readlists.len());
     for mut readlist in readlists {
         let Some(visible_books) = (match load_visible_persisted_readlist_books(
-            app.root.as_ref(),
+            &app,
             &headers,
             &readlist.id,
             &detail_query,

@@ -116,28 +116,17 @@ fn interface_task_record(task: ApplicationTaskQueueRecord) -> TaskQueueRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::extract::FromRef;
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
-    use komga_application::operational::PersistedServerSettings;
     use komga_application::task_processing::{TaskKind, TaskRequest};
 
-    use crate::discovery_auth::state::DiscoveryAuthState;
     use crate::state::{
-        AuthDatabaseState, HttpAppState, HttpServerRequestsState, HttpServices,
-        LibraryCatalogService, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
-        RemoteCacheEntry, RuntimeProfile, RuntimeState, ServerSettingsService, SseOperationalState,
-        StartupTimingState, TaskEngine, TransientBooksStore,
-        tests::{
-            NoopDiscoveryAuthorService, NoopDiscoveryBookFeedService,
-            NoopDiscoveryCollectionSearchService, NoopDiscoveryDetailService,
-            NoopDiscoveryLibraryMappingService, NoopDiscoveryListService,
-            NoopDiscoveryReadlistSearchService, NoopMediaAssetsService, NoopOpdsCatalogService,
-            NoopOpdsPersistedService, NoopOperationalRuntimeService,
-            NoopOperationalSettingsService,
-        },
+        HttpServerRequestsState, IdentityState, MediaAssetsState, OAuth2ClientConfig,
+        OperationalBuildMetadata, OperationalState, RemoteCacheEntry, RuntimeState,
+        SseOperationalState, StartupTimingState, TaskEngine, TaskQueueState, TransientBooksStore,
+        tests::{NoopDiscoveryDetailService, NoopMediaAssetsService},
     };
 
     struct StubImportService;
@@ -168,101 +157,6 @@ mod tests {
         ) -> futures_util::future::BoxFuture<'a, Result<Vec<ApplicationTaskQueueRecord>, String>>
         {
             Box::pin(async { panic!("process_queued_book_payload should not be called in tests") })
-        }
-    }
-
-    struct NoopLibraryCatalogService;
-
-    #[async_trait::async_trait]
-    impl LibraryCatalogService for NoopLibraryCatalogService {
-        async fn list_libraries(
-            &self,
-            _context: komga_domain::discovery::DiscoveryQueryContext,
-        ) -> Result<
-            Vec<komga_application::library_catalog::LibraryRecord>,
-            komga_domain::discovery::DiscoveryError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn get_library(
-            &self,
-            _context: komga_domain::discovery::DiscoveryQueryContext,
-            _library_id: &str,
-        ) -> Result<
-            Option<komga_application::library_catalog::LibraryRecord>,
-            komga_domain::discovery::DiscoveryError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn create_library(
-            &self,
-            _changes: komga_application::library_catalog::LibraryChangeSet,
-        ) -> Result<
-            komga_application::library_catalog::CreateLibraryResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn update_library(
-            &self,
-            _library_id: &str,
-            _changes: komga_application::library_catalog::LibraryChangeSet,
-        ) -> Result<
-            komga_application::library_catalog::LibraryTaskResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn delete_library(
-            &self,
-            _library_id: &str,
-        ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn scan_library(
-            &self,
-            _library_id: &str,
-            _deep_scan: bool,
-        ) -> Result<
-            komga_application::library_catalog::LibraryTaskResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn analyze_library(
-            &self,
-            _library_id: &str,
-        ) -> Result<
-            komga_application::library_catalog::LibraryTaskResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn refresh_metadata(
-            &self,
-            _library_id: &str,
-        ) -> Result<
-            komga_application::library_catalog::LibraryTaskResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
-        }
-
-        async fn empty_trash(
-            &self,
-            _library_id: &str,
-        ) -> Result<
-            komga_application::library_catalog::LibraryTaskResult,
-            komga_application::library_catalog::LibraryCatalogMutationError,
-        > {
-            panic!("library catalog should not be used in media import tests")
         }
     }
 
@@ -320,35 +214,7 @@ mod tests {
         fn wakeup(&self) {}
     }
 
-    struct TestServerSettingsService;
-
-    #[async_trait::async_trait]
-    impl ServerSettingsService for TestServerSettingsService {
-        async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
-            Ok(BTreeMap::new())
-        }
-
-        async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
-            Ok(PersistedServerSettings {
-                delete_empty_collections: false,
-                delete_empty_read_lists: false,
-                remember_me_key: String::new(),
-                remember_me_duration_days: 365,
-                thumbnail_size: "DEFAULT",
-                task_pool_size: 1,
-                server_port: None,
-                server_context_path: None,
-                kobo_proxy: false,
-                kobo_port: None,
-            })
-        }
-
-        async fn apply_changes(&self, _changes: &[(String, Option<String>)]) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
-    fn test_app_state(task_queue: Arc<dyn TaskEngine>) -> HttpAppState {
+    fn test_media_state(task_queue: Arc<dyn TaskEngine>) -> MediaAssetsState {
         let operational = OperationalState {
             runtime: RuntimeState {
                 tasks_db_file: PathBuf::from("/tmp/tasks.db"),
@@ -385,40 +251,15 @@ mod tests {
             shutdown_trigger: None,
         };
 
-        HttpAppState {
-            profile: RuntimeProfile::LiveLocaldb,
+        MediaAssetsState {
             read_progress: crate::state::ReadProgressState::default(),
-            discovery_auth: DiscoveryAuthState::default(),
-            auth_db: AuthDatabaseState {
-                db: komga_infrastructure::database_handle::DatabaseHandle::single_pool(
-                    PathBuf::from("/tmp/main.db"),
-                    sqlx::sqlite::SqlitePoolOptions::new()
-                        .connect_lazy("sqlite::memory:")
-                        .expect("lazy in-memory pool should open"),
-                ),
-                demo_mode: false,
-                session_runtime_key: operational.remember_me_runtime_key.clone(),
-                remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
-            },
-            services: HttpServices {
-                library_catalog: Arc::new(NoopLibraryCatalogService),
-                task_queue,
-                server_settings: Arc::new(TestServerSettingsService),
-                runtime_identity: crate::state::default_test_identity_service(),
-                operational_runtime: Arc::new(NoopOperationalRuntimeService),
-                operational_settings: Arc::new(NoopOperationalSettingsService),
-                media_assets: Arc::new(NoopMediaAssetsService),
-                opds_catalog: Arc::new(NoopOpdsCatalogService),
-                opds_persisted: Arc::new(NoopOpdsPersistedService),
-                discovery_authors: Arc::new(NoopDiscoveryAuthorService),
-                discovery_library_mapping: Arc::new(NoopDiscoveryLibraryMappingService),
-                discovery_collection_search: Arc::new(NoopDiscoveryCollectionSearchService),
-                discovery_readlist_search: Arc::new(NoopDiscoveryReadlistSearchService),
-                discovery_book_feeds: Arc::new(NoopDiscoveryBookFeedService),
-                discovery_detail: Arc::new(NoopDiscoveryDetailService),
-                discovery_list: Arc::new(NoopDiscoveryListService),
-            },
             operational,
+            identity: IdentityState {
+                service: crate::state::default_test_identity_service(),
+            },
+            media_assets: Arc::new(NoopMediaAssetsService),
+            task_queue: TaskQueueState { engine: task_queue },
+            discovery_detail: Arc::new(NoopDiscoveryDetailService),
         }
     }
 
@@ -443,10 +284,9 @@ mod tests {
             ],
         };
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let app = Arc::new(test_app_state(Arc::new(TestTaskEngine {
+        let media_state = test_media_state(Arc::new(TestTaskEngine {
             persisted_ids: persisted_ids.clone(),
-        })));
-        let media_state = MediaAssetsState::from_ref(&app);
+        }));
 
         enqueue_books_best_effort(&service, payload, &media_state).await;
 

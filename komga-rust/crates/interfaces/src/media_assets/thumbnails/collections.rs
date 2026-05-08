@@ -13,22 +13,20 @@ pub async fn collection_thumbnail(
     headers: HeaderMap,
     Path(collection_id): Path<String>,
 ) -> Response {
-    match user_can_access_collection_media(app.root.as_ref(), &collection_id, &user).await {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(app.root.as_ref(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(app.root.as_ref(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -37,7 +35,7 @@ pub async fn collection_thumbnail(
                 return response;
             }
 
-            match load_collection_mosaic_bytes(app.root.as_ref(), &collection_id).await {
+            match load_collection_mosaic_bytes(&app, &collection_id).await {
                 Ok(Some(bytes)) => {
                     let mut response = response_from_thumbnail_bytes(&headers, bytes, "image/jpeg");
                     set_one_hour_private_cache_control(&mut response);
@@ -56,22 +54,20 @@ pub async fn collection_thumbnails(
     Authenticated(user): Authenticated,
     Path(collection_id): Path<String>,
 ) -> Response {
-    match user_can_access_collection_media(app.root.as_ref(), &collection_id, &user).await {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(app.root.as_ref(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(app.root.as_ref(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -98,22 +94,20 @@ pub async fn collection_thumbnail_by_id(
     Authenticated(user): Authenticated,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match user_can_access_collection_media(app.root.as_ref(), &collection_id, &user).await {
+    match user_can_access_collection_media(&app, &collection_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(app.root.as_ref(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(app.root.as_ref(), &collection_id)
-        .await
-    {
+    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 asset_ok_response(
@@ -136,7 +130,7 @@ pub async fn collection_thumbnail_upload(
     Path(collection_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !persisted_collection_exists_from_services(app.root.as_ref(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
@@ -153,7 +147,7 @@ pub async fn collection_thumbnail_upload(
     };
 
     match insert_collection_thumbnail_from_services(
-        app.root.as_ref(),
+        &app,
         &collection_id,
         &thumbnail_bytes,
         media_type.as_str(),
@@ -183,14 +177,14 @@ pub async fn collection_thumbnail_select(
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if !persisted_collection_exists_from_services(app.root.as_ref(), &collection_id)
+    if !persisted_collection_exists_from_services(&app, &collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match select_collection_thumbnail_from_services(app.root.as_ref(), &thumbnail_id).await {
+    match select_collection_thumbnail_from_services(&app, &thumbnail_id).await {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -201,13 +195,7 @@ pub async fn collection_thumbnail_delete(
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match delete_collection_thumbnail_from_services(
-        app.root.as_ref(),
-        &collection_id,
-        &thumbnail_id,
-    )
-    .await
-    {
+    match delete_collection_thumbnail_from_services(&app, &collection_id, &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

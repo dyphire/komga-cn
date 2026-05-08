@@ -1,6 +1,6 @@
 pub(crate) use super::files::{
-    book_file, book_file_response, book_file_with_suffix, book_resource, book_resource_opds_v2,
-    readlist_file, series_file,
+    book_file, book_file_with_suffix, book_resource, book_resource_opds_v2, readlist_file,
+    series_file,
 };
 pub use super::import::books_import;
 pub use super::manifests::{
@@ -12,8 +12,8 @@ pub use super::operations::{
     series_metadata_refresh,
 };
 pub use super::pages::{
-    BookPageQuery, book_page, book_page_opds_v1, book_page_opds_v2, book_page_raw,
-    book_page_thumbnail, book_pages, book_positions,
+    BookPageQuery, book_page, book_page_opds_v1, book_page_raw, book_page_thumbnail, book_pages,
+    book_positions,
 };
 pub use super::read_progress::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,
@@ -29,7 +29,4 @@ pub use super::thumbnails::{
     readlist_thumbnail_select, readlist_thumbnail_upload, readlist_thumbnails, series_thumbnail,
     series_thumbnail_by_id, series_thumbnail_delete, series_thumbnail_select,
     series_thumbnail_upload, series_thumbnails,
-};
-pub(crate) use super::thumbnails::{
-    book_thumbnail_opds_response, book_thumbnail_opds_small_default_response,
 };

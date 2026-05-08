@@ -76,12 +76,12 @@ pub async fn authors_names(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let search = query_value(uri.query().unwrap_or_default(), "search")
         .map(decode_query_component)
         .unwrap_or_default();
     let context = match resolve_query_context_or_unauthorized(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         None,
@@ -93,7 +93,6 @@ pub async fn authors_names(
     };
 
     match app
-        .services
         .discovery_authors
         .load_author_names(&search, context.authorized_library_ids.as_deref())
         .await
@@ -108,9 +107,9 @@ pub async fn authors_roles(
     _: Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let context = match resolve_query_context_or_unauthorized(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         None,
@@ -122,7 +121,6 @@ pub async fn authors_roles(
     };
 
     match app
-        .services
         .discovery_authors
         .load_author_roles(context.authorized_library_ids.as_deref())
         .await
@@ -138,7 +136,7 @@ pub(crate) async fn authors_deprecated_get(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let search = query_value(query, "search")
         .map(decode_query_component)
@@ -151,7 +149,7 @@ pub(crate) async fn authors_deprecated_get(
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
     let context = match resolve_query_context_or_unauthorized(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         library_id.as_ref().map(std::slice::from_ref),
@@ -173,7 +171,6 @@ pub(crate) async fn authors_deprecated_get(
     };
 
     let mut authors = match app
-        .services
         .discovery_authors
         .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
@@ -196,7 +193,7 @@ pub async fn authors_v2(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let search = query_value(query, "search")
         .filter(|value| !value.is_empty())
@@ -228,7 +225,7 @@ pub async fn authors_v2(
         .max(1);
     let unpaged = query_bool(query, "unpaged");
     let context = match resolve_query_context_or_unauthorized(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         (!library_ids.is_empty()).then_some(library_ids.as_slice()),
@@ -252,7 +249,6 @@ pub async fn authors_v2(
     };
 
     let mut authors = match app
-        .services
         .discovery_authors
         .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
@@ -280,10 +276,10 @@ pub async fn genres(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -297,7 +293,6 @@ pub async fn genres(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_genres(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -313,10 +308,10 @@ pub async fn tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -330,7 +325,6 @@ pub async fn tags(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_tags(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -346,10 +340,10 @@ pub async fn series_tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -363,7 +357,6 @@ pub async fn series_tags(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_series_tags(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -379,10 +372,10 @@ pub async fn languages(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -396,7 +389,6 @@ pub async fn languages(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_languages(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -412,10 +404,10 @@ pub async fn publishers(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -429,7 +421,6 @@ pub async fn publishers(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_publishers(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -445,10 +436,10 @@ pub async fn age_ratings(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -462,7 +453,6 @@ pub async fn age_ratings(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_age_ratings(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -478,10 +468,10 @@ pub async fn sharing_labels(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -495,7 +485,6 @@ pub async fn sharing_labels(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_sharing_labels(&domain_context, authorized_library_ids, scope.collection_id)
         .await
@@ -511,10 +500,10 @@ pub async fn series_release_dates(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &app.discovery_auth,
         &headers,
         query,
@@ -528,7 +517,6 @@ pub async fn series_release_dates(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .services
         .discovery_list
         .list_series_release_dates(&domain_context, authorized_library_ids, scope.collection_id)
         .await

@@ -6,27 +6,21 @@ use std::path::Path;
 
 #[derive(Clone)]
 pub struct OperationalApiState {
-    pub root: Arc<HttpAppState>,
-    pub profile: RuntimeProfile,
-    pub auth_db: AuthDatabaseState,
-    pub operational: OperationalState,
-    pub identity: IdentityState,
-    pub task_queue: TaskQueueState,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub operational_runtime: Arc<dyn OperationalRuntimeService>,
-    pub operational_settings: Arc<dyn OperationalSettingsService>,
+    pub(crate) auth_db: AuthDatabaseState,
+    pub(crate) operational: OperationalState,
+    pub(crate) identity: IdentityState,
+    pub(crate) task_queue: TaskQueueState,
+    pub(crate) operational_runtime: Arc<dyn OperationalRuntimeService>,
+    pub(crate) operational_settings: Arc<dyn OperationalSettingsService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for OperationalApiState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            root: app.clone(),
-            profile: app.profile,
             auth_db: app.auth_db.clone(),
             operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             task_queue: TaskQueueState::from_ref(app),
-            server_settings: app.services.server_settings.clone(),
             operational_runtime: app.services.operational_runtime.clone(),
             operational_settings: app.services.operational_settings.clone(),
         }
@@ -35,16 +29,14 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
 
 #[derive(Clone)]
 pub struct ServerSettingsState {
-    pub identity: IdentityState,
     pub runtime: RuntimeState,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub task_queue: TaskQueueState,
+    pub(crate) server_settings: Arc<dyn ServerSettingsService>,
+    pub(crate) task_queue: TaskQueueState,
 }
 
 impl FromRef<Arc<HttpAppState>> for ServerSettingsState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            identity: IdentityState::from_ref(app),
             runtime: app.operational.runtime.clone(),
             server_settings: app.services.server_settings.clone(),
             task_queue: TaskQueueState::from_ref(app),

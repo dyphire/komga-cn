@@ -265,9 +265,9 @@ pub(super) fn api_key_comment_from_request(body: &Value) -> Option<String> {
 pub(super) async fn authenticated_user(
     headers: &HeaderMap,
     connection_info: RequestConnectionInfo,
-    app: &HttpAppState,
+    app: &IdentityAccessState,
 ) -> Option<AuthUser> {
-    let identity = &*app.services.runtime_identity;
+    let identity = &*app.identity.service;
     let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
         headers,
         connection_info.remote_addr(),

@@ -9,31 +9,21 @@ use std::path::Path;
 
 #[derive(Clone)]
 pub struct MediaAssetsState {
-    pub root: Arc<HttpAppState>,
-    pub profile: RuntimeProfile,
-    pub read_progress: ReadProgressState,
-    pub discovery_auth: DiscoveryAuthState,
-    pub auth_db: AuthDatabaseState,
-    pub operational: OperationalState,
-    pub identity: IdentityState,
-    pub media_assets: Arc<dyn MediaAssetsService>,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub task_queue: TaskQueueState,
-    pub discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub(crate) read_progress: ReadProgressState,
+    pub(crate) operational: OperationalState,
+    pub(crate) identity: IdentityState,
+    pub(crate) media_assets: Arc<dyn MediaAssetsService>,
+    pub(crate) task_queue: TaskQueueState,
+    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for MediaAssetsState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            root: app.clone(),
-            profile: app.profile,
             read_progress: app.read_progress.clone(),
-            discovery_auth: app.discovery_auth.clone(),
-            auth_db: app.auth_db.clone(),
             operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             media_assets: app.services.media_assets.clone(),
-            server_settings: app.services.server_settings.clone(),
             task_queue: TaskQueueState::from_ref(app),
             discovery_detail: app.services.discovery_detail.clone(),
         }

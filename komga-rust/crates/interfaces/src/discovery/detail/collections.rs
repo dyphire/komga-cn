@@ -5,7 +5,7 @@ use crate::discovery::series::{parse_series_filter_from_json, series_read_model_
 use crate::discovery::series_routes::author_query_to_author_match;
 use crate::helpers::{mark_runtime_owned, to_domain_query_context, validation_error_response};
 use crate::identity_access::auth::{Admin, Authenticated};
-use crate::state::{DiscoveryState, HttpAppState};
+use crate::state::DiscoveryState;
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use icu::collator::{
@@ -39,15 +39,13 @@ pub async fn collection_series(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
     let query_string = uri.query().unwrap_or_default();
-    let collection = match load_persisted_collection_detail(app.root.as_ref(), &collection_id).await
-    {
+    let collection = match load_persisted_collection_detail(&app, &collection_id).await {
         Ok(Some(collection)) => collection,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
     let visible_series_ids =
-        match visible_collection_series_ids(app.root.as_ref(), &visible_context, &collection).await
-        {
+        match visible_collection_series_ids(&app, &visible_context, &collection).await {
             Ok(ids) => ids,
             Err(error) => return internal_error_response(error),
         };
@@ -188,7 +186,7 @@ pub async fn collection_series(
 }
 
 async fn visible_collection_series_ids(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     context: &DiscoveryQueryContext,
     collection: &CollectionReadModel,
 ) -> Result<Vec<String>, String> {
@@ -371,13 +369,13 @@ pub async fn collections(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let persisted_rows_exist = match persisted_collections_exist(app.root.as_ref()).await {
+    let persisted_rows_exist = match persisted_collections_exist(&app).await {
         Ok(exists) => exists,
         Err(error) => return internal_error_response(error),
     };
 
     let mut content = if persisted_rows_exist {
-        match load_persisted_collections(app.root.as_ref()).await {
+        match load_persisted_collections(&app).await {
             Ok(collections) => collections,
             Err(error) => return internal_error_response(error),
         }
@@ -406,8 +404,7 @@ pub async fn collections(
         let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
         let mut matches_requested_scope = request_scope_context.is_none();
         for series_id in &collection.series_ids {
-            let series_library_id = match load_series_library_id(app.root.as_ref(), series_id).await
-            {
+            let series_library_id = match load_series_library_id(&app, series_id).await {
                 Ok(Some(value)) => value,
                 Ok(None) => continue,
                 Err(error) => return internal_error_response(error),
@@ -417,7 +414,7 @@ pub async fn collections(
                 && !matches_requested_scope
             {
                 match series_visible_to_context(
-                    app.root.as_ref(),
+                    &app,
                     request_context,
                     series_id,
                     Some(series_library_id.as_str()),
@@ -431,7 +428,7 @@ pub async fn collections(
             }
 
             match series_visible_to_context(
-                app.root.as_ref(),
+                &app,
                 &visible_context,
                 series_id,
                 Some(series_library_id.as_str()),
@@ -519,7 +516,7 @@ pub async fn collection_create(
         Err(response) => return response,
     };
 
-    match load_persisted_collections(app.root.as_ref()).await {
+    match load_persisted_collections(&app).await {
         Ok(collections)
             if collections
                 .iter()
@@ -531,16 +528,16 @@ pub async fn collection_create(
         Err(error) => return internal_error_response(error),
     }
 
-    let created_id = match persist_collection_create(app.root.as_ref(), &input).await {
+    let created_id = match persist_collection_create(&app, &input).await {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
 
-    if let Err(error) = upsert_collection_search_document(app.root.as_ref(), &created_id).await {
+    if let Err(error) = upsert_collection_search_document(&app, &created_id).await {
         return internal_error_response(error);
     }
 
-    match load_persisted_collection_detail(app.root.as_ref(), &created_id).await {
+    match load_persisted_collection_detail(&app, &created_id).await {
         Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -811,12 +808,11 @@ pub async fn collection_detail(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    match load_persisted_collection_detail(app.root.as_ref(), &collection_id).await {
+    match load_persisted_collection_detail(&app, &collection_id).await {
         Ok(Some(mut collection)) => {
             let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
             for series_id in &collection.series_ids {
-                match series_visible_to_context(app.root.as_ref(), &context, series_id, None).await
-                {
+                match series_visible_to_context(&app, &context, series_id, None).await {
                     Ok(true) => visible_series_ids.push(series_id.clone()),
                     Ok(false) => {}
                     Err(error) => return internal_error_response(error),
@@ -858,7 +854,7 @@ pub async fn collection_update(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let existing = match load_persisted_collection_detail(app.root.as_ref(), &collection_id).await {
+    let existing = match load_persisted_collection_detail(&app, &collection_id).await {
         Ok(Some(collection)) => collection,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
@@ -870,7 +866,7 @@ pub async fn collection_update(
     let input = merge_collection_patch_input(&existing, patch);
 
     if should_validate_duplicate_name {
-        match load_persisted_collections(app.root.as_ref()).await {
+        match load_persisted_collections(&app).await {
             Ok(collections)
                 if collections.iter().any(|collection| {
                     collection.id != collection_id
@@ -887,11 +883,9 @@ pub async fn collection_update(
         }
     }
 
-    match persist_collection_update(app.root.as_ref(), &collection_id, &input).await {
+    match persist_collection_update(&app, &collection_id, &input).await {
         Ok(true) => {
-            if let Err(error) =
-                upsert_collection_search_document(app.root.as_ref(), &collection_id).await
-            {
+            if let Err(error) = upsert_collection_search_document(&app, &collection_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -906,11 +900,9 @@ pub async fn collection_delete(
     _: Admin,
     Path(collection_id): Path<String>,
 ) -> Response {
-    match delete_persisted_collection(app.root.as_ref(), &collection_id).await {
+    match delete_persisted_collection(&app, &collection_id).await {
         Ok(true) => {
-            if let Err(error) =
-                delete_collection_search_document(app.root.as_ref(), &collection_id).await
-            {
+            if let Err(error) = delete_collection_search_document(&app, &collection_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()

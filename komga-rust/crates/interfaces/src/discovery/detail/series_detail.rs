@@ -13,7 +13,7 @@ pub async fn series_detail(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
 
     let resolved_series_id = resolve_series_id_for_persisted(app, &series_id).await;
 
@@ -35,7 +35,7 @@ pub async fn series_detail(
     let detail_query_context = match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -67,11 +67,11 @@ pub async fn series_collections(
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
 
     let Some(context) = app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -94,7 +94,7 @@ pub async fn series_collections(
     match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -135,7 +135,7 @@ pub async fn series_metadata_update(
     Path(series_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
 
     let body = match body.as_object() {
         Some(body) => body,

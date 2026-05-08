@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::HttpAppState;
+use crate::state::DiscoveryState;
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
 
@@ -42,11 +42,10 @@ pub struct ExistingSeriesMetadata {
 }
 
 pub async fn load_persisted_series_resource(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResource>, String> {
     let resource = app
-        .services
         .discovery_detail
         .load_persisted_series_resource(series_id)
         .await?
@@ -60,7 +59,7 @@ pub async fn load_persisted_series_resource(
 }
 
 pub async fn resolve_series_id_for_persisted(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     requested_series_id: &str,
 ) -> String {
     let Some(index) = requested_series_id
@@ -82,7 +81,6 @@ pub async fn resolve_series_id_for_persisted(
     }
 
     match app
-        .services
         .discovery_detail
         .load_series_id_by_sorted_position(index)
         .await
@@ -93,12 +91,11 @@ pub async fn resolve_series_id_for_persisted(
 }
 
 pub(super) async fn load_persisted_series_detail(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<SeriesDetailReadModel>, String> {
     let Some(row) = app
-        .services
         .discovery_detail
         .load_persisted_series_detail(series_id)
         .await?
@@ -110,7 +107,6 @@ pub(super) async fn load_persisted_series_detail(
         .unwrap_or_else(|| fallback_existing_series_metadata(&row));
 
     let persisted_summary = app
-        .services
         .discovery_detail
         .load_persisted_series_summaries()
         .await?
@@ -118,7 +114,6 @@ pub(super) async fn load_persisted_series_detail(
         .find(|entry| entry.id == series_id);
 
     let total_book_count = app
-        .services
         .discovery_detail
         .load_series_total_book_counts()
         .await?
@@ -128,7 +123,6 @@ pub(super) async fn load_persisted_series_detail(
 
     let (books_read_count, books_in_progress_count) = if let Some(user_id) = user_id {
         let counts = app
-            .services
             .discovery_detail
             .load_series_read_progress_counts(user_id)
             .await?
@@ -280,11 +274,10 @@ fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorRead
 }
 
 pub(super) async fn load_persisted_series_collections(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Vec<CollectionReadModel>, String> {
     let rows = app
-        .services
         .discovery_detail
         .load_persisted_series_collections(series_id)
         .await?;
@@ -303,11 +296,10 @@ pub(super) async fn load_persisted_series_collections(
 }
 
 pub async fn load_existing_series_metadata(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadata>, String> {
     let metadata = app
-        .services
         .discovery_detail
         .load_existing_series_metadata(series_id)
         .await?
@@ -346,12 +338,11 @@ pub async fn load_existing_series_metadata(
 }
 
 pub async fn persist_series_metadata_update(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
     let updated = app
-        .services
         .discovery_detail
         .persist_series_metadata_update(series_id, update)
         .await?;
@@ -370,11 +361,10 @@ pub async fn persist_series_metadata_update(
 }
 
 pub async fn sync_series_search_documents_after_metadata_update(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     series_id: &str,
 ) -> Result<(), String> {
-    app.services
-        .discovery_detail
+    app.discovery_detail
         .refresh_series_search_documents_after_metadata_update(series_id)
         .await
 }

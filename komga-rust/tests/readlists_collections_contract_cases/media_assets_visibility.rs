@@ -123,7 +123,8 @@ async fn router_readlist_and_collection_media_assets_hide_age_restricted_content
 }
 
 #[tokio::test]
-async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_kotlin() {
+async fn router_readlist_tachiyomi_progress_counts_only_visible_books_for_content_restricted_user()
+{
     let ctx = TestFixture::builder("router-readlist-tachiyomi-content-restrictions")
         .with_seed(|paths| async move {
             seed_router_age_exclude_user_with_roles(
@@ -161,9 +162,9 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restrictions_like_ko
     assert_eq!(
         response_json(response).await,
         json!({
-            "booksCount": 1,
+            "booksCount": 0,
             "booksReadCount": 0,
-            "booksUnreadCount": 1,
+            "booksUnreadCount": 0,
             "booksInProgressCount": 0,
             "lastReadContinuousIndex": 0,
         })
@@ -213,7 +214,7 @@ async fn router_readlist_detail_filters_books_for_partially_restricted_user() {
 }
 
 #[tokio::test]
-async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_like_kotlin() {
+async fn router_readlist_tachiyomi_progress_counts_only_visible_content_subset() {
     let ctx = TestFixture::builder("router-readlist-tachiyomi-partially-restricted")
         .with_seed(|paths| async move {
             seed_readlist_endpoint_variants(&paths).await;
@@ -252,9 +253,9 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_
     assert_eq!(
         response_json(response).await,
         json!({
-            "booksCount": 3,
+            "booksCount": 1,
             "booksReadCount": 0,
-            "booksUnreadCount": 3,
+            "booksUnreadCount": 1,
             "booksInProgressCount": 0,
             "lastReadContinuousIndex": 0,
         })
@@ -262,7 +263,7 @@ async fn router_readlist_tachiyomi_progress_ignores_content_restriction_subsets_
 }
 
 #[tokio::test]
-async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_restricted_user() {
+async fn router_readlist_tachiyomi_progress_counts_only_visible_library_subset() {
     let ctx = TestFixture::builder("router-readlist-tachiyomi-library-restricted")
         .with_seed(|paths| async move {
             seed_readlist_endpoint_variants(&paths).await;
@@ -300,9 +301,9 @@ async fn router_readlist_tachiyomi_progress_counts_full_readlist_for_library_res
     assert_eq!(
         response_json(response).await,
         json!({
-            "booksCount": 3,
+            "booksCount": 2,
             "booksReadCount": 0,
-            "booksUnreadCount": 3,
+            "booksUnreadCount": 2,
             "booksInProgressCount": 0,
             "lastReadContinuousIndex": 0,
         })
@@ -398,7 +399,7 @@ async fn router_readlist_tachiyomi_progress_put_returns_not_found_when_library_s
 }
 
 #[tokio::test]
-async fn router_readlist_tachiyomi_progress_put_ignores_fully_hidden_content_like_kotlin() {
+async fn router_readlist_tachiyomi_progress_put_skips_fully_hidden_content() {
     let ctx = TestFixture::builder("router-readlist-tachiyomi-put-content-restrictions")
         .with_seed(|paths| async move {
             seed_router_age_exclude_user_with_roles(
@@ -512,7 +513,7 @@ async fn router_readlist_tachiyomi_progress_put_marks_only_visible_books_for_res
 }
 
 #[tokio::test]
-async fn router_readlist_media_assets_allow_partially_visible_restricted_readlist() {
+async fn router_readlist_media_assets_return_only_visible_archive_entries() {
     let ctx = TestFixture::builder("router-readlist-media-assets-partially-restricted")
         .with_seed(|paths| async move {
             seed_readlist_endpoint_variants(&paths).await;
@@ -619,14 +620,7 @@ async fn router_readlist_media_assets_allow_partially_visible_restricted_readlis
                 .to_string()
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "1 - book-1.epub".to_string(),
-            "2 - book-2.epub".to_string(),
-            "3 - book-3.epub".to_string(),
-        ]
-    );
+    assert_eq!(names, vec!["1 - book-3.epub".to_string()]);
 }
 
 #[tokio::test]

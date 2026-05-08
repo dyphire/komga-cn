@@ -7,7 +7,7 @@ use quick_xml::Reader as XmlReader;
 #[cfg(test)]
 use quick_xml::events::Event as XmlEvent;
 
-pub(super) fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
+pub(crate) fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
     let extension = file_name
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
@@ -28,35 +28,35 @@ pub(super) fn content_type_from_filename(file_name: &str, default_mime_type: &st
     }
 }
 
-pub(super) fn book_media_supports_page_image(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_supports_page_image(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type).starts_with("image/")
 }
 
-pub(super) fn book_media_is_single_image(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_is_single_image(media: &PersistedBookMedia) -> bool {
     book_media_supports_page_image(media)
 }
 
-pub(super) fn book_media_is_zip_archive(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_is_zip_archive(media: &PersistedBookMedia) -> bool {
     matches!(
         content_type_from_filename(&media.file_name, &media.media_type).as_str(),
         "application/vnd.comicbook+zip" | "application/epub+zip" | "application/zip"
     )
 }
 
-pub(super) fn book_media_is_rar_archive(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_is_rar_archive(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type)
         == "application/vnd.comicbook-rar"
 }
 
-pub(super) fn book_media_is_epub(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_is_epub(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type) == "application/epub+zip"
 }
 
-pub(super) fn book_media_is_pdf(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_is_pdf(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type) == "application/pdf"
 }
 
-pub(super) fn book_media_supports_page_api(media: &PersistedBookMedia) -> bool {
+pub(crate) fn book_media_supports_page_api(media: &PersistedBookMedia) -> bool {
     book_media_is_single_image(media)
         || media.page_count > 0
         || book_media_is_zip_archive(media)

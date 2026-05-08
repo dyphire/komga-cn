@@ -1,5 +1,5 @@
 use super::*;
-use crate::discovery::detail::load_persisted_webpub_metadata_additions;
+use crate::state::{DiscoveryDetailService, MediaAssetsService};
 use flate2::read::GzDecoder;
 use komga_application::media_assets::BookPageRecord;
 use std::io::Read;
@@ -366,7 +366,7 @@ fn persisted_epub_manifest_payload(
 }
 
 async fn build_manifest_reading_order(
-    app: &HttpAppState,
+    media_assets: &dyn MediaAssetsService,
     headers: &HeaderMap,
     book_id: &str,
     media: &PersistedBookMedia,
@@ -385,7 +385,7 @@ async fn build_manifest_reading_order(
             .collect::<Vec<_>>(),
         (ManifestVariant::Divina, ManifestProfile::Pdf)
         | (ManifestVariant::Divina, ManifestProfile::Divina) => {
-            let persisted_rows = load_persisted_book_pages_from_services(app, book_id).await?;
+            let persisted_rows = media_assets.load_persisted_book_pages(book_id).await?;
             let effective_rows = if !persisted_rows.is_empty() {
                 reading_order_entries(
                     headers,
@@ -393,10 +393,10 @@ async fn build_manifest_reading_order(
                     persisted_rows,
                     (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
                 )
-            } else if let Some(archive_rows) = load_archive_page_rows_from_services(app, media).await {
+            } else if let Some(archive_rows) = media_assets.load_archive_page_rows(media).await {
                 reading_order_entries(headers, book_id, archive_rows, None)
             } else {
-                reading_order_entries(headers, book_id, load_generated_pdf_page_rows_from_services(app, media), None)
+                reading_order_entries(headers, book_id, media_assets.load_generated_pdf_page_rows(media), None)
             };
 
             if effective_rows.is_empty() {
@@ -474,15 +474,219 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
     })
 }
 
+async fn load_persisted_webpub_metadata_additions(
+    discovery_detail: &dyn DiscoveryDetailService,
+    book_id: &str,
+) -> Result<Option<(serde_json::Map<String, Value>, bool)>, String> {
+    let Some(book) = discovery_detail
+        .load_persisted_book_detail(book_id, None)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let series = discovery_detail
+        .load_persisted_series_detail(&book.series_id)
+        .await?;
+
+    let mut metadata = serde_json::Map::new();
+    if !book.metadata_summary.is_empty() {
+        metadata.insert(
+            "description".to_string(),
+            Value::String(book.metadata_summary.clone()),
+        );
+    }
+    if !book.metadata_isbn.is_empty() {
+        metadata.insert(
+            "identifier".to_string(),
+            Value::String(format!("urn:isbn:{}", book.metadata_isbn)),
+        );
+    }
+    if book.media_pages_count > 0 {
+        metadata.insert(
+            "numberOfPages".to_string(),
+            Value::Number(book.media_pages_count.into()),
+        );
+    }
+    if let Some(release_date) = book
+        .metadata_release_date
+        .as_ref()
+        .filter(|value| !value.is_empty())
+    {
+        metadata.insert("published".to_string(), Value::String(release_date.clone()));
+    }
+    if !book.last_modified.is_empty() {
+        metadata.insert(
+            "modified".to_string(),
+            Value::String(normalize_webpub_modified(&book.last_modified)),
+        );
+    }
+    if !book.metadata_tags.is_empty() {
+        metadata.insert(
+            "subject".to_string(),
+            Value::Array(
+                parse_csv_values(&book.metadata_tags)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    extend_webpub_metadata_with_role_authors(
+        &mut metadata,
+        parse_metadata_authors(&book.metadata_authors).as_slice(),
+    );
+    if !book.series_title.is_empty() {
+        let mut series_entry = serde_json::Map::new();
+        series_entry.insert("name".to_string(), Value::String(book.series_title.clone()));
+        if let Some(position) = serde_json::Number::from_f64(book.metadata_number_sort) {
+            series_entry.insert("position".to_string(), Value::Number(position));
+        }
+        metadata.insert(
+            "belongsTo".to_string(),
+            Value::Object(serde_json::Map::from_iter([(
+                "series".to_string(),
+                Value::Array(vec![Value::Object(series_entry)]),
+            )])),
+        );
+    }
+
+    if let Some(series) = series {
+        if !series.language.is_empty() {
+            metadata.insert("language".to_string(), Value::String(series.language));
+        }
+        if let Some(reading_progression) =
+            webpub_reading_progression(series.reading_direction.as_str())
+        {
+            metadata.insert(
+                "readingProgression".to_string(),
+                Value::String(reading_progression.to_string()),
+            );
+        }
+    }
+
+    Ok(Some((metadata, book.media_epub_divina_compatible)))
+}
+
+struct ManifestAuthor {
+    name: String,
+    role: String,
+}
+
+fn parse_metadata_authors(raw: &str) -> Vec<ManifestAuthor> {
+    raw.split('\u{001F}')
+        .filter(|entry| !entry.is_empty())
+        .map(|author| match author.split_once('\u{001E}') {
+            Some((name, role)) => ManifestAuthor {
+                name: name.to_string(),
+                role: role.to_string(),
+            },
+            None => ManifestAuthor {
+                name: author.to_string(),
+                role: String::new(),
+            },
+        })
+        .collect()
+}
+
+fn parse_csv_values(raw: &str) -> Vec<String> {
+    if raw.trim().is_empty() {
+        return vec![];
+    }
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn webpub_reading_progression(reading_direction: &str) -> Option<&'static str> {
+    match reading_direction.trim().to_ascii_uppercase().as_str() {
+        "LEFT_TO_RIGHT" => Some("ltr"),
+        "RIGHT_TO_LEFT" => Some("rtl"),
+        "VERTICAL" | "WEBTOON" => Some("ttb"),
+        _ => None,
+    }
+}
+
+fn normalize_webpub_modified(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    if time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339).is_ok()
+    {
+        return trimmed.to_string();
+    }
+    if let Some((date, time)) = trimmed.split_once(' ') {
+        return format!("{date}T{time}Z");
+    }
+    if trimmed.contains('T') {
+        return format!("{trimmed}Z");
+    }
+    trimmed.to_string()
+}
+
+fn extend_webpub_metadata_with_role_authors(
+    metadata: &mut serde_json::Map<String, Value>,
+    authors: &[ManifestAuthor],
+) {
+    let mut author = Vec::new();
+    let mut translator = Vec::new();
+    let mut editor = Vec::new();
+    let mut artist = Vec::new();
+    let mut illustrator = Vec::new();
+    let mut letterer = Vec::new();
+    let mut penciler = Vec::new();
+    let mut colorist = Vec::new();
+    let mut inker = Vec::new();
+    let mut contributor = Vec::new();
+
+    for entry in authors {
+        let target = match entry.role.trim().to_ascii_lowercase().as_str() {
+            "author" => &mut author,
+            "translator" => &mut translator,
+            "editor" => &mut editor,
+            "artist" => &mut artist,
+            "illustrator" => &mut illustrator,
+            "letterer" => &mut letterer,
+            "penciler" | "penciller" => &mut penciler,
+            "colorist" => &mut colorist,
+            "inker" => &mut inker,
+            _ => &mut contributor,
+        };
+        if !entry.name.is_empty() {
+            target.push(Value::String(entry.name.clone()));
+        }
+    }
+
+    for (key, values) in [
+        ("author", author),
+        ("translator", translator),
+        ("editor", editor),
+        ("artist", artist),
+        ("illustrator", illustrator),
+        ("letterer", letterer),
+        ("penciler", penciler),
+        ("colorist", colorist),
+        ("inker", inker),
+        ("contributor", contributor),
+    ] {
+        if !values.is_empty() {
+            metadata.insert(key.to_string(), Value::Array(values));
+        }
+    }
+}
+
 pub(crate) async fn build_persisted_book_manifest(
-    app: &HttpAppState,
+    media_assets: &dyn MediaAssetsService,
+    discovery_detail: &dyn DiscoveryDetailService,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
     let Some((library_id, title, media_type)) =
-        load_persisted_manifest_book_from_services(app, book_id).await?
+        media_assets.load_persisted_manifest_book(book_id).await?
     else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
@@ -491,15 +695,16 @@ pub(crate) async fn build_persisted_book_manifest(
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
-    let Some(media) = load_persisted_book_media_from_services(app, book_id).await? else {
+    let Some(media) = media_assets.load_persisted_book_media(book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
-    if !user_can_access_book_media(app, book_id, user, &media).await {
+    if !user_can_access_book_media(media_assets, book_id, user, &media).await {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
     let profile = manifest_profile_from_media_type(&media_type);
-    let webpub_additions = load_persisted_webpub_metadata_additions(app, book_id).await?;
+    let webpub_additions =
+        load_persisted_webpub_metadata_additions(discovery_detail, book_id).await?;
     let epub_divina_compatible = webpub_additions
         .as_ref()
         .is_some_and(|(_, epub_divina_compatible)| *epub_divina_compatible);
@@ -522,10 +727,10 @@ pub(crate) async fn build_persisted_book_manifest(
         (effective_variant, profile),
         (ManifestVariant::Epub, ManifestProfile::Epub)
     ) {
-        let media_files = load_persisted_media_file_records_from_services(app, book_id).await?;
-        let extension_blob = app
-            .services
-            .media_assets
+        let media_files = media_assets
+            .load_persisted_media_file_records(book_id)
+            .await?;
+        let extension_blob = media_assets
             .load_persisted_epub_extension_blob(book_id)
             .await?;
         let payload = persisted_epub_manifest_payload(
@@ -545,7 +750,7 @@ pub(crate) async fn build_persisted_book_manifest(
     }
 
     let reading_order = build_manifest_reading_order(
-        app,
+        media_assets,
         headers,
         book_id,
         &media,

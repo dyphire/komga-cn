@@ -32,7 +32,7 @@ pub async fn book_analyze(
     };
 
     enqueue_task_records(
-        app.root.as_ref(),
+        &app,
         vec![
             TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(&book_id))
                 .priority(6)
@@ -60,7 +60,7 @@ pub async fn book_metadata_refresh(
     };
 
     enqueue_task_records(
-        app.root.as_ref(),
+        &app,
         vec![
             TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
                 .priority(6)
@@ -123,7 +123,7 @@ pub async fn book_metadata_update(
                 )
                 .priority(80)
                 .into_queue_record();
-                if let Err(error) = process_task_side_effects(app.root.as_ref(), vec![task]).await {
+                if let Err(error) = process_task_side_effects(&app, vec![task]).await {
                     return internal_error_response(error);
                 }
             }
@@ -225,7 +225,7 @@ pub async fn book_metadata_batch_update(
                 .into_queue_record()
             })
             .collect::<Vec<_>>();
-        if let Err(error) = process_task_side_effects(app.root.as_ref(), tasks).await {
+        if let Err(error) = process_task_side_effects(&app, tasks).await {
             return internal_error_response(error);
         }
     }
@@ -479,7 +479,7 @@ pub async fn books_thumbnails_regenerate(
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
     enqueue_task_records(
-        app.root.as_ref(),
+        &app,
         vec![
             TaskRequest::new(TaskKind::FindBookThumbnailsToRegenerate)
                 .into_queue_record()
@@ -499,7 +499,7 @@ pub async fn series_file_delete(
     _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    enqueue_delete_media_task(app.root.as_ref(), TaskKind::DeleteSeries, &series_id, 8).await
+    enqueue_delete_media_task(&app, TaskKind::DeleteSeries, &series_id, 8).await
 }
 
 pub async fn series_analyze(
@@ -507,7 +507,7 @@ pub async fn series_analyze(
     _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
     let book_ids = match app
         .media_assets
@@ -527,7 +527,7 @@ pub async fn series_analyze(
         })
         .collect::<Vec<_>>();
 
-    enqueue_task_records(app.root.as_ref(), task_records).await
+    enqueue_task_records(&app, task_records).await
 }
 
 pub async fn series_metadata_refresh(
@@ -566,7 +566,7 @@ pub async fn series_metadata_refresh(
         .into_queue_record(),
     );
 
-    enqueue_task_records(app.root.as_ref(), task_records).await
+    enqueue_task_records(&app, task_records).await
 }
 
 pub async fn book_file_delete(
@@ -574,11 +574,11 @@ pub async fn book_file_delete(
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    enqueue_delete_media_task(app.root.as_ref(), TaskKind::DeleteBook, &book_id, 8).await
+    enqueue_delete_media_task(&app, TaskKind::DeleteBook, &book_id, 8).await
 }
 
 async fn enqueue_delete_media_task(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     kind: TaskKind,
     target_id: &str,
     priority: i32,

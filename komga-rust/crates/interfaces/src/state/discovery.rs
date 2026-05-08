@@ -5,33 +5,21 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone)]
 pub struct DiscoveryState {
-    pub root: Arc<HttpAppState>,
-    pub profile: RuntimeProfile,
-    pub read_progress: ReadProgressState,
-    pub discovery_auth: DiscoveryAuthState,
-    pub auth_db: AuthDatabaseState,
-    pub operational: OperationalState,
-    pub identity: IdentityState,
-    pub discovery_authors: Arc<dyn DiscoveryAuthorService>,
-    pub discovery_library_mapping: Arc<dyn DiscoveryLibraryMappingService>,
-    pub discovery_collection_search: Arc<dyn DiscoveryCollectionSearchService>,
-    pub discovery_readlist_search: Arc<dyn DiscoveryReadlistSearchService>,
-    pub discovery_book_feeds: Arc<dyn DiscoveryBookFeedService>,
-    pub discovery_detail: Arc<dyn DiscoveryDetailService>,
-    pub discovery_list: Arc<dyn DiscoveryListService>,
-    pub media_assets: Arc<dyn MediaAssetsService>,
-    pub task_queue: TaskQueueState,
+    pub(crate) discovery_auth: DiscoveryAuthState,
+    pub(crate) identity: IdentityState,
+    pub(crate) discovery_authors: Arc<dyn DiscoveryAuthorService>,
+    pub(crate) discovery_library_mapping: Arc<dyn DiscoveryLibraryMappingService>,
+    pub(crate) discovery_collection_search: Arc<dyn DiscoveryCollectionSearchService>,
+    pub(crate) discovery_readlist_search: Arc<dyn DiscoveryReadlistSearchService>,
+    pub(crate) discovery_book_feeds: Arc<dyn DiscoveryBookFeedService>,
+    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub(crate) discovery_list: Arc<dyn DiscoveryListService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for DiscoveryState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            root: app.clone(),
-            profile: app.profile,
-            read_progress: app.read_progress.clone(),
             discovery_auth: app.discovery_auth.clone(),
-            auth_db: app.auth_db.clone(),
-            operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             discovery_authors: app.services.discovery_authors.clone(),
             discovery_library_mapping: app.services.discovery_library_mapping.clone(),
@@ -40,8 +28,6 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
             discovery_book_feeds: app.services.discovery_book_feeds.clone(),
             discovery_detail: app.services.discovery_detail.clone(),
             discovery_list: app.services.discovery_list.clone(),
-            media_assets: app.services.media_assets.clone(),
-            task_queue: TaskQueueState::from_ref(app),
         }
     }
 }

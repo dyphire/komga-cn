@@ -1,11 +1,10 @@
 use super::*;
 
 pub(super) async fn load_persisted_epub_positions(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<Option<Vec<Value>>, String> {
     let Some((extension_class, blob)) = app
-        .services
         .media_assets
         .load_persisted_epub_extension_blob(book_id)
         .await?
@@ -29,8 +28,8 @@ pub(super) async fn load_persisted_epub_positions(
 }
 
 pub(super) fn decode_epub_positions_blob(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     blob: &[u8],
 ) -> Result<Vec<Value>, String> {
-    app.services.media_assets.decode_epub_positions(blob)
+    app.media_assets.decode_epub_positions(blob)
 }

@@ -345,7 +345,7 @@ pub async fn books_duplicates(
             let mut content = Vec::with_capacity(entries.len());
             for entry in entries {
                 let detail = match super::super::detail::load_persisted_book_detail(
-                    app.root.as_ref(),
+                    &app,
                     &entry.id,
                     Some(&user_id),
                 )

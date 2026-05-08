@@ -1,8 +1,8 @@
 use super::*;
-use crate::state::HttpAppState;
+use crate::state::OpdsState;
 
 pub(super) async fn build_book_feed_acquisition_entries(
-    app: &HttpAppState,
+    app: &OpdsState,
     headers: &HeaderMap,
     books: Vec<PersistedBookFeedItem>,
 ) -> Vec<OpdsV1AcquisitionEntry> {
@@ -66,7 +66,7 @@ pub(super) fn localized_opds_updated(value: &str) -> Option<String> {
 }
 
 pub(super) async fn series_book_page_streaming_links(
-    app: &HttpAppState,
+    app: &OpdsState,
     headers: &HeaderMap,
     book: &PersistedSeriesBook,
 ) -> Vec<String> {
@@ -84,7 +84,7 @@ pub(super) async fn series_book_page_streaming_links(
 }
 
 async fn book_feed_page_streaming_links(
-    app: &HttpAppState,
+    app: &OpdsState,
     headers: &HeaderMap,
     book: &PersistedBookFeedItem,
 ) -> Vec<String> {
@@ -103,7 +103,7 @@ async fn book_feed_page_streaming_links(
 
 #[allow(clippy::too_many_arguments)]
 async fn opds_book_page_streaming_links(
-    app: &HttpAppState,
+    app: &OpdsState,
     headers: &HeaderMap,
     book_id: &str,
     media_type: &str,
@@ -113,7 +113,7 @@ async fn opds_book_page_streaming_links(
     last_read_date: Option<&str>,
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
-        app.services.media_assets.as_ref(),
+        app.media_assets.as_ref(),
         book_id,
         media_type,
         page_count,

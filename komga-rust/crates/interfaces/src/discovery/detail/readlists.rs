@@ -4,7 +4,7 @@ use super::readlists_support::{
 use super::*;
 use crate::helpers::validation_error_response;
 use crate::identity_access::auth::{Admin, Authenticated};
-use crate::state::{DiscoveryState, HttpAppState};
+use crate::state::DiscoveryState;
 use axum::extract::State;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use icu::collator::{
@@ -78,15 +78,13 @@ pub async fn readlists(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content = match load_persisted_readlists(
-        app.root.as_ref(),
-        requested_context.authorized_library_ids.as_deref(),
-    )
-    .await
-    {
-        Ok(readlists) => readlists,
-        Err(error) => return internal_error_response(error),
-    };
+    let mut content =
+        match load_persisted_readlists(&app, requested_context.authorized_library_ids.as_deref())
+            .await
+        {
+            Ok(readlists) => readlists,
+            Err(error) => return internal_error_response(error),
+        };
     let search_ranks = match search.as_deref() {
         Some(search_term) => {
             let search_groups = search_term
@@ -160,7 +158,7 @@ pub async fn readlists(
     let mut visible_content = Vec::with_capacity(content.len());
     for readlist in content {
         let Some(mut visible_readlist) = (match load_persisted_readlist_detail(
-            app.root.as_ref(),
+            &app,
             &readlist.id,
             visibility_context.authorized_library_ids.as_deref(),
         )
@@ -174,7 +172,7 @@ pub async fn readlists(
 
         if let Some(requested_library_query) = requested_library_query.as_ref() {
             let Some(requested_library_books) = (match load_visible_persisted_readlist_books(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &readlist.id,
                 requested_library_query,
@@ -192,17 +190,14 @@ pub async fn readlists(
             }
         }
 
-        let Some(visible_books) = (match load_visible_persisted_readlist_books(
-            app.root.as_ref(),
-            &headers,
-            &readlist.id,
-            &list_query,
-        )
-        .await
-        {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        }) else {
+        let Some(visible_books) =
+            (match load_visible_persisted_readlist_books(&app, &headers, &readlist.id, &list_query)
+                .await
+            {
+                Ok(books) => books,
+                Err(error) => return internal_error_response(error),
+            })
+        else {
             continue;
         };
 
@@ -314,7 +309,7 @@ pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: 
         Err(response) => return response,
     };
 
-    match load_persisted_readlists(app.root.as_ref(), None).await {
+    match load_persisted_readlists(&app, None).await {
         Ok(readlists)
             if readlists
                 .iter()
@@ -326,16 +321,16 @@ pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: 
         Err(error) => return internal_error_response(error),
     }
 
-    let created_id = match persist_readlist_create(app.root.as_ref(), &input).await {
+    let created_id = match persist_readlist_create(&app, &input).await {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
 
-    if let Err(error) = upsert_readlist_search_document(app.root.as_ref(), &created_id).await {
+    if let Err(error) = upsert_readlist_search_document(&app, &created_id).await {
         return internal_error_response(error);
     }
 
-    match load_persisted_readlist_detail(app.root.as_ref(), &created_id, None).await {
+    match load_persisted_readlist_detail(&app, &created_id, None).await {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -469,7 +464,7 @@ pub async fn readlist_match_comicrack(
         Err(error_code) => return comicrack_bad_request_response(error_code),
     };
 
-    match match_comicrack_readlist(app.root.as_ref(), &request).await {
+    match match_comicrack_readlist(&app, &request).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -499,21 +494,17 @@ pub async fn readlist_update(
     body: Bytes,
 ) -> Response {
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-    let Some(existing) =
-        (match load_persisted_readlist_detail(app.root.as_ref(), &readlist_id, None).await {
-            Ok(readlist) => readlist,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(existing) = (match load_persisted_readlist_detail(&app, &readlist_id, None).await {
+        Ok(readlist) => readlist,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let input = merge_readlist_write_input(&existing, &payload);
 
-    match persist_readlist_update(app.root.as_ref(), &readlist_id, &input).await {
+    match persist_readlist_update(&app, &readlist_id, &input).await {
         Ok(true) => {
-            if let Err(error) =
-                upsert_readlist_search_document(app.root.as_ref(), &readlist_id).await
-            {
+            if let Err(error) = upsert_readlist_search_document(&app, &readlist_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -528,11 +519,9 @@ pub async fn readlist_delete(
     _: Admin,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match delete_persisted_readlist(app.root.as_ref(), &readlist_id).await {
+    match delete_persisted_readlist(&app, &readlist_id).await {
         Ok(true) => {
-            if let Err(error) =
-                delete_readlist_search_document(app.root.as_ref(), &readlist_id).await
-            {
+            if let Err(error) = delete_readlist_search_document(&app, &readlist_id).await {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -550,17 +539,12 @@ pub async fn readlist_books(
     uri: Uri,
 ) -> Response {
     let query = parse_persisted_readlist_books_query(uri.query().unwrap_or_default());
-    let Some(mut visible_books) = (match load_visible_persisted_readlist_books(
-        app.root.as_ref(),
-        &headers,
-        &readlist_id,
-        &query,
-    )
-    .await
-    {
-        Ok(books) => books,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(mut visible_books) =
+        (match load_visible_persisted_readlist_books(&app, &headers, &readlist_id, &query).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -576,7 +560,7 @@ pub async fn readlist_books(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = (match load_persisted_readlist_detail(
-        app.root.as_ref(),
+        &app,
         &readlist_id,
         context.authorized_library_ids.as_deref(),
     )
@@ -625,7 +609,7 @@ pub async fn readlist_detail(
     };
 
     match load_persisted_readlist_detail(
-        app.root.as_ref(),
+        &app,
         &readlist_id,
         context.authorized_library_ids.as_deref(),
     )
@@ -633,7 +617,7 @@ pub async fn readlist_detail(
     {
         Ok(Some(mut readlist)) => {
             let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                app.root.as_ref(),
+                &app,
                 &headers,
                 &readlist_id,
                 &detail_query,
@@ -671,7 +655,7 @@ pub async fn readlist_book_sibling_previous(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    sibling_response(app.root.as_ref(), &headers, &readlist_id, &book_id, false).await
+    sibling_response(&app, &headers, &readlist_id, &book_id, false).await
 }
 
 pub async fn readlist_book_sibling_next(
@@ -680,11 +664,11 @@ pub async fn readlist_book_sibling_next(
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    sibling_response(app.root.as_ref(), &headers, &readlist_id, &book_id, true).await
+    sibling_response(&app, &headers, &readlist_id, &book_id, true).await
 }
 
 async fn sibling_response(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     headers: &HeaderMap,
     readlist_id: &str,
     book_id: &str,
@@ -713,7 +697,7 @@ async fn sibling_response(
     };
 
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();

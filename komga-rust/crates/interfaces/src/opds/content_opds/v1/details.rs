@@ -2,7 +2,7 @@ use super::streaming::{localized_opds_updated, series_book_page_streaming_links}
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::opds::content_opds::types::PersistedSeries;
-use crate::state::{HttpAppState, OpdsSeriesEntry};
+use crate::state::{OpdsSeriesEntry, OpdsState};
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
@@ -19,7 +19,7 @@ fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
 pub(crate) async fn opds_v1_series_detail(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     series_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -27,7 +27,7 @@ pub(crate) async fn opds_v1_series_detail(
 
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let Some(series) = load_series(app.services.opds_persisted.as_ref(), series_id)
+    let Some(series) = load_series(app.opds_persisted.as_ref(), series_id)
         .await
         .unwrap_or(None)
     else {
@@ -47,7 +47,7 @@ pub(crate) async fn opds_v1_series_detail(
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let feed_updated = localized_opds_updated(&series.last_modified);
     let books = load_series_books_paged(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &series.id,
         &current_user_id,
         page.saturating_mul(size) as i64,
@@ -103,12 +103,12 @@ pub(crate) async fn opds_v1_series_detail(
 pub(crate) async fn opds_v1_library_detail(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: &str,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
-    let Some(library) = load_library(app.services.opds_persisted.as_ref(), library_id)
+    let Some(library) = load_library(app.opds_persisted.as_ref(), library_id)
         .await
         .unwrap_or(None)
     else {
@@ -134,7 +134,6 @@ pub(crate) async fn opds_v1_library_detail(
     let mut entries = Vec::with_capacity(size + 1);
     let has_next = loop {
         let batch = app
-            .services
             .opds_catalog
             .load_library_series(library_id, raw_offset, batch_limit)
             .await
@@ -191,12 +190,12 @@ pub(crate) async fn opds_v1_library_detail(
 pub(crate) async fn opds_v1_collection_detail(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
-    let Some(collection) = load_collection(app.services.opds_persisted.as_ref(), collection_id)
+    let Some(collection) = load_collection(app.opds_persisted.as_ref(), collection_id)
         .await
         .unwrap_or(None)
     else {
@@ -205,7 +204,7 @@ pub(crate) async fn opds_v1_collection_detail(
     let restrictions = opds_restrictions_for_user(user);
 
     let visible_series = load_collection_series(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         collection_id,
         collection.ordered,
     )
@@ -259,12 +258,12 @@ pub(crate) async fn opds_v1_collection_detail(
 pub(crate) async fn opds_v1_readlist_detail(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
-    let Some(readlist) = load_readlist(app.services.opds_persisted.as_ref(), readlist_id)
+    let Some(readlist) = load_readlist(app.opds_persisted.as_ref(), readlist_id)
         .await
         .unwrap_or(None)
     else {
@@ -272,7 +271,7 @@ pub(crate) async fn opds_v1_readlist_detail(
     };
     let restrictions = opds_restrictions_for_user(user);
 
-    let visible_books = load_readlist_books(app.services.opds_persisted.as_ref(), readlist_id)
+    let visible_books = load_readlist_books(app.opds_persisted.as_ref(), readlist_id)
         .await
         .unwrap_or_default()
         .into_iter()

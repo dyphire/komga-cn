@@ -28,7 +28,7 @@ use crate::identity_access::auth::{
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::operational::register_session_expired_event;
-use crate::state::{HttpAppState, IdentityAccessState, IdentityService};
+use crate::state::{IdentityAccessState, IdentityService};
 use komga_application::identity_access::{
     AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
 };
@@ -52,9 +52,9 @@ fn expire_user_sessions_for_runtime_key(
     register_session_expired_event(user_id);
 }
 
-pub(super) async fn users_me(app: &HttpAppState, request: Request) -> Response {
+pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.services.runtime_identity;
+    let identity = &*app.identity.service;
     let auth_state = &app.discovery_auth;
     let uri = request.uri().clone();
     let headers = request.headers().clone();
@@ -238,8 +238,8 @@ pub(super) async fn login_set_cookie(
         .into_response()
 }
 
-pub(super) async fn users_list(app: &HttpAppState) -> Response {
-    let users = persisted_users(&*app.services.runtime_identity)
+pub(super) async fn users_list(app: &IdentityAccessState) -> Response {
+    let users = persisted_users(&*app.identity.service)
         .await
         .unwrap_or_default();
 
@@ -247,7 +247,7 @@ pub(super) async fn users_list(app: &HttpAppState) -> Response {
 }
 
 pub(super) async fn users_create(
-    app: Arc<HttpAppState>,
+    app: Arc<IdentityAccessState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
@@ -309,8 +309,8 @@ pub(super) async fn users_create(
     };
 
     match app
-        .services
-        .runtime_identity
+        .identity
+        .service
         .create_auth_user(CreateAuthUserInput {
             user_id: new_user_id,
             email: email.to_string(),
@@ -340,7 +340,7 @@ pub(super) async fn users_create(
 }
 
 pub(super) async fn users_delete(
-    app: Arc<HttpAppState>,
+    app: Arc<IdentityAccessState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
@@ -356,15 +356,10 @@ pub(super) async fn users_delete(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match app
-        .services
-        .runtime_identity
-        .delete_auth_user(&target_user_id)
-        .await
-    {
+    match app.identity.service.delete_auth_user(&target_user_id).await {
         Ok(true) => {
             expire_user_sessions_for_runtime_key(
-                &*app.services.runtime_identity,
+                &*app.identity.service,
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -376,7 +371,7 @@ pub(super) async fn users_delete(
 }
 
 pub(super) async fn users_update(
-    app: Arc<HttpAppState>,
+    app: Arc<IdentityAccessState>,
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
@@ -443,8 +438,8 @@ pub(super) async fn users_update(
     };
 
     match app
-        .services
-        .runtime_identity
+        .identity
+        .service
         .update_auth_user(
             &target_user_id,
             UpdateAuthUserInput {
@@ -471,7 +466,7 @@ pub(super) async fn users_update(
         Ok(result) => {
             if result.expire_sessions {
                 expire_user_sessions_for_runtime_key(
-                    &*app.services.runtime_identity,
+                    &*app.identity.service,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -502,10 +497,10 @@ pub(super) async fn users_me_password(
     headers: HeaderMap,
     connection_info: RequestConnectionInfo,
     body: Value,
-    app: &HttpAppState,
+    app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.services.runtime_identity;
+    let identity = &*app.identity.service;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -529,10 +524,10 @@ pub(super) async fn users_by_id_password(
     connection_info: RequestConnectionInfo,
     Path(target_user_id): Path<String>,
     body: Value,
-    app: &HttpAppState,
+    app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.services.runtime_identity;
+    let identity = &*app.identity.service;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -567,11 +562,11 @@ pub(crate) async fn users_me_route(
     State(app): State<IdentityAccessState>,
     request: Request,
 ) -> Response {
-    users_me(app.root.as_ref(), request).await
+    users_me(&app, request).await
 }
 
 pub(crate) async fn users_list_route(State(app): State<IdentityAccessState>, _: Admin) -> Response {
-    users_list(app.root.as_ref()).await
+    users_list(&app).await
 }
 
 pub(crate) async fn users_create_route(
@@ -580,7 +575,7 @@ pub(crate) async fn users_create_route(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_create(app.root.clone(), headers, connection_info, body).await
+    users_create(Arc::new(app), headers, connection_info, body).await
 }
 
 pub(crate) async fn users_update_route(
@@ -590,7 +585,7 @@ pub(crate) async fn users_update_route(
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_update(app.root.clone(), headers, connection_info, path, body).await
+    users_update(Arc::new(app), headers, connection_info, path, body).await
 }
 
 pub(crate) async fn users_delete_route(
@@ -599,7 +594,7 @@ pub(crate) async fn users_delete_route(
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_delete(app.root.clone(), headers, connection_info, path).await
+    users_delete(Arc::new(app), headers, connection_info, path).await
 }
 
 pub(crate) async fn users_me_password_route(
@@ -608,7 +603,7 @@ pub(crate) async fn users_me_password_route(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_password(headers, connection_info, body, app.root.as_ref()).await
+    users_me_password(headers, connection_info, body, &app).await
 }
 
 pub(crate) async fn users_by_id_password_route(
@@ -618,7 +613,7 @@ pub(crate) async fn users_by_id_password_route(
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_by_id_password(headers, connection_info, path, body, app.root.as_ref()).await
+    users_by_id_password(headers, connection_info, path, body, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_create_route(
@@ -627,7 +622,7 @@ pub(crate) async fn users_me_api_keys_create_route(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_api_keys_create(headers, connection_info, body, app.root.as_ref()).await
+    users_me_api_keys_create(headers, connection_info, body, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_list_route(
@@ -635,7 +630,7 @@ pub(crate) async fn users_me_api_keys_list_route(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    users_me_api_keys_list(headers, connection_info, app.root.as_ref()).await
+    users_me_api_keys_list(headers, connection_info, &app).await
 }
 
 pub(crate) async fn users_me_api_keys_delete_route(
@@ -644,7 +639,7 @@ pub(crate) async fn users_me_api_keys_delete_route(
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_me_api_keys_delete(headers, connection_info, path, app.root.as_ref()).await
+    users_me_api_keys_delete(headers, connection_info, path, &app).await
 }
 
 pub(crate) async fn users_me_authentication_activity_route(
@@ -653,7 +648,7 @@ pub(crate) async fn users_me_authentication_activity_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_me_authentication_activity(headers, connection_info, uri, app.root.as_ref()).await
+    users_me_authentication_activity(headers, connection_info, uri, &app).await
 }
 
 pub(crate) async fn users_authentication_activity_route(
@@ -662,7 +657,7 @@ pub(crate) async fn users_authentication_activity_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_authentication_activity(headers, connection_info, uri, app.root.as_ref()).await
+    users_authentication_activity(headers, connection_info, uri, &app).await
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest_route(
@@ -672,14 +667,7 @@ pub(crate) async fn users_by_id_authentication_activity_latest_route(
     path: Path<String>,
     uri: Uri,
 ) -> Response {
-    users_by_id_authentication_activity_latest(
-        headers,
-        connection_info,
-        path,
-        uri,
-        app.root.as_ref(),
-    )
-    .await
+    users_by_id_authentication_activity_latest(headers, connection_info, path, uri, &app).await
 }
 
 pub(crate) async fn login_set_cookie_route(

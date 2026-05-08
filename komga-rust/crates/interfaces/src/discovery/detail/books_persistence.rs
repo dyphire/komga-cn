@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::HttpAppState;
+use crate::state::DiscoveryState;
 
 #[derive(Clone)]
 pub struct PersistedBookResource {
@@ -14,7 +14,10 @@ pub enum PersistedBookSiblingDirection {
     Next,
 }
 
-pub async fn resolve_book_id_for_persisted(app: &HttpAppState, requested_book_id: &str) -> String {
+pub async fn resolve_book_id_for_persisted(
+    app: &DiscoveryState,
+    requested_book_id: &str,
+) -> String {
     let Some(index) = requested_book_id
         .strip_prefix("book-")
         .and_then(|value| value.parse::<usize>().ok())
@@ -34,7 +37,6 @@ pub async fn resolve_book_id_for_persisted(app: &HttpAppState, requested_book_id
     }
 
     match app
-        .services
         .discovery_detail
         .load_book_id_by_sorted_position(index)
         .await
@@ -45,11 +47,10 @@ pub async fn resolve_book_id_for_persisted(app: &HttpAppState, requested_book_id
 }
 
 pub async fn load_persisted_book_resource(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     book_id: &str,
 ) -> Result<Option<PersistedBookResource>, String> {
     let resource = app
-        .services
         .discovery_detail
         .load_persisted_book_resource(book_id)
         .await?
@@ -62,12 +63,11 @@ pub async fn load_persisted_book_resource(
 }
 
 pub(super) async fn load_persisted_book_detail(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     book_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<BookDetailReadModel>, String> {
     let model = app
-        .services
         .discovery_detail
         .load_persisted_book_detail(book_id, user_id)
         .await?
@@ -127,7 +127,7 @@ pub(super) async fn load_persisted_book_detail(
 }
 
 pub async fn load_persisted_book_series_id(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     book_id: &str,
 ) -> Result<Option<String>, String> {
     Ok(load_persisted_book_detail(app, book_id, None)
@@ -166,7 +166,7 @@ fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
 }
 
 pub(super) async fn load_persisted_book_sibling_detail(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     book_id: &str,
     direction: PersistedBookSiblingDirection,
     user_id: Option<&str>,
@@ -177,7 +177,6 @@ pub(super) async fn load_persisted_book_sibling_detail(
     };
 
     let Some(sibling_id) = app
-        .services
         .discovery_detail
         .load_persisted_book_sibling_id(book_id, direction)
         .await?

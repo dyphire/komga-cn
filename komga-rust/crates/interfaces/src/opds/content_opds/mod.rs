@@ -1,4 +1,4 @@
-use axum::extract::{FromRef, State};
+use axum::extract::State;
 
 use axum::Json;
 use axum::extract::{Path as AxumPath, Query};
@@ -6,10 +6,11 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-use crate::identity_access::auth::{Authenticated, user_has_role, user_is_admin};
+use crate::identity_access::auth::{user_has_role, user_is_admin};
 use crate::media_assets;
+use crate::media_responses;
 use crate::request_urls::app_absolute_url;
-use crate::state::{MediaAssetsState, OpdsState};
+use crate::state::OpdsState;
 
 mod auth_extractors;
 mod auth_payload;
@@ -36,7 +37,7 @@ pub(crate) async fn opds_manifest_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    opds_manifest(headers, app.root.as_ref(), &book_id, &user).await
+    opds_manifest(headers, &app, &book_id, &user).await
 }
 
 pub(crate) async fn opds_manifest_profile_route(
@@ -45,14 +46,7 @@ pub(crate) async fn opds_manifest_profile_route(
     headers: HeaderMap,
     AxumPath((book_id, manifest_profile)): AxumPath<(String, String)>,
 ) -> Response {
-    opds_manifest_with_profile(
-        headers,
-        app.root.as_ref(),
-        &book_id,
-        &manifest_profile,
-        &user,
-    )
-    .await
+    opds_manifest_with_profile(headers, &app, &book_id, &manifest_profile, &user).await
 }
 
 pub(crate) async fn opds_auth_route(headers: HeaderMap) -> Response {
@@ -65,7 +59,7 @@ pub(crate) async fn opds_v1_series_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_series(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_series(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_catalog_route(
@@ -73,7 +67,7 @@ pub(crate) async fn opds_v1_catalog_route(
     _: OpdsV1Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    v1::opds_v1_catalog(app.root.as_ref(), headers).await
+    v1::opds_v1_catalog(&app, headers).await
 }
 
 pub(crate) async fn opds_v1_search_route(
@@ -81,7 +75,7 @@ pub(crate) async fn opds_v1_search_route(
     _: OpdsV1Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    v1::opds_v1_search(app.root.as_ref(), headers).await
+    v1::opds_v1_search(&app, headers).await
 }
 
 pub(crate) async fn opds_v1_on_deck_route(
@@ -90,7 +84,7 @@ pub(crate) async fn opds_v1_on_deck_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_on_deck(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_on_deck(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_keep_reading_route(
@@ -99,7 +93,7 @@ pub(crate) async fn opds_v1_keep_reading_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_keep_reading(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_keep_reading(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_series_latest_route(
@@ -108,7 +102,7 @@ pub(crate) async fn opds_v1_series_latest_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_series_latest(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_series_latest(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_books_latest_route(
@@ -117,7 +111,7 @@ pub(crate) async fn opds_v1_books_latest_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_books_latest(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_books_latest(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_libraries_route(
@@ -125,7 +119,7 @@ pub(crate) async fn opds_v1_libraries_route(
     OpdsV1Authenticated(user): OpdsV1Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    v1::opds_v1_libraries(headers, app.root.as_ref(), &user).await
+    v1::opds_v1_libraries(headers, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_collections_route(
@@ -134,7 +128,7 @@ pub(crate) async fn opds_v1_collections_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_collections(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_collections(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_readlists_route(
@@ -143,7 +137,7 @@ pub(crate) async fn opds_v1_readlists_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_readlists(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_readlists(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_publishers_route(
@@ -152,7 +146,7 @@ pub(crate) async fn opds_v1_publishers_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v1::opds_v1_publishers(headers, uri, app.root.as_ref(), &user).await
+    v1::opds_v1_publishers(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v1_series_detail_route(
@@ -162,7 +156,7 @@ pub(crate) async fn opds_v1_series_detail_route(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    v1::opds_v1_series_detail(headers, uri, app.root.as_ref(), &series_id, &user).await
+    v1::opds_v1_series_detail(headers, uri, &app, &series_id, &user).await
 }
 
 pub(crate) async fn opds_v1_library_detail_route(
@@ -172,7 +166,7 @@ pub(crate) async fn opds_v1_library_detail_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v1::opds_v1_library_detail(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v1::opds_v1_library_detail(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v1_collection_detail_route(
@@ -182,7 +176,7 @@ pub(crate) async fn opds_v1_collection_detail_route(
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
 ) -> Response {
-    v1::opds_v1_collection_detail(headers, uri, app.root.as_ref(), &collection_id, &user).await
+    v1::opds_v1_collection_detail(headers, uri, &app, &collection_id, &user).await
 }
 
 pub(crate) async fn opds_v1_readlist_detail_route(
@@ -192,7 +186,7 @@ pub(crate) async fn opds_v1_readlist_detail_route(
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
 ) -> Response {
-    v1::opds_v1_readlist_detail(headers, uri, app.root.as_ref(), &readlist_id, &user).await
+    v1::opds_v1_readlist_detail(headers, uri, &app, &readlist_id, &user).await
 }
 
 pub(crate) async fn opds_v1_book_file_route(
@@ -204,7 +198,7 @@ pub(crate) async fn opds_v1_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_assets::handlers::book_file_response(app.root.as_ref(), &user, &book_id).await
+    media_responses::book_file_response(app.media_assets.as_ref(), &user, &book_id).await
 }
 
 pub(crate) async fn opds_v1_book_thumbnail_route(
@@ -213,8 +207,8 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_assets::handlers::book_thumbnail_opds_response(
-        app.root.as_ref(),
+    media_responses::book_thumbnail_opds_response(
+        app.media_assets.as_ref(),
         &headers,
         &book_id,
         &user,
@@ -228,8 +222,9 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_assets::handlers::book_thumbnail_opds_small_default_response(
-        app.root.as_ref(),
+    media_responses::book_thumbnail_opds_small_default_response(
+        app.media_assets.as_ref(),
+        app.server_settings.as_ref(),
         &headers,
         &book_id,
         &user,
@@ -246,7 +241,7 @@ pub(crate) async fn opds_v2_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_assets::handlers::book_file_response(app.root.as_ref(), &user, &book_id).await
+    media_responses::book_file_response(app.media_assets.as_ref(), &user, &book_id).await
 }
 
 pub(crate) async fn opds_v2_book_file_with_suffix_route(
@@ -258,22 +253,26 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_assets::handlers::book_file_response(app.root.as_ref(), &user, &book_id).await
+    media_responses::book_file_response(app.media_assets.as_ref(), &user, &book_id).await
 }
 
 pub(crate) async fn opds_v2_book_page_route(
     State(app): State<OpdsState>,
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     headers: HeaderMap,
-    Query(query): Query<media_assets::handlers::BookPageQuery>,
+    Query(mut query): Query<media_assets::handlers::BookPageQuery>,
     AxumPath((book_id, page_number)): AxumPath<(String, u32)>,
 ) -> Response {
-    media_assets::handlers::book_page_opds_v2(
-        State(MediaAssetsState::from_ref(&app.root)),
-        OpdsV2Authenticated(user),
-        headers,
-        Query(query),
-        AxumPath((book_id, page_number)),
+    query.zero_based = false;
+    query.content_negotiation = false;
+    media_responses::book_page_response(
+        app.media_assets.as_ref(),
+        app.discovery_detail.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        page_number,
+        query.into_response_options(),
     )
     .await
 }
@@ -284,11 +283,13 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     headers: HeaderMap,
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    media_assets::handlers::book_page_raw(
-        State(MediaAssetsState::from_ref(&app.root)),
-        Authenticated(user),
-        headers,
-        AxumPath((book_id, page_number)),
+    media_responses::book_page_raw_response(
+        app.media_assets.as_ref(),
+        app.discovery_detail.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        page_number,
     )
     .await
 }
@@ -299,8 +300,8 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_assets::handlers::book_thumbnail_opds_response(
-        app.root.as_ref(),
+    media_responses::book_thumbnail_opds_response(
+        app.media_assets.as_ref(),
         &headers,
         &book_id,
         &user,
@@ -314,7 +315,7 @@ pub(crate) async fn opds_v2_library_route(
     headers: HeaderMap,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library(headers, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library(headers, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_library_readlists_route(
@@ -324,7 +325,7 @@ pub(crate) async fn opds_v2_library_readlists_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_readlists(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_readlists(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_readlists_route(
@@ -333,7 +334,7 @@ pub(crate) async fn opds_v2_libraries_readlists_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_readlists(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_readlists(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_keep_reading_route(
@@ -342,7 +343,7 @@ pub(crate) async fn opds_v2_libraries_keep_reading_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_keep_reading(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_keep_reading(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_keep_reading_route(
@@ -352,7 +353,7 @@ pub(crate) async fn opds_v2_library_keep_reading_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_keep_reading(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_keep_reading(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_on_deck_route(
@@ -361,7 +362,7 @@ pub(crate) async fn opds_v2_libraries_on_deck_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_on_deck(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_on_deck(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_on_deck_route(
@@ -371,7 +372,7 @@ pub(crate) async fn opds_v2_library_on_deck_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_on_deck(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_on_deck(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_books_route(
@@ -380,7 +381,7 @@ pub(crate) async fn opds_v2_libraries_latest_books_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_latest_books(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_latest_books(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_latest_books_route(
@@ -390,7 +391,7 @@ pub(crate) async fn opds_v2_library_latest_books_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_latest_books(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_latest_books(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_series_route(
@@ -399,7 +400,7 @@ pub(crate) async fn opds_v2_libraries_latest_series_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_latest_series(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_latest_series(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_latest_series_route(
@@ -409,7 +410,7 @@ pub(crate) async fn opds_v2_library_latest_series_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_latest_series(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_latest_series(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_browse_route(
@@ -418,7 +419,7 @@ pub(crate) async fn opds_v2_libraries_browse_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_browse(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_browse(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_browse_route(
@@ -428,7 +429,7 @@ pub(crate) async fn opds_v2_library_browse_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_browse(headers, uri, app.root.as_ref(), Some(&library_id), &user).await
+    v2::opds_v2_library_browse(headers, uri, &app, Some(&library_id), &user).await
 }
 
 pub(crate) async fn opds_v2_libraries_collections_route(
@@ -437,7 +438,7 @@ pub(crate) async fn opds_v2_libraries_collections_route(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    v2::opds_v2_libraries_collections(headers, uri, app.root.as_ref(), &user).await
+    v2::opds_v2_libraries_collections(headers, uri, &app, &user).await
 }
 
 pub(crate) async fn opds_v2_library_collections_route(
@@ -447,7 +448,7 @@ pub(crate) async fn opds_v2_library_collections_route(
     uri: Uri,
     AxumPath(library_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_library_collections(headers, uri, app.root.as_ref(), &library_id, &user).await
+    v2::opds_v2_library_collections(headers, uri, &app, &library_id, &user).await
 }
 
 pub(crate) async fn opds_v2_collection_route(
@@ -457,7 +458,7 @@ pub(crate) async fn opds_v2_collection_route(
     uri: Uri,
     AxumPath(collection_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_collection(headers, uri, app.root.as_ref(), &collection_id, &user).await
+    v2::opds_v2_collection(headers, uri, &app, &collection_id, &user).await
 }
 
 pub(crate) async fn opds_v2_series_route(
@@ -467,7 +468,7 @@ pub(crate) async fn opds_v2_series_route(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_series(headers, uri, app.root.as_ref(), &series_id, &user).await
+    v2::opds_v2_series(headers, uri, &app, &series_id, &user).await
 }
 
 pub(crate) async fn opds_v2_readlist_route(
@@ -477,7 +478,7 @@ pub(crate) async fn opds_v2_readlist_route(
     uri: Uri,
     AxumPath(readlist_id): AxumPath<String>,
 ) -> Response {
-    v2::opds_v2_readlist(headers, uri, app.root.as_ref(), &readlist_id, &user).await
+    v2::opds_v2_readlist(headers, uri, &app, &readlist_id, &user).await
 }
 
 pub(crate) async fn opds_v2_search_route(
@@ -496,5 +497,5 @@ pub(crate) async fn opds_v2_search_route(
         })
         .map(|value| percent_decode(&value.replace('+', " ")));
 
-    v2::opds_v2_search(headers, app.root.as_ref(), query.as_deref(), &user).await
+    v2::opds_v2_search(headers, &app, query.as_deref(), &user).await
 }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::identity_access::auth::FileDownload;
+use crate::media_responses;
 use crate::opds::content_opds::opds_catalog_unauthorized_response;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
@@ -9,28 +10,18 @@ pub async fn readlist_file(
     FileDownload(user): FileDownload,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match user_can_access_readlist_media(app.root.as_ref(), &readlist_id, &user).await {
+    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    let readlist_books = match app
-        .root
-        .services
-        .opds_persisted
-        .load_readlist_books(&readlist_id)
-        .await
-    {
+    let visible_books = match visible_readlist_books_for_user(&app, &readlist_id, &user).await {
         Ok(books) => books,
         Err(error) => return internal_error_response(error),
     };
-    let visible_books = readlist_books
-        .into_iter()
-        .filter(|book| user_can_access_library(&user, &book.library_id))
-        .collect::<Vec<_>>();
 
-    match load_persisted_readlist_name_from_services(app.root.as_ref(), &readlist_id).await {
+    match load_persisted_readlist_name_from_services(&app, &readlist_id).await {
         Ok(Some(name)) => {
             let file_name = format!("{name}.zip");
             let content_disposition = attachment_disposition(&file_name);
@@ -38,17 +29,14 @@ pub async fn readlist_file(
             let mut archive_entries = Vec::new();
             for (index, book) in visible_books.into_iter().enumerate() {
                 let Some(media) =
-                    (match load_persisted_book_media_from_services(app.root.as_ref(), &book.id)
-                        .await
-                    {
+                    (match load_persisted_book_media_from_services(&app, &book.id).await {
                         Ok(media) => media,
                         Err(error) => return internal_error_response(error),
                     })
                 else {
                     continue;
                 };
-                let Some(bytes) =
-                    read_media_file_bytes_from_services(app.root.as_ref(), &media.file_path).await
+                let Some(bytes) = read_media_file_bytes_from_services(&app, &media.file_path).await
                 else {
                     continue;
                 };
@@ -82,9 +70,9 @@ pub async fn series_file(
     FileDownload(user): FileDownload,
     Path(series_id): Path<String>,
 ) -> Response {
-    match load_series_archive_entries_from_services(app.root.as_ref(), &series_id).await {
+    match load_series_archive_entries_from_services(&app, &series_id).await {
         Ok(Some((series_title, _library_id, entries))) => {
-            match user_can_access_series_media(app.root.as_ref(), &series_id, &user).await {
+            match user_can_access_series_media(&app, &series_id, &user).await {
                 Ok(true) => {}
                 Ok(false) => return StatusCode::FORBIDDEN.into_response(),
                 Err(error) => return internal_error_response(error),
@@ -92,9 +80,7 @@ pub async fn series_file(
 
             let mut archive_entries = Vec::new();
             for (file_name, file_path) in entries {
-                if let Some(bytes) =
-                    read_media_file_bytes_from_services(app.root.as_ref(), &file_path).await
-                {
+                if let Some(bytes) = read_media_file_bytes_from_services(&app, &file_path).await {
                     archive_entries.push((file_name, bytes));
                 }
             }
@@ -126,8 +112,7 @@ pub async fn book_resource(
     headers: HeaderMap,
     Path((book_id, resource_path)): Path<(String, String)>,
 ) -> Response {
-    book_resource_response_for_route(app.root.as_ref(), headers, book_id, resource_path, false)
-        .await
+    book_resource_response_for_route(&app, headers, book_id, resource_path, false).await
 }
 
 pub async fn book_resource_opds_v2(
@@ -135,11 +120,11 @@ pub async fn book_resource_opds_v2(
     headers: HeaderMap,
     Path((book_id, resource_path)): Path<(String, String)>,
 ) -> Response {
-    book_resource_response_for_route(app.root.as_ref(), headers, book_id, resource_path, true).await
+    book_resource_response_for_route(&app, headers, book_id, resource_path, true).await
 }
 
 async fn book_resource_response_for_route(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     headers: HeaderMap,
     book_id: String,
     resource_path: String,
@@ -159,7 +144,7 @@ async fn book_resource_response_for_route(
 }
 
 async fn book_font_resource_response(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     headers: &HeaderMap,
     book_id: &str,
     resource_name: &str,
@@ -173,14 +158,13 @@ async fn book_font_resource_response(
 }
 
 async fn book_protected_resource_response(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     headers: &HeaderMap,
     book_id: &str,
     resource_name: &str,
     opds_v2_unauthorized: bool,
 ) -> Response {
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
-    else {
+    let Some(user) = resolved_request_auth_user(&*app.identity.service, headers).await else {
         return if opds_v2_unauthorized {
             opds_catalog_unauthorized_response(headers)
         } else {
@@ -192,7 +176,7 @@ async fn book_protected_resource_response(
         Err(response) => return response,
     };
 
-    if !user_can_access_book_media(app, book_id, &user, &media).await {
+    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -200,7 +184,7 @@ async fn book_protected_resource_response(
 }
 
 async fn load_epub_book_media(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<PersistedBookMedia, Response> {
     let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
@@ -224,7 +208,7 @@ async fn load_epub_book_media(
 }
 
 async fn book_resource_response(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     headers: &HeaderMap,
     media: &PersistedBookMedia,
     resource_name: &str,
@@ -293,71 +277,5 @@ async fn book_file_response_for_user(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if let Ok(Some(media)) =
-        load_persisted_book_media_from_services(app.root.as_ref(), book_id).await
-    {
-        if !user_can_access_book_media(app.root.as_ref(), book_id, user, &media).await {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-
-        let Some(body) =
-            read_media_file_bytes_from_services(app.root.as_ref(), &media.file_path).await
-        else {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "File not found, it may have moved" })),
-            )
-                .into_response();
-        };
-
-        let content_type = media.media_type.clone();
-        let content_disposition = attachment_disposition(&media.file_name);
-
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, content_type.as_str()),
-                (header::CONTENT_DISPOSITION, content_disposition.as_str()),
-            ],
-            body,
-        )
-            .into_response();
-    }
-
-    StatusCode::NOT_FOUND.into_response()
-}
-
-pub(crate) async fn book_file_response(
-    app: &HttpAppState,
-    user: &AuthUser,
-    book_id: &str,
-) -> Response {
-    if let Ok(Some(media)) = load_persisted_book_media_from_services(app, book_id).await {
-        if !user_can_access_book_media(app, book_id, user, &media).await {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-
-        let Some(body) = read_media_file_bytes_from_services(app, &media.file_path).await else {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "File not found, it may have moved" })),
-            )
-                .into_response();
-        };
-
-        let content_type = media.media_type.clone();
-        let content_disposition = attachment_disposition(&media.file_name);
-
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, content_type.as_str()),
-                (header::CONTENT_DISPOSITION, content_disposition.as_str()),
-            ],
-            body,
-        )
-            .into_response();
-    }
-
-    StatusCode::NOT_FOUND.into_response()
+    media_responses::book_file_response(app.media_assets.as_ref(), user, book_id).await
 }

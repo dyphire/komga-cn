@@ -24,23 +24,18 @@ fn request_progress_token(
 }
 
 async fn load_accessible_book_media(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     user: &AuthUser,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match app
-        .services
-        .media_assets
-        .load_persisted_book_media(book_id)
-        .await
-    {
+    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
         return Err(StatusCode::NOT_FOUND.into_response());
     };
 
-    if !user_can_access_book_media(app, book_id, user, &media).await {
+    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
@@ -49,7 +44,7 @@ async fn load_accessible_book_media(
 
 #[allow(clippy::too_many_arguments)]
 async fn persist_and_record_read_progress(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     token: &str,
     book_id: &str,
     persisted_user_id: Option<&str>,
@@ -65,7 +60,7 @@ async fn persist_and_record_read_progress(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    set_read_progress(app, token.to_string(), book_id.to_string());
+    set_read_progress(&app.read_progress, token.to_string(), book_id.to_string());
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -76,7 +71,7 @@ pub async fn book_read_progress(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let supports_persisted_flow = persisted_book_exists_from_services(app.root.as_ref(), &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false);
 
@@ -88,11 +83,11 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     };
 
-    if let Err(response) = load_accessible_book_media(app.root.as_ref(), &book_id, &user).await {
+    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
     let persisted_user_id = Some(user_id(&user));
-    let page_count = match load_book_page_count_from_services(app.root.as_ref(), &book_id).await {
+    let page_count = match load_book_page_count_from_services(&app, &book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
@@ -112,7 +107,7 @@ pub async fn book_read_progress(
 
     if completed_true {
         return persist_and_record_read_progress(
-            app.root.as_ref(),
+            &app,
             &token,
             &book_id,
             persisted_user_id,
@@ -147,13 +142,13 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     }
 
-    let locator = match load_epub_locator_for_page(app.root.as_ref(), &book_id, page).await {
+    let locator = match load_epub_locator_for_page(&app, &book_id, page).await {
         Ok(locator) => locator,
         Err(error) => return internal_error_response(error),
     };
 
     persist_and_record_read_progress(
-        app.root.as_ref(),
+        &app,
         &token,
         &book_id,
         persisted_user_id,
@@ -170,7 +165,7 @@ pub async fn book_read_progress_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let supports_persisted_flow = persisted_book_exists_from_services(app.root.as_ref(), &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
         .await
         .unwrap_or(false);
 
@@ -178,7 +173,7 @@ pub async fn book_read_progress_delete(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    if let Err(response) = load_accessible_book_media(app.root.as_ref(), &book_id, &user).await {
+    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
     let token = request_progress_token(&*app.identity.service, &headers, &user);
@@ -195,7 +190,7 @@ pub async fn book_read_progress_delete(
     }
 
     if supports_persisted_flow
-        && delete_persisted_read_progress_from_services(app.root.as_ref(), &book_id, user_id(&user))
+        && delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user))
             .await
             .is_err()
     {
@@ -229,7 +224,7 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
-    if !persisted_book_exists_from_services(app.root.as_ref(), book_id)
+    if !persisted_book_exists_from_services(&app, book_id)
         .await
         .unwrap_or(false)
     {
@@ -242,7 +237,7 @@ async fn book_progression_response(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(app.root.as_ref(), book_id, user, &media).await {
+    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -277,7 +272,7 @@ async fn book_progression_response(
             return invalid_progression_payload();
         };
         let normalized_locator =
-            match normalize_book_epub_locator(app.root.as_ref(), book_id, locator).await {
+            match normalize_book_epub_locator(app.media_assets.as_ref(), book_id, locator).await {
                 Ok(locator) => locator,
                 Err(response) => return response,
             };
@@ -302,7 +297,7 @@ async fn book_progression_response(
     }
 
     let stale_progression = match progression_is_older_than_existing(
-        app.root.as_ref(),
+        app.media_assets.as_ref(),
         book_id,
         user_id(user),
         modified,
@@ -360,7 +355,7 @@ async fn book_progression_get_response(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if !persisted_book_exists_from_services(app.root.as_ref(), book_id)
+    if !persisted_book_exists_from_services(&app, book_id)
         .await
         .unwrap_or(false)
     {
@@ -373,11 +368,11 @@ async fn book_progression_get_response(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(app.root.as_ref(), book_id, user, &media).await {
+    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_progression_from_services(app.root.as_ref(), book_id, user_id(user)).await {
+    match load_book_progression_from_services(&app, book_id, user_id(user)).await {
         Ok(Some(progression)) => (
             [(
                 header::CONTENT_TYPE,

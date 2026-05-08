@@ -13,13 +13,13 @@ pub async fn readlist_thumbnail(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match user_can_access_readlist_media(app.root.as_ref(), &readlist_id, &user).await {
+    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(app.root.as_ref(), &readlist_id).await {
+    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -28,7 +28,7 @@ pub async fn readlist_thumbnail(
                 return response;
             }
 
-            match load_readlist_mosaic_bytes(app.root.as_ref(), &readlist_id).await {
+            match load_readlist_mosaic_bytes(&app, &readlist_id).await {
                 Ok(Some(bytes)) => {
                     let mut response = response_from_thumbnail_bytes(&headers, bytes, "image/jpeg");
                     set_one_hour_private_cache_control(&mut response);
@@ -38,7 +38,7 @@ pub async fn readlist_thumbnail(
                 Err(error) => return internal_error_response(error),
             }
 
-            if persisted_readlist_exists_from_services(app.root.as_ref(), &readlist_id)
+            if persisted_readlist_exists_from_services(&app, &readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -56,13 +56,13 @@ pub async fn readlist_thumbnails(
     Authenticated(user): Authenticated,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match user_can_access_readlist_media(app.root.as_ref(), &readlist_id, &user).await {
+    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(app.root.as_ref(), &readlist_id).await {
+    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
         Ok(rows) => {
             if !rows.is_empty() {
                 return Json(
@@ -84,7 +84,7 @@ pub async fn readlist_thumbnails(
                 .into_response();
             }
 
-            if persisted_readlist_exists_from_services(app.root.as_ref(), &readlist_id)
+            if persisted_readlist_exists_from_services(&app, &readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -102,13 +102,13 @@ pub async fn readlist_thumbnail_by_id(
     Authenticated(user): Authenticated,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match user_can_access_readlist_media(app.root.as_ref(), &readlist_id, &user).await {
+    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(app.root.as_ref(), &readlist_id).await {
+    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 return asset_ok_response(
@@ -119,7 +119,7 @@ pub async fn readlist_thumbnail_by_id(
                 );
             }
 
-            if persisted_readlist_exists_from_services(app.root.as_ref(), &readlist_id)
+            if persisted_readlist_exists_from_services(&app, &readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -138,7 +138,7 @@ pub async fn readlist_thumbnail_upload(
     Path(readlist_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !persisted_readlist_exists_from_services(app.root.as_ref(), &readlist_id)
+    if !persisted_readlist_exists_from_services(&app, &readlist_id)
         .await
         .unwrap_or(false)
     {
@@ -155,7 +155,7 @@ pub async fn readlist_thumbnail_upload(
     };
 
     match insert_readlist_thumbnail_from_services(
-        app.root.as_ref(),
+        &app,
         &readlist_id,
         &thumbnail_bytes,
         media_type.as_str(),
@@ -185,16 +185,14 @@ pub async fn readlist_thumbnail_select(
     _: Admin,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if !persisted_readlist_exists_from_services(app.root.as_ref(), &readlist_id)
+    if !persisted_readlist_exists_from_services(&app, &readlist_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match select_readlist_thumbnail_from_services(app.root.as_ref(), &readlist_id, &thumbnail_id)
-        .await
-    {
+    match select_readlist_thumbnail_from_services(&app, &readlist_id, &thumbnail_id).await {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -205,9 +203,7 @@ pub async fn readlist_thumbnail_delete(
     _: Admin,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match delete_readlist_thumbnail_from_services(app.root.as_ref(), &readlist_id, &thumbnail_id)
-        .await
-    {
+    match delete_readlist_thumbnail_from_services(&app, &readlist_id, &thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

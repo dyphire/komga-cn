@@ -1,6 +1,6 @@
 use super::*;
 use crate::helpers::read_progress_validation_error_response;
-use crate::state::HttpAppState;
+use crate::state::MediaAssetsState;
 use crate::state::PersistedReadProgressRecord;
 use flate2::read::GzDecoder;
 use std::io::Read;
@@ -25,80 +25,72 @@ pub use series::{
     series_tachiyomi_read_progress_put,
 };
 pub(crate) async fn load_read_progress_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
-    app.services
-        .runtime_identity
+    app.identity
+        .service
         .load_read_progress(book_id, user_id)
         .await
 }
 
 pub(crate) async fn load_series_book_ids_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Vec<String>, String> {
-    app.services
-        .media_assets
-        .load_series_book_ids(series_id)
-        .await
+    app.media_assets.load_series_book_ids(series_id).await
 }
 
 pub(crate) async fn persist_read_progress_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     user_id: &str,
     page: u64,
     completed: bool,
     locator: Option<Value>,
 ) -> Result<(), String> {
-    app.services
-        .media_assets
+    app.media_assets
         .persist_read_progress(book_id, user_id, page, completed, locator)
         .await
 }
 
 pub(crate) async fn delete_persisted_read_progress_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     book_id: &str,
     user_id: &str,
 ) -> Result<(), String> {
-    app.services
-        .media_assets
+    app.media_assets
         .delete_persisted_read_progress(book_id, user_id)
         .await
 }
 
 pub(crate) async fn refresh_series_read_progress_row_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     user_id: &str,
 ) -> Result<(), String> {
-    app.services
-        .media_assets
+    app.media_assets
         .refresh_series_read_progress_row(series_id, user_id)
         .await
 }
 
 pub(crate) async fn delete_series_read_progress_row_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     user_id: &str,
 ) -> Result<(), String> {
-    app.services
-        .media_assets
+    app.media_assets
         .delete_series_read_progress_row(series_id, user_id)
         .await
 }
 
 pub(crate) async fn load_series_tachiyomi_progress_from_services(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     user_id: &str,
 ) -> Result<Option<Value>, String> {
-    app.services
-        .media_assets
+    app.media_assets
         .load_series_tachiyomi_progress(series_id, user_id)
         .await
 }

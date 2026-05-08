@@ -274,21 +274,18 @@ pub async fn books_ondeck(
                 };
             let mut content = Vec::with_capacity(filtered_entries.len());
             for entry in filtered_entries {
-                let resource = match super::super::detail::load_persisted_book_resource(
-                    app.root.as_ref(),
-                    &entry.id,
-                )
-                .await
-                {
-                    Ok(Some(resource)) => resource,
-                    Ok(None) => {
-                        return internal_error_response(format!(
-                            "missing persisted on-deck book resource for '{}'",
-                            entry.id
-                        ));
-                    }
-                    Err(error) => return internal_error_response(error),
-                };
+                let resource =
+                    match super::super::detail::load_persisted_book_resource(&app, &entry.id).await
+                    {
+                        Ok(Some(resource)) => resource,
+                        Ok(None) => {
+                            return internal_error_response(format!(
+                                "missing persisted on-deck book resource for '{}'",
+                                entry.id
+                            ));
+                        }
+                        Err(error) => return internal_error_response(error),
+                    };
 
                 if !ondeck_content_allowed_by_restrictions(
                     context.restrictions.as_ref(),
@@ -299,7 +296,7 @@ pub async fn books_ondeck(
                 }
 
                 let detail = match super::super::detail::load_persisted_book_detail(
-                    app.root.as_ref(),
+                    &app,
                     &entry.id,
                     Some(user_id),
                 )

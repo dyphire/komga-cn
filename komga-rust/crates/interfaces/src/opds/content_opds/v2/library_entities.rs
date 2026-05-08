@@ -6,15 +6,14 @@ use super::super::types::{
 };
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::HttpAppState;
+use crate::state::OpdsState;
 use serde_json::Value;
 
 async fn load_collection_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     collection_id: &str,
 ) -> Result<Option<PersistedCollection>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_collection(collection_id)
         .await?
@@ -27,12 +26,11 @@ async fn load_collection_from_services(
 }
 
 async fn load_collection_series_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     collection_id: &str,
     ordered: bool,
 ) -> Result<Vec<PersistedSeries>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_collection_series(collection_id, ordered)
         .await?
@@ -50,11 +48,10 @@ async fn load_collection_series_from_services(
 }
 
 async fn load_series_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     series_id: &str,
 ) -> Result<Option<PersistedSeries>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_series(series_id)
         .await?
@@ -70,14 +67,13 @@ async fn load_series_from_services(
 }
 
 async fn load_series_books_paged_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     series_id: &str,
     user_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBook>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_series_books_paged(series_id, user_id, offset, limit)
         .await?
@@ -117,21 +113,17 @@ async fn load_series_books_paged_from_services(
 }
 
 async fn load_series_tags_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     series_id: &str,
 ) -> Result<Vec<String>, String> {
-    app.services
-        .opds_persisted
-        .load_series_tags(series_id)
-        .await
+    app.opds_persisted.load_series_tags(series_id).await
 }
 
 async fn load_readlist_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlist>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_readlist(readlist_id)
         .await?
@@ -144,11 +136,10 @@ async fn load_readlist_from_services(
 }
 
 async fn load_readlist_books_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBook>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_readlist_books(readlist_id)
         .await?
@@ -187,11 +178,10 @@ async fn load_readlist_books_from_services(
 }
 
 async fn load_collection_books_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     collection_id: &str,
 ) -> Result<Vec<PersistedBookFeedItem>, String> {
     Ok(app
-        .services
         .opds_persisted
         .load_collection_books(collection_id)
         .await?
@@ -219,7 +209,7 @@ async fn load_collection_books_from_services(
 }
 
 async fn load_unified_search_results_from_services(
-    app: &HttpAppState,
+    app: &OpdsState,
     query: &str,
 ) -> Result<
     (
@@ -231,7 +221,6 @@ async fn load_unified_search_results_from_services(
     String,
 > {
     let (series_rows, book_rows, collection_rows, readlist_rows) = app
-        .services
         .opds_persisted
         .load_unified_search_results(query)
         .await?;
@@ -300,7 +289,7 @@ async fn load_unified_search_results_from_services(
 pub(crate) async fn opds_v2_libraries_collections(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     opds_v2_collections_feed(headers, uri, app, None, user).await
@@ -309,7 +298,7 @@ pub(crate) async fn opds_v2_libraries_collections(
 pub(crate) async fn opds_v2_library_collections(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -319,7 +308,7 @@ pub(crate) async fn opds_v2_library_collections(
 pub(crate) async fn opds_v2_collection(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -472,7 +461,7 @@ pub(crate) async fn opds_v2_collection(
 pub(crate) async fn opds_v2_libraries_readlists(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     opds_v2_readlists_feed(headers, uri, app, None, user).await
@@ -481,7 +470,7 @@ pub(crate) async fn opds_v2_libraries_readlists(
 pub(crate) async fn opds_v2_library_readlists(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -491,7 +480,7 @@ pub(crate) async fn opds_v2_library_readlists(
 pub(crate) async fn opds_v2_series(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     series_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -725,7 +714,7 @@ fn series_page_link_path(self_path: &str, page: usize) -> String {
 pub(crate) async fn opds_v2_readlist(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Response {
@@ -856,7 +845,7 @@ fn search_book_feed_entry(book: PersistedBookSearchResult) -> crate::state::Opds
 
 pub(crate) async fn opds_v2_search(
     headers: HeaderMap,
-    app: &HttpAppState,
+    app: &OpdsState,
     query: Option<&str>,
     user: &AuthUser,
 ) -> Response {

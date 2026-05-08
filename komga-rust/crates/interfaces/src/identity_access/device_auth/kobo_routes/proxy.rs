@@ -1,14 +1,14 @@
 use super::*;
 
 pub(super) async fn proxied_missing_kobo_book_response(
-    app: &HttpAppState,
+    app: &IdentityAccessState,
     method: &axum::http::Method,
     proxy_path: &str,
     query: Option<&str>,
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Option<Response> {
-    if !load_kobo_proxy_enabled(app.services.server_settings.as_ref()).await {
+    if !load_kobo_proxy_enabled(app.server_settings.as_ref()).await {
         return None;
     }
 

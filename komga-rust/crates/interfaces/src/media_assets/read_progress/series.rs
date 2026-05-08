@@ -8,24 +8,21 @@ pub async fn series_read_progress_post(
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
-    match user_can_access_series_media(app.root.as_ref(), &resolved_series_id, &user).await {
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::FORBIDDEN.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    let book_ids =
-        match load_series_book_ids_from_services(app.root.as_ref(), &resolved_series_id).await {
-            Ok(book_ids) => book_ids,
-            Err(error) => return internal_error_response(error),
-        };
+    let book_ids = match load_series_book_ids_from_services(&app, &resolved_series_id).await {
+        Ok(book_ids) => book_ids,
+        Err(error) => return internal_error_response(error),
+    };
 
     for book_id in book_ids {
         let already_completed =
-            match load_read_progress_from_services(app.root.as_ref(), &book_id, user_id(&user))
-                .await
-            {
+            match load_read_progress_from_services(&app, &book_id, user_id(&user)).await {
                 Ok(Some(progress)) => progress.completed,
                 Ok(None) => false,
                 Err(error) => return internal_error_response(error),
@@ -34,14 +31,13 @@ pub async fn series_read_progress_post(
             continue;
         }
 
-        let page_count = match load_book_page_count_from_services(app.root.as_ref(), &book_id).await
-        {
+        let page_count = match load_book_page_count_from_services(&app, &book_id).await {
             Ok(Some(value)) => value,
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
         };
         if let Err(error) = persist_read_progress_from_services(
-            app.root.as_ref(),
+            &app,
             &book_id,
             user_id(&user),
             page_count,
@@ -53,12 +49,9 @@ pub async fn series_read_progress_post(
             return internal_error_response(error);
         }
     }
-    if let Err(error) = refresh_series_read_progress_row_from_services(
-        app.root.as_ref(),
-        &resolved_series_id,
-        user_id(&user),
-    )
-    .await
+    if let Err(error) =
+        refresh_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
+            .await
     {
         return internal_error_response(error);
     }
@@ -71,54 +64,46 @@ pub async fn series_read_progress_delete(
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
     let unrestricted_all_libraries = user_shared_all_libraries(&user)
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(app.root.as_ref(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NO_CONTENT.into_response();
         }
     } else {
-        if !persisted_series_exists_from_services(app.root.as_ref(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NOT_FOUND.into_response();
         }
-        match user_can_access_series_media(app.root.as_ref(), &resolved_series_id, &user).await {
+        match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
             Ok(false) => return StatusCode::FORBIDDEN.into_response(),
             Err(error) => return internal_error_response(error),
         }
     }
 
-    let book_ids =
-        match load_series_book_ids_from_services(app.root.as_ref(), &resolved_series_id).await {
-            Ok(book_ids) => book_ids,
-            Err(error) => return internal_error_response(error),
-        };
+    let book_ids = match load_series_book_ids_from_services(&app, &resolved_series_id).await {
+        Ok(book_ids) => book_ids,
+        Err(error) => return internal_error_response(error),
+    };
 
     for book_id in book_ids {
-        if let Err(error) = delete_persisted_read_progress_from_services(
-            app.root.as_ref(),
-            &book_id,
-            user_id(&user),
-        )
-        .await
+        if let Err(error) =
+            delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user)).await
         {
             return internal_error_response(error);
         }
     }
-    if let Err(error) = delete_series_read_progress_row_from_services(
-        app.root.as_ref(),
-        &resolved_series_id,
-        user_id(&user),
-    )
-    .await
+    if let Err(error) =
+        delete_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
+            .await
     {
         return internal_error_response(error);
     }
@@ -131,30 +116,26 @@ pub async fn series_tachiyomi_read_progress_get(
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
     let unrestricted_all_libraries = user_shared_all_libraries(&user)
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if !unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(app.root.as_ref(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NOT_FOUND.into_response();
         }
-        match user_can_access_series_media(app.root.as_ref(), &resolved_series_id, &user).await {
+        match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
             Ok(false) => return StatusCode::FORBIDDEN.into_response(),
             Err(error) => return internal_error_response(error),
         }
     }
 
-    match load_series_tachiyomi_progress_from_services(
-        app.root.as_ref(),
-        &resolved_series_id,
-        user_id(&user),
-    )
-    .await
+    match load_series_tachiyomi_progress_from_services(&app, &resolved_series_id, user_id(&user))
+        .await
     {
         Ok(Some(payload)) => Json(payload).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -186,25 +167,25 @@ pub async fn series_tachiyomi_read_progress_put(
             .into_response();
     };
 
-    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
     let unrestricted_all_libraries = user_shared_all_libraries(&user)
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(app.root.as_ref(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NO_CONTENT.into_response();
         }
     } else {
-        if !persisted_series_exists_from_services(app.root.as_ref(), &resolved_series_id)
+        if !persisted_series_exists_from_services(&app, &resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NOT_FOUND.into_response();
         }
-        match user_can_access_series_media(app.root.as_ref(), &resolved_series_id, &user).await {
+        match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
             Ok(false) => return StatusCode::FORBIDDEN.into_response(),
             Err(error) => return internal_error_response(error),
@@ -212,9 +193,7 @@ pub async fn series_tachiyomi_read_progress_put(
     }
 
     let book_numbers =
-        match load_series_book_number_sorts_from_services(app.root.as_ref(), &resolved_series_id)
-            .await
-        {
+        match load_series_book_number_sorts_from_services(&app, &resolved_series_id).await {
             Ok(book_numbers) => book_numbers,
             Err(error) => return internal_error_response(error),
         };
@@ -225,9 +204,7 @@ pub async fn series_tachiyomi_read_progress_put(
         }
 
         let already_completed =
-            match load_read_progress_from_services(app.root.as_ref(), &book_id, user_id(&user))
-                .await
-            {
+            match load_read_progress_from_services(&app, &book_id, user_id(&user)).await {
                 Ok(Some(progress)) => progress.completed,
                 Ok(None) => false,
                 Err(error) => return internal_error_response(error),
@@ -236,14 +213,13 @@ pub async fn series_tachiyomi_read_progress_put(
             continue;
         }
 
-        let page_count = match load_book_page_count_from_services(app.root.as_ref(), &book_id).await
-        {
+        let page_count = match load_book_page_count_from_services(&app, &book_id).await {
             Ok(Some(value)) => value,
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
         };
         if let Err(error) = persist_read_progress_from_services(
-            app.root.as_ref(),
+            &app,
             &book_id,
             user_id(&user),
             page_count,
@@ -255,12 +231,9 @@ pub async fn series_tachiyomi_read_progress_put(
             return internal_error_response(error);
         }
     }
-    if let Err(error) = refresh_series_read_progress_row_from_services(
-        app.root.as_ref(),
-        &resolved_series_id,
-        user_id(&user),
-    )
-    .await
+    if let Err(error) =
+        refresh_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
+            .await
     {
         return internal_error_response(error);
     }

@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::request_urls::app_absolute_url;
-use crate::state::{HttpAppState, OpdsBookFeedEntry, OpdsSeriesEntry};
+use crate::state::{OpdsBookFeedEntry, OpdsSeriesEntry, OpdsState};
 
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
@@ -23,13 +23,13 @@ use super::persisted::{
 pub(super) async fn opds_v2_keep_reading_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -40,7 +40,7 @@ pub(super) async fn opds_v2_keep_reading_feed(
 
     let user_id = user_id(user);
     let selected_library = if let Some(id) = library_id {
-        match load_library(app.services.opds_persisted.as_ref(), id).await {
+        match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
             Err(error) => {
                 return (
@@ -57,7 +57,6 @@ pub(super) async fn opds_v2_keep_reading_feed(
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
     let books = match app
-        .services
         .opds_catalog
         .load_keep_reading_books(user_id, None)
         .await
@@ -114,13 +113,13 @@ pub(super) async fn opds_v2_keep_reading_feed(
 pub(super) async fn opds_v2_on_deck_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -132,7 +131,7 @@ pub(super) async fn opds_v2_on_deck_feed(
     let user_id = user_id(user);
     let restrictions = opds_restrictions_for_user(user);
     let selected_library = if let Some(id) = library_id {
-        match load_library(app.services.opds_persisted.as_ref(), id).await {
+        match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
             Err(error) => {
                 return (
@@ -147,7 +146,6 @@ pub(super) async fn opds_v2_on_deck_feed(
     };
 
     let books = match app
-        .services
         .opds_catalog
         .load_on_deck_books(user_id, library_id)
         .await
@@ -205,13 +203,13 @@ pub(super) async fn opds_v2_on_deck_feed(
 pub(super) async fn opds_v2_latest_books_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -221,7 +219,7 @@ pub(super) async fn opds_v2_latest_books_feed(
     }
 
     let selected_library = if let Some(id) = library_id {
-        match load_library(app.services.opds_persisted.as_ref(), id).await {
+        match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
             Err(error) => {
                 return (
@@ -282,7 +280,7 @@ pub(super) async fn opds_v2_latest_books_feed(
 }
 
 async fn load_visible_latest_books_page(
-    app: &HttpAppState,
+    app: &OpdsState,
     allowed_library_ids: &Option<std::collections::HashSet<String>>,
     restrictions: Option<&super::types::OpdsRestrictions>,
     page: usize,
@@ -297,7 +295,6 @@ async fn load_visible_latest_books_page(
 
     loop {
         let batch = app
-            .services
             .opds_catalog
             .load_latest_books_paged(allowed_library_ids.as_ref(), None, None, offset, scan_limit)
             .await?;
@@ -333,13 +330,13 @@ async fn load_visible_latest_books_page(
 pub(super) async fn opds_v2_latest_series_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -348,7 +345,7 @@ pub(super) async fn opds_v2_latest_series_feed(
         return response;
     }
 
-    let libraries = match load_libraries(app.services.opds_persisted.as_ref()).await {
+    let libraries = match load_libraries(app.opds_persisted.as_ref()).await {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -416,7 +413,7 @@ pub(super) async fn opds_v2_latest_series_feed(
 }
 
 async fn load_visible_latest_series_page(
-    app: &HttpAppState,
+    app: &OpdsState,
     allowed_library_ids: &Option<std::collections::HashSet<String>>,
     restrictions: Option<&super::types::OpdsRestrictions>,
     library_id: Option<&str>,
@@ -432,7 +429,6 @@ async fn load_visible_latest_series_page(
 
     loop {
         let batch = app
-            .services
             .opds_catalog
             .load_latest_series_paged(allowed_library_ids.as_ref(), library_id, offset, batch_size)
             .await?;
@@ -469,13 +465,13 @@ async fn load_visible_latest_series_page(
 pub(super) async fn opds_v2_collections_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -484,7 +480,7 @@ pub(super) async fn opds_v2_collections_feed(
         return response;
     }
 
-    let libraries = match load_libraries(app.services.opds_persisted.as_ref()).await {
+    let libraries = match load_libraries(app.opds_persisted.as_ref()).await {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -499,8 +495,7 @@ pub(super) async fn opds_v2_collections_feed(
     let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
-    let collections = match load_collections(app.services.opds_persisted.as_ref(), library_id).await
-    {
+    let collections = match load_collections(app.opds_persisted.as_ref(), library_id).await {
         Ok(collections) => collections,
         Err(error) => {
             return (
@@ -514,7 +509,7 @@ pub(super) async fn opds_v2_collections_feed(
     let mut visible_collections = Vec::new();
     for collection in collections {
         let series = match load_collection_series(
-            app.services.opds_persisted.as_ref(),
+            app.opds_persisted.as_ref(),
             &collection.id,
             collection.ordered,
         )
@@ -546,15 +541,15 @@ pub(super) async fn opds_v2_collections_feed(
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let self_path = format!("/opds/v2/libraries{library_segment}/collections");
     let has_visible_collections = has_visible_collections_for_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
     )
     .await;
     let has_visible_readlists = has_visible_readlists_for_scope(
-        app.services.opds_catalog.as_ref(),
-        app.services.opds_persisted.as_ref(),
+        app.opds_catalog.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
@@ -665,13 +660,13 @@ pub(super) async fn opds_v2_collections_feed(
 pub(super) async fn opds_v2_readlists_feed(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -681,7 +676,7 @@ pub(super) async fn opds_v2_readlists_feed(
     }
 
     let selected_library = if let Some(id) = library_id {
-        match load_library(app.services.opds_persisted.as_ref(), id).await {
+        match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
             Err(error) => {
                 return (
@@ -698,8 +693,8 @@ pub(super) async fn opds_v2_readlists_feed(
     let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let readlists = match match library_id {
-        Some(id) => load_readlists_for_library(app.services.opds_persisted.as_ref(), id).await,
-        None => load_all_readlists(app.services.opds_catalog.as_ref()).await,
+        Some(id) => load_readlists_for_library(app.opds_persisted.as_ref(), id).await,
+        None => load_all_readlists(app.opds_catalog.as_ref()).await,
     } {
         Ok(readlists) => readlists,
         Err(error) => {
@@ -717,8 +712,7 @@ pub(super) async fn opds_v2_readlists_feed(
         let mut visible = Vec::new();
         for readlist in readlists {
             let readlist_books =
-                match load_readlist_books(app.services.opds_persisted.as_ref(), &readlist.id).await
-                {
+                match load_readlist_books(app.opds_persisted.as_ref(), &readlist.id).await {
                     Ok(books) => books,
                     Err(_) => continue,
                 };
@@ -748,15 +742,15 @@ pub(super) async fn opds_v2_readlists_feed(
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let has_visible_collections = has_visible_collections_for_scope(
-        app.services.opds_persisted.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,
     )
     .await;
     let has_visible_readlists = has_visible_readlists_for_scope(
-        app.services.opds_catalog.as_ref(),
-        app.services.opds_persisted.as_ref(),
+        app.opds_catalog.as_ref(),
+        app.opds_persisted.as_ref(),
         &allowed_library_ids,
         restrictions.as_ref(),
         library_id,

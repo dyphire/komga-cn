@@ -1,12 +1,9 @@
 use super::*;
-use crate::discovery::detail::load_series_library_id;
+use crate::state::MediaAssetsService;
 
 #[derive(Clone)]
 pub(super) struct PersistedReadlistBookAccessRecord {
     pub id: String,
-    pub library_id: String,
-    pub age_rating: Option<u16>,
-    pub sharing_labels: Vec<String>,
 }
 
 pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool {
@@ -17,7 +14,7 @@ pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool
 }
 
 pub(crate) async fn user_can_access_book_media(
-    app: &HttpAppState,
+    media_assets: &dyn MediaAssetsService,
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,
@@ -26,8 +23,7 @@ pub(crate) async fn user_can_access_book_media(
         return false;
     }
 
-    let Ok(Some((age_rating, labels))) = load_book_restrictions_from_services(app, book_id).await
-    else {
+    let Ok(Some((age_rating, labels))) = media_assets.load_book_restrictions(book_id).await else {
         return true;
     };
 
@@ -47,11 +43,15 @@ fn principal_allows_content(user: &AuthUser, age_rating: Option<u16>, labels: &[
 }
 
 pub(super) async fn user_can_access_series_media(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     series_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    let Some(library_id) = load_series_library_id(app, series_id).await? else {
+    let Some(library_id) = app
+        .discovery_detail
+        .load_series_library_id(series_id)
+        .await?
+    else {
         return Ok(false);
     };
     if !user_can_access_library(user, &library_id) {
@@ -59,7 +59,6 @@ pub(super) async fn user_can_access_series_media(
     }
 
     let restriction_record = app
-        .services
         .discovery_detail
         .load_series_restrictions(series_id)
         .await?;
@@ -71,7 +70,7 @@ pub(super) async fn user_can_access_series_media(
 }
 
 pub(super) async fn user_can_access_readlist_media(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
@@ -81,32 +80,36 @@ pub(super) async fn user_can_access_readlist_media(
 }
 
 pub(super) async fn visible_readlist_books_for_user(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<Vec<PersistedReadlistBookAccessRecord>, String> {
     let books = app
-        .services
-        .opds_persisted
-        .load_readlist_books(readlist_id)
+        .discovery_detail
+        .load_persisted_readlist_book_rows(readlist_id)
         .await?;
-    Ok(books
-        .into_iter()
-        .map(|book| PersistedReadlistBookAccessRecord {
-            id: book.id,
-            library_id: book.library_id,
-            age_rating: book.age_rating,
-            sharing_labels: book.sharing_labels,
-        })
-        .filter(|book| {
-            user_can_access_library(user, &book.library_id)
-                && principal_allows_content(user, book.age_rating, &book.sharing_labels)
-        })
-        .collect())
+    let mut visible_books = Vec::new();
+    for book in books {
+        if !user_can_access_library(user, &book.library_id) {
+            continue;
+        }
+
+        let (age_rating, sharing_labels) = app
+            .media_assets
+            .load_book_restrictions(&book.book_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or((None, Vec::new()));
+        if principal_allows_content(user, age_rating, &sharing_labels) {
+            visible_books.push(PersistedReadlistBookAccessRecord { id: book.book_id });
+        }
+    }
+    Ok(visible_books)
 }
 
 pub(super) async fn user_can_access_collection_media(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
@@ -118,12 +121,11 @@ pub(super) async fn user_can_access_collection_media(
 }
 
 pub(super) async fn visible_collection_series_ids_for_user(
-    app: &HttpAppState,
+    app: &MediaAssetsState,
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<Vec<String>, String> {
     let series_ids = app
-        .services
         .discovery_detail
         .load_persisted_collection_series_ids(collection_id)
         .await?;

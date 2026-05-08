@@ -1,7 +1,7 @@
 use super::*;
 
-pub(super) type PersistedBookMedia = komga_application::media_assets::BookMediaRecord;
-pub(super) type PersistedBookPageRow = komga_application::media_assets::BookPageRecord;
+pub(crate) type PersistedBookMedia = komga_application::media_assets::BookMediaRecord;
+pub(crate) type PersistedBookPageRow = komga_application::media_assets::BookPageRecord;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

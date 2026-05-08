@@ -6,6 +6,7 @@ pub mod helpers;
 pub mod identity_access;
 pub mod library_catalog;
 pub mod media_assets;
+mod media_responses;
 pub mod opds;
 pub mod operational;
 pub mod request_urls;

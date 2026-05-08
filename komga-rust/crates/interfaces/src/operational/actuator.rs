@@ -19,7 +19,7 @@ use std::os::windows::ffi::OsStrExt;
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 
 use crate::identity_access::auth::{Admin, resolved_request_auth_user, user_is_admin};
-use crate::state::{HttpAppState, OperationalApiState};
+use crate::state::OperationalApiState;
 
 const ACTUATOR_V3_JSON: &str = "application/vnd.spring-boot.actuator.v3+json";
 const PRODUCT_GROUP: &str = "huihuimoe";
@@ -87,8 +87,8 @@ pub(crate) async fn actuator_health(
     headers: HeaderMap,
     State(app): State<OperationalApiState>,
 ) -> Response {
-    let db = db_health_component(app.root.as_ref());
-    let disk_space_probe_path = disk_space_probe_path(app.root.as_ref());
+    let db = db_health_component(&app);
+    let disk_space_probe_path = disk_space_probe_path(&app);
     let disk_space = disk_space_component(&disk_space_probe_path);
     let ping = ping_component();
     let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
@@ -124,7 +124,7 @@ fn component_status(is_up: bool) -> &'static str {
     if is_up { "UP" } else { "DOWN" }
 }
 
-fn db_health_component(app: &HttpAppState) -> HealthComponentPayload {
+fn db_health_component(app: &OperationalApiState) -> HealthComponentPayload {
     let sqlite_rw_ready = app.auth_db.db.database_file().exists();
     let sqlite_ro_ready = sqlite_rw_ready;
     let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
@@ -202,7 +202,7 @@ fn disk_space_component(path: &Path) -> HealthComponentPayload {
     }
 }
 
-fn disk_space_probe_path(app: &HttpAppState) -> std::path::PathBuf {
+fn disk_space_probe_path(app: &OperationalApiState) -> std::path::PathBuf {
     std::env::current_dir()
         .ok()
         .or_else(|| app.operational.runtime.config_dir.clone())
@@ -513,7 +513,7 @@ pub(crate) async fn actuator_metric_detail(
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,
 ) -> Response {
-    match metric_detail_json(app.root.as_ref(), &metric_name, &uri).await {
+    match metric_detail_json(&app, &metric_name, &uri).await {
         Ok(Some(metric)) => actuator_json(metric),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -525,7 +525,7 @@ pub(crate) async fn actuator_metric_detail(
 }
 
 async fn metric_detail_json(
-    app: &HttpAppState,
+    app: &OperationalApiState,
     metric_name: &str,
     uri: &Uri,
 ) -> Result<Option<Value>, String> {
@@ -677,10 +677,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Libraries count",
                 Some("count"),
-                app.services
-                    .operational_runtime
-                    .load_libraries_count()
-                    .await?,
+                app.operational_runtime.load_libraries_count().await?,
             )
             .await,
         )),
@@ -689,8 +686,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Series count grouped by library",
                 Some("count"),
-                app.services
-                    .operational_runtime
+                app.operational_runtime
                     .load_series_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
@@ -702,8 +698,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Books count grouped by library",
                 Some("count"),
-                app.services
-                    .operational_runtime
+                app.operational_runtime
                     .load_books_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
@@ -715,8 +710,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Books file size grouped by library",
                 Some("bytes"),
-                app.services
-                    .operational_runtime
+                app.operational_runtime
                     .load_books_filesize_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
@@ -728,8 +722,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Sidecars count grouped by library",
                 Some("count"),
-                app.services
-                    .operational_runtime
+                app.operational_runtime
                     .load_sidecars_grouped_by_library()
                     .await?,
                 tag_filters.get("library").map(String::as_str),
@@ -741,10 +734,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Collections count",
                 Some("count"),
-                app.services
-                    .operational_runtime
-                    .load_collections_count()
-                    .await?,
+                app.operational_runtime.load_collections_count().await?,
             )
             .await,
         )),
@@ -753,10 +743,7 @@ async fn metric_detail_json(
                 metric_name,
                 "Read lists count",
                 Some("count"),
-                app.services
-                    .operational_runtime
-                    .load_readlists_count()
-                    .await?,
+                app.operational_runtime.load_readlists_count().await?,
             )
             .await,
         )),
@@ -775,14 +762,10 @@ fn metric_query_tags(uri: &Uri) -> HashMap<String, String> {
 }
 
 async fn metric_tasks_execution(
-    app: &HttpAppState,
+    app: &OperationalApiState,
     task_type: Option<&str>,
 ) -> Result<Value, String> {
-    let values = app
-        .services
-        .operational_runtime
-        .load_task_execution_values()
-        .await?;
+    let values = app.operational_runtime.load_task_execution_values().await?;
 
     let count = if let Some(task_type) = task_type {
         values
@@ -820,15 +803,10 @@ async fn metric_tasks_execution(
     }))
 }
 
-async fn metric_tasks_failure(app: &HttpAppState) -> Result<Value, String> {
-    let failures = app
-        .services
-        .operational_runtime
-        .load_task_failure_count()
-        .await?;
+async fn metric_tasks_failure(app: &OperationalApiState) -> Result<Value, String> {
+    let failures = app.operational_runtime.load_task_failure_count().await?;
     let task_types = unique_strings(
-        app.services
-            .operational_runtime
+        app.operational_runtime
             .load_task_execution_values()
             .await?
             .into_iter()
@@ -1114,7 +1092,10 @@ fn metric_from_samples(
     Value::Object(metric)
 }
 
-fn http_server_requests_metric(app: &HttpAppState, tag_filters: &HashMap<String, String>) -> Value {
+fn http_server_requests_metric(
+    app: &OperationalApiState,
+    tag_filters: &HashMap<String, String>,
+) -> Value {
     let samples = app
         .operational
         .http_server_requests
@@ -1155,14 +1136,13 @@ enum JdbcConnectionsField {
 }
 
 async fn jdbc_connections_metric(
-    app: &HttpAppState,
+    app: &OperationalApiState,
     name: &str,
     description: &str,
     tag_filters: &HashMap<String, String>,
     field: JdbcConnectionsField,
 ) -> Result<Value, String> {
     let samples = app
-        .services
         .operational_runtime
         .load_sqlite_pool_snapshots(&[
             app.auth_db.db.database_file().to_path_buf(),
@@ -1196,7 +1176,11 @@ async fn jdbc_connections_metric(
     ))
 }
 
-fn datasource_pool_name(app: &HttpAppState, pool_path: &Path, max_connections: u32) -> String {
+fn datasource_pool_name(
+    app: &OperationalApiState,
+    pool_path: &Path,
+    max_connections: u32,
+) -> String {
     let normalized_main_path = normalized_runtime_path(app.auth_db.db.database_file());
     let normalized_tasks_path = normalized_runtime_path(&app.operational.runtime.tasks_db_file);
     let normalized_pool_path = normalized_runtime_path(pool_path);

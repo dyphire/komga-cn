@@ -161,11 +161,11 @@ pub(crate) async fn books_deprecated_get(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.services.discovery_library_mapping.as_ref(),
+        app.discovery_library_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await;
@@ -210,7 +210,7 @@ pub(crate) async fn books_deprecated_get(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             library_ids.as_deref(),
         )
@@ -230,7 +230,6 @@ pub(crate) async fn books_deprecated_get(
     );
 
     match app
-        .services
         .discovery_list
         .list_books(
             &context,
@@ -265,17 +264,13 @@ pub async fn series_books_deprecated(
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    let resolved_series_id =
-        super::detail::resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
-    let Some(resource) = (match super::detail::load_persisted_series_resource(
-        app.root.as_ref(),
-        &resolved_series_id,
-    )
-    .await
-    {
-        Ok(resource) => resource,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let resolved_series_id = super::detail::resolve_series_id_for_persisted(&app, &series_id).await;
+    let Some(resource) =
+        (match super::detail::load_persisted_series_resource(&app, &resolved_series_id).await {
+            Ok(resource) => resource,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
 

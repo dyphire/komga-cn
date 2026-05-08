@@ -9,7 +9,7 @@ use crate::helpers::{
     to_domain_query_context,
 };
 use crate::identity_access::auth::Authenticated;
-use crate::state::{DiscoveryState, HttpAppState};
+use crate::state::DiscoveryState;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -127,7 +127,7 @@ fn parse_legacy_series_sorts(
 }
 
 async fn series_feed(
-    app: &HttpAppState,
+    app: &DiscoveryState,
     headers: HeaderMap,
     uri: Uri,
     sorts: Vec<SeriesSort>,
@@ -139,7 +139,7 @@ async fn series_feed(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             requested_library_ids.as_deref(),
         )
@@ -201,7 +201,6 @@ async fn series_feed(
     };
 
     match app
-        .services
         .discovery_list
         .list_series(
             &context,
@@ -235,7 +234,7 @@ pub async fn series_latest(
     uri: Uri,
 ) -> Response {
     series_feed(
-        app.root.as_ref(),
+        &app,
         headers,
         uri,
         vec![SeriesSort::LastModifiedDateDesc],
@@ -251,7 +250,7 @@ pub async fn series_deprecated_get(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let collection_ids = decoded_query_values(query, "collection_id");
@@ -269,7 +268,7 @@ pub async fn series_deprecated_get(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             requested_library_ids.as_deref(),
         )
@@ -448,7 +447,6 @@ pub async fn series_deprecated_get(
     let sorted = !domain_sorts.is_empty();
 
     match app
-        .services
         .discovery_list
         .list_series(
             &context,
@@ -479,7 +477,7 @@ pub async fn series_alphabetical_groups(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    let app = app.root.as_ref();
+    let app = &app;
     if !body.is_object() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -499,7 +497,7 @@ pub async fn series_alphabetical_groups(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     {
         Some(context) => context,
@@ -508,7 +506,6 @@ pub async fn series_alphabetical_groups(
     let context = to_domain_query_context(interfaces_context);
 
     match app
-        .services
         .discovery_list
         .list_series_alphabetical_groups(&context, filter, full_text_search)
         .await
@@ -1283,7 +1280,7 @@ pub async fn series_new(
     uri: Uri,
 ) -> Response {
     series_feed(
-        app.root.as_ref(),
+        &app,
         headers,
         uri,
         vec![SeriesSort::CreatedDateDesc],
@@ -1300,7 +1297,7 @@ pub async fn series_updated(
     uri: Uri,
 ) -> Response {
     series_feed(
-        app.root.as_ref(),
+        &app,
         headers,
         uri,
         vec![SeriesSort::LastModifiedDateDesc],

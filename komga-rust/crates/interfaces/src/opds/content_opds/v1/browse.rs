@@ -2,7 +2,7 @@ use super::helpers::{nav_entry_with_content, publisher_entry_id, series_feed_sel
 use super::streaming::{build_book_feed_acquisition_entries, localized_opds_updated};
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::{HttpAppState, OpdsBookFeedEntry};
+use crate::state::{OpdsBookFeedEntry, OpdsState};
 
 fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
@@ -30,7 +30,7 @@ fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     }
 }
 
-pub(crate) async fn opds_v1_catalog(_app: &HttpAppState, headers: HeaderMap) -> Response {
+pub(crate) async fn opds_v1_catalog(_app: &OpdsState, headers: HeaderMap) -> Response {
     let search_href = app_absolute_url(&headers, "/opds/v1.2/search");
     let alternate_href = app_absolute_url(&headers, "/opds/v2/catalog");
     opds_v1_navigation_feed_response_with_extra_links(
@@ -109,7 +109,7 @@ pub(crate) async fn opds_v1_catalog(_app: &HttpAppState, headers: HeaderMap) -> 
     )
 }
 
-pub(crate) async fn opds_v1_search(_app: &HttpAppState, headers: HeaderMap) -> Response {
+pub(crate) async fn opds_v1_search(_app: &OpdsState, headers: HeaderMap) -> Response {
     let template_href = app_absolute_url(&headers, "/opds/v1.2/series?search={searchTerms}");
     let payload = format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?><OpenSearchDescription xmlns=\"http://a9.com/-/spec/opensearch/1.1/\"><ShortName>Search</ShortName><Description>Search for series</Description><InputEncoding>UTF-8</InputEncoding><OutputEncoding>UTF-8</OutputEncoding><Url type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" template=\"{}\"/></OpenSearchDescription>",
@@ -130,7 +130,7 @@ pub(crate) async fn opds_v1_search(_app: &HttpAppState, headers: HeaderMap) -> R
 pub(crate) async fn opds_v1_on_deck(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let user_id = user_id(user);
@@ -138,7 +138,6 @@ pub(crate) async fn opds_v1_on_deck(
     let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let books = app
-        .services
         .opds_catalog
         .load_on_deck_books(user_id, None)
         .await
@@ -175,7 +174,7 @@ pub(crate) async fn opds_v1_on_deck(
 pub(crate) async fn opds_v1_keep_reading(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let user_id = user_id(user);
@@ -184,7 +183,6 @@ pub(crate) async fn opds_v1_keep_reading(
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let books = app
-        .services
         .opds_catalog
         .load_keep_reading_books(user_id, None)
         .await
@@ -221,7 +219,7 @@ pub(crate) async fn opds_v1_keep_reading(
 pub(crate) async fn opds_v1_series_latest(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
@@ -235,7 +233,6 @@ pub(crate) async fn opds_v1_series_latest(
     let mut rows = Vec::with_capacity(size + 1);
     let has_next = loop {
         let batch = app
-            .services
             .opds_catalog
             .load_latest_series_paged(allowed_library_ids.as_ref(), None, raw_offset, batch_limit)
             .await
@@ -293,7 +290,7 @@ pub(crate) async fn opds_v1_series_latest(
 pub(crate) async fn opds_v1_books_latest(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let current_user_id = user_id(user);
@@ -309,7 +306,6 @@ pub(crate) async fn opds_v1_books_latest(
     let mut books = Vec::with_capacity(size + 1);
     let has_next = loop {
         let batch = app
-            .services
             .opds_catalog
             .load_latest_books_paged(
                 allowed_library_ids.as_ref(),
@@ -370,12 +366,12 @@ pub(crate) async fn opds_v1_books_latest(
 
 pub(crate) async fn opds_v1_libraries(
     headers: HeaderMap,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let rows = load_libraries(app.services.opds_persisted.as_ref())
+    let rows = load_libraries(app.opds_persisted.as_ref())
         .await
         .unwrap_or_default()
         .into_iter()
@@ -405,18 +401,18 @@ pub(crate) async fn opds_v1_libraries(
 pub(crate) async fn opds_v1_collections(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
     let mut rows = Vec::new();
-    for collection in load_collections(app.services.opds_persisted.as_ref(), None)
+    for collection in load_collections(app.opds_persisted.as_ref(), None)
         .await
         .unwrap_or_default()
     {
         let series = load_collection_series(
-            app.services.opds_persisted.as_ref(),
+            app.opds_persisted.as_ref(),
             &collection.id,
             collection.ordered,
         )
@@ -455,20 +451,19 @@ pub(crate) async fn opds_v1_collections(
 pub(crate) async fn opds_v1_readlists(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
     let mut rows = Vec::new();
     for readlist in app
-        .services
         .opds_catalog
         .load_all_readlists()
         .await
         .unwrap_or_default()
     {
-        let books = load_readlist_books(app.services.opds_persisted.as_ref(), &readlist.id)
+        let books = load_readlist_books(app.opds_persisted.as_ref(), &readlist.id)
             .await
             .unwrap_or_default();
         if books
@@ -501,12 +496,12 @@ pub(crate) async fn opds_v1_readlists(
 pub(crate) async fn opds_v1_publishers(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let publishers = load_publishers(app.services.opds_persisted.as_ref(), &allowed_library_ids)
+    let publishers = load_publishers(app.opds_persisted.as_ref(), &allowed_library_ids)
         .await
         .unwrap_or_default();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
@@ -534,7 +529,7 @@ pub(crate) async fn opds_v1_publishers(
 pub(crate) async fn opds_v1_series(
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
+    app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
@@ -552,8 +547,8 @@ pub(crate) async fn opds_v1_series(
 
     let search_rows = if let Some(search_term) = search.as_deref() {
         load_opds_v1_series_search_results(
-            app.services.opds_persisted.as_ref(),
-            app.services.opds_catalog.as_ref(),
+            app.opds_persisted.as_ref(),
+            app.opds_catalog.as_ref(),
             &allowed_library_ids,
             search_term,
             publishers.as_slice(),
@@ -573,8 +568,7 @@ pub(crate) async fn opds_v1_series(
         })
         .collect::<Vec<_>>()
     } else {
-        app.services
-            .opds_catalog
+        app.opds_catalog
             .load_series_page(
                 allowed_library_ids.as_ref(),
                 None,

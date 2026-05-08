@@ -18,7 +18,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::SEARCH_OWNERSHIP_HEADER;
-use crate::state::{HttpAppState, ReadProgress};
+use crate::state::{ReadProgress, ReadProgressState};
 
 pub(crate) fn books_page_payload(
     page: PageEnvelope<BookReadModel>,
@@ -391,9 +391,8 @@ pub(crate) fn invalid_progression_payload() -> Response {
         .into_response()
 }
 
-pub(crate) fn set_read_progress(app: &HttpAppState, token: String, book_id: String) {
-    let mut all_progress = app
-        .read_progress
+pub(crate) fn set_read_progress(read_progress: &ReadProgressState, token: String, book_id: String) {
+    let mut all_progress = read_progress
         .progress_by_token
         .lock()
         .expect("read-progress state lock should not be poisoned");
