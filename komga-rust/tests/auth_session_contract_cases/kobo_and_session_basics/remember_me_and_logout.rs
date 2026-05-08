@@ -169,6 +169,25 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
         remember_payload.get("email"),
         Some(&json!("admin@example.org"))
     );
+
+    let combined_expired_session_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("KOMGA-SESSION={session_cookie}; komga-remember-me={remember_me_cookie}"),
+    )
+    .await;
+
+    assert_eq!(combined_expired_session_response.status(), StatusCode::OK);
+    let refreshed_cookies = response_cookies(&combined_expired_session_response);
+    let refreshed_session_cookie = cookie_value(&refreshed_cookies, "KOMGA-SESSION")
+        .expect("remember-me reauthentication should issue a fresh session cookie");
+    assert_ne!(refreshed_session_cookie, session_cookie);
+
+    let refreshed_session_response = users_me_with_cookie(
+        ctx.app().clone(),
+        &format!("KOMGA-SESSION={refreshed_session_cookie}"),
+    )
+    .await;
+    assert_eq!(refreshed_session_response.status(), StatusCode::OK);
 }
 
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {

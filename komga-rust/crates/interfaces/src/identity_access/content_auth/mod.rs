@@ -3,7 +3,7 @@ use axum::extract::State;
 use axum::extract::{Extension, Path, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use axum_extra::extract::cookie::{Cookie, SameSite};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::Value;
 use serde_json::json;
@@ -14,17 +14,17 @@ use crate::access_log::RequestConnectionInfo;
 use crate::discovery_auth::principal::principal_from_user_payload;
 
 use crate::identity_access::auth::{
-    Admin, AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user,
-    bootstrap_user, bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
-    empty_auth_token_supplied, expired_remember_me_cookie, expired_session_cookie,
-    invalidate_session_token, invalidate_user_sessions_for_runtime_key,
+    Admin, AuthOutcome, AuthTokenSource, AuthUser, PersistedAuthenticationActivity,
+    bootstrap_api_key_user, bootstrap_user, bootstrap_user_with_remember_me_cookies,
+    bootstrap_user_with_remember_me_token, empty_auth_token_supplied, expired_remember_me_cookie,
+    expired_session_cookie, invalidate_session_token, invalidate_user_sessions_for_runtime_key,
     persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
     persisted_basic_user, persisted_create_api_key, persisted_delete_api_key_by_id,
     persisted_list_api_keys, persisted_list_authentication_activity,
     persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
     persisted_users, remember_me_max_age_seconds, remember_me_requested,
-    remember_me_token_for_user_with_runtime_key, resolved_auth_user, resolved_token,
-    session_token_for_user_with_runtime_key, session_token_from_headers,
+    remember_me_token_for_user_with_runtime_key, resolved_auth_token, resolved_auth_user,
+    resolved_token, session_token_for_user_with_runtime_key, session_token_from_headers,
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::operational::register_session_expired_event;
@@ -97,11 +97,9 @@ pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Res
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = resolved_auth_user(identity, &headers) {
-        let remember_me_cookie_present = CookieJar::from_headers(&headers)
-            .get("komga-remember-me")
-            .is_some_and(|cookie| !cookie.value().trim().is_empty());
-        if session_token_from_headers(&headers).is_none() && remember_me_cookie_present {
+    if let Some(resolved) = resolved_auth_token(identity, &headers) {
+        let user = resolved.user;
+        if resolved.source == AuthTokenSource::RememberMe {
             let _ = persisted_record_successful_authentication_activity(
                 identity,
                 &user,
@@ -109,16 +107,18 @@ pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Res
             )
             .await;
         }
-        let token = session_token_from_headers(&headers).unwrap_or_else(|| {
-            session_token_for_user_with_runtime_key(
+        let token = match resolved.source {
+            AuthTokenSource::Session => session_token_from_headers(&headers)
+                .expect("session authentication should have a session token"),
+            AuthTokenSource::RememberMe => session_token_for_user_with_runtime_key(
                 identity,
                 &user,
                 auth_db.session_runtime_key.as_str(),
-            )
-        });
+            ),
+        };
         let payload = crate::identity_access::auth::user_payload_json(&user);
         register_discovery_principal(auth_state, &payload, &token);
-        if session_token_from_headers(&headers).is_some() {
+        if resolved.source == AuthTokenSource::Session {
             return Json(payload).into_response();
         }
         return bootstrap_user(user, token);

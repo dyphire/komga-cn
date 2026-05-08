@@ -1,8 +1,8 @@
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, CreateAuthUserInput, KoboStoreSyncMergeResult, KoboSyncPage,
-    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, UpdateAuthUserInput,
-    UpdateAuthUserResult,
+    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, ResolvedAuthToken,
+    UpdateAuthUserInput, UpdateAuthUserResult,
 };
 use komga_infrastructure::auth::runtime_identity_access as infrastructure_auth_runtime_identity;
 use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
@@ -28,6 +28,10 @@ pub(super) fn compose_runtime_identity_service(db: DatabaseHandle) -> Box<dyn Id
 impl IdentityService for RuntimeIdentityService {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser> {
         infrastructure_runtime_identity_access::auth_token_user(headers)
+    }
+
+    fn auth_token_resolution(&self, headers: &HeaderMap) -> Option<ResolvedAuthToken> {
+        infrastructure_runtime_identity_access::auth_token_resolution(headers)
     }
 
     fn session_token_for_user_with_runtime_key(

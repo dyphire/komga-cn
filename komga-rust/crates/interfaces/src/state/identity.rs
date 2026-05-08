@@ -1,8 +1,10 @@
 use super::*;
 use axum::extract::FromRef;
 
+#[cfg(test)]
+use komga_application::identity_access::AuthTokenSource;
 use komga_application::identity_access::{
-    CreateAuthUserInput, UpdateAuthUserInput, UpdateAuthUserResult,
+    CreateAuthUserInput, ResolvedAuthToken, UpdateAuthUserInput, UpdateAuthUserResult,
 };
 
 #[cfg(test)]
@@ -77,6 +79,7 @@ pub struct AuthenticationActivityWriteInput {
 #[async_trait]
 pub trait IdentityService: Send + Sync {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser>;
+    fn auth_token_resolution(&self, headers: &HeaderMap) -> Option<ResolvedAuthToken>;
     fn session_token_for_user_with_runtime_key(&self, user: &AuthUser, runtime_key: &str)
     -> String;
     fn remember_me_token_for_user_with_runtime_key(
@@ -303,6 +306,11 @@ pub(crate) fn seed_koreader_book_target(
 #[async_trait::async_trait]
 impl IdentityService for TestIdentityService {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser> {
+        self.auth_token_resolution(headers)
+            .map(|resolved| resolved.user)
+    }
+
+    fn auth_token_resolution(&self, headers: &HeaderMap) -> Option<ResolvedAuthToken> {
         headers
             .get("X-Auth-Token")
             .and_then(|value| value.to_str().ok())
@@ -313,6 +321,10 @@ impl IdentityService for TestIdentityService {
                     .session_users
                     .get(token)
                     .cloned()
+            })
+            .map(|user| ResolvedAuthToken {
+                user,
+                source: AuthTokenSource::Session,
             })
     }
 

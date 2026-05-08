@@ -9,11 +9,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password, verify as verify_bcrypt_password};
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
-    PersistedAuthenticationActivity,
+    PersistedAuthenticationActivity, ResolvedAuthToken,
     invalidate_remember_me_token as invalidate_remember_me_session_token,
     invalidate_session_token as invalidate_active_session_token,
     invalidate_user_sessions as invalidate_all_user_sessions, issue_remember_me_token,
-    issue_session_token, resolve_authenticated_user, user_payload_json,
+    issue_session_token, resolve_authenticated_token, user_payload_json,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha512};
@@ -26,9 +26,13 @@ use crate::sqlite::{connect_read_pool, connect_write_pool};
 static API_KEY_NONCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
+    auth_token_resolution(headers).map(|resolved| resolved.user)
+}
+
+pub fn auth_token_resolution(headers: &HeaderMap) -> Option<ResolvedAuthToken> {
     let session_token = session_token_from_headers(headers);
     let remember_me_token = remember_me_token_from_headers(headers);
-    resolve_authenticated_user(
+    resolve_authenticated_token(
         session_token_store(),
         session_token_store(),
         session_token.as_deref(),

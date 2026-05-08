@@ -12,7 +12,7 @@ use crate::state::IdentityService;
 pub use crate::state::AuthenticationActivityWriteInput;
 pub use extractors::{Admin, Authenticated, FileDownload};
 pub use komga_application::identity_access::{
-    AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
+    AuthOutcome, AuthTokenSource, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
     PersistedAuthenticationActivity, user_has_role, user_id, user_is_admin, user_payload_json,
     user_shared_all_libraries, user_shared_library_ids,
 };
@@ -48,7 +48,18 @@ fn record_resolved_auth_user(auth_user: Option<AuthUser>) -> Option<AuthUser> {
 }
 
 pub fn resolved_auth_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
-    record_resolved_auth_user(identity.auth_token_user(headers))
+    resolved_auth_token(identity, headers).map(|resolved| resolved.user)
+}
+
+pub fn resolved_auth_token(
+    identity: &dyn IdentityService,
+    headers: &HeaderMap,
+) -> Option<komga_application::identity_access::ResolvedAuthToken> {
+    let resolved = identity.auth_token_resolution(headers);
+    access_log::record_resolved_auth_user_id(
+        resolved.as_ref().map(|resolved| user_id(&resolved.user)),
+    );
+    resolved
 }
 
 pub async fn resolved_request_auth_user(

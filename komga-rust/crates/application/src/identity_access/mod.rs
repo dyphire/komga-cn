@@ -30,8 +30,9 @@ pub use principal_resolution::{
     configured_api_key_identity, koreader_authorized, resolve_kobo_user, resolve_koreader_user_id,
 };
 pub use session_tokens::{
-    RememberMeRuntime, SessionRuntime, invalidate_remember_me_token, invalidate_session_token,
-    invalidate_user_sessions, issue_remember_me_token, issue_session_token,
+    AuthTokenSource, RememberMeRuntime, ResolvedAuthToken, SessionRuntime,
+    invalidate_remember_me_token, invalidate_session_token, invalidate_user_sessions,
+    issue_remember_me_token, issue_session_token, resolve_authenticated_token,
     resolve_authenticated_user,
 };
 pub use user_models::{

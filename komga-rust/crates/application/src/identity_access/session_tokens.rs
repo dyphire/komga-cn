@@ -1,5 +1,17 @@
 use super::user_models::AuthUser;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthTokenSource {
+    Session,
+    RememberMe,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedAuthToken {
+    pub user: AuthUser,
+    pub source: AuthTokenSource,
+}
+
 pub trait SessionRuntime {
     fn issue_session_token(&self, user: &AuthUser, runtime_key: &str) -> String;
     fn resolve_session_user(&self, token: &str) -> Option<AuthUser>;
@@ -23,15 +35,41 @@ where
     S: SessionRuntime + ?Sized,
     R: RememberMeRuntime + ?Sized,
 {
+    resolve_authenticated_token(
+        session_runtime,
+        remember_me_runtime,
+        session_token,
+        remember_me_token,
+    )
+    .map(|resolved| resolved.user)
+}
+
+pub fn resolve_authenticated_token<S, R>(
+    session_runtime: &S,
+    remember_me_runtime: &R,
+    session_token: Option<&str>,
+    remember_me_token: Option<&str>,
+) -> Option<ResolvedAuthToken>
+where
+    S: SessionRuntime + ?Sized,
+    R: RememberMeRuntime + ?Sized,
+{
     if let Some(token) = session_token.and_then(non_empty_token)
         && let Some(user) = session_runtime.resolve_session_user(token)
     {
-        return Some(user);
+        return Some(ResolvedAuthToken {
+            user,
+            source: AuthTokenSource::Session,
+        });
     }
 
     remember_me_token
         .and_then(non_empty_token)
         .and_then(|token| remember_me_runtime.resolve_remember_me_user(token))
+        .map(|user| ResolvedAuthToken {
+            user,
+            source: AuthTokenSource::RememberMe,
+        })
 }
 
 pub fn issue_session_token<S>(runtime: &S, user: &AuthUser, runtime_key: &str) -> String

@@ -11,10 +11,10 @@ pub use crate::auth::kobo_sync::{
     load_kobo_sync_page, proxy_kobo_store_library_sync, remove_sync_point,
 };
 pub use crate::auth::runtime_identity_access::{
-    auth_token_user, ensure_oauth_user, invalidate_remember_me_token, invalidate_session_token,
-    invalidate_user_sessions, invalidate_user_sessions_with_runtime_key, open_auth_pool,
-    persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
-    persisted_api_key_user_by_token, persisted_basic_user,
+    auth_token_resolution, auth_token_user, ensure_oauth_user, invalidate_remember_me_token,
+    invalidate_session_token, invalidate_user_sessions, invalidate_user_sessions_with_runtime_key,
+    open_auth_pool, persisted_api_key_comment_exists, persisted_api_key_metadata,
+    persisted_api_key_user, persisted_api_key_user_by_token, persisted_basic_user,
     persisted_cleanup_authentication_activity, persisted_create_api_key,
     persisted_delete_api_key_by_id, persisted_latest_authentication_activity_by_user_and_api_key,
     persisted_list_api_keys, persisted_list_authentication_activity,

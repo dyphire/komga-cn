@@ -409,7 +409,15 @@ pub async fn series_deprecated_get(
             DateCondition::StartsWith(InclusionCondition::Include(vals)),
         )));
     }
-    if let Some(vals) = sharing_labels.filter(|v| !v.is_empty()) {
+    if let Some(vals) = sharing_labels
+        .map(|values| {
+            values
+                .into_iter()
+                .map(|value| value.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty())
+    {
         conditions.push(SeriesCondition::Value(SeriesValueCondition::SharingLabel(
             StringCondition::Exact(InclusionCondition::Include(vals)),
         )));
