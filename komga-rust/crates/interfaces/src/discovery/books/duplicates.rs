@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
 use icu::collator::{
     Collator,
@@ -8,11 +8,10 @@ use icu::collator::{
 };
 use icu::locale::locale;
 use serde_json::{Value, json};
-use std::sync::Arc;
 
 use crate::helpers::{mark_runtime_owned, query_bool, query_value, query_values};
-use crate::identity_access::auth::{require_request_admin, resolved_request_auth_user, user_id};
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, user_id};
+use crate::state::DiscoveryState;
 
 use super::super::persisted::common_helpers::{decode_query_component, internal_error_response};
 
@@ -325,19 +324,11 @@ fn slice_duplicate_books_page(
 }
 
 pub async fn books_duplicates(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<DiscoveryState>,
+    admin: Admin,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let user_id = user_id(&user).to_string();
+    let user_id = user_id(&admin).to_string();
     let query = uri.query().unwrap_or_default();
     let requested_page = query_value(query, "page")
         .and_then(|value| value.parse::<usize>().ok())
@@ -349,17 +340,12 @@ pub async fn books_duplicates(
     let unpaged = query_bool(query, "unpaged");
     let sort_modes = duplicate_books_sort_modes(query, unpaged);
 
-    match app
-        .services
-        .discovery_book_feeds
-        .load_duplicate_books()
-        .await
-    {
+    match app.discovery_book_feeds.load_duplicate_books().await {
         Ok(entries) => {
             let mut content = Vec::with_capacity(entries.len());
             for entry in entries {
                 let detail = match super::super::detail::load_persisted_book_detail(
-                    &app,
+                    app.root.as_ref(),
                     &entry.id,
                     Some(&user_id),
                 )

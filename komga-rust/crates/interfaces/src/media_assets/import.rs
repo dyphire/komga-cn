@@ -6,20 +6,16 @@ use komga_application::media_assets::{
     ImportCopyMode as ApplicationImportCopyMode,
 };
 use komga_application::task_processing::TaskQueueRecord as ApplicationTaskQueueRecord;
-use std::sync::Arc;
 use tracing::error;
 
-use crate::state::RuntimeMediaImportService;
+use crate::identity_access::auth::Admin;
+use crate::state::{MediaAssetsState, RuntimeMediaImportService};
 
 pub async fn books_import(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _admin: Admin,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let payload = match parse_books_import_payload(&body) {
         Ok(payload) => payload,
         Err(error) => {
@@ -27,7 +23,7 @@ pub async fn books_import(
         }
     };
 
-    let service = app.services.media_assets.media_import_service();
+    let service = app.media_assets.media_import_service();
     enqueue_books_best_effort(service.as_ref(), payload, &app).await;
 
     let mut response = StatusCode::ACCEPTED.into_response();
@@ -38,7 +34,7 @@ pub async fn books_import(
 async fn enqueue_books_best_effort(
     service: &dyn RuntimeMediaImportService,
     payload: BooksImportPayload,
-    app: &HttpAppState,
+    app: &MediaAssetsState,
 ) {
     for book in payload.books {
         let source_file = book.source_file.display().to_string();
@@ -59,8 +55,8 @@ async fn enqueue_books_best_effort(
             }) {
             Ok(task_record) => {
                 if let Err(err) = app
-                    .services
                     .task_queue
+                    .engine
                     .enqueue_task_records(vec![interface_task_record(task_record)], true)
                     .await
                 {
@@ -120,6 +116,7 @@ fn interface_task_record(task: ApplicationTaskQueueRecord) -> TaskQueueRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::FromRef;
     use std::collections::{BTreeMap, HashMap};
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -191,7 +188,7 @@ mod tests {
         async fn get_library(
             &self,
             _context: komga_domain::discovery::DiscoveryQueryContext,
-            _library_id: String,
+            _library_id: &str,
         ) -> Result<
             Option<komga_application::library_catalog::LibraryRecord>,
             komga_domain::discovery::DiscoveryError,
@@ -211,7 +208,7 @@ mod tests {
 
         async fn update_library(
             &self,
-            _library_id: String,
+            _library_id: &str,
             _changes: komga_application::library_catalog::LibraryChangeSet,
         ) -> Result<
             komga_application::library_catalog::LibraryTaskResult,
@@ -222,14 +219,14 @@ mod tests {
 
         async fn delete_library(
             &self,
-            _library_id: String,
+            _library_id: &str,
         ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
             panic!("library catalog should not be used in media import tests")
         }
 
         async fn scan_library(
             &self,
-            _library_id: String,
+            _library_id: &str,
             _deep_scan: bool,
         ) -> Result<
             komga_application::library_catalog::LibraryTaskResult,
@@ -240,7 +237,7 @@ mod tests {
 
         async fn analyze_library(
             &self,
-            _library_id: String,
+            _library_id: &str,
         ) -> Result<
             komga_application::library_catalog::LibraryTaskResult,
             komga_application::library_catalog::LibraryCatalogMutationError,
@@ -250,7 +247,7 @@ mod tests {
 
         async fn refresh_metadata(
             &self,
-            _library_id: String,
+            _library_id: &str,
         ) -> Result<
             komga_application::library_catalog::LibraryTaskResult,
             komga_application::library_catalog::LibraryCatalogMutationError,
@@ -260,7 +257,7 @@ mod tests {
 
         async fn empty_trash(
             &self,
-            _library_id: String,
+            _library_id: &str,
         ) -> Result<
             komga_application::library_catalog::LibraryTaskResult,
             komga_application::library_catalog::LibraryCatalogMutationError,
@@ -351,7 +348,7 @@ mod tests {
         }
     }
 
-    fn test_app_state(task_queue: Box<dyn TaskEngine>) -> HttpAppState {
+    fn test_app_state(task_queue: Arc<dyn TaskEngine>) -> HttpAppState {
         let operational = OperationalState {
             runtime: RuntimeState {
                 tasks_db_file: PathBuf::from("/tmp/tasks.db"),
@@ -379,10 +376,12 @@ mod tests {
             oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
             oauth2_account_creation: false,
             oidc_email_verification: false,
-            sse: Mutex::new(SseOperationalState::default()),
-            announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
-            releases_cache: Mutex::new(None::<RemoteCacheEntry>),
-            transient_books: Mutex::new(TransientBooksStore::with_records(HashMap::new())),
+            sse: Arc::new(Mutex::new(SseOperationalState::default())),
+            announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+            releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+            transient_books: Arc::new(Mutex::new(
+                TransientBooksStore::with_records(HashMap::new()),
+            )),
             shutdown_trigger: None,
         };
 
@@ -402,22 +401,22 @@ mod tests {
                 remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
             },
             services: HttpServices {
-                library_catalog: Box::new(NoopLibraryCatalogService),
+                library_catalog: Arc::new(NoopLibraryCatalogService),
                 task_queue,
-                server_settings: Box::new(TestServerSettingsService),
+                server_settings: Arc::new(TestServerSettingsService),
                 runtime_identity: crate::state::default_test_identity_service(),
-                operational_runtime: Box::new(NoopOperationalRuntimeService),
-                operational_settings: Box::new(NoopOperationalSettingsService),
-                media_assets: Box::new(NoopMediaAssetsService),
-                opds_catalog: Box::new(NoopOpdsCatalogService),
-                opds_persisted: Box::new(NoopOpdsPersistedService),
-                discovery_authors: Box::new(NoopDiscoveryAuthorService),
-                discovery_library_mapping: Box::new(NoopDiscoveryLibraryMappingService),
-                discovery_collection_search: Box::new(NoopDiscoveryCollectionSearchService),
-                discovery_readlist_search: Box::new(NoopDiscoveryReadlistSearchService),
-                discovery_book_feeds: Box::new(NoopDiscoveryBookFeedService),
-                discovery_detail: Box::new(NoopDiscoveryDetailService),
-                discovery_list: Box::new(NoopDiscoveryListService),
+                operational_runtime: Arc::new(NoopOperationalRuntimeService),
+                operational_settings: Arc::new(NoopOperationalSettingsService),
+                media_assets: Arc::new(NoopMediaAssetsService),
+                opds_catalog: Arc::new(NoopOpdsCatalogService),
+                opds_persisted: Arc::new(NoopOpdsPersistedService),
+                discovery_authors: Arc::new(NoopDiscoveryAuthorService),
+                discovery_library_mapping: Arc::new(NoopDiscoveryLibraryMappingService),
+                discovery_collection_search: Arc::new(NoopDiscoveryCollectionSearchService),
+                discovery_readlist_search: Arc::new(NoopDiscoveryReadlistSearchService),
+                discovery_book_feeds: Arc::new(NoopDiscoveryBookFeedService),
+                discovery_detail: Arc::new(NoopDiscoveryDetailService),
+                discovery_list: Arc::new(NoopDiscoveryListService),
             },
             operational,
         }
@@ -444,11 +443,12 @@ mod tests {
             ],
         };
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let app = test_app_state(Box::new(TestTaskEngine {
+        let app = Arc::new(test_app_state(Arc::new(TestTaskEngine {
             persisted_ids: persisted_ids.clone(),
-        }));
+        })));
+        let media_state = MediaAssetsState::from_ref(&app);
 
-        enqueue_books_best_effort(&service, payload, &app).await;
+        enqueue_books_best_effort(&service, payload, &media_state).await;
 
         assert_eq!(
             persisted_ids.lock().await.clone(),

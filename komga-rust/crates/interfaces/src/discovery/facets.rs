@@ -3,10 +3,16 @@ use super::persisted::common_helpers::{
     decode_query_component, discovery_error_response, internal_error_response,
 };
 use super::persisted::models::PersistedAuthorsScope;
-use super::*;
 use crate::discovery_auth::context::DiscoveryQueryContext;
 use crate::discovery_auth::state::DiscoveryAuthState;
-use crate::helpers::to_domain_query_context;
+use crate::helpers::{query_bool, query_value, query_values, to_domain_query_context};
+use crate::identity_access::auth::Authenticated;
+use crate::state::DiscoveryState;
+use axum::Json;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use serde_json::json;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")
@@ -64,11 +70,13 @@ async fn resolve_collection_facet_scope(
     })
 }
 
-pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn authors_names(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let search = query_value(uri.query().unwrap_or_default(), "search")
         .map(decode_query_component)
         .unwrap_or_default();
@@ -87,7 +95,7 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
     match app
         .services
         .discovery_authors
-        .load_author_names(search, context.authorized_library_ids)
+        .load_author_names(&search, context.authorized_library_ids.as_deref())
         .await
     {
         Ok(values) => Json(json!(values)).into_response(),
@@ -95,11 +103,12 @@ pub async fn authors_names(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> 
     }
 }
 
-pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn authors_roles(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+) -> Response {
+    let app = app.root.as_ref();
     let context = match resolve_query_context_or_unauthorized(
         &*app.services.runtime_identity,
         &app.discovery_auth,
@@ -115,7 +124,7 @@ pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
     match app
         .services
         .discovery_authors
-        .load_author_roles(context.authorized_library_ids)
+        .load_author_roles(context.authorized_library_ids.as_deref())
         .await
     {
         Ok(values) => Json(json!(values)).into_response(),
@@ -123,15 +132,13 @@ pub async fn authors_roles(headers: HeaderMap, app: &HttpAppState) -> Response {
     }
 }
 
-pub(super) async fn authors_deprecated_get(
+pub(crate) async fn authors_deprecated_get(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let search = query_value(query, "search")
         .map(decode_query_component)
@@ -168,7 +175,7 @@ pub(super) async fn authors_deprecated_get(
     let mut authors = match app
         .services
         .discovery_authors
-        .load_authors_by_scope(scope, context.authorized_library_ids)
+        .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
     {
         Ok(values) => values,
@@ -183,11 +190,13 @@ pub(super) async fn authors_deprecated_get(
     Json(json!(authors)).into_response()
 }
 
-pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn authors_v2(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let search = query_value(query, "search")
         .filter(|value| !value.is_empty())
@@ -245,7 +254,7 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
     let mut authors = match app
         .services
         .discovery_authors
-        .load_authors_by_scope(scope, context.authorized_library_ids)
+        .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
     {
         Ok(values) => values,
@@ -265,11 +274,13 @@ pub async fn authors_v2(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
     Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
 }
 
-pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn genres(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -296,11 +307,13 @@ pub async fn genres(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Respons
     }
 }
 
-pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn tags(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -327,11 +340,13 @@ pub async fn tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response 
     }
 }
 
-pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn series_tags(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -358,11 +373,13 @@ pub async fn series_tags(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
     }
 }
 
-pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn languages(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -389,11 +406,13 @@ pub async fn languages(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Resp
     }
 }
 
-pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn publishers(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -420,11 +439,13 @@ pub async fn publishers(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Res
     }
 }
 
-pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn age_ratings(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -451,11 +472,13 @@ pub async fn age_ratings(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Re
     }
 }
 
-pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn sharing_labels(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,
@@ -482,11 +505,13 @@ pub async fn sharing_labels(headers: HeaderMap, uri: Uri, app: &HttpAppState) ->
     }
 }
 
-pub async fn series_release_dates(headers: HeaderMap, uri: Uri, app: &HttpAppState) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn series_release_dates(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.services.runtime_identity,

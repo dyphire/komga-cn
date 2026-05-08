@@ -3,7 +3,8 @@ use super::readlists_support::{
 };
 use super::*;
 use crate::helpers::validation_error_response;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, Authenticated};
+use crate::state::{DiscoveryState, HttpAppState};
 use axum::extract::State;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use icu::collator::{
@@ -12,20 +13,16 @@ use icu::collator::{
 };
 use icu::locale::locale;
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
 
 pub async fn readlists(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let query_string = uri.query().unwrap_or_default();
     let page = query_value(query_string, "page")
         .and_then(|value| value.parse::<usize>().ok())
@@ -63,7 +60,7 @@ pub async fn readlists(
     let requested_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             library_ids.as_deref(),
         )
@@ -74,20 +71,22 @@ pub async fn readlists(
     };
     let visibility_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     {
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content =
-        match load_persisted_readlists(&app, requested_context.authorized_library_ids.as_deref())
-            .await
-        {
-            Ok(readlists) => readlists,
-            Err(error) => return internal_error_response(error),
-        };
+    let mut content = match load_persisted_readlists(
+        app.root.as_ref(),
+        requested_context.authorized_library_ids.as_deref(),
+    )
+    .await
+    {
+        Ok(readlists) => readlists,
+        Err(error) => return internal_error_response(error),
+    };
     let search_ranks = match search.as_deref() {
         Some(search_term) => {
             let search_groups = search_term
@@ -106,12 +105,8 @@ pub async fn readlists(
                     // hidden higher-ranked readlists crowding visible matches out of Rust's
                     // pre-filtered result set.
                     let ranked_hits = match app
-                        .services
                         .discovery_readlist_search
-                        .search_readlist_scored_ids(
-                            search_group.to_string(),
-                            READLIST_SEARCH_CANDIDATE_LIMIT,
-                        )
+                        .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
                         .await
                     {
                         Ok(hits) => hits,
@@ -165,7 +160,7 @@ pub async fn readlists(
     let mut visible_content = Vec::with_capacity(content.len());
     for readlist in content {
         let Some(mut visible_readlist) = (match load_persisted_readlist_detail(
-            &app,
+            app.root.as_ref(),
             &readlist.id,
             visibility_context.authorized_library_ids.as_deref(),
         )
@@ -179,7 +174,7 @@ pub async fn readlists(
 
         if let Some(requested_library_query) = requested_library_query.as_ref() {
             let Some(requested_library_books) = (match load_visible_persisted_readlist_books(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &readlist.id,
                 requested_library_query,
@@ -197,14 +192,17 @@ pub async fn readlists(
             }
         }
 
-        let Some(visible_books) =
-            (match load_visible_persisted_readlist_books(&app, &headers, &readlist.id, &list_query)
-                .await
-            {
-                Ok(books) => books,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
+        let Some(visible_books) = (match load_visible_persisted_readlist_books(
+            app.root.as_ref(),
+            &headers,
+            &readlist.id,
+            &list_query,
+        )
+        .await
+        {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        }) else {
             continue;
         };
 
@@ -309,22 +307,14 @@ fn readlists_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
         .expect("unicode collator for readlists sorting should construct")
 }
 
-pub async fn readlist_create(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: Bytes) -> Response {
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
     let input = match parse_readlist_create_input(&payload) {
         Ok(input) => input,
         Err(response) => return response,
     };
 
-    match load_persisted_readlists(&app, None).await {
+    match load_persisted_readlists(app.root.as_ref(), None).await {
         Ok(readlists)
             if readlists
                 .iter()
@@ -336,16 +326,16 @@ pub async fn readlist_create(
         Err(error) => return internal_error_response(error),
     }
 
-    let created_id = match persist_readlist_create(&app, &input).await {
+    let created_id = match persist_readlist_create(app.root.as_ref(), &input).await {
         Ok(id) => id,
         Err(error) => return internal_error_response(error),
     };
 
-    if let Err(error) = upsert_readlist_search_document(&app, &created_id).await {
+    if let Err(error) = upsert_readlist_search_document(app.root.as_ref(), &created_id).await {
         return internal_error_response(error);
     }
 
-    match load_persisted_readlist_detail(&app, &created_id, None).await {
+    match load_persisted_readlist_detail(app.root.as_ref(), &created_id, None).await {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -465,14 +455,10 @@ fn readlist_create_bad_request(message: &str) -> Response {
 }
 
 pub async fn readlist_match_comicrack(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<DiscoveryState>,
+    _: Admin,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let xml = match extract_comicrack_upload_xml(multipart).await {
         Ok(xml) => xml,
         Err(error) => return comicrack_bad_request_response(error.as_str()),
@@ -483,7 +469,7 @@ pub async fn readlist_match_comicrack(
         Err(error_code) => return comicrack_bad_request_response(error_code),
     };
 
-    match match_comicrack_readlist(&app, &request).await {
+    match match_comicrack_readlist(app.root.as_ref(), &request).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -507,27 +493,27 @@ fn comicrack_bad_request_response(error_code: &str) -> Response {
 }
 
 pub async fn readlist_update(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<DiscoveryState>,
+    _: Admin,
     Path(readlist_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-    let Some(existing) = (match load_persisted_readlist_detail(&app, &readlist_id, None).await {
-        Ok(readlist) => readlist,
-        Err(error) => return internal_error_response(error),
-    }) else {
+    let Some(existing) =
+        (match load_persisted_readlist_detail(app.root.as_ref(), &readlist_id, None).await {
+            Ok(readlist) => readlist,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let input = merge_readlist_write_input(&existing, &payload);
 
-    match persist_readlist_update(&app, &readlist_id, &input).await {
+    match persist_readlist_update(app.root.as_ref(), &readlist_id, &input).await {
         Ok(true) => {
-            if let Err(error) = upsert_readlist_search_document(&app, &readlist_id).await {
+            if let Err(error) =
+                upsert_readlist_search_document(app.root.as_ref(), &readlist_id).await
+            {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -538,17 +524,15 @@ pub async fn readlist_update(
 }
 
 pub async fn readlist_delete(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<DiscoveryState>,
+    _: Admin,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    match delete_persisted_readlist(&app, &readlist_id).await {
+    match delete_persisted_readlist(app.root.as_ref(), &readlist_id).await {
         Ok(true) => {
-            if let Err(error) = delete_readlist_search_document(&app, &readlist_id).await {
+            if let Err(error) =
+                delete_readlist_search_document(app.root.as_ref(), &readlist_id).await
+            {
                 return internal_error_response(error);
             }
             StatusCode::NO_CONTENT.into_response()
@@ -559,29 +543,31 @@ pub async fn readlist_delete(
 }
 
 pub async fn readlist_books(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let query = parse_persisted_readlist_books_query(uri.query().unwrap_or_default());
-    let Some(mut visible_books) =
-        (match load_visible_persisted_readlist_books(&app, &headers, &readlist_id, &query).await {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let Some(mut visible_books) = (match load_visible_persisted_readlist_books(
+        app.root.as_ref(),
+        &headers,
+        &readlist_id,
+        &query,
+    )
+    .await
+    {
+        Ok(books) => books,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
     let Some(context) = app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             query.library_ids.as_deref(),
         )
@@ -590,7 +576,7 @@ pub async fn readlist_books(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(readlist) = (match load_persisted_readlist_detail(
-        &app,
+        app.root.as_ref(),
         &readlist_id,
         context.authorized_library_ids.as_deref(),
     )
@@ -613,17 +599,14 @@ pub async fn readlist_books(
 }
 
 pub async fn readlist_detail(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     {
         Some(context) => context,
@@ -642,7 +625,7 @@ pub async fn readlist_detail(
     };
 
     match load_persisted_readlist_detail(
-        &app,
+        app.root.as_ref(),
         &readlist_id,
         context.authorized_library_ids.as_deref(),
     )
@@ -650,7 +633,7 @@ pub async fn readlist_detail(
     {
         Ok(Some(mut readlist)) => {
             let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &readlist_id,
                 &detail_query,
@@ -683,27 +666,21 @@ pub async fn readlist_detail(
 }
 
 pub async fn readlist_book_sibling_previous(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    sibling_response(&app, &headers, &readlist_id, &book_id, false).await
+    sibling_response(app.root.as_ref(), &headers, &readlist_id, &book_id, false).await
 }
 
 pub async fn readlist_book_sibling_next(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path((readlist_id, book_id)): Path<(String, String)>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    sibling_response(&app, &headers, &readlist_id, &book_id, true).await
+    sibling_response(app.root.as_ref(), &headers, &readlist_id, &book_id, true).await
 }
 
 async fn sibling_response(

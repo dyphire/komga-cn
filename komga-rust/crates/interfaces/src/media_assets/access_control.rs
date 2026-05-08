@@ -61,7 +61,7 @@ pub(super) async fn user_can_access_series_media(
     let restriction_record = app
         .services
         .discovery_detail
-        .load_series_restrictions(series_id.to_string())
+        .load_series_restrictions(series_id)
         .await?;
     Ok(principal_allows_content(
         user,
@@ -88,7 +88,7 @@ pub(super) async fn visible_readlist_books_for_user(
     let books = app
         .services
         .opds_persisted
-        .load_readlist_books(readlist_id.to_string())
+        .load_readlist_books(readlist_id)
         .await?;
     Ok(books
         .into_iter()
@@ -125,7 +125,7 @@ pub(super) async fn visible_collection_series_ids_for_user(
     let series_ids = app
         .services
         .discovery_detail
-        .load_persisted_collection_series_ids(collection_id.to_string())
+        .load_persisted_collection_series_ids(collection_id)
         .await?;
     let mut visible_series_ids = Vec::new();
     for series_id in series_ids {

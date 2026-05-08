@@ -5,23 +5,23 @@ use komga_application::task_processing::TaskQueueRecord as ApplicationTaskQueueR
 use serde_json::json;
 
 use crate::helpers::mark_runtime_owned;
-use crate::state::HttpAppState;
+use crate::state::LibraryCatalogState;
 
 pub(super) async fn enqueue_task_records(
-    app: &HttpAppState,
+    app: &LibraryCatalogState,
     task_records: Vec<ApplicationTaskQueueRecord>,
 ) -> Response {
     enqueue_task_records_with_status(app, task_records, StatusCode::ACCEPTED).await
 }
 
 pub(super) async fn enqueue_task_records_with_status(
-    app: &HttpAppState,
+    app: &LibraryCatalogState,
     task_records: Vec<ApplicationTaskQueueRecord>,
     status: StatusCode,
 ) -> Response {
     if let Err(error) = app
-        .services
         .task_queue
+        .engine
         .enqueue_task_records(task_records, true)
         .await
     {

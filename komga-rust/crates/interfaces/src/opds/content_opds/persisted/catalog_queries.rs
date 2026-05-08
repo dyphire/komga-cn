@@ -43,9 +43,9 @@ pub(super) async fn load_browse_series_navigation(
 ) -> Result<(Vec<Value>, usize), String> {
     let (entries, total) = backend
         .load_browse_series_navigation_entries(
-            allowed_library_ids.clone(),
-            library_id.map(str::to_string),
-            publishers.to_vec(),
+            allowed_library_ids.as_ref(),
+            library_id,
+            publishers,
             page,
             size,
         )
@@ -81,7 +81,7 @@ pub(super) async fn load_browse_publisher_navigation(
     library_id: Option<&str>,
 ) -> Result<Vec<Value>, String> {
     let entries = backend
-        .load_browse_publisher_entries(allowed_library_ids.clone(), library_id.map(str::to_string))
+        .load_browse_publisher_entries(allowed_library_ids.as_ref(), library_id)
         .await?;
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     Ok(entries
@@ -110,9 +110,9 @@ pub(super) async fn load_series_page(
 ) -> Result<Vec<PersistedSeries>, String> {
     backend
         .load_series_page(
-            allowed_library_ids.clone(),
-            search.map(str::to_string),
-            publishers.to_vec(),
+            allowed_library_ids.as_ref(),
+            search,
+            publishers,
             offset,
             limit,
         )

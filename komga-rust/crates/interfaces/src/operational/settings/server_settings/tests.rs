@@ -2,27 +2,28 @@ use super::*;
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::FromRef;
+use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
 use komga_application::operational::PersistedServerSettings;
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
 };
 
-use crate::identity_access::auth::session_token_for_user_with_runtime_key;
+use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
-use crate::state::default_test_identity_service;
 use crate::state::{
     BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices, LibraryCatalogService,
     OAuth2ClientConfig, OperationalBuildMetadata, RemoteCacheEntry, RuntimeState,
-    ServerSettingsService, SseOperationalState, StartupTimingState, TransientBooksStore,
+    ServerSettingsService, ServerSettingsState, SseOperationalState, StartupTimingState,
+    TransientBooksStore,
     tests::{
         NoopDiscoveryAuthorService, NoopDiscoveryBookFeedService,
         NoopDiscoveryCollectionSearchService, NoopDiscoveryDetailService,
@@ -52,7 +53,7 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
     let app = Arc::new(test_app_state(
         database_file.clone(),
         state,
-        Box::new(FakeTaskEngine {
+        Arc::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -63,11 +64,9 @@ async fn update_server_settings_does_not_apply_runtime_task_pool_before_persiste
         }),
         fake_settings_store(persisted_settings.clone(), persist_attempts.clone()),
     ));
-    let headers = admin_headers(&fixture_root);
-
     let response = update_server_settings(
-        State(app),
-        headers,
+        State(test_server_settings_state(&app)),
+        Admin(admin_user()),
         Bytes::from(serde_json::json!({ "taskPoolSize": 4_u64 }).to_string()),
     )
     .await;
@@ -111,7 +110,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskEngine {
+        Arc::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 let applied_value = applied_value.clone();
@@ -124,11 +123,9 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
         }),
         fake_settings_store(persisted_settings.clone(), persist_attempts.clone()),
     ));
-    let headers = admin_headers(&fixture_root);
-
     let response = update_server_settings(
-        State(app),
-        headers,
+        State(test_server_settings_state(&app)),
+        Admin(admin_user()),
         Bytes::from(serde_json::json!({ "taskPoolSize": 3_u64 }).to_string()),
     )
     .await;
@@ -164,7 +161,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskEngine {
+        Arc::new(FakeTaskEngine {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -175,9 +172,8 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
         }),
         fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0))),
     ));
-    let headers = admin_headers(&fixture_root);
-
-    let response = get_server_settings(State(app), headers).await;
+    let response =
+        get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(apply_count.load(Ordering::SeqCst), 0);
@@ -197,12 +193,11 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskEngine { apply: |_| Ok(()) }),
+        Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
         settings_store,
     ));
-    let headers = admin_headers(&fixture_root);
-
-    let response = get_server_settings(State(app), headers).await;
+    let response =
+        get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)
@@ -240,12 +235,11 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     let app = Arc::new(test_app_state(
         database_file,
         state,
-        Box::new(FakeTaskEngine { apply: |_| Ok(()) }),
+        Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
         settings_store,
     ));
-    let headers = admin_headers(&fixture_root);
-
-    let response = get_server_settings(State(app), headers).await;
+    let response =
+        get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_body = to_bytes(response.into_body(), usize::MAX)
@@ -404,7 +398,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
     async fn get_library(
         &self,
         _context: komga_domain::discovery::DiscoveryQueryContext,
-        _library_id: String,
+        _library_id: &str,
     ) -> Result<
         Option<komga_application::library_catalog::LibraryRecord>,
         komga_domain::discovery::DiscoveryError,
@@ -424,7 +418,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
     async fn update_library(
         &self,
-        _library_id: String,
+        _library_id: &str,
         _changes: komga_application::library_catalog::LibraryChangeSet,
     ) -> Result<
         komga_application::library_catalog::LibraryTaskResult,
@@ -435,14 +429,14 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
     async fn delete_library(
         &self,
-        _library_id: String,
+        _library_id: &str,
     ) -> Result<bool, komga_application::library_catalog::LibraryCatalogMutationError> {
         panic!("library catalog should not be used in server settings tests")
     }
 
     async fn scan_library(
         &self,
-        _library_id: String,
+        _library_id: &str,
         _deep_scan: bool,
     ) -> Result<
         komga_application::library_catalog::LibraryTaskResult,
@@ -453,7 +447,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
     async fn analyze_library(
         &self,
-        _library_id: String,
+        _library_id: &str,
     ) -> Result<
         komga_application::library_catalog::LibraryTaskResult,
         komga_application::library_catalog::LibraryCatalogMutationError,
@@ -463,7 +457,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
     async fn refresh_metadata(
         &self,
-        _library_id: String,
+        _library_id: &str,
     ) -> Result<
         komga_application::library_catalog::LibraryTaskResult,
         komga_application::library_catalog::LibraryCatalogMutationError,
@@ -473,7 +467,7 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 
     async fn empty_trash(
         &self,
-        _library_id: String,
+        _library_id: &str,
     ) -> Result<
         komga_application::library_catalog::LibraryTaskResult,
         komga_application::library_catalog::LibraryCatalogMutationError,
@@ -485,8 +479,8 @@ impl LibraryCatalogService for NoopLibraryCatalogService {
 fn test_app_state(
     database_file: PathBuf,
     operational: OperationalState,
-    task_queue: Box<dyn TaskEngine>,
-    server_settings: Box<dyn ServerSettingsService>,
+    task_queue: Arc<dyn TaskEngine>,
+    server_settings: Arc<dyn ServerSettingsService>,
 ) -> HttpAppState {
     HttpAppState {
         profile: crate::state::RuntimeProfile::LiveLocaldb,
@@ -504,22 +498,22 @@ fn test_app_state(
             remember_me_runtime_key: operational.remember_me_runtime_key.clone(),
         },
         services: HttpServices {
-            library_catalog: Box::new(NoopLibraryCatalogService),
+            library_catalog: Arc::new(NoopLibraryCatalogService),
             task_queue,
             server_settings,
             runtime_identity: crate::state::default_test_identity_service(),
-            operational_runtime: Box::new(NoopOperationalRuntimeService),
-            operational_settings: Box::new(NoopOperationalSettingsService),
-            media_assets: Box::new(NoopMediaAssetsService),
-            opds_catalog: Box::new(NoopOpdsCatalogService),
-            opds_persisted: Box::new(NoopOpdsPersistedService),
-            discovery_authors: Box::new(NoopDiscoveryAuthorService),
-            discovery_library_mapping: Box::new(NoopDiscoveryLibraryMappingService),
-            discovery_collection_search: Box::new(NoopDiscoveryCollectionSearchService),
-            discovery_readlist_search: Box::new(NoopDiscoveryReadlistSearchService),
-            discovery_book_feeds: Box::new(NoopDiscoveryBookFeedService),
-            discovery_detail: Box::new(NoopDiscoveryDetailService),
-            discovery_list: Box::new(NoopDiscoveryListService),
+            operational_runtime: Arc::new(NoopOperationalRuntimeService),
+            operational_settings: Arc::new(NoopOperationalSettingsService),
+            media_assets: Arc::new(NoopMediaAssetsService),
+            opds_catalog: Arc::new(NoopOpdsCatalogService),
+            opds_persisted: Arc::new(NoopOpdsPersistedService),
+            discovery_authors: Arc::new(NoopDiscoveryAuthorService),
+            discovery_library_mapping: Arc::new(NoopDiscoveryLibraryMappingService),
+            discovery_collection_search: Arc::new(NoopDiscoveryCollectionSearchService),
+            discovery_readlist_search: Arc::new(NoopDiscoveryReadlistSearchService),
+            discovery_book_feeds: Arc::new(NoopDiscoveryBookFeedService),
+            discovery_detail: Arc::new(NoopDiscoveryDetailService),
+            discovery_list: Arc::new(NoopDiscoveryListService),
         },
         operational,
     }
@@ -551,17 +545,17 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
         oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
         oauth2_account_creation: false,
         oidc_email_verification: true,
-        sse: Mutex::new(SseOperationalState {
+        sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
-        }),
-        announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
-        releases_cache: Mutex::new(None::<RemoteCacheEntry>),
-        transient_books: Mutex::new(TransientBooksStore::with_records(
+        })),
+        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+        transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
             std::collections::HashMap::new(),
-        )),
+        ))),
         shutdown_trigger: None,
     }
 }
@@ -569,15 +563,15 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
 fn fake_settings_store(
     persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
     persist_attempts: Arc<AtomicUsize>,
-) -> Box<dyn ServerSettingsService> {
-    Box::new(FakeSettingsStore {
+) -> Arc<dyn ServerSettingsService> {
+    Arc::new(FakeSettingsStore {
         persisted,
         persist_attempts,
     })
 }
 
-fn admin_headers(fixture_root: &Path) -> HeaderMap {
-    let user = AuthUser {
+fn admin_user() -> AuthUser {
+    AuthUser {
         id: "admin-user".to_string(),
         email: "admin@example.org".to_string(),
         password: String::new(),
@@ -587,19 +581,11 @@ fn admin_headers(fixture_root: &Path) -> HeaderMap {
         labels_allow: Vec::new(),
         labels_exclude: Vec::new(),
         age_restriction: None,
-    };
-    let identity = default_test_identity_service();
-    let token = session_token_for_user_with_runtime_key(
-        &*identity,
-        &user,
-        fixture_root.to_string_lossy().as_ref(),
-    );
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::HeaderName::from_static("x-auth-token"),
-        HeaderValue::from_str(&token).expect("auth token header should be valid"),
-    );
-    headers
+    }
+}
+
+fn test_server_settings_state(app: &Arc<HttpAppState>) -> ServerSettingsState {
+    ServerSettingsState::from_ref(app)
 }
 
 fn unique_fixture_root(case_name: &str) -> PathBuf {

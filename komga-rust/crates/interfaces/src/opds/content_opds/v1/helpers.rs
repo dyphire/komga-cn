@@ -1,16 +1,5 @@
 use super::*;
 
-pub(super) fn opds_v1_basic_unauthorized_response() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(
-            header::WWW_AUTHENTICATE,
-            HeaderValue::from_static("Basic realm=\"Realm\""),
-        )],
-    )
-        .into_response()
-}
-
 pub(super) fn series_feed_self_path(search: Option<&str>, publishers: &[String]) -> String {
     let mut query_parts = Vec::new();
     if let Some(search) = search {

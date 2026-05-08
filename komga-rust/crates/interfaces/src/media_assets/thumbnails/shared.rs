@@ -212,7 +212,7 @@ pub(super) async fn load_readlist_mosaic_bytes(
     let book_ids = repeated_thumbnail_source_ids(
         app.services
             .discovery_detail
-            .load_persisted_readlist_book_rows(readlist_id.to_string())
+            .load_persisted_readlist_book_rows(readlist_id)
             .await?
             .into_iter()
             .map(|row| row.book_id)
@@ -241,7 +241,7 @@ pub(super) async fn load_collection_mosaic_bytes(
     let series_ids = repeated_thumbnail_source_ids(
         app.services
             .discovery_detail
-            .load_persisted_collection_series_ids(collection_id.to_string())
+            .load_persisted_collection_series_ids(collection_id)
             .await?,
     );
     if series_ids.is_empty() {

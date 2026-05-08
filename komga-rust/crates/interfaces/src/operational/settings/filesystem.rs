@@ -1,15 +1,14 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use crate::identity_access::auth::require_admin;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Admin;
+use crate::state::OperationalApiState;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -20,14 +19,10 @@ struct DirectoryRequestDto {
 }
 
 pub(crate) async fn post_filesystem(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let request = if body.is_empty() {
         DirectoryRequestDto::default()
     } else {
@@ -56,13 +51,11 @@ pub(crate) async fn post_filesystem(
     }
 
     let directories = app
-        .services
         .operational_settings
-        .list_directory_entries(directory.clone(), true);
+        .list_directory_entries(&directory, true);
     let files = if request.show_files {
-        app.services
-            .operational_settings
-            .list_directory_entries(directory.clone(), false)
+        app.operational_settings
+            .list_directory_entries(&directory, false)
     } else {
         Vec::new()
     };

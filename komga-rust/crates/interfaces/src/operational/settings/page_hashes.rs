@@ -2,17 +2,16 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::Path as AxumPath;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::task_processing::{TaskKind, TaskRequest};
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::Arc;
 
-use crate::identity_access::auth::require_admin;
+use crate::identity_access::auth::Admin;
 
 use super::{query_value, query_values};
-use crate::state::HttpAppState;
+use crate::state::OperationalApiState;
 
 const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
 
@@ -28,14 +27,10 @@ struct DeletePageHashMatchRequest {
 }
 
 pub(crate) async fn get_page_hashes(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let page = query_value(query, "page")
         .and_then(|value| value.parse::<u64>().ok())
@@ -51,9 +46,8 @@ pub(crate) async fn get_page_hashes(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .services
         .operational_settings
-        .load_page_hashes_page(page, size, actions, sorts)
+        .load_page_hashes_page(page, size, &actions, &sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -115,14 +109,10 @@ fn build_remove_hashed_pages_task(
 }
 
 pub(crate) async fn get_page_hashes_unknown(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let page = query_value(query, "page")
         .and_then(|value| value.parse::<u64>().ok())
@@ -134,9 +124,8 @@ pub(crate) async fn get_page_hashes_unknown(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .services
         .operational_settings
-        .load_page_hashes_unknown_page(page, size, sorts)
+        .load_page_hashes_unknown_page(page, size, &sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -147,15 +136,11 @@ pub(crate) async fn get_page_hashes_unknown(
 }
 
 pub(crate) async fn get_page_hash_matches(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let page = query_value(query, "page")
         .and_then(|value| value.parse::<u64>().ok())
@@ -167,9 +152,8 @@ pub(crate) async fn get_page_hash_matches(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .services
         .operational_settings
-        .load_page_hash_matches_page(page_hash.clone(), page, size, sorts)
+        .load_page_hash_matches_page(&page_hash, page, size, &sorts)
         .await
     {
         Ok(page_data) => page_data,
@@ -180,18 +164,13 @@ pub(crate) async fn get_page_hash_matches(
 }
 
 pub(crate) async fn get_page_hash_thumbnail(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let thumbnail = match app
-        .services
         .operational_settings
-        .load_page_hash_thumbnail(page_hash)
+        .load_page_hash_thumbnail(&page_hash)
         .await
     {
         Ok(Some(thumbnail)) => thumbnail,
@@ -203,15 +182,11 @@ pub(crate) async fn get_page_hash_thumbnail(
 }
 
 pub(crate) async fn get_page_hash_unknown_thumbnail(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let resize_to = match query_value(query, "resize") {
         None => None,
@@ -222,9 +197,8 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     };
 
     let thumbnail = match app
-        .services
         .operational_settings
-        .load_unknown_page_hash_thumbnail(page_hash, resize_to)
+        .load_unknown_page_hash_thumbnail(&page_hash, resize_to)
         .await
     {
         Ok(Some(thumbnail)) => thumbnail,
@@ -240,14 +214,10 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
 }
 
 pub(crate) async fn put_page_hash(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -274,9 +244,8 @@ pub(crate) async fn put_page_hash(
     };
 
     match app
-        .services
         .operational_settings
-        .upsert_page_hash(hash.to_string(), size, action.to_string())
+        .upsert_page_hash(hash, size, action)
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
@@ -285,18 +254,13 @@ pub(crate) async fn put_page_hash(
 }
 
 pub(crate) async fn post_page_hash_delete_all(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let delete_targets = match app
-        .services
         .operational_settings
-        .load_page_hash_delete_targets(page_hash.clone())
+        .load_page_hash_delete_targets(&page_hash)
         .await
     {
         Ok(targets) => targets,
@@ -326,8 +290,8 @@ pub(crate) async fn post_page_hash_delete_all(
     }
 
     match app
-        .services
         .task_queue
+        .engine
         .enqueue_task_records(task_records, true)
         .await
     {
@@ -337,15 +301,11 @@ pub(crate) async fn post_page_hash_delete_all(
 }
 
 pub(crate) async fn post_page_hash_delete_match(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Ok(DeletePageHashMatchRequest {
         book_id,
         url,
@@ -374,8 +334,8 @@ pub(crate) async fn post_page_hash_delete_match(
     };
 
     match app
-        .services
         .task_queue
+        .engine
         .enqueue_task_records(vec![task_record], true)
         .await
     {

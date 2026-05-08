@@ -1,13 +1,13 @@
 use super::*;
+use crate::state::IdentityAccessState;
 use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use std::io::Read;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn oauth2_authorization(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -47,14 +47,12 @@ pub async fn oauth2_authorization(
     let session_token = existing_session_token
         .clone()
         .unwrap_or_else(issue_oauth2_session_token);
-    app.services
-        .runtime_identity
-        .store_oauth2_authorization_state(
-            state.remember_me_runtime_key.clone(),
-            session_token.clone(),
-            client.registration_id.clone(),
-            csrf_state.secret().to_string(),
-        );
+    app.identity.service.store_oauth2_authorization_state(
+        &state.remember_me_runtime_key,
+        &session_token,
+        &client.registration_id,
+        csrf_state.secret(),
+    );
 
     let mut response = (
         StatusCode::FOUND,
@@ -81,7 +79,7 @@ pub async fn oauth2_authorization(
 }
 
 pub async fn oauth2_login_code(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,
@@ -100,7 +98,7 @@ pub async fn oauth2_login_code(
 
     if let Some(error) = query.error.as_deref() {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -112,7 +110,7 @@ pub async fn oauth2_login_code(
 
     let Some(code) = query.code.as_deref() else {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -124,7 +122,7 @@ pub async fn oauth2_login_code(
 
     let Some(received_state) = query.state.as_deref() else {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -135,7 +133,7 @@ pub async fn oauth2_login_code(
     };
     let Some(session_token) = oauth2_session_cookie_token(&headers) else {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -144,17 +142,13 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-    let Some(expected_state) = app
-        .services
-        .runtime_identity
-        .take_oauth2_authorization_state(
-            auth_db.session_runtime_key.clone(),
-            session_token.clone(),
-            registration_id.clone(),
-        )
-    else {
+    let Some(expected_state) = app.identity.service.take_oauth2_authorization_state(
+        &auth_db.session_runtime_key,
+        &session_token,
+        &registration_id,
+    ) else {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -165,7 +159,7 @@ pub async fn oauth2_login_code(
     };
     if received_state != expected_state {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -183,7 +177,7 @@ pub async fn oauth2_login_code(
         Ok(payload) => payload,
         Err(error) => {
             return oauth2_login_error_response(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &connection_info,
                 client_name,
@@ -201,7 +195,7 @@ pub async fn oauth2_login_code(
 
     let Some(access_token) = access_token else {
         return oauth2_login_error_response(
-            &app,
+            app.root.as_ref(),
             &headers,
             &connection_info,
             client_name,
@@ -215,7 +209,7 @@ pub async fn oauth2_login_code(
         let claims = resolve_oidc_claims(client_config, &token_payload, access_token).await;
         let Some(email) = claims.email else {
             return oauth2_login_error_response(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &connection_info,
                 client_name,
@@ -229,7 +223,7 @@ pub async fn oauth2_login_code(
                 Some(true) => email,
                 Some(false) => {
                     return oauth2_login_error_response(
-                        &app,
+                        app.root.as_ref(),
                         &headers,
                         &connection_info,
                         client_name,
@@ -240,7 +234,7 @@ pub async fn oauth2_login_code(
                 }
                 None => {
                     return oauth2_login_error_response(
-                        &app,
+                        app.root.as_ref(),
                         &headers,
                         &connection_info,
                         client_name,
@@ -257,7 +251,7 @@ pub async fn oauth2_login_code(
         let email = resolve_oauth2_email(client_config, access_token).await;
         let Some(email) = email else {
             return oauth2_login_error_response(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &connection_info,
                 client_name,
@@ -269,17 +263,17 @@ pub async fn oauth2_login_code(
         email
     };
 
-    let allow_create = oauth2_account_creation_enabled(&app).await;
+    let allow_create = oauth2_account_creation_enabled(app.root.as_ref()).await;
     let user = match app
-        .services
-        .runtime_identity
-        .ensure_oauth_user(email.clone(), allow_create)
+        .identity
+        .service
+        .ensure_oauth_user(&email, allow_create)
         .await
     {
         Ok(Some(user)) => user,
         Ok(None) => {
             return oauth2_login_error_response(
-                &app,
+                app.root.as_ref(),
                 &headers,
                 &connection_info,
                 client_name,
@@ -293,7 +287,7 @@ pub async fn oauth2_login_code(
 
     let source = format!("OAuth2:{client_name}");
     let _ = persisted_record_successful_authentication_activity(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &user,
         authentication_activity_write_input(
             &authentication_activity_headers_metadata_with_remote_addr(
@@ -308,7 +302,7 @@ pub async fn oauth2_login_code(
     .await;
 
     let session_token = session_token_for_user_with_runtime_key(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &user,
         auth_db.session_runtime_key.as_str(),
     );
@@ -638,7 +632,7 @@ async fn oauth2_login_error_response(
         .services
         .runtime_identity
         .persisted_record_failed_authentication_activity(
-            email.map(str::to_string),
+            email,
             authentication_activity_write_input(
                 &authentication_activity_headers_metadata_with_remote_addr(
                     headers,
@@ -648,7 +642,7 @@ async fn oauth2_login_error_response(
                 None,
                 None,
             ),
-            error.to_string(),
+            error,
         )
         .await;
 

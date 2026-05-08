@@ -3,8 +3,10 @@ use super::epub::{
     progression_is_older_than_existing, progression_locator,
 };
 use super::*;
+use crate::identity_access::auth::Authenticated;
+use crate::opds::content_opds::OpdsV2Authenticated;
+use crate::state::MediaAssetsState;
 use axum::extract::State;
-use std::sync::Arc;
 
 fn request_progress_token(
     identity: &dyn crate::state::IdentityService,
@@ -29,7 +31,7 @@ async fn load_accessible_book_media(
     let Some(media) = (match app
         .services
         .media_assets
-        .load_persisted_book_media(book_id.to_string())
+        .load_persisted_book_media(book_id)
         .await
     {
         Ok(media) => media,
@@ -68,16 +70,13 @@ async fn persist_and_record_read_progress(
 }
 
 pub async fn book_read_progress(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(app.root.as_ref(), &book_id)
         .await
         .unwrap_or(false);
 
@@ -89,21 +88,17 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     };
 
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
+    if let Err(response) = load_accessible_book_media(app.root.as_ref(), &book_id, &user).await {
         return response;
     }
-    let persisted_user_id = Some(user_id(&user).to_string());
-    let page_count = match load_book_page_count_from_services(&app, &book_id).await {
+    let persisted_user_id = Some(user_id(&user));
+    let page_count = match load_book_page_count_from_services(app.root.as_ref(), &book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
     };
 
-    let token = request_progress_token(&*app.services.runtime_identity, &headers, &user);
+    let token = request_progress_token(&*app.identity.service, &headers, &user);
 
     let page_value = payload.get("page");
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
@@ -117,10 +112,10 @@ pub async fn book_read_progress(
 
     if completed_true {
         return persist_and_record_read_progress(
-            &app,
+            app.root.as_ref(),
             &token,
             &book_id,
-            persisted_user_id.as_deref(),
+            persisted_user_id,
             page_count,
             true,
             None,
@@ -152,16 +147,16 @@ pub async fn book_read_progress(
         return invalid_read_progress_payload();
     }
 
-    let locator = match load_epub_locator_for_page(&app, &book_id, page).await {
+    let locator = match load_epub_locator_for_page(app.root.as_ref(), &book_id, page).await {
         Ok(locator) => locator,
         Err(error) => return internal_error_response(error),
     };
 
     persist_and_record_read_progress(
-        &app,
+        app.root.as_ref(),
         &token,
         &book_id,
-        persisted_user_id.as_deref(),
+        persisted_user_id,
         page,
         page == page_count,
         locator,
@@ -170,15 +165,12 @@ pub async fn book_read_progress(
 }
 
 pub async fn book_read_progress_delete(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
+    let supports_persisted_flow = persisted_book_exists_from_services(app.root.as_ref(), &book_id)
         .await
         .unwrap_or(false);
 
@@ -186,14 +178,10 @@ pub async fn book_read_progress_delete(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
+    if let Err(response) = load_accessible_book_media(app.root.as_ref(), &book_id, &user).await {
         return response;
     }
-    let token = request_progress_token(&*app.services.runtime_identity, &headers, &user);
+    let token = request_progress_token(&*app.identity.service, &headers, &user);
     {
         let mut all_progress = app
             .read_progress
@@ -207,7 +195,7 @@ pub async fn book_read_progress_delete(
     }
 
     if supports_persisted_flow
-        && delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user))
+        && delete_persisted_read_progress_from_services(app.root.as_ref(), &book_id, user_id(&user))
             .await
             .is_err()
     {
@@ -218,38 +206,43 @@ pub async fn book_read_progress_delete(
 }
 
 pub async fn book_progression(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    book_progression_response(&app, &user, &book_id, body).await
+}
 
-    if !persisted_book_exists_from_services(&app, &book_id)
+pub async fn opds_v2_book_progression(
+    State(app): State<MediaAssetsState>,
+    OpdsV2Authenticated(user): OpdsV2Authenticated,
+    Path(book_id): Path<String>,
+    body: Bytes,
+) -> Response {
+    book_progression_response(&app, &user, &book_id, body).await
+}
+
+async fn book_progression_response(
+    app: &MediaAssetsState,
+    user: &AuthUser,
+    book_id: &str,
+    body: Bytes,
+) -> Response {
+    if !persisted_book_exists_from_services(app.root.as_ref(), book_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Some(media) = (match app
-        .services
-        .media_assets
-        .load_persisted_book_media(book_id.clone())
-        .await
-    {
+    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(&app, &book_id, &user, &media).await {
+    if !user_can_access_book_media(app.root.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -283,10 +276,11 @@ pub async fn book_progression(
         let Some(locator) = locator else {
             return invalid_progression_payload();
         };
-        let normalized_locator = match normalize_book_epub_locator(&app, &book_id, locator).await {
-            Ok(locator) => locator,
-            Err(response) => return response,
-        };
+        let normalized_locator =
+            match normalize_book_epub_locator(app.root.as_ref(), book_id, locator).await {
+                Ok(locator) => locator,
+                Err(response) => return response,
+            };
         let Some(progression) = locator_progression(&normalized_locator) else {
             return invalid_progression_payload();
         };
@@ -307,11 +301,17 @@ pub async fn book_progression(
         return invalid_progression_payload();
     }
 
-    let stale_progression =
-        match progression_is_older_than_existing(&app, &book_id, user_id(&user), modified).await {
-            Ok(stale) => stale,
-            Err(error) => return internal_error_response(error),
-        };
+    let stale_progression = match progression_is_older_than_existing(
+        app.root.as_ref(),
+        book_id,
+        user_id(user),
+        modified,
+    )
+    .await
+    {
+        Ok(stale) => stale,
+        Err(error) => return internal_error_response(error),
+    };
     if stale_progression {
         return (
             StatusCode::CONFLICT,
@@ -321,16 +321,15 @@ pub async fn book_progression(
     }
 
     match app
-        .services
         .media_assets
         .persist_book_progression(
-            book_id.clone(),
-            user_id(&user).to_string(),
+            book_id,
+            user_id(user),
             progression,
             !is_epub,
-            Some(modified.to_string()),
-            Some(device_id.to_string()),
-            Some(device_name.to_string()),
+            Some(modified),
+            Some(device_id),
+            Some(device_name),
             locator_to_persist,
         )
         .await
@@ -341,41 +340,44 @@ pub async fn book_progression(
 }
 
 pub async fn book_progression_get(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    book_progression_get_response(&app, &user, &book_id).await
+}
 
-    if !persisted_book_exists_from_services(&app, &book_id)
+pub async fn opds_v2_book_progression_get(
+    State(app): State<MediaAssetsState>,
+    OpdsV2Authenticated(user): OpdsV2Authenticated,
+    Path(book_id): Path<String>,
+) -> Response {
+    book_progression_get_response(&app, &user, &book_id).await
+}
+
+async fn book_progression_get_response(
+    app: &MediaAssetsState,
+    user: &AuthUser,
+    book_id: &str,
+) -> Response {
+    if !persisted_book_exists_from_services(app.root.as_ref(), book_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Some(media) = (match app
-        .services
-        .media_assets
-        .load_persisted_book_media(book_id.clone())
-        .await
-    {
+    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(&app, &book_id, &user, &media).await {
+    if !user_can_access_book_media(app.root.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_progression_from_services(&app, &book_id, user_id(&user)).await {
+    match load_book_progression_from_services(app.root.as_ref(), book_id, user_id(user)).await {
         Ok(Some(progression)) => (
             [(
                 header::CONTENT_TYPE,

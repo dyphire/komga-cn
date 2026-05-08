@@ -10,12 +10,11 @@ use komga_application::runtime_sse::{
 use serde_json::json;
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use crate::identity_access::auth::{resolved_auth_user, user_id, user_is_admin};
-use crate::state::HttpAppState;
+use crate::state::OperationalApiState;
 
 use super::super::super::{PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
 
@@ -26,7 +25,7 @@ fn sse_event(name: &str, payload: serde_json::Value) -> Event {
 }
 
 pub(crate) async fn sse_events(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
     let state = &app.operational;
@@ -39,7 +38,7 @@ pub(crate) async fn sse_events(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
+    let Some(user) = resolved_auth_user(&*app.identity.service, &headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let authenticated_user_id = user_id(&user).to_string();
@@ -127,7 +126,7 @@ struct SseStreamState {
     last_runtime_event_id: u64,
     pending_events: VecDeque<Event>,
     runtime_event_updates: tokio::sync::watch::Receiver<u64>,
-    app: Arc<HttpAppState>,
+    app: OperationalApiState,
 }
 
 async fn poll_runtime_events(stream_state: &mut SseStreamState) {
@@ -144,9 +143,9 @@ async fn poll_runtime_events(stream_state: &mut SseStreamState) {
     );
 }
 
-async fn task_queue_status_event(app: &HttpAppState) -> Event {
+async fn task_queue_status_event(app: &OperationalApiState) -> Event {
     let count_by_type =
-        kotlin_visible_task_type_counts(app.services.task_queue.status().await.counts);
+        kotlin_visible_task_type_counts(app.task_queue.engine.status().await.counts);
     let total_count: usize = count_by_type.values().sum();
     sse_event(
         "TaskQueueStatus",

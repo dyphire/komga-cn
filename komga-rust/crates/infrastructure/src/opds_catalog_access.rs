@@ -97,16 +97,15 @@ pub struct OpdsReadlistEntry {
     pub last_modified: String,
 }
 
-fn sorted_authorized_library_ids(allowed_library_ids: &Option<HashSet<String>>) -> Vec<String> {
+fn sorted_authorized_library_ids(allowed_library_ids: Option<&HashSet<String>>) -> Vec<String> {
     let mut authorized_library_ids = allowed_library_ids
-        .as_ref()
         .map(|ids| ids.iter().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
     authorized_library_ids.sort();
     authorized_library_ids
 }
 
-fn library_visible(allowed_library_ids: &Option<HashSet<String>>, library_id: &str) -> bool {
+fn library_visible(allowed_library_ids: Option<&HashSet<String>>, library_id: &str) -> bool {
     match allowed_library_ids {
         None => true,
         Some(ids) => ids.contains(library_id),
@@ -115,7 +114,7 @@ fn library_visible(allowed_library_ids: &Option<HashSet<String>>, library_id: &s
 
 pub async fn load_browse_series_navigation_entries(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
     publishers: &[String],
     page: usize,
@@ -210,7 +209,7 @@ OFFSET ?"#,
 
 pub async fn load_browse_publisher_entries(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
 ) -> Result<Vec<BrowsePublisherEntry>, sqlx::Error> {
     let pool = connect_read_pool(database_file).await?;
@@ -511,12 +510,12 @@ pub async fn load_latest_books(
     library_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    load_latest_books_paged(database_file, &None, None, library_id, 0, limit).await
+    load_latest_books_paged(database_file, None, None, library_id, 0, limit).await
 }
 
 pub async fn load_latest_books_paged(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
     user_id: Option<&str>,
     library_id: Option<&str>,
     offset: i64,
@@ -660,12 +659,12 @@ pub async fn load_latest_series(
     library_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    load_latest_series_paged(database_file, &None, library_id, 0, limit).await
+    load_latest_series_paged(database_file, None, library_id, 0, limit).await
 }
 
 pub async fn load_latest_series_paged(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
@@ -778,7 +777,7 @@ OFFSET ?"#,
 
 pub async fn load_series_page(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
     offset: i64,

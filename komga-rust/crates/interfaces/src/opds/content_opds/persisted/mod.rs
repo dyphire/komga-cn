@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::identity_access::auth::{
-    resolved_auth_user, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
+    AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::{
     OpdsBookAuthorEntry, OpdsCatalogService, OpdsPersistedService, PersistedLibraryRecord,
@@ -25,20 +25,16 @@ use super::types::{
 
 mod catalog_queries;
 
-pub(super) fn allowed_library_ids(
-    identity: &dyn crate::state::IdentityService,
-    headers: &HeaderMap,
-) -> Option<Option<HashSet<String>>> {
-    let user = resolved_auth_user(identity, headers)?;
-    if user_shared_all_libraries(&user) {
-        return Some(None);
+pub(super) fn allowed_library_ids_for_user(user: &AuthUser) -> Option<HashSet<String>> {
+    if user_shared_all_libraries(user) {
+        return None;
     }
 
-    let ids = user_shared_library_ids(&user)
+    let ids = user_shared_library_ids(user)
         .iter()
         .cloned()
         .collect::<HashSet<_>>();
-    Some(Some(ids))
+    Some(ids)
 }
 
 pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &str) -> bool {
@@ -48,12 +44,8 @@ pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &st
     }
 }
 
-pub(super) fn opds_restrictions(
-    identity: &dyn crate::state::IdentityService,
-    headers: &HeaderMap,
-) -> Option<OpdsRestrictions> {
-    let user = resolved_auth_user(identity, headers)?;
-    let payload = user_payload_json(&user);
+pub(super) fn opds_restrictions_for_user(user: &AuthUser) -> Option<OpdsRestrictions> {
+    let payload = user_payload_json(user);
 
     let age = payload
         .get("ageRestriction")
@@ -188,7 +180,7 @@ pub(super) async fn load_library(
     backend: &dyn OpdsPersistedService,
     library_id: &str,
 ) -> Result<Option<PersistedLibrary>, String> {
-    let record = backend.load_library(library_id.to_string()).await?;
+    let record = backend.load_library(library_id).await?;
     Ok(record.map(map_library_record))
 }
 
@@ -196,9 +188,7 @@ pub(super) async fn load_readlists_for_library(
     backend: &dyn OpdsPersistedService,
     library_id: &str,
 ) -> Result<Vec<PersistedReadlist>, String> {
-    let records = backend
-        .load_readlists_for_library(library_id.to_string())
-        .await?;
+    let records = backend.load_readlists_for_library(library_id).await?;
     Ok(records.into_iter().map(map_readlist_record).collect())
 }
 
@@ -206,7 +196,7 @@ pub(super) async fn load_series(
     backend: &dyn OpdsPersistedService,
     series_id: &str,
 ) -> Result<Option<PersistedSeries>, String> {
-    let record = backend.load_series(series_id.to_string()).await?;
+    let record = backend.load_series(series_id).await?;
     Ok(record.map(map_series_record))
 }
 
@@ -218,7 +208,7 @@ pub(super) async fn load_series_books_paged(
     limit: i64,
 ) -> Result<Vec<PersistedSeriesBook>, String> {
     let records = backend
-        .load_series_books_paged(series_id.to_string(), user_id.to_string(), offset, limit)
+        .load_series_books_paged(series_id, user_id, offset, limit)
         .await?;
     Ok(records.into_iter().map(map_series_book_record).collect())
 }
@@ -227,7 +217,7 @@ pub(super) async fn load_readlist(
     backend: &dyn OpdsPersistedService,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlist>, String> {
-    let record = backend.load_readlist(readlist_id.to_string()).await?;
+    let record = backend.load_readlist(readlist_id).await?;
     Ok(record.map(map_readlist_record))
 }
 
@@ -235,7 +225,7 @@ pub(super) async fn load_readlist_books(
     backend: &dyn OpdsPersistedService,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBook>, String> {
-    let records = backend.load_readlist_books(readlist_id.to_string()).await?;
+    let records = backend.load_readlist_books(readlist_id).await?;
     Ok(records.into_iter().map(map_readlist_book_record).collect())
 }
 
@@ -251,9 +241,8 @@ pub(super) async fn load_unified_search_results(
     ),
     String,
 > {
-    let (series_rows, book_rows, collection_rows, readlist_rows) = backend
-        .load_unified_search_results(query.to_string())
-        .await?;
+    let (series_rows, book_rows, collection_rows, readlist_rows) =
+        backend.load_unified_search_results(query).await?;
 
     Ok((
         series_rows
@@ -368,7 +357,7 @@ pub(super) async fn load_publishers(
     backend: &dyn OpdsPersistedService,
     allowed_library_ids: &Option<HashSet<String>>,
 ) -> Result<Vec<String>, String> {
-    backend.load_publishers(allowed_library_ids.clone()).await
+    backend.load_publishers(allowed_library_ids.as_ref()).await
 }
 
 pub(super) async fn has_visible_collections_for_scope(
@@ -494,9 +483,7 @@ pub(super) async fn load_collections(
     backend: &dyn OpdsPersistedService,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedCollection>, String> {
-    let rows = backend
-        .load_collections(library_id.map(str::to_string))
-        .await?;
+    let rows = backend.load_collections(library_id).await?;
     Ok(rows
         .into_iter()
         .map(|row| PersistedCollection {
@@ -512,7 +499,7 @@ pub(super) async fn load_collection(
     backend: &dyn OpdsPersistedService,
     collection_id: &str,
 ) -> Result<Option<PersistedCollection>, String> {
-    let row = backend.load_collection(collection_id.to_string()).await?;
+    let row = backend.load_collection(collection_id).await?;
     Ok(row.map(|row| PersistedCollection {
         id: row.id,
         name: row.name,
@@ -527,7 +514,7 @@ pub(super) async fn load_collection_series(
     ordered: bool,
 ) -> Result<Vec<PersistedSeries>, String> {
     let rows = backend
-        .load_collection_series(collection_id.to_string(), ordered)
+        .load_collection_series(collection_id, ordered)
         .await?;
     Ok(rows.into_iter().map(map_series_record).collect())
 }

@@ -1,5 +1,6 @@
 use super::*;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Admin;
+use crate::state::MediaAssetsState;
 use axum::extract::State;
 use komga_application::media_assets::{
     BookMetadataAuthor as ApplicationBookMetadataAuthor,
@@ -7,7 +8,6 @@ use komga_application::media_assets::{
     BookMetadataPatch as ApplicationBookMetadataPatch,
 };
 use komga_application::runtime_sse::register_runtime_sse_event;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct BooksThumbnailsRegenerateQuery {
@@ -16,18 +16,13 @@ pub struct BooksThumbnailsRegenerateQuery {
 }
 
 pub async fn book_analyze(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Some(book) = (match app
-        .services
         .discovery_detail
-        .load_persisted_book_detail(book_id.clone(), None)
+        .load_persisted_book_detail(&book_id, None)
         .await
     {
         Ok(book) => book,
@@ -37,7 +32,7 @@ pub async fn book_analyze(
     };
 
     enqueue_task_records(
-        &app,
+        app.root.as_ref(),
         vec![
             TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(&book_id))
                 .priority(6)
@@ -49,18 +44,13 @@ pub async fn book_analyze(
 }
 
 pub async fn book_metadata_refresh(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Some(book) = (match app
-        .services
         .discovery_detail
-        .load_persisted_book_detail(book_id.clone(), None)
+        .load_persisted_book_detail(&book_id, None)
         .await
     {
         Ok(book) => book,
@@ -70,7 +60,7 @@ pub async fn book_metadata_refresh(
     };
 
     enqueue_task_records(
-        &app,
+        app.root.as_ref(),
         vec![
             TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
                 .priority(6)
@@ -88,15 +78,11 @@ pub async fn book_metadata_refresh(
 }
 
 pub async fn book_metadata_update(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(book_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let patch = match body.as_object() {
         Some(value) => value,
         None => {
@@ -115,16 +101,15 @@ pub async fn book_metadata_update(
         }
     };
 
-    let service = app.services.media_assets.book_metadata_service();
+    let service = app.media_assets.book_metadata_service();
 
     match service.update_book_metadata(&book_id, &patch).await {
         Ok(Some(series_id)) => {
             if let Err(error) = app
-                .services
                 .media_assets
                 .refresh_book_search_documents_after_metadata_update(
-                    app.operational.runtime.lucene_data_directory.clone(),
-                    book_id.clone(),
+                    &app.operational.runtime.lucene_data_directory,
+                    &book_id,
                 )
                 .await
             {
@@ -138,15 +123,14 @@ pub async fn book_metadata_update(
                 )
                 .priority(80)
                 .into_queue_record();
-                if let Err(error) = process_task_side_effects(&app, vec![task]).await {
+                if let Err(error) = process_task_side_effects(app.root.as_ref(), vec![task]).await {
                     return internal_error_response(error);
                 }
             }
 
             if let Ok(Some(book)) = app
-                .services
                 .discovery_detail
-                .load_persisted_book_detail(book_id.clone(), None)
+                .load_persisted_book_detail(&book_id, None)
                 .await
             {
                 register_runtime_sse_event(
@@ -171,14 +155,10 @@ pub async fn book_metadata_update(
 }
 
 pub async fn book_metadata_batch_update(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let batch = match body.as_object() {
         Some(value) => value,
         None => {
@@ -223,7 +203,7 @@ pub async fn book_metadata_batch_update(
         updates.push((book_id.clone(), patch));
     }
 
-    let service = app.services.media_assets.book_metadata_service();
+    let service = app.media_assets.book_metadata_service();
     let updated_book_ids = updates
         .iter()
         .map(|(book_id, _)| book_id.clone())
@@ -245,16 +225,15 @@ pub async fn book_metadata_batch_update(
                 .into_queue_record()
             })
             .collect::<Vec<_>>();
-        if let Err(error) = process_task_side_effects(&app, tasks).await {
+        if let Err(error) = process_task_side_effects(app.root.as_ref(), tasks).await {
             return internal_error_response(error);
         }
     }
 
     for updated_book_id in updated_book_ids {
         if let Ok(Some(book)) = app
-            .services
             .discovery_detail
-            .load_persisted_book_detail(updated_book_id.clone(), None)
+            .load_persisted_book_detail(&updated_book_id, None)
             .await
         {
             register_runtime_sse_event(
@@ -495,16 +474,12 @@ fn optional_links(
 }
 
 pub async fn books_thumbnails_regenerate(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     enqueue_task_records(
-        &app,
+        app.root.as_ref(),
         vec![
             TaskRequest::new(TaskKind::FindBookThumbnailsToRegenerate)
                 .into_queue_record()
@@ -520,32 +495,23 @@ pub async fn books_thumbnails_regenerate(
 }
 
 pub async fn series_file_delete(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    enqueue_delete_media_task(&app, TaskKind::DeleteSeries, &series_id, 8).await
+    enqueue_delete_media_task(app.root.as_ref(), TaskKind::DeleteSeries, &series_id, 8).await
 }
 
 pub async fn series_analyze(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    let resolved_series_id = resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
 
     let book_ids = match app
-        .services
         .media_assets
-        .load_series_book_ids(resolved_series_id.clone())
+        .load_series_book_ids(&resolved_series_id)
         .await
     {
         Ok(book_ids) => book_ids,
@@ -561,24 +527,15 @@ pub async fn series_analyze(
         })
         .collect::<Vec<_>>();
 
-    enqueue_task_records(&app, task_records).await
+    enqueue_task_records(app.root.as_ref(), task_records).await
 }
 
 pub async fn series_metadata_refresh(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let book_ids = match app
-        .services
-        .media_assets
-        .load_series_book_ids(series_id.clone())
-        .await
-    {
+    let book_ids = match app.media_assets.load_series_book_ids(&series_id).await {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };
@@ -609,19 +566,15 @@ pub async fn series_metadata_refresh(
         .into_queue_record(),
     );
 
-    enqueue_task_records(&app, task_records).await
+    enqueue_task_records(app.root.as_ref(), task_records).await
 }
 
 pub async fn book_file_delete(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    enqueue_delete_media_task(&app, TaskKind::DeleteBook, &book_id, 8).await
+    enqueue_delete_media_task(app.root.as_ref(), TaskKind::DeleteBook, &book_id, 8).await
 }
 
 async fn enqueue_delete_media_task(

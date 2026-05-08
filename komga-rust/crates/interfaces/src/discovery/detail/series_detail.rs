@@ -1,18 +1,19 @@
 #![allow(clippy::result_large_err)]
 
 use super::*;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, Authenticated};
+use crate::state::DiscoveryState;
+use axum::extract::State;
 use language_tags::LanguageTag;
 use reqwest::Url;
 
 pub async fn series_detail(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(series_id): Path<String>,
-    app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let app = app.root.as_ref();
 
     let resolved_series_id = resolve_series_id_for_persisted(app, &series_id).await;
 
@@ -61,13 +62,12 @@ pub async fn series_detail(
 }
 
 pub async fn series_collections(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(series_id): Path<String>,
-    app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let app = app.root.as_ref();
 
     let Some(context) = app
         .discovery_auth
@@ -130,14 +130,12 @@ pub async fn series_collections(
 }
 
 pub async fn series_metadata_update(
-    headers: HeaderMap,
-    app: &HttpAppState,
+    State(app): State<DiscoveryState>,
+    _: Admin,
     Path(series_id): Path<String>,
-    body: Value,
+    Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_request_admin(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let app = app.root.as_ref();
 
     let body = match body.as_object() {
         Some(body) => body,

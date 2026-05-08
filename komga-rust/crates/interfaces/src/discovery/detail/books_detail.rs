@@ -1,18 +1,15 @@
 use super::*;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Authenticated;
+use crate::state::DiscoveryState;
 use axum::extract::State;
-use std::sync::Arc;
 
 pub async fn book_detail(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -30,7 +27,7 @@ pub async fn book_detail(
     let detail_query_context = match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -41,7 +38,12 @@ pub async fn book_detail(
     };
 
     let is_admin = detail_query_context.is_admin;
-    match load_persisted_book_detail(&app, &book_id, detail_query_context.user_id.as_deref()).await
+    match load_persisted_book_detail(
+        app.root.as_ref(),
+        &book_id,
+        detail_query_context.user_id.as_deref(),
+    )
+    .await
     {
         Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -50,17 +52,14 @@ pub async fn book_detail(
 }
 
 pub async fn book_sibling_previous(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
 
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
-
-    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -78,7 +77,7 @@ pub async fn book_sibling_previous(
     let detail_query_context = match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -90,7 +89,7 @@ pub async fn book_sibling_previous(
     let is_admin = detail_query_context.is_admin;
 
     match load_persisted_book_sibling_detail(
-        &app,
+        app.root.as_ref(),
         &book_id,
         PersistedBookSiblingDirection::Previous,
         detail_query_context.user_id.as_deref(),
@@ -104,17 +103,14 @@ pub async fn book_sibling_previous(
 }
 
 pub async fn book_sibling_next(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
 
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
-
-    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -132,7 +128,7 @@ pub async fn book_sibling_next(
     let detail_query_context = match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -144,7 +140,7 @@ pub async fn book_sibling_next(
     let is_admin = detail_query_context.is_admin;
 
     match load_persisted_book_sibling_detail(
-        &app,
+        app.root.as_ref(),
         &book_id,
         PersistedBookSiblingDirection::Next,
         detail_query_context.user_id.as_deref(),
@@ -158,17 +154,14 @@ pub async fn book_sibling_next(
 }
 
 pub async fn book_readlists(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
+    let book_id = resolve_book_id_for_persisted(app.root.as_ref(), &book_id).await;
 
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
-
-    let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
+    let Some(resource) = (match load_persisted_book_resource(app.root.as_ref(), &book_id).await {
         Ok(resource) => resource,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -186,7 +179,7 @@ pub async fn book_readlists(
     let detail_query_context = match app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -197,7 +190,7 @@ pub async fn book_readlists(
     };
 
     let mut readlists = match load_persisted_readlists(
-        &app,
+        app.root.as_ref(),
         detail_query_context.authorized_library_ids.as_deref(),
     )
     .await
@@ -228,7 +221,7 @@ pub async fn book_readlists(
     let mut visible_readlists = Vec::with_capacity(readlists.len());
     for mut readlist in readlists {
         let Some(visible_books) = (match load_visible_persisted_readlist_books(
-            &app,
+            app.root.as_ref(),
             &headers,
             &readlist.id,
             &detail_query,

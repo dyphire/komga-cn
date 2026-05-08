@@ -1,6 +1,7 @@
 use super::*;
+use crate::identity_access::auth::Authenticated;
+use crate::state::MediaAssetsState;
 use axum::extract::State;
-use std::sync::Arc;
 
 async fn load_tachiyomi_readlist_book_ids(
     app: &HttpAppState,
@@ -10,13 +11,13 @@ async fn load_tachiyomi_readlist_book_ids(
     let readlist_books = app
         .services
         .opds_persisted
-        .load_readlist_books(readlist_id.to_string())
+        .load_readlist_books(readlist_id)
         .await?;
     if readlist_books.is_empty() {
         let readlist_exists = app
             .services
             .media_assets
-            .load_persisted_readlist_name(readlist_id.to_string())
+            .load_persisted_readlist_name(readlist_id)
             .await?
             .is_some();
         return Ok(
@@ -37,21 +38,12 @@ async fn load_tachiyomi_readlist_book_ids(
 }
 
 pub async fn readlist_tachiyomi_read_progress_get(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let Some(ordered_book_ids) =
-        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
+        (match load_tachiyomi_readlist_book_ids(app.root.as_ref(), &readlist_id, &user).await {
             Ok(ordered_book_ids) => ordered_book_ids,
             Err(error) => return internal_error_response(error),
         })
@@ -60,9 +52,8 @@ pub async fn readlist_tachiyomi_read_progress_get(
     };
 
     let counters = match app
-        .services
         .media_assets
-        .readlist_tachiyomi_counters(ordered_book_ids, user_id(&user).to_string())
+        .readlist_tachiyomi_counters(&ordered_book_ids, user_id(&user))
         .await
     {
         Ok(counters) => counters,
@@ -87,20 +78,11 @@ pub async fn readlist_tachiyomi_read_progress_get(
 }
 
 pub async fn readlist_tachiyomi_read_progress_put(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     Path(readlist_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, &headers).await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let Some(last_book_read) = body
         .get("lastBookRead")
         .and_then(Value::as_i64)
@@ -114,7 +96,7 @@ pub async fn readlist_tachiyomi_read_progress_put(
     };
 
     let Some(ordered_book_ids) =
-        (match load_tachiyomi_readlist_book_ids(&app, &readlist_id, &user).await {
+        (match load_tachiyomi_readlist_book_ids(app.root.as_ref(), &readlist_id, &user).await {
             Ok(ordered_book_ids) => ordered_book_ids,
             Err(error) => return internal_error_response(error),
         })
@@ -126,10 +108,11 @@ pub async fn readlist_tachiyomi_read_progress_put(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    let visible_books = match visible_readlist_books_for_user(&app, &readlist_id, &user).await {
-        Ok(books) => books,
-        Err(error) => return internal_error_response(error),
-    };
+    let visible_books =
+        match visible_readlist_books_for_user(app.root.as_ref(), &readlist_id, &user).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        };
     if visible_books.is_empty() {
         return StatusCode::NO_CONTENT.into_response();
     }
@@ -140,11 +123,10 @@ pub async fn readlist_tachiyomi_read_progress_put(
         .collect::<Vec<_>>();
 
     match app
-        .services
         .media_assets
         .persist_readlist_tachiyomi_progress(
-            visible_book_ids,
-            user_id(&user).to_string(),
+            &visible_book_ids,
+            user_id(&user),
             last_book_read as usize,
         )
         .await

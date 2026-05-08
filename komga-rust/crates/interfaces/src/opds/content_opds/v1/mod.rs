@@ -20,7 +20,3 @@ pub(crate) use details::{
     opds_v1_collection_detail, opds_v1_library_detail, opds_v1_readlist_detail,
     opds_v1_series_detail,
 };
-
-pub(super) fn opds_v1_basic_unauthorized_response() -> Response {
-    helpers::opds_v1_basic_unauthorized_response()
-}

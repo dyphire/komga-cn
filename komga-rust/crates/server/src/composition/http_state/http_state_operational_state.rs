@@ -1,6 +1,7 @@
 use super::*;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::build_metadata::current_build_metadata;
 use async_trait::async_trait;
@@ -42,10 +43,10 @@ impl LibraryCatalogService for SqliteLibraryCatalogService {
     async fn get_library(
         &self,
         context: DiscoveryQueryContext,
-        library_id: String,
+        library_id: &str,
     ) -> Result<Option<LibraryRecord>, DiscoveryError> {
         let service = LibraryCatalogQueryService::new(self.adapter.clone());
-        service.get_library(&context, &library_id).await
+        service.get_library(&context, library_id).await
     }
 
     async fn create_library(
@@ -58,52 +59,49 @@ impl LibraryCatalogService for SqliteLibraryCatalogService {
 
     async fn update_library(
         &self,
-        library_id: String,
+        library_id: &str,
         changes: LibraryChangeSet,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         let service = UpdateLibraryService::new(self.adapter.clone());
-        service.update_library(&library_id, changes).await
+        service.update_library(library_id, changes).await
     }
 
-    async fn delete_library(
-        &self,
-        library_id: String,
-    ) -> Result<bool, LibraryCatalogMutationError> {
+    async fn delete_library(&self, library_id: &str) -> Result<bool, LibraryCatalogMutationError> {
         let service = DeleteLibraryService::new(self.adapter.clone());
-        service.delete_library(&library_id).await
+        service.delete_library(library_id).await
     }
 
     async fn scan_library(
         &self,
-        library_id: String,
+        library_id: &str,
         deep_scan: bool,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         let service = LibraryTaskService::new(self.adapter.clone());
-        service.scan_library(&library_id, deep_scan).await
+        service.scan_library(library_id, deep_scan).await
     }
 
     async fn analyze_library(
         &self,
-        library_id: String,
+        library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         let service = LibraryTaskService::new(self.adapter.clone());
-        service.analyze_library(&library_id).await
+        service.analyze_library(library_id).await
     }
 
     async fn refresh_metadata(
         &self,
-        library_id: String,
+        library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         let service = LibraryTaskService::new(self.adapter.clone());
-        service.refresh_metadata(&library_id).await
+        service.refresh_metadata(library_id).await
     }
 
     async fn empty_trash(
         &self,
-        library_id: String,
+        library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
         let service = LibraryTaskService::new(self.adapter.clone());
-        service.empty_trash(&library_id).await
+        service.empty_trash(library_id).await
     }
 }
 
@@ -187,15 +185,15 @@ pub(super) fn compose_operational_state(
         oauth2_clients: oauth2_clients(config),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        sse: Mutex::new(SseOperationalState {
+        sse: Arc::new(Mutex::new(SseOperationalState {
             accepting_connections: true,
             book_import_events: Vec::<BookImportSseEvent>::new(),
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
-        }),
-        announcements_cache: Mutex::new(None::<RemoteCacheEntry>),
-        releases_cache: Mutex::new(None::<RemoteCacheEntry>),
-        transient_books: Mutex::new(TransientBooksStore::default()),
+        })),
+        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
+        transient_books: Arc::new(Mutex::new(TransientBooksStore::default())),
         shutdown_trigger,
     }
 }

@@ -5,15 +5,14 @@ use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BooksFeedQuery;
 use komga_domain::discovery::PageEnvelope;
 use serde_json::{Value, json};
-use std::sync::Arc;
 
 use crate::discovery_auth::context::QueryRestrictions;
 use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::helpers::{
     books_page_payload, mark_runtime_owned, query_bool, query_value, to_domain_query_context,
 };
-use crate::identity_access::auth::require_request_auth;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Authenticated;
+use crate::state::DiscoveryState;
 
 use super::super::persisted::common_helpers::{
     filter_rows, internal_error_response, requested_query_values,
@@ -166,19 +165,16 @@ fn ondeck_page_payload(content: Vec<Value>, uri: &Uri) -> Value {
 }
 
 pub async fn books_latest(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
 
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.services.discovery_library_mapping.as_ref(),
+        app.discovery_library_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
@@ -187,7 +183,7 @@ pub async fn books_latest(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             library_ids.as_deref(),
         )
@@ -208,7 +204,6 @@ pub async fn books_latest(
     let unpaged = query_bool(query, "unpaged");
 
     match app
-        .services
         .discovery_list
         .list_books_latest(
             &context,
@@ -238,18 +233,15 @@ pub async fn books_latest(
 }
 
 pub async fn books_ondeck(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.services.discovery_library_mapping.as_ref(),
+        app.discovery_library_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
@@ -257,7 +249,7 @@ pub async fn books_ondeck(
     let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             library_ids.as_deref(),
         )
@@ -270,12 +262,7 @@ pub async fn books_ondeck(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match app
-        .services
-        .discovery_book_feeds
-        .load_ondeck_books(user_id.to_string())
-        .await
-    {
+    match app.discovery_book_feeds.load_ondeck_books(user_id).await {
         Ok(entries) => {
             let filtered_entries =
                 if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
@@ -287,18 +274,21 @@ pub async fn books_ondeck(
                 };
             let mut content = Vec::with_capacity(filtered_entries.len());
             for entry in filtered_entries {
-                let resource =
-                    match super::super::detail::load_persisted_book_resource(&app, &entry.id).await
-                    {
-                        Ok(Some(resource)) => resource,
-                        Ok(None) => {
-                            return internal_error_response(format!(
-                                "missing persisted on-deck book resource for '{}'",
-                                entry.id
-                            ));
-                        }
-                        Err(error) => return internal_error_response(error),
-                    };
+                let resource = match super::super::detail::load_persisted_book_resource(
+                    app.root.as_ref(),
+                    &entry.id,
+                )
+                .await
+                {
+                    Ok(Some(resource)) => resource,
+                    Ok(None) => {
+                        return internal_error_response(format!(
+                            "missing persisted on-deck book resource for '{}'",
+                            entry.id
+                        ));
+                    }
+                    Err(error) => return internal_error_response(error),
+                };
 
                 if !ondeck_content_allowed_by_restrictions(
                     context.restrictions.as_ref(),
@@ -309,7 +299,7 @@ pub async fn books_ondeck(
                 }
 
                 let detail = match super::super::detail::load_persisted_book_detail(
-                    &app,
+                    app.root.as_ref(),
                     &entry.id,
                     Some(user_id),
                 )

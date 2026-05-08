@@ -2,15 +2,16 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::Path as AxumPath;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::identity_access::auth::require_admin;
-use crate::state::{HttpAppState, TransientBookPage, TransientBookPageRecord, TransientBookRecord};
+use crate::identity_access::auth::Admin;
+use crate::state::{
+    OperationalApiState, TransientBookPage, TransientBookPageRecord, TransientBookRecord,
+};
 
 mod discovery;
 mod payload;
@@ -42,14 +43,10 @@ fn transient_books_json_error_response(status: StatusCode, error: &str) -> Respo
 }
 
 pub(crate) async fn post_transient_books(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -58,9 +55,8 @@ pub(crate) async fn post_transient_books(
     };
 
     match app
-        .services
         .operational_settings
-        .validate_transient_scan_root(requested_path.to_string())
+        .validate_transient_scan_root(requested_path)
         .await
     {
         Ok(()) => {}
@@ -82,9 +78,8 @@ pub(crate) async fn post_transient_books(
         };
 
         let Some(file_metadata) = app
-            .services
             .operational_settings
-            .load_transient_book_file_metadata(path.to_string())
+            .load_transient_book_file_metadata(path)
         else {
             continue;
         };
@@ -129,14 +124,10 @@ pub(crate) async fn post_transient_books(
 }
 
 pub(crate) async fn post_transient_book_analyze(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let record = {
         let mut store = app
             .operational
@@ -150,9 +141,8 @@ pub(crate) async fn post_transient_book_analyze(
     };
 
     let analysis = app
-        .services
         .operational_settings
-        .analyze_transient_book(record.path.clone());
+        .analyze_transient_book(&record.path);
     let inferred_series_and_number =
         infer_transient_series_and_number(&app, record.path.as_str()).await;
 
@@ -193,13 +183,10 @@ pub(crate) async fn post_transient_book_analyze(
 }
 
 pub(crate) async fn get_transient_book_page(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     AxumPath((transient_book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
     if page_number <= 0 {
         return transient_books_json_error_response(
             StatusCode::BAD_REQUEST,
@@ -249,16 +236,12 @@ pub(crate) async fn get_transient_book_page(
             size_bytes: page.size_bytes,
         })
         .collect::<Vec<_>>();
-    let Some((content_type, bytes)) = app
-        .services
-        .operational_settings
-        .transient_book_page_content(
-            record.path.clone(),
-            record.media_type.clone(),
-            pages,
-            page_number,
-        )
-    else {
+    let Some((content_type, bytes)) = app.operational_settings.transient_book_page_content(
+        &record.path,
+        &record.media_type,
+        &pages,
+        page_number,
+    ) else {
         return transient_books_json_error_response(
             StatusCode::BAD_REQUEST,
             "Page number does not exist",

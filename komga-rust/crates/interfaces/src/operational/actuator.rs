@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -19,8 +18,8 @@ use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 
-use crate::identity_access::auth::{require_admin, resolved_request_auth_user, user_is_admin};
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, resolved_request_auth_user, user_is_admin};
+use crate::state::{HttpAppState, OperationalApiState};
 
 const ACTUATOR_V3_JSON: &str = "application/vnd.spring-boot.actuator.v3+json";
 const PRODUCT_GROUP: &str = "huihuimoe";
@@ -33,13 +32,9 @@ fn actuator_json(payload: Value) -> Response {
 }
 
 pub(crate) async fn actuator_root(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(_app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     actuator_json(json!({
         "_links": actuator_root_links(),
     }))
@@ -90,16 +85,15 @@ fn actuator_root_links() -> Value {
 
 pub(crate) async fn actuator_health(
     headers: HeaderMap,
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
 ) -> Response {
-    let db = db_health_component(&app);
-    let disk_space_probe_path = disk_space_probe_path(&app);
+    let db = db_health_component(app.root.as_ref());
+    let disk_space_probe_path = disk_space_probe_path(app.root.as_ref());
     let disk_space = disk_space_component(&disk_space_probe_path);
     let ping = ping_component();
     let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
 
-    let request_auth_user =
-        resolved_request_auth_user(&*app.services.runtime_identity, &headers).await;
+    let request_auth_user = resolved_request_auth_user(&*app.identity.service, &headers).await;
     if request_auth_user
         .as_ref()
         .is_none_or(|user| !user_is_admin(user))
@@ -285,13 +279,9 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
 }
 
 pub(crate) async fn actuator_info(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let build_time =
         Some(app.operational.build_metadata.build_time.as_str()).filter(|value| !value.is_empty());
     let commit_time = app.operational.build_metadata.git_commit_time.as_deref();
@@ -466,13 +456,9 @@ fn parse_windows_version_from_cmd_output(output: &str) -> Option<String> {
 }
 
 pub(crate) async fn actuator_logfile(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let logfile = match fs::read_to_string(app.operational.runtime.log_file.as_path()) {
         Ok(logfile) => logfile,
         Err(_) => {
@@ -496,13 +482,9 @@ pub(crate) async fn actuator_logfile(
 }
 
 pub(crate) async fn actuator_shutdown(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     app.operational
         .sse
         .lock()
@@ -517,29 +499,21 @@ pub(crate) async fn actuator_shutdown(
 }
 
 pub(crate) async fn actuator_metrics_index(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(_app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     actuator_json(json!({
         "names": actuator_metric_names(),
     }))
 }
 
 pub(crate) async fn actuator_metric_detail(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    match metric_detail_json(&app, &metric_name, &uri).await {
+    match metric_detail_json(app.root.as_ref(), &metric_name, &uri).await {
         Ok(Some(metric)) => actuator_json(metric),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -1190,7 +1164,7 @@ async fn jdbc_connections_metric(
     let samples = app
         .services
         .operational_runtime
-        .load_sqlite_pool_snapshots(vec![
+        .load_sqlite_pool_snapshots(&[
             app.auth_db.db.database_file().to_path_buf(),
             app.operational.runtime.tasks_db_file.clone(),
         ])

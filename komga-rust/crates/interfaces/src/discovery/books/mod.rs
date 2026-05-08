@@ -11,10 +11,19 @@ use super::persisted::common_helpers::{
     decode_query_component, internal_error_response, requested_query_values,
 };
 use super::persisted::library_mappings::remap_requested_library_ids_for_persisted;
-use super::*;
 use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
-use crate::helpers::{detail_access_denial_response, to_domain_query_context};
+use crate::helpers::{
+    books_page_payload, detail_access_denial_response, extract_full_text_search,
+    mark_runtime_owned, query_bool, query_value, query_values, to_domain_query_context,
+};
+use crate::identity_access::auth::Authenticated;
+use crate::state::DiscoveryState;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::Path as AxumPath;
 use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BooksBrowseQuery;
 use komga_domain::discovery::{DiscoveryError, PageEnvelope};
 use list_query::{
@@ -22,7 +31,7 @@ use list_query::{
     legacy_series_books_sort_from_query, normalize_release_date_date_time,
     parse_book_filter_from_json, parse_book_sorts_from_json, parse_book_sorts_from_json_values,
 };
-use std::sync::Arc;
+use serde_json::{Value, json};
 
 fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bool) -> Response {
     Json(books_page_payload(
@@ -41,15 +50,12 @@ fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bo
 }
 
 pub async fn books_list(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let payload = if body.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     } else {
@@ -61,7 +67,7 @@ pub async fn books_list(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     {
         Some(ctx) => ctx,
@@ -122,7 +128,6 @@ pub async fn books_list(
     let sorted = !sort.is_empty();
 
     match app
-        .services
         .discovery_list
         .list_books(
             &context,
@@ -150,15 +155,13 @@ pub async fn books_list(
     }
 }
 
-pub(super) async fn books_deprecated_get(
+pub(crate) async fn books_deprecated_get(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
     headers: HeaderMap,
     uri: Uri,
-    app: &HttpAppState,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
+    let app = app.root.as_ref();
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
@@ -256,22 +259,23 @@ pub(super) async fn books_deprecated_get(
 }
 
 pub async fn series_books_deprecated(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    let resolved_series_id = super::detail::resolve_series_id_for_persisted(&app, &series_id).await;
-    let Some(resource) =
-        (match super::detail::load_persisted_series_resource(&app, &resolved_series_id).await {
-            Ok(resource) => resource,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
+    let resolved_series_id =
+        super::detail::resolve_series_id_for_persisted(app.root.as_ref(), &series_id).await;
+    let Some(resource) = (match super::detail::load_persisted_series_resource(
+        app.root.as_ref(),
+        &resolved_series_id,
+    )
+    .await
+    {
+        Ok(resource) => resource,
+        Err(error) => return internal_error_response(error),
+    }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -286,7 +290,7 @@ pub async fn series_books_deprecated(
     if let Err(denial) = app
         .discovery_auth
         .resolve_detail_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             &detail_context,
         )
@@ -313,7 +317,7 @@ pub async fn series_books_deprecated(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.services.runtime_identity, &headers, None)
+        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
         .await
     {
         Some(ctx) => ctx,
@@ -322,7 +326,6 @@ pub async fn series_books_deprecated(
     let context = to_domain_query_context(interfaces_context);
 
     match app
-        .services
         .discovery_list
         .list_books(
             &context,

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections, readlists,
@@ -63,49 +63,66 @@ pub fn compose_http_runtime(
         tasks_db,
         task_engine,
     } = runtime;
-    let runtime_identity_service =
-        http_state_runtime_identity::compose_runtime_identity_service(db.clone());
-    let operational_runtime_service: Box<dyn OperationalRuntimeService> = Box::new(
+    let runtime_identity_service: Arc<dyn IdentityService> =
+        Arc::from(http_state_runtime_identity::compose_runtime_identity_service(db.clone()));
+    let operational_runtime_service: Arc<dyn OperationalRuntimeService> = Arc::new(
         http_state_operational_access::compose_operational_runtime_service(db.clone(), tasks_db),
     );
-    let media_assets_service = http_state_media_assets::compose_media_assets_service(db.clone());
-    let discovery_detail_service = http_state_discovery::compose_discovery_detail_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
+    let media_assets_service: Arc<dyn komga_interfaces::state::MediaAssetsService> = Arc::from(
+        http_state_media_assets::compose_media_assets_service(db.clone()),
     );
-    let discovery_authors = http_state_discovery::compose_discovery_author_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
+    let discovery_detail_service: Arc<dyn DiscoveryDetailService> =
+        Arc::from(http_state_discovery::compose_discovery_detail_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ));
+    let discovery_authors: Arc<dyn komga_interfaces::state::DiscoveryAuthorService> =
+        Arc::from(http_state_discovery::compose_discovery_author_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ));
+    let discovery_library_mapping: Arc<
+        dyn komga_interfaces::state::DiscoveryLibraryMappingService,
+    > = Arc::from(
+        http_state_discovery::compose_discovery_library_mapping_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ),
     );
-    let discovery_library_mapping = http_state_discovery::compose_discovery_library_mapping_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
-    );
-    let discovery_collection_search =
+    let discovery_collection_search: Arc<
+        dyn komga_interfaces::state::DiscoveryCollectionSearchService,
+    > = Arc::from(
         http_state_discovery::compose_discovery_collection_search_service(
             db.clone(),
             config.lucene_data_directory.clone(),
-        );
-    let discovery_readlist_search = http_state_discovery::compose_discovery_readlist_search_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
+        ),
     );
-    let discovery_book_feeds = http_state_discovery::compose_discovery_book_feed_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
+    let discovery_readlist_search: Arc<
+        dyn komga_interfaces::state::DiscoveryReadlistSearchService,
+    > = Arc::from(
+        http_state_discovery::compose_discovery_readlist_search_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ),
     );
-    let discovery_list = http_state_discovery::compose_discovery_list_service(
-        db.clone(),
-        config.lucene_data_directory.clone(),
-    );
+    let discovery_book_feeds: Arc<dyn komga_interfaces::state::DiscoveryBookFeedService> =
+        Arc::from(http_state_discovery::compose_discovery_book_feed_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ));
+    let discovery_list: Arc<dyn komga_application::discovery::DiscoveryListService> =
+        Arc::from(http_state_discovery::compose_discovery_list_service(
+            db.clone(),
+            config.lucene_data_directory.clone(),
+        ));
     let (opds_catalog, opds_persisted) =
         http_state_opds::compose_opds_services(&db, config.lucene_data_directory.as_path());
-    let operational_settings_service: Box<dyn OperationalSettingsService> =
-        Box::new(http_state_operational_access::compose_operational_settings_service(db.clone()));
+    let operational_settings_service: Arc<dyn OperationalSettingsService> =
+        Arc::new(http_state_operational_access::compose_operational_settings_service(db.clone()));
 
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
     runtime_identity_service
-        .sync_remember_me_runtime_database_file(remember_me_runtime_key.clone());
+        .sync_remember_me_runtime_database_file(remember_me_runtime_key.as_str());
     preload_remember_me_runtime_settings(
         config,
         remember_me_runtime_key.as_str(),
@@ -115,12 +132,12 @@ pub fn compose_http_runtime(
     // but the HTTP state keeps separate runtime keys so session and remember-me semantics are explicit.
     let session_runtime_key = remember_me_runtime_key.clone();
     runtime_identity_service.sync_session_runtime_settings(
-        session_runtime_key.clone(),
+        session_runtime_key.as_str(),
         config.session_max_inactive_seconds,
     );
 
     let read_progress = ReadProgressState {
-        progress_by_token: Mutex::new(HashMap::new()),
+        progress_by_token: Arc::new(Mutex::new(HashMap::new())),
     };
     let profile = http_state_runtime_config::runtime_profile(config);
     let discovery_auth = DiscoveryAuthState::default();
@@ -131,14 +148,14 @@ pub fn compose_http_runtime(
         remember_me_runtime_key: remember_me_runtime_key.clone(),
     };
     let services = HttpServices {
-        library_catalog: Box::new(
+        library_catalog: Arc::new(
             http_state_operational_state::SqliteLibraryCatalogService::new(
                 config.database_file.as_path(),
                 db.write_pool().clone(),
             ),
         ),
-        task_queue: task_engine,
-        server_settings: Box::new(
+        task_queue: Arc::from(task_engine),
+        server_settings: Arc::new(
             http_state_operational_state::RuntimeServerSettingsService::new(
                 config.database_file.as_path(),
             ),
@@ -147,8 +164,8 @@ pub fn compose_http_runtime(
         operational_runtime: operational_runtime_service,
         operational_settings: operational_settings_service,
         media_assets: media_assets_service,
-        opds_catalog: Box::new(opds_catalog),
-        opds_persisted: Box::new(opds_persisted),
+        opds_catalog: Arc::new(opds_catalog),
+        opds_persisted: Arc::new(opds_persisted),
         discovery_authors,
         discovery_library_mapping,
         discovery_collection_search,
@@ -197,8 +214,8 @@ fn preload_remember_me_runtime_settings(
         )
         .expect("remember-me startup settings should load");
     runtime_identity.sync_remember_me_runtime_settings(
-        remember_me_runtime_key.to_string(),
-        remember_me_key,
+        remember_me_runtime_key,
+        remember_me_key.as_str(),
         remember_me_duration_days,
     );
 }

@@ -1,15 +1,16 @@
+mod extractors;
 mod request_metadata;
 mod response;
 mod token;
 mod user;
 
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::HeaderMap;
 
 use crate::access_log;
 use crate::state::IdentityService;
 
 pub use crate::state::AuthenticationActivityWriteInput;
+pub use extractors::{Admin, Authenticated, FileDownload};
 pub use komga_application::identity_access::{
     AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
     PersistedAuthenticationActivity, user_has_role, user_id, user_is_admin, user_payload_json,
@@ -46,24 +47,8 @@ fn record_resolved_auth_user(auth_user: Option<AuthUser>) -> Option<AuthUser> {
     auth_user
 }
 
-pub fn require_auth(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<Response> {
-    if resolved_auth_user(identity, headers).is_some() {
-        None
-    } else {
-        Some(StatusCode::UNAUTHORIZED.into_response())
-    }
-}
-
-pub fn require_admin(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<Response> {
-    match resolved_auth_user(identity, headers) {
-        Some(user) if user_is_admin(&user) => None,
-        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
-        None => Some(StatusCode::UNAUTHORIZED.into_response()),
-    }
-}
-
 pub fn resolved_auth_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
-    record_resolved_auth_user(identity.auth_token_user(headers.clone()))
+    record_resolved_auth_user(identity.auth_token_user(headers))
 }
 
 pub async fn resolved_request_auth_user(
@@ -76,7 +61,7 @@ pub async fn resolved_request_auth_user(
     {
         AuthOutcome::Valid(user) => Some(*user),
         AuthOutcome::Invalid => None,
-        AuthOutcome::Missing => match identity.auth_token_user(headers.clone()) {
+        AuthOutcome::Missing => match identity.auth_token_user(headers) {
             Some(user) => Some(user),
             None => match persisted_basic_user(identity, headers)
                 .await
@@ -91,57 +76,17 @@ pub async fn resolved_request_auth_user(
     record_resolved_auth_user(auth_user)
 }
 
-pub async fn require_request_auth(
-    identity: &dyn IdentityService,
-    headers: &HeaderMap,
-) -> Option<Response> {
-    if resolved_request_auth_user(identity, headers)
-        .await
-        .is_some()
-    {
-        None
-    } else {
-        Some(StatusCode::UNAUTHORIZED.into_response())
-    }
-}
-
-pub async fn require_request_admin(
-    identity: &dyn IdentityService,
-    headers: &HeaderMap,
-) -> Option<Response> {
-    match resolved_request_auth_user(identity, headers).await {
-        Some(user) if user_is_admin(&user) => None,
-        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
-        None => Some(StatusCode::UNAUTHORIZED.into_response()),
-    }
-}
-
-pub async fn require_request_file_download(
-    identity: &dyn IdentityService,
-    headers: &HeaderMap,
-) -> Option<Response> {
-    match resolved_request_auth_user(identity, headers).await {
-        Some(user) if user_is_admin(&user) || user_has_role(&user, "FILE_DOWNLOAD") => None,
-        Some(_) => Some(StatusCode::FORBIDDEN.into_response()),
-        None => Some(StatusCode::UNAUTHORIZED.into_response()),
-    }
-}
-
 pub fn sync_remember_me_runtime_settings(
     identity: &dyn IdentityService,
     runtime_key: &str,
     key: &str,
     duration_days: u64,
 ) {
-    identity.sync_remember_me_runtime_settings(
-        runtime_key.to_string(),
-        key.to_string(),
-        duration_days,
-    )
+    identity.sync_remember_me_runtime_settings(runtime_key, key, duration_days)
 }
 
 pub fn sync_remember_me_runtime_database_file(identity: &dyn IdentityService, runtime_key: &str) {
-    identity.sync_remember_me_runtime_database_file(runtime_key.to_string());
+    identity.sync_remember_me_runtime_database_file(runtime_key);
 }
 
 pub fn sync_session_runtime_settings(
@@ -149,15 +94,15 @@ pub fn sync_session_runtime_settings(
     runtime_key: &str,
     max_inactive_seconds: u64,
 ) {
-    identity.sync_session_runtime_settings(runtime_key.to_string(), max_inactive_seconds);
+    identity.sync_session_runtime_settings(runtime_key, max_inactive_seconds);
 }
 
 pub fn remember_me_max_age_seconds(identity: &dyn IdentityService, runtime_key: &str) -> u64 {
-    identity.remember_me_max_age_seconds(runtime_key.to_string())
+    identity.remember_me_max_age_seconds(runtime_key)
 }
 
 pub fn invalidate_user_sessions(identity: &dyn IdentityService, user_id: &str) {
-    identity.invalidate_user_sessions(user_id.to_string());
+    identity.invalidate_user_sessions(user_id);
 }
 
 pub fn invalidate_user_sessions_for_runtime_key(
@@ -165,14 +110,13 @@ pub fn invalidate_user_sessions_for_runtime_key(
     user_id: &str,
     runtime_key: &str,
 ) {
-    identity
-        .invalidate_user_sessions_with_runtime_key(user_id.to_string(), runtime_key.to_string());
+    identity.invalidate_user_sessions_with_runtime_key(user_id, runtime_key);
 }
 
 pub fn invalidate_session_token(identity: &dyn IdentityService, token: &str) {
-    identity.invalidate_session_token(token.to_string());
+    identity.invalidate_session_token(token);
 }
 
 pub fn invalidate_remember_me_token(identity: &dyn IdentityService, token: &str) {
-    identity.invalidate_remember_me_token(token.to_string());
+    identity.invalidate_remember_me_token(token);
 }

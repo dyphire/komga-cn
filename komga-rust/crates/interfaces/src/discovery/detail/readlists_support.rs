@@ -108,7 +108,7 @@ pub async fn load_persisted_book_authors(
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
     app.services
         .discovery_detail
-        .load_persisted_book_authors(book_id.to_string())
+        .load_persisted_book_authors(book_id)
         .await
 }
 
@@ -120,7 +120,7 @@ pub(super) async fn load_persisted_readlist_detail(
     let Some(row) = app
         .services
         .discovery_detail
-        .load_persisted_readlist_detail(readlist_id.to_string())
+        .load_persisted_readlist_detail(readlist_id)
         .await?
     else {
         return Ok(None);
@@ -151,7 +151,7 @@ async fn load_persisted_readlist_book_ids(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_readlist_book_rows(readlist_id.to_string())
+        .load_persisted_readlist_book_rows(readlist_id)
         .await?;
 
     let total_count = rows.len();
@@ -213,11 +213,11 @@ pub async fn persist_readlist_create(
     app.services
         .discovery_detail
         .persist_readlist_create(
-            readlist_id.clone(),
-            input.name.clone(),
-            input.summary.clone(),
+            &readlist_id,
+            &input.name,
+            &input.summary,
             input.ordered,
-            input.book_ids.clone(),
+            &input.book_ids,
         )
         .await?;
 
@@ -243,11 +243,11 @@ pub async fn persist_readlist_update(
         .services
         .discovery_detail
         .persist_readlist_update(
-            readlist_id.to_string(),
-            input.name.clone(),
-            input.summary.clone(),
+            readlist_id,
+            &input.name,
+            &input.summary,
             input.ordered,
-            input.book_ids.clone(),
+            &input.book_ids,
         )
         .await?;
     if updated {
@@ -272,7 +272,7 @@ pub async fn delete_persisted_readlist(
     let deleted = app
         .services
         .discovery_detail
-        .delete_persisted_readlist(readlist_id.to_string())
+        .delete_persisted_readlist(readlist_id)
         .await?;
     if deleted && let Some(readlist) = existing {
         register_runtime_sse_event(
@@ -294,7 +294,7 @@ pub async fn upsert_readlist_search_document(
 ) -> Result<bool, String> {
     app.services
         .discovery_detail
-        .upsert_readlist_search_document(readlist_id.to_string())
+        .upsert_readlist_search_document(readlist_id)
         .await
 }
 
@@ -304,7 +304,7 @@ pub async fn delete_readlist_search_document(
 ) -> Result<(), String> {
     app.services
         .discovery_detail
-        .delete_readlist_search_document(readlist_id.to_string())
+        .delete_readlist_search_document(readlist_id)
         .await
 }
 
@@ -585,7 +585,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_readlist_book_rows(readlist_id.to_string())
+        .load_persisted_readlist_book_rows(readlist_id)
         .await?;
     let mut visible = Vec::new();
 

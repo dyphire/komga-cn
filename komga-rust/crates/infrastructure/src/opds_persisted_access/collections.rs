@@ -17,7 +17,7 @@ use super::records::{
 
 pub async fn load_publishers(
     database_file: &Path,
-    allowed_library_ids: &Option<HashSet<String>>,
+    allowed_library_ids: Option<&HashSet<String>>,
 ) -> Result<Vec<String>, sqlx::Error> {
     let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(

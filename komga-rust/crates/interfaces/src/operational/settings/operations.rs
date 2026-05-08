@@ -1,13 +1,12 @@
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::http::Uri;
-use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
-use std::sync::Arc;
 
-use crate::identity_access::auth::{require_admin, require_auth, resolved_auth_user, user_id};
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, Authenticated, user_id};
+use crate::state::OperationalApiState;
 
 use super::{query_value, query_values};
 
@@ -18,14 +17,10 @@ enum SyncpointDeleteScope {
 }
 
 pub(crate) async fn get_history(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _: Admin,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let page = query_value(query, "page")
         .and_then(|value| value.parse::<u64>().ok())
@@ -37,7 +32,6 @@ pub(crate) async fn get_history(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .services
         .operational_settings
         .load_history_page(page, size, sorts)
         .await
@@ -50,29 +44,19 @@ pub(crate) async fn get_history(
 }
 
 pub(crate) async fn delete_syncpoints_me(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    Authenticated(current_user): Authenticated,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let result = match syncpoint_delete_scope(uri.query().unwrap_or_default()) {
         SyncpointDeleteScope::All => {
-            app.services
-                .operational_settings
-                .delete_syncpoints_by_user(user_id(&current_user).to_string())
+            app.operational_settings
+                .delete_syncpoints_by_user(user_id(&current_user))
                 .await
         }
         SyncpointDeleteScope::ApiKeys(key_ids) => {
-            app.services
-                .operational_settings
-                .delete_syncpoints_by_user_and_key_ids(user_id(&current_user).to_string(), key_ids)
+            app.operational_settings
+                .delete_syncpoints_by_user_and_key_ids(user_id(&current_user), &key_ids)
                 .await
         }
     };
@@ -103,7 +87,7 @@ fn syncpoint_delete_scope(query: &str) -> SyncpointDeleteScope {
     }
 }
 
-pub(crate) async fn get_oauth2_providers(State(app): State<Arc<HttpAppState>>) -> Response {
+pub(crate) async fn get_oauth2_providers(State(app): State<OperationalApiState>) -> Response {
     let providers = app
         .operational
         .oauth2_clients
@@ -119,15 +103,8 @@ pub(crate) async fn get_oauth2_providers(State(app): State<Arc<HttpAppState>>) -
     Json(providers).into_response()
 }
 
-pub(crate) async fn delete_tasks(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
-) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let deleted = app.services.task_queue.clear_unowned_tasks().await;
+pub(crate) async fn delete_tasks(State(app): State<OperationalApiState>, _: Admin) -> Response {
+    let deleted = app.task_queue.engine.clear_unowned_tasks().await;
 
     Json(json!(deleted)).into_response()
 }

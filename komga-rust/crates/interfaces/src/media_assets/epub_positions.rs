@@ -7,7 +7,7 @@ pub(super) async fn load_persisted_epub_positions(
     let Some((extension_class, blob)) = app
         .services
         .media_assets
-        .load_persisted_epub_extension_blob(book_id.to_string())
+        .load_persisted_epub_extension_blob(book_id)
         .await?
     else {
         return Ok(None);
@@ -32,7 +32,5 @@ pub(super) fn decode_epub_positions_blob(
     app: &HttpAppState,
     blob: &[u8],
 ) -> Result<Vec<Value>, String> {
-    app.services
-        .media_assets
-        .decode_epub_positions(blob.to_vec())
+    app.services.media_assets.decode_epub_positions(blob)
 }

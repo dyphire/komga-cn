@@ -1,31 +1,22 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::identity_access::auth::{require_admin, resolved_auth_user, user_id};
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, user_id};
+use crate::state::OperationalApiState;
 
 pub(crate) async fn get_announcements(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let feed = match load_cached_announcements_feed(&app).await {
         Ok(Some(feed)) => feed,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -33,9 +24,8 @@ pub(crate) async fn get_announcements(
     };
 
     let read_ids = match app
-        .services
         .operational_settings
-        .load_announcement_read_ids(user_id(&current_user).to_string())
+        .load_announcement_read_ids(user_id(&admin))
         .await
     {
         Ok(ids) => ids,
@@ -46,26 +36,17 @@ pub(crate) async fn get_announcements(
 }
 
 pub(crate) async fn put_announcements(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    admin: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let Ok(ids) = parse_announcement_ids(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
 
     if app
-        .services
         .operational_settings
-        .save_announcements_read(user_id(&current_user).to_string(), ids)
+        .save_announcements_read(user_id(&admin), &ids)
         .await
         .is_err()
     {
@@ -95,13 +76,9 @@ fn parse_announcement_ids(body: &[u8]) -> Result<Vec<String>, ()> {
 }
 
 pub(crate) async fn get_releases(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _admin: Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let releases = match load_cached_releases(&app).await {
         Ok(Some(releases)) => releases,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -111,7 +88,9 @@ pub(crate) async fn get_releases(
     Json(releases).into_response()
 }
 
-async fn load_cached_announcements_feed(app: &HttpAppState) -> Result<Option<Value>, String> {
+async fn load_cached_announcements_feed(
+    app: &OperationalApiState,
+) -> Result<Option<Value>, String> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {
@@ -241,7 +220,7 @@ mod optional_rfc3339 {
     }
 }
 
-async fn load_cached_releases(app: &HttpAppState) -> Result<Option<Value>, reqwest::Error> {
+async fn load_cached_releases(app: &OperationalApiState) -> Result<Option<Value>, reqwest::Error> {
     const CACHE_TTL_SECONDS: u64 = 60 * 60;
     let now = now_epoch_seconds();
     {

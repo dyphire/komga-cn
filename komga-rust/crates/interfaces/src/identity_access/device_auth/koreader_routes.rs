@@ -1,6 +1,6 @@
 use super::*;
+use crate::state::IdentityAccessState;
 use axum::extract::State;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const KOREADER_VENDOR_MEDIA_TYPE: &str = "application/vnd.koreader.v1+json";
@@ -88,7 +88,7 @@ async fn load_koreader_book_target(
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
     app.services
         .runtime_identity
-        .load_koreader_book_target(book_hash.to_string())
+        .load_koreader_book_target(book_hash)
         .await
 }
 
@@ -99,18 +99,18 @@ async fn load_read_progress(
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_read_progress(book_id.to_string(), user_id.to_string())
+        .load_read_progress(book_id, user_id)
         .await
 }
 
 pub async fn koreader_user_create(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
     if let Err(status) = required_koreader_user(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &headers,
         connection_info.remote_addr(),
     )
@@ -136,13 +136,13 @@ pub async fn koreader_user_create(
 }
 
 pub async fn koreader_user_auth(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
     match required_koreader_user(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &headers,
         connection_info.remote_addr(),
     )
@@ -165,13 +165,13 @@ pub async fn koreader_user_auth(
 }
 
 pub async fn koreader_get_progress(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Path(book_hash): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
     let user_id_value = match required_koreader_user_id(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &headers,
         connection_info.remote_addr(),
     )
@@ -181,7 +181,7 @@ pub async fn koreader_get_progress(
         Err(status) => return status.into_response(),
     };
 
-    let target = match load_koreader_book_target(&app, &book_hash).await {
+    let target = match load_koreader_book_target(app.root.as_ref(), &book_hash).await {
         Ok(Some(target)) => target,
         Ok(None) => {
             return koreader_progress_error_response(
@@ -204,10 +204,12 @@ pub async fn koreader_get_progress(
         }
     };
 
-    let Some(progress) = (match load_read_progress(&app, &target.id, &user_id_value).await {
-        Ok(progress) => progress,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }) else {
+    let Some(progress) =
+        (match load_read_progress(app.root.as_ref(), &target.id, &user_id_value).await {
+            Ok(progress) => progress,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        })
+    else {
         return koreader_progress_error_response(
             &headers,
             StatusCode::OK,
@@ -224,14 +226,15 @@ pub async fn koreader_get_progress(
         .unwrap_or_else(|| {
             (progress.page.max(0) as f64 / target.page_count.max(1) as f64).clamp(0.0, 1.0)
         });
-    let progress_value = match koreader_epub_progress_value(&app, &target.id, &locator).await {
-        Some(progress_value) => progress_value,
-        None => locator
-            .get("koreaderProgress")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| progress.page.max(0).to_string()),
-    };
+    let progress_value =
+        match koreader_epub_progress_value(app.root.as_ref(), &target.id, &locator).await {
+            Some(progress_value) => progress_value,
+            None => locator
+                .get("koreaderProgress")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| progress.page.max(0).to_string()),
+        };
 
     (
         StatusCode::OK,
@@ -264,10 +267,14 @@ async fn koreader_epub_progress_value(
     let (_extension_class, blob) = app
         .services
         .media_assets
-        .load_persisted_epub_extension_blob(book_id.to_string())
+        .load_persisted_epub_extension_blob(book_id)
         .await
         .ok()??;
-    let positions = app.services.media_assets.decode_epub_positions(blob).ok()?;
+    let positions = app
+        .services
+        .media_assets
+        .decode_epub_positions(&blob)
+        .ok()?;
     let unique_hrefs = dedup_epub_hrefs(&positions);
 
     unique_hrefs
@@ -321,7 +328,7 @@ fn koreader_epub_locator(href: &str, matched_position: &Value) -> Value {
 }
 
 pub async fn koreader_put_progress(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     body: Bytes,
@@ -329,7 +336,7 @@ pub async fn koreader_put_progress(
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
 
     let user_id_value = match required_koreader_user_id(
-        &*app.services.runtime_identity,
+        &*app.identity.service,
         &headers,
         connection_info.remote_addr(),
     )
@@ -343,7 +350,8 @@ pub async fn koreader_put_progress(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    let target = match load_koreader_book_target(&app, payload.document.as_str()).await {
+    let target = match load_koreader_book_target(app.root.as_ref(), payload.document.as_str()).await
+    {
         Ok(Some(target)) => target,
         Ok(None) => {
             return koreader_progress_error_response(
@@ -371,14 +379,12 @@ pub async fn koreader_put_progress(
         match koreader_media_profile(target.media_type.as_str()) {
             Some(KoreaderMediaProfile::Epub) => {
                 match app
-                    .services
                     .media_assets
-                    .load_persisted_epub_extension_blob(target.id.clone())
+                    .load_persisted_epub_extension_blob(&target.id)
                     .await
                 {
                     Ok(Some((_extension_class, blob))) => {
-                        let Ok(positions) = app.services.media_assets.decode_epub_positions(blob)
-                        else {
+                        let Ok(positions) = app.media_assets.decode_epub_positions(&blob) else {
                             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                         };
                         let unique_hrefs = dedup_epub_hrefs(&positions);
@@ -462,17 +468,17 @@ pub async fn koreader_put_progress(
             }
         };
 
+    let modified = now_sync_marker();
     if app
-        .services
         .media_assets
         .persist_book_progression(
-            target.id.clone(),
-            user_id_value.clone(),
+            &target.id,
+            &user_id_value,
             progression,
             use_locator_position_for_page,
-            Some(now_sync_marker()),
-            Some(payload.device_id.clone()),
-            Some(payload.device.clone()),
+            Some(modified.as_str()),
+            Some(payload.device_id.as_str()),
+            Some(payload.device.as_str()),
             Some(locator),
         )
         .await

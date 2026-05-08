@@ -16,7 +16,18 @@ pub(crate) async fn opds_auth(headers: HeaderMap) -> Response {
         .into_response()
 }
 
-pub(super) fn opds_catalog_unauthorized_response(headers: &HeaderMap) -> Response {
+pub(crate) fn opds_v1_basic_unauthorized_response() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("Basic realm=\"Realm\""),
+        )],
+    )
+        .into_response()
+}
+
+pub(crate) fn opds_catalog_unauthorized_response(headers: &HeaderMap) -> Response {
     let base_url = request_base_url(headers);
     let auth_href = format!("{base_url}/opds/v2/auth");
     let link = format!(

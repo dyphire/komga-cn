@@ -5,7 +5,7 @@ use komga_application::identity_access::AuthUser;
 use crate::state::IdentityService;
 
 pub fn auth_token_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
-    identity.auth_token_user(headers.clone())
+    identity.auth_token_user(headers)
 }
 
 pub fn resolved_token(headers: &HeaderMap) -> String {
@@ -37,7 +37,7 @@ pub fn session_token_for_user_with_runtime_key(
     user: &AuthUser,
     runtime_key: &str,
 ) -> String {
-    identity.session_token_for_user_with_runtime_key(user.clone(), runtime_key.to_string())
+    identity.session_token_for_user_with_runtime_key(user, runtime_key)
 }
 
 pub fn remember_me_token_for_user_with_runtime_key(
@@ -45,7 +45,7 @@ pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
     runtime_key: &str,
 ) -> Option<String> {
-    identity.remember_me_token_for_user_with_runtime_key(user.clone(), runtime_key.to_string())
+    identity.remember_me_token_for_user_with_runtime_key(user, runtime_key)
 }
 
 fn x_auth_token(headers: &HeaderMap) -> Option<String> {

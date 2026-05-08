@@ -436,7 +436,7 @@ pub fn build_router(app: HttpAppState) -> Router {
         )
         .route(
             "/opds/v2/books/{book_id}/resource/{*resource_path}",
-            get(media_assets::handlers::book_resource),
+            get(media_assets::handlers::book_resource_opds_v2),
         )
         .route(
             "/api/v1/books/thumbnails",
@@ -556,8 +556,8 @@ pub fn build_router(app: HttpAppState) -> Router {
             get(media_assets::handlers::book_page_opds_v1),
         )
         .route("/opds/v2/auth", get(opds::content_opds::opds_auth_route))
-        .route("/opds/v2/catalog", get(opds::content_opds::opds_catalog_route))
-        .route("/opds/v2/libraries", get(opds::content_opds::opds_v2_libraries_route))
+        .route("/opds/v2/catalog", get(opds::content_opds::opds_catalog))
+        .route("/opds/v2/libraries", get(opds::content_opds::opds_v2_libraries))
         .route(
             "/opds/v2/libraries/keep-reading",
             get(opds::content_opds::opds_v2_libraries_keep_reading_route),
@@ -655,8 +655,8 @@ pub fn build_router(app: HttpAppState) -> Router {
         )
         .route(
             "/opds/v2/books/{book_id}/progression",
-            get(media_assets::handlers::book_progression_get)
-                .put(media_assets::handlers::book_progression),
+            get(media_assets::handlers::opds_v2_book_progression_get)
+                .put(media_assets::handlers::opds_v2_book_progression),
         )
         .route(
             "/api/v1/login/set-cookie",

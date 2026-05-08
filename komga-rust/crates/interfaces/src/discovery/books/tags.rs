@@ -4,23 +4,19 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookTagScope;
 use serde_json::json;
-use std::sync::Arc;
 
 use crate::helpers::{query_value, query_values, to_domain_query_context};
-use crate::identity_access::auth::require_request_auth;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Authenticated;
+use crate::state::DiscoveryState;
 
 use super::super::persisted::common_helpers::{decode_query_component, internal_error_response};
 
 pub async fn book_tags(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<DiscoveryState>,
+    _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let query = uri.query().unwrap_or_default();
     let library_ids = query_values(query, "library_id")
         .into_iter()
@@ -38,7 +34,7 @@ pub async fn book_tags(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.services.runtime_identity,
+            &*app.identity.service,
             &headers,
             if scoped_by_resource || library_ids.is_empty() {
                 None
@@ -81,7 +77,6 @@ pub async fn book_tags(
     };
 
     match app
-        .services
         .discovery_list
         .list_book_tags(&context, scope, service_library_ids)
         .await

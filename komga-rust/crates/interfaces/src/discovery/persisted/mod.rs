@@ -1,8 +1,7 @@
-use super::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use komga_application::discovery::BookReadModel;
-use komga_domain::discovery::{DiscoveryError, PageEnvelope};
+use komga_domain::discovery::PageEnvelope;
 use serde_json::{Value, json};
 
 use crate::discovery_auth::context::DiscoveryQueryContext;

@@ -1,34 +1,52 @@
 use super::*;
-use crate::state::{HttpAppState, OpdsBookFeedEntry, OpdsSeriesEntry};
+use crate::identity_access::auth::{AuthUser, user_id};
+use crate::state::{HttpAppState, OpdsBookFeedEntry, OpdsSeriesEntry, OpdsState};
+use axum::extract::State;
 
 const RECOMMENDED_PAGE_SIZE: i64 = 100;
 
-pub(crate) async fn opds_catalog(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if require_auth(&*app.services.runtime_identity, &headers).is_none() {
-        return opds_v2_recommended(headers, app, None, "/opds/v2/libraries".to_string()).await;
-    }
-
-    opds_catalog_unauthorized_response(&headers)
+pub(crate) async fn opds_catalog(
+    State(app): State<OpdsState>,
+    OpdsV2Authenticated(user): OpdsV2Authenticated,
+    headers: HeaderMap,
+) -> Response {
+    opds_v2_recommended(
+        headers,
+        app.root.as_ref(),
+        None,
+        "/opds/v2/libraries".to_string(),
+        &user,
+    )
+    .await
 }
 
-pub(crate) async fn opds_v2_libraries(headers: HeaderMap, app: &HttpAppState) -> Response {
-    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
-        return opds_catalog_unauthorized_response(&headers);
-    }
-
-    opds_v2_recommended(headers, app, None, "/opds/v2/libraries".to_string()).await
+pub(crate) async fn opds_v2_libraries(
+    State(app): State<OpdsState>,
+    OpdsV2Authenticated(user): OpdsV2Authenticated,
+    headers: HeaderMap,
+) -> Response {
+    opds_v2_recommended(
+        headers,
+        app.root.as_ref(),
+        None,
+        "/opds/v2/libraries".to_string(),
+        &user,
+    )
+    .await
 }
 
 pub(crate) async fn opds_v2_library(
     headers: HeaderMap,
     app: &HttpAppState,
     library_id: &str,
+    user: &AuthUser,
 ) -> Response {
     opds_v2_recommended(
         headers,
         app,
         Some(library_id),
         format!("/opds/v2/libraries/{library_id}"),
+        user,
     )
     .await
 }
@@ -38,15 +56,9 @@ async fn opds_v2_recommended(
     app: &HttpAppState,
     library_id: Option<&str>,
     self_path: String,
+    user: &AuthUser,
 ) -> Response {
-    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
-        return opds_catalog_unauthorized_response(&headers);
-    }
-
-    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
-    else {
-        return opds_catalog_unauthorized_response(&headers);
-    };
+    let allowed_library_ids = allowed_library_ids_for_user(user);
 
     let libraries = match load_libraries(app.services.opds_persisted.as_ref()).await {
         Ok(libraries) => libraries,
@@ -71,22 +83,19 @@ async fn opds_v2_recommended(
         None
     };
 
-    let Some(user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return opds_catalog_unauthorized_response(&headers);
-    };
-    let user_id_value = user_id(&user).to_string();
+    let user_id_value = user_id(user);
 
     let library_segment = selected_library
         .as_ref()
         .map(|library| format!("/{}", library.id))
         .unwrap_or_default();
     let recommended_path = format!("/opds/v2/libraries{library_segment}");
-    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
+    let restrictions = opds_restrictions_for_user(user);
 
     let mut keep_reading = app
         .services
         .opds_catalog
-        .load_keep_reading_books(user_id_value.clone(), library_id.map(str::to_string))
+        .load_keep_reading_books(user_id_value, library_id)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -109,7 +118,7 @@ async fn opds_v2_recommended(
     let mut on_deck = app
         .services
         .opds_catalog
-        .load_on_deck_books(user_id_value.clone(), library_id.map(str::to_string))
+        .load_on_deck_books(user_id_value, library_id)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -133,7 +142,7 @@ async fn opds_v2_recommended(
         app,
         &allowed_library_ids,
         restrictions.as_ref(),
-        &user_id_value,
+        user_id_value,
         library_id,
     )
     .await
@@ -337,9 +346,9 @@ async fn load_visible_latest_books_for_catalog(
             .services
             .opds_catalog
             .load_latest_books_paged(
-                allowed_library_ids.clone(),
-                Some(user_id.to_string()),
-                library_id.map(str::to_string),
+                allowed_library_ids.as_ref(),
+                Some(user_id),
+                library_id,
                 offset,
                 RECOMMENDED_PAGE_SIZE,
             )
@@ -388,8 +397,8 @@ async fn load_visible_latest_series_for_catalog(
             .services
             .opds_catalog
             .load_latest_series_paged(
-                allowed_library_ids.clone(),
-                library_id.map(str::to_string),
+                allowed_library_ids.as_ref(),
+                library_id,
                 offset,
                 RECOMMENDED_PAGE_SIZE,
             )
@@ -441,8 +450,9 @@ pub(crate) async fn opds_v2_libraries_keep_reading(
     headers: HeaderMap,
     uri: Uri,
     app: &HttpAppState,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_keep_reading_feed(headers, uri, app, None).await
+    opds_v2_keep_reading_feed(headers, uri, app, None, user).await
 }
 
 pub(crate) async fn opds_v2_library_keep_reading(
@@ -450,16 +460,18 @@ pub(crate) async fn opds_v2_library_keep_reading(
     uri: Uri,
     app: &HttpAppState,
     library_id: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_keep_reading_feed(headers, uri, app, Some(library_id)).await
+    opds_v2_keep_reading_feed(headers, uri, app, Some(library_id), user).await
 }
 
 pub(crate) async fn opds_v2_libraries_on_deck(
     headers: HeaderMap,
     uri: Uri,
     app: &HttpAppState,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_on_deck_feed(headers, uri, app, None).await
+    opds_v2_on_deck_feed(headers, uri, app, None, user).await
 }
 
 pub(crate) async fn opds_v2_library_on_deck(
@@ -467,16 +479,18 @@ pub(crate) async fn opds_v2_library_on_deck(
     uri: Uri,
     app: &HttpAppState,
     library_id: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_on_deck_feed(headers, uri, app, Some(library_id)).await
+    opds_v2_on_deck_feed(headers, uri, app, Some(library_id), user).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_books(
     headers: HeaderMap,
     uri: Uri,
     app: &HttpAppState,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_latest_books_feed(headers, uri, app, None).await
+    opds_v2_latest_books_feed(headers, uri, app, None, user).await
 }
 
 pub(crate) async fn opds_v2_library_latest_books(
@@ -484,16 +498,18 @@ pub(crate) async fn opds_v2_library_latest_books(
     uri: Uri,
     app: &HttpAppState,
     library_id: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_latest_books_feed(headers, uri, app, Some(library_id)).await
+    opds_v2_latest_books_feed(headers, uri, app, Some(library_id), user).await
 }
 
 pub(crate) async fn opds_v2_libraries_latest_series(
     headers: HeaderMap,
     uri: Uri,
     app: &HttpAppState,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_latest_series_feed(headers, uri, app, None).await
+    opds_v2_latest_series_feed(headers, uri, app, None, user).await
 }
 
 pub(crate) async fn opds_v2_library_latest_series(
@@ -501,16 +517,18 @@ pub(crate) async fn opds_v2_library_latest_series(
     uri: Uri,
     app: &HttpAppState,
     library_id: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_latest_series_feed(headers, uri, app, Some(library_id)).await
+    opds_v2_latest_series_feed(headers, uri, app, Some(library_id), user).await
 }
 
 pub(crate) async fn opds_v2_libraries_browse(
     headers: HeaderMap,
     uri: Uri,
     app: &HttpAppState,
+    user: &AuthUser,
 ) -> Response {
-    opds_v2_library_browse(headers, uri, app, None).await
+    opds_v2_library_browse(headers, uri, app, None, user).await
 }
 
 pub(crate) async fn opds_v2_library_browse(
@@ -518,15 +536,9 @@ pub(crate) async fn opds_v2_library_browse(
     uri: Uri,
     app: &HttpAppState,
     library_id: Option<&str>,
+    user: &AuthUser,
 ) -> Response {
-    if require_auth(&*app.services.runtime_identity, &headers).is_some() {
-        return opds_catalog_unauthorized_response(&headers);
-    }
-
-    let Some(allowed_library_ids) = allowed_library_ids(&*app.services.runtime_identity, &headers)
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
+    let allowed_library_ids = allowed_library_ids_for_user(user);
 
     if let Some(response) = validate_library_scope(
         app.services.opds_persisted.as_ref(),
@@ -551,7 +563,7 @@ pub(crate) async fn opds_v2_library_browse(
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
 
-    let restrictions = opds_restrictions(&*app.services.runtime_identity, &headers);
+    let restrictions = opds_restrictions_for_user(user);
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let browse_base_path = format!("/opds/v2/libraries{library_segment}/browse");

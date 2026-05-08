@@ -1,23 +1,24 @@
 use super::*;
 use komga_application::discovery::DiscoveryListService;
 
+#[derive(Clone)]
 pub struct HttpServices {
-    pub library_catalog: Box<dyn LibraryCatalogService>,
-    pub task_queue: Box<dyn TaskEngine>,
-    pub server_settings: Box<dyn ServerSettingsService>,
-    pub runtime_identity: Box<dyn IdentityService>,
-    pub operational_runtime: Box<dyn OperationalRuntimeService>,
-    pub operational_settings: Box<dyn OperationalSettingsService>,
-    pub media_assets: Box<dyn MediaAssetsService>,
-    pub opds_catalog: Box<dyn OpdsCatalogService>,
-    pub opds_persisted: Box<dyn OpdsPersistedService>,
-    pub discovery_authors: Box<dyn DiscoveryAuthorService>,
-    pub discovery_library_mapping: Box<dyn DiscoveryLibraryMappingService>,
-    pub discovery_collection_search: Box<dyn DiscoveryCollectionSearchService>,
-    pub discovery_readlist_search: Box<dyn DiscoveryReadlistSearchService>,
-    pub discovery_book_feeds: Box<dyn DiscoveryBookFeedService>,
-    pub discovery_detail: Box<dyn DiscoveryDetailService>,
-    pub discovery_list: Box<dyn DiscoveryListService>,
+    pub library_catalog: Arc<dyn LibraryCatalogService>,
+    pub task_queue: Arc<dyn TaskEngine>,
+    pub server_settings: Arc<dyn ServerSettingsService>,
+    pub runtime_identity: Arc<dyn IdentityService>,
+    pub operational_runtime: Arc<dyn OperationalRuntimeService>,
+    pub operational_settings: Arc<dyn OperationalSettingsService>,
+    pub media_assets: Arc<dyn MediaAssetsService>,
+    pub opds_catalog: Arc<dyn OpdsCatalogService>,
+    pub opds_persisted: Arc<dyn OpdsPersistedService>,
+    pub discovery_authors: Arc<dyn DiscoveryAuthorService>,
+    pub discovery_library_mapping: Arc<dyn DiscoveryLibraryMappingService>,
+    pub discovery_collection_search: Arc<dyn DiscoveryCollectionSearchService>,
+    pub discovery_readlist_search: Arc<dyn DiscoveryReadlistSearchService>,
+    pub discovery_book_feeds: Arc<dyn DiscoveryBookFeedService>,
+    pub discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub discovery_list: Arc<dyn DiscoveryListService>,
 }
 
 pub struct HttpAppState {
@@ -29,6 +30,7 @@ pub struct HttpAppState {
     pub services: HttpServices,
 }
 
+#[derive(Clone)]
 pub struct OperationalState {
     pub runtime: RuntimeState,
     pub startup_timing: StartupTimingState,
@@ -38,10 +40,10 @@ pub struct OperationalState {
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
     pub oauth2_account_creation: bool,
     pub oidc_email_verification: bool,
-    pub sse: Mutex<SseOperationalState>,
-    pub announcements_cache: Mutex<Option<RemoteCacheEntry>>,
-    pub releases_cache: Mutex<Option<RemoteCacheEntry>>,
-    pub transient_books: Mutex<TransientBooksStore>,
+    pub sse: Arc<Mutex<SseOperationalState>>,
+    pub announcements_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
+    pub releases_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
+    pub transient_books: Arc<Mutex<TransientBooksStore>>,
     pub shutdown_trigger: Option<watch::Sender<bool>>,
 }
 
@@ -216,9 +218,9 @@ fn current_unix_epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ReadProgressState {
-    pub progress_by_token: Mutex<HashMap<String, HashMap<String, ReadProgress>>>,
+    pub progress_by_token: Arc<Mutex<HashMap<String, HashMap<String, ReadProgress>>>>,
 }
 
 #[derive(Clone)]

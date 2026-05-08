@@ -1,44 +1,35 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use komga_application::operational::PersistedServerSettings;
 use serde_json::{Value, json};
-use std::sync::Arc;
 
-use crate::identity_access::auth::require_admin;
+use crate::identity_access::auth::Admin;
 use crate::operational::helpers::{
     effective_server_context_path, effective_server_port, invalid_settings_payload,
     is_valid_context_path, multi_source_number, multi_source_string,
 };
-use crate::state::{HttpAppState, OperationalSettings, RuntimeState};
+use crate::state::{OperationalSettings, RuntimeState, ServerSettingsState};
 
 pub(crate) async fn get_server_settings(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<ServerSettingsState>,
+    Admin(_admin): Admin,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let settings = match load_operational_settings(&app).await {
         Ok(settings) => settings,
         Err(response) => return response,
     };
 
-    Json(settings_json(&app.operational.runtime, &settings)).into_response()
+    Json(settings_json(&app.runtime, &settings)).into_response()
 }
 
 pub(crate) async fn update_server_settings(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<ServerSettingsState>,
+    Admin(_admin): Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_settings_payload("invalid settings payload");
     };
@@ -223,7 +214,6 @@ pub(crate) async fn update_server_settings(
     }
 
     if let Err(error) = app
-        .services
         .server_settings
         .apply_changes(&persistence_changes)
         .await
@@ -237,8 +227,8 @@ pub(crate) async fn update_server_settings(
 
     if let Some(value) = task_pool_size_change
         && let Err(error) = app
-            .services
             .task_queue
+            .engine
             .apply_task_pool_size(value as usize)
             .await
     {
@@ -278,9 +268,10 @@ fn operational_settings_from_persisted(settings: PersistedServerSettings) -> Ope
     operational
 }
 
-async fn load_operational_settings(app: &HttpAppState) -> Result<OperationalSettings, Response> {
-    app.services
-        .server_settings
+async fn load_operational_settings(
+    app: &ServerSettingsState,
+) -> Result<OperationalSettings, Response> {
+    app.server_settings
         .load_settings()
         .await
         .map(operational_settings_from_persisted)

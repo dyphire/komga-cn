@@ -4,16 +4,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::json;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::identity_access::auth::{AuthUser, user_payload_json};
 use crate::state::ClaimInitialAdminUserResult;
-use crate::state::HttpAppState;
+use crate::state::OperationalApiState;
 
-pub(crate) async fn get_claim_status(State(app): State<Arc<HttpAppState>>) -> Response {
+pub(crate) async fn get_claim_status(State(app): State<OperationalApiState>) -> Response {
     let is_claimed = app
-        .services
         .operational_settings
         .load_claim_status()
         .await
@@ -23,7 +21,7 @@ pub(crate) async fn get_claim_status(State(app): State<Arc<HttpAppState>>) -> Re
 }
 
 pub(crate) async fn post_claim(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
     let email = email_header_value(&headers, "x-komga-email");
@@ -33,7 +31,6 @@ pub(crate) async fn post_claim(
     };
 
     if app
-        .services
         .operational_settings
         .load_claim_status()
         .await
@@ -49,9 +46,8 @@ pub(crate) async fn post_claim(
 
     let created_user_id = generate_claimed_user_id();
     let created_user = match app
-        .services
         .operational_settings
-        .claim_initial_admin_user(created_user_id, email, hashed_password)
+        .claim_initial_admin_user(&created_user_id, &email, &hashed_password)
         .await
     {
         Ok(ClaimInitialAdminUserResult::Created(created_user)) => *created_user,

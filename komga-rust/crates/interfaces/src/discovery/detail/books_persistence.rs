@@ -51,7 +51,7 @@ pub async fn load_persisted_book_resource(
     let resource = app
         .services
         .discovery_detail
-        .load_persisted_book_resource(book_id.to_string())
+        .load_persisted_book_resource(book_id)
         .await?
         .map(|row| PersistedBookResource {
             library_id: row.library_id,
@@ -69,7 +69,7 @@ pub(super) async fn load_persisted_book_detail(
     let model = app
         .services
         .discovery_detail
-        .load_persisted_book_detail(book_id.to_string(), user_id.map(str::to_string))
+        .load_persisted_book_detail(book_id, user_id)
         .await?
         .map(|row| BookDetailReadModel {
             id: row.id,
@@ -179,7 +179,7 @@ pub(super) async fn load_persisted_book_sibling_detail(
     let Some(sibling_id) = app
         .services
         .discovery_detail
-        .load_persisted_book_sibling_id(book_id.to_string(), direction)
+        .load_persisted_book_sibling_id(book_id, direction)
         .await?
     else {
         return Ok(None);

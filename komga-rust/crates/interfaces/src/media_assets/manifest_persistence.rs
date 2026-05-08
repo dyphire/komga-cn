@@ -476,29 +476,25 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
 
 pub(crate) async fn build_persisted_book_manifest(
     app: &HttpAppState,
+    user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
-    let Some(user) = resolved_request_auth_user(&*app.services.runtime_identity, headers).await
-    else {
-        return Ok(ManifestBuildOutcome::NotFound);
-    };
-
     let Some((library_id, title, media_type)) =
         load_persisted_manifest_book_from_services(app, book_id).await?
     else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
 
-    if !user_can_access_library(&user, &library_id) {
+    if !user_can_access_library(user, &library_id) {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
     let Some(media) = load_persisted_book_media_from_services(app, book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
-    if !user_can_access_book_media(app, book_id, &user, &media).await {
+    if !user_can_access_book_media(app, book_id, user, &media).await {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
@@ -530,7 +526,7 @@ pub(crate) async fn build_persisted_book_manifest(
         let extension_blob = app
             .services
             .media_assets
-            .load_persisted_epub_extension_blob(book_id.to_string())
+            .load_persisted_epub_extension_blob(book_id)
             .await?;
         let payload = persisted_epub_manifest_payload(
             headers,

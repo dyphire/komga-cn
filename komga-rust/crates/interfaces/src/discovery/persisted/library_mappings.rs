@@ -71,9 +71,7 @@ pub async fn load_collection_ordering(
     backend: &dyn PersistedDiscoveryListDataSource,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
-    backend
-        .load_collection_ordering(collection_id.to_string())
-        .await
+    backend.load_collection_ordering(collection_id).await
 }
 
 pub async fn load_readlist_memberships(

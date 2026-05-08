@@ -48,7 +48,7 @@ pub async fn load_persisted_series_resource(
     let resource = app
         .services
         .discovery_detail
-        .load_persisted_series_resource(series_id.to_string())
+        .load_persisted_series_resource(series_id)
         .await?
         .map(|row| PersistedSeriesResource {
             library_id: row.library_id,
@@ -100,7 +100,7 @@ pub(super) async fn load_persisted_series_detail(
     let Some(row) = app
         .services
         .discovery_detail
-        .load_persisted_series_detail(series_id.to_string())
+        .load_persisted_series_detail(series_id)
         .await?
     else {
         return Ok(None);
@@ -130,7 +130,7 @@ pub(super) async fn load_persisted_series_detail(
         let counts = app
             .services
             .discovery_detail
-            .load_series_read_progress_counts(user_id.to_string())
+            .load_series_read_progress_counts(user_id)
             .await?
             .get(series_id)
             .copied();
@@ -286,7 +286,7 @@ pub(super) async fn load_persisted_series_collections(
     let rows = app
         .services
         .discovery_detail
-        .load_persisted_series_collections(series_id.to_string())
+        .load_persisted_series_collections(series_id)
         .await?;
     Ok(rows
         .into_iter()
@@ -309,7 +309,7 @@ pub async fn load_existing_series_metadata(
     let metadata = app
         .services
         .discovery_detail
-        .load_existing_series_metadata(series_id.to_string())
+        .load_existing_series_metadata(series_id)
         .await?
         .map(|row| ExistingSeriesMetadata {
             status: row.status,
@@ -353,7 +353,7 @@ pub async fn persist_series_metadata_update(
     let updated = app
         .services
         .discovery_detail
-        .persist_series_metadata_update(series_id.to_string(), update)
+        .persist_series_metadata_update(series_id, update)
         .await?;
     if updated && let Some(series) = load_persisted_series_resource(app, series_id).await? {
         register_runtime_sse_event(
@@ -375,7 +375,7 @@ pub async fn sync_series_search_documents_after_metadata_update(
 ) -> Result<(), String> {
     app.services
         .discovery_detail
-        .refresh_series_search_documents_after_metadata_update(series_id.to_string())
+        .refresh_series_search_documents_after_metadata_update(series_id)
         .await
 }
 

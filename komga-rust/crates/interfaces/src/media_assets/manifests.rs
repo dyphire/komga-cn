@@ -1,17 +1,23 @@
 use super::*;
+use crate::identity_access::auth::Authenticated;
+use crate::state::MediaAssetsState;
 use axum::extract::State;
-use std::sync::Arc;
 
 pub async fn book_manifest(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Default).await {
+    match build_persisted_book_manifest(
+        app.root.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        ManifestVariant::Default,
+    )
+    .await
+    {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -28,15 +34,20 @@ pub async fn book_manifest(
 }
 
 pub async fn book_manifest_epub(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Epub).await {
+    match build_persisted_book_manifest(
+        app.root.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        ManifestVariant::Epub,
+    )
+    .await
+    {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -53,15 +64,20 @@ pub async fn book_manifest_epub(
 }
 
 pub async fn book_manifest_pdf(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Pdf).await {
+    match build_persisted_book_manifest(
+        app.root.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        ManifestVariant::Pdf,
+    )
+    .await
+    {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],
@@ -78,15 +94,20 @@ pub async fn book_manifest_pdf(
 }
 
 pub async fn book_manifest_divina(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<MediaAssetsState>,
+    Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
-    match build_persisted_book_manifest(&app, &headers, &book_id, ManifestVariant::Divina).await {
+    match build_persisted_book_manifest(
+        app.root.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        ManifestVariant::Divina,
+    )
+    .await
+    {
         Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, content_type)],

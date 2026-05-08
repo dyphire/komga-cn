@@ -1,28 +1,23 @@
 use axum::Json;
 use axum::extract::Path as AxumPath;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
-use crate::identity_access::auth::require_request_auth;
-use crate::state::HttpAppState;
+use crate::identity_access::auth::Authenticated;
+use crate::state::OperationalApiState;
 
 #[derive(Embed)]
 #[folder = "../../../komga/src/main/resources/embeddedFonts"]
 struct EmbeddedFonts;
 
 pub(crate) async fn get_fonts_families(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _: Authenticated,
 ) -> Response {
-    if let Some(response) = require_request_auth(&*app.services.runtime_identity, &headers).await {
-        return response;
-    }
-
     let families = merged_font_families(&app);
     Json(Value::Array(
         families.into_iter().map(Value::String).collect(),
@@ -30,14 +25,13 @@ pub(crate) async fn get_fonts_families(
     .into_response()
 }
 
-fn merged_font_families(app: &HttpAppState) -> Vec<String> {
+fn merged_font_families(app: &OperationalApiState) -> Vec<String> {
     let mut families = embedded_font_families()
         .into_iter()
         .collect::<BTreeSet<_>>();
     families.extend(
-        app.services
-            .operational_settings
-            .list_font_families(app.operational.runtime.fonts_data_directory.clone()),
+        app.operational_settings
+            .list_font_families(&app.operational.runtime.fonts_data_directory),
     );
     families.into_iter().collect()
 }
@@ -100,7 +94,7 @@ fn load_embedded_font_family_css(font_family: &str) -> Option<String> {
     )
 }
 
-fn filesystem_font_family_exists(app: &HttpAppState, font_family: &str) -> bool {
+fn filesystem_font_family_exists(app: &OperationalApiState, font_family: &str) -> bool {
     app.operational
         .runtime
         .fonts_data_directory
@@ -115,7 +109,7 @@ struct FontCharacteristics {
 }
 
 pub(crate) async fn get_font_file(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
     AxumPath((font_family, font_file)): AxumPath<(String, String)>,
 ) -> Response {
     if font_family.contains('/')
@@ -132,18 +126,12 @@ pub(crate) async fn get_font_file(
 
     let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
     let bytes = if filesystem_font_family_exists(&app, &font_family) {
-        app.services.operational_settings.load_font_file(
-            fonts_directory.clone(),
-            font_family.clone(),
-            font_file.clone(),
-        )
+        app.operational_settings
+            .load_font_file(&fonts_directory, &font_family, &font_file)
     } else {
         load_embedded_font_file(&font_family, &font_file).or_else(|| {
-            app.services.operational_settings.load_font_file(
-                fonts_directory.clone(),
-                font_family.clone(),
-                font_file.clone(),
-            )
+            app.operational_settings
+                .load_font_file(&fonts_directory, &font_family, &font_file)
         })
     };
 
@@ -164,7 +152,7 @@ pub(crate) async fn get_font_file(
 }
 
 pub(crate) async fn get_font_family_css(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
     AxumPath(font_family): AxumPath<String>,
 ) -> Response {
     if font_family.contains('/') || font_family.contains('\\') {
@@ -173,14 +161,12 @@ pub(crate) async fn get_font_family_css(
 
     let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
     let css = if filesystem_font_family_exists(&app, &font_family) {
-        app.services
-            .operational_settings
-            .load_font_family_css(fonts_directory.clone(), font_family.clone())
+        app.operational_settings
+            .load_font_family_css(&fonts_directory, &font_family)
     } else {
         load_embedded_font_family_css(&font_family).or_else(|| {
-            app.services
-                .operational_settings
-                .load_font_family_css(fonts_directory.clone(), font_family.clone())
+            app.operational_settings
+                .load_font_family_css(&fonts_directory, &font_family)
         })
     };
 

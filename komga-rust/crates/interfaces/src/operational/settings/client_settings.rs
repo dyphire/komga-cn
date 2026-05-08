@@ -6,19 +6,16 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
-use std::sync::Arc;
 
-use crate::identity_access::auth::{require_admin, require_auth, resolved_auth_user, user_id};
-use crate::state::HttpAppState;
+use crate::identity_access::auth::{Admin, Authenticated, resolved_auth_user, user_id};
+use crate::state::OperationalApiState;
 
 pub(crate) async fn get_client_settings_global(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
-    let include_unauthorized_only =
-        resolved_auth_user(&*app.services.runtime_identity, &headers).is_none();
+    let include_unauthorized_only = resolved_auth_user(&*app.identity.service, &headers).is_none();
     let settings = match app
-        .services
         .operational_settings
         .load_client_settings_global(include_unauthorized_only)
         .await
@@ -30,20 +27,12 @@ pub(crate) async fn get_client_settings_global(
 }
 
 pub(crate) async fn get_client_settings_user(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    Authenticated(current_user): Authenticated,
 ) -> Response {
-    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let settings = match app
-        .services
         .operational_settings
-        .load_client_settings_user(user_id(&current_user).to_string())
+        .load_client_settings_user(user_id(&current_user))
         .await
     {
         Ok(settings) => settings,
@@ -53,23 +42,18 @@ pub(crate) async fn get_client_settings_user(
 }
 
 pub(crate) async fn patch_client_settings_global(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let settings = match parse_client_settings_global_payload(&body) {
         Ok(settings) => settings,
         Err(response) => return response,
     };
 
     match app
-        .services
         .operational_settings
-        .upsert_client_settings_global(settings)
+        .upsert_client_settings_global(&settings)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -78,26 +62,18 @@ pub(crate) async fn patch_client_settings_global(
 }
 
 pub(crate) async fn patch_client_settings_user(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    Authenticated(current_user): Authenticated,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let settings = match parse_client_settings_user_payload(&body) {
         Ok(settings) => settings,
         Err(response) => return response,
     };
 
     match app
-        .services
         .operational_settings
-        .upsert_client_settings_user(user_id(&current_user).to_string(), settings)
+        .upsert_client_settings_user(user_id(&current_user), &settings)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -106,23 +82,18 @@ pub(crate) async fn patch_client_settings_user(
 }
 
 pub(crate) async fn delete_client_settings_global(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    _: Admin,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_admin(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let keys = match parse_client_settings_delete_keys(&body) {
         Ok(keys) => keys,
         Err(response) => return response,
     };
 
     match app
-        .services
         .operational_settings
-        .delete_client_settings_global(keys)
+        .delete_client_settings_global(&keys)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -131,26 +102,18 @@ pub(crate) async fn delete_client_settings_global(
 }
 
 pub(crate) async fn delete_client_settings_user(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
+    State(app): State<OperationalApiState>,
+    Authenticated(current_user): Authenticated,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-    let Some(current_user) = resolved_auth_user(&*app.services.runtime_identity, &headers) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let keys = match parse_client_settings_delete_keys(&body) {
         Ok(keys) => keys,
         Err(response) => return response,
     };
 
     match app
-        .services
         .operational_settings
-        .delete_client_settings_user(user_id(&current_user).to_string(), keys)
+        .delete_client_settings_user(user_id(&current_user), &keys)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

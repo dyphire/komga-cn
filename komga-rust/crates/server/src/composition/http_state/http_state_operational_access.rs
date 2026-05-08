@@ -63,10 +63,10 @@ impl OperationalRuntimeService for RuntimeOperationalRuntimeService {
 
     async fn load_sqlite_pool_snapshots(
         &self,
-        paths: Vec<PathBuf>,
+        paths: &[PathBuf],
     ) -> Result<Vec<SqlitePoolSnapshot>, String> {
         Ok(
-            operational_metrics_access::load_sqlite_pool_snapshots(paths.as_slice())
+            operational_metrics_access::load_sqlite_pool_snapshots(paths)
                 .into_iter()
                 .map(|snapshot| SqlitePoolSnapshot {
                     path: snapshot.path,
@@ -96,26 +96,23 @@ pub(super) struct RuntimeOperationalSettingsService {
 
 #[async_trait]
 impl OperationalSettingsService for RuntimeOperationalSettingsService {
-    async fn load_announcement_read_ids(
-        &self,
-        user_id: String,
-    ) -> Result<Vec<String>, sqlx::Error> {
+    async fn load_announcement_read_ids(&self, user_id: &str) -> Result<Vec<String>, sqlx::Error> {
         komga_infrastructure::announcements_access::load_announcement_read_ids(
             self.db.database_file(),
-            &user_id,
+            user_id,
         )
         .await
     }
 
     async fn save_announcements_read(
         &self,
-        user_id: String,
-        ids: Vec<String>,
+        user_id: &str,
+        ids: &[String],
     ) -> Result<(), sqlx::Error> {
         komga_infrastructure::announcements_access::save_announcements_read(
             self.db.database_file(),
-            &user_id,
-            ids.as_slice(),
+            user_id,
+            ids,
         )
         .await
     }
@@ -126,15 +123,15 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn claim_initial_admin_user(
         &self,
-        user_id: String,
-        email: String,
-        password_hash: String,
+        user_id: &str,
+        email: &str,
+        password_hash: &str,
     ) -> Result<ClaimInitialAdminUserResult, sqlx::Error> {
         komga_infrastructure::claims_access::claim_initial_admin_user(
             self.db.database_file(),
-            &user_id,
-            &email,
-            &password_hash,
+            user_id,
+            email,
+            password_hash,
         )
         .await
         .map(|value| match value {
@@ -170,86 +167,83 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         .await
     }
 
-    async fn load_client_settings_user(&self, user_id: String) -> Result<Value, sqlx::Error> {
-        operational_settings_access::load_client_settings_user(self.db.database_file(), &user_id)
+    async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, sqlx::Error> {
+        operational_settings_access::load_client_settings_user(self.db.database_file(), user_id)
             .await
     }
 
     async fn upsert_client_settings_global(
         &self,
-        settings: Vec<(String, String, bool)>,
+        settings: &[(String, String, bool)],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::upsert_client_settings_global(
             self.db.database_file(),
-            settings.as_slice(),
+            settings,
         )
         .await
     }
 
     async fn upsert_client_settings_user(
         &self,
-        user_id: String,
-        settings: Vec<(String, String)>,
+        user_id: &str,
+        settings: &[(String, String)],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::upsert_client_settings_user(
             self.db.database_file(),
-            &user_id,
-            settings.as_slice(),
+            user_id,
+            settings,
         )
         .await
     }
 
-    async fn delete_client_settings_global(&self, keys: Vec<String>) -> Result<(), sqlx::Error> {
-        operational_settings_access::delete_client_settings_global(
-            self.db.database_file(),
-            keys.as_slice(),
-        )
-        .await
+    async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), sqlx::Error> {
+        operational_settings_access::delete_client_settings_global(self.db.database_file(), keys)
+            .await
     }
 
     async fn delete_client_settings_user(
         &self,
-        user_id: String,
-        keys: Vec<String>,
+        user_id: &str,
+        keys: &[String],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::delete_client_settings_user(
             self.db.database_file(),
-            &user_id,
-            keys.as_slice(),
+            user_id,
+            keys,
         )
         .await
     }
 
-    fn list_directory_entries(&self, path: PathBuf, directories_only: bool) -> Vec<Value> {
-        browser::list_directory_entries(path.as_path(), directories_only)
+    fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
+        browser::list_directory_entries(path, directories_only)
     }
 
-    fn list_font_families(&self, path: PathBuf) -> Vec<String> {
-        fonts::list_font_families(path.as_path())
+    fn list_font_families(&self, path: &Path) -> Vec<String> {
+        fonts::list_font_families(path)
     }
 
-    fn load_font_family_css(&self, path: PathBuf, family: String) -> Option<String> {
-        fonts::load_font_family_css(path.as_path(), &family)
+    fn load_font_family_css(&self, path: &Path, family: &str) -> Option<String> {
+        fonts::load_font_family_css(path, family)
     }
 
-    fn load_font_file(&self, path: PathBuf, family: String, file: String) -> Option<Vec<u8>> {
-        fonts::load_font_file(path.as_path(), &family, &file)
+    fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
+        fonts::load_font_file(path, family, file)
     }
 
-    async fn delete_syncpoints_by_user(&self, user_id: String) -> Result<(), sqlx::Error> {
-        operational_settings_access::delete_syncpoints_by_user(self.db.database_file(), &user_id)
+    async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), sqlx::Error> {
+        operational_settings_access::delete_syncpoints_by_user(self.db.database_file(), user_id)
             .await
     }
 
     async fn delete_syncpoints_by_user_and_key_ids(
         &self,
-        user_id: String,
-        key_ids: Vec<String>,
+        user_id: &str,
+        key_ids: &[String],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::delete_syncpoints_by_user_and_key_ids(
             self.db.database_file(),
-            &user_id,
-            key_ids.as_slice(),
+            user_id,
+            key_ids,
         )
         .await
     }
@@ -266,36 +260,36 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn load_page_hash_matches_page(
         &self,
-        page_hash: String,
+        page_hash: &str,
         page: u64,
         size: u64,
-        sorts: Vec<String>,
+        sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
         page_hashes_access::load_page_hash_matches_page(
             self.db.database_file(),
-            &page_hash,
+            page_hash,
             page,
             size,
-            &sorts,
+            sorts,
         )
         .await
     }
 
     async fn load_page_hash_thumbnail(
         &self,
-        page_hash: String,
+        page_hash: &str,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-        page_hashes_access::load_page_hash_thumbnail(self.db.database_file(), &page_hash).await
+        page_hashes_access::load_page_hash_thumbnail(self.db.database_file(), page_hash).await
     }
 
     async fn load_unknown_page_hash_thumbnail(
         &self,
-        page_hash: String,
+        page_hash: &str,
         resize_to: Option<u32>,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
         page_hashes_access::load_unknown_page_hash_thumbnail(
             self.db.database_file(),
-            &page_hash,
+            page_hash,
             resize_to,
         )
         .await
@@ -305,15 +299,15 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         &self,
         page: u64,
         size: u64,
-        actions: Vec<String>,
-        sorts: Vec<String>,
+        actions: &[String],
+        sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
         page_hashes_access::load_page_hashes_page(
             self.db.database_file(),
             page,
             size,
-            &actions,
-            &sorts,
+            actions,
+            sorts,
         )
         .await
     }
@@ -322,35 +316,35 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         &self,
         page: u64,
         size: u64,
-        sorts: Vec<String>,
+        sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
         page_hashes_access::load_page_hashes_unknown_page(
             self.db.database_file(),
             page,
             size,
-            &sorts,
+            sorts,
         )
         .await
     }
 
     async fn load_page_hash_delete_targets(
         &self,
-        hash: String,
+        hash: &str,
     ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-        page_hashes_access::load_page_hash_delete_targets(self.db.database_file(), &hash).await
+        page_hashes_access::load_page_hash_delete_targets(self.db.database_file(), hash).await
     }
 
     async fn upsert_page_hash(
         &self,
-        hash: String,
+        hash: &str,
         size: Option<i64>,
-        action: String,
+        action: &str,
     ) -> Result<(), sqlx::Error> {
-        page_hashes_access::upsert_page_hash(self.db.database_file(), &hash, size, &action).await
+        page_hashes_access::upsert_page_hash(self.db.database_file(), hash, size, action).await
     }
 
-    fn analyze_transient_book(&self, path: String) -> TransientBookAnalysis {
-        let value = transient_books::analyze_transient_book(&path);
+    fn analyze_transient_book(&self, path: &str) -> TransientBookAnalysis {
+        let value = transient_books::analyze_transient_book(path);
         TransientBookAnalysis {
             status: value.status,
             media_type: value.media_type,
@@ -376,26 +370,23 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
 
     async fn infer_transient_series_and_number(
         &self,
-        transient_name: String,
+        transient_name: &str,
     ) -> (Option<String>, Option<f64>) {
-        transient_books::infer_transient_series_and_number(self.db.database_file(), &transient_name)
+        transient_books::infer_transient_series_and_number(self.db.database_file(), transient_name)
             .await
     }
 
-    fn list_transient_book_entries(&self, root: PathBuf) -> Vec<Value> {
-        transient_books::list_transient_book_entries(root.as_path())
+    fn list_transient_book_entries(&self, root: &Path) -> Vec<Value> {
+        transient_books::list_transient_book_entries(root)
     }
 
-    async fn validate_transient_scan_root(&self, path: String) -> Result<(), String> {
-        transient_books::validate_transient_scan_root(
-            self.db.database_file(),
-            std::path::Path::new(&path),
-        )
-        .await
+    async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
+        transient_books::validate_transient_scan_root(self.db.database_file(), Path::new(path))
+            .await
     }
 
-    fn load_transient_book_file_metadata(&self, path: String) -> Option<TransientBookFileMetadata> {
-        transient_books::load_transient_book_file_metadata(&path).map(|value| {
+    fn load_transient_book_file_metadata(&self, path: &str) -> Option<TransientBookFileMetadata> {
+        transient_books::load_transient_book_file_metadata(path).map(|value| {
             TransientBookFileMetadata {
                 file_last_modified_unix_nanos: value.file_last_modified_unix_nanos,
                 size_bytes: value.size_bytes,
@@ -403,35 +394,35 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         })
     }
 
-    fn load_transient_book_media(&self, path: String) -> Option<Vec<u8>> {
-        transient_books::load_transient_book_media(&path)
+    fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>> {
+        transient_books::load_transient_book_media(path)
     }
 
-    fn transient_book_content_type(&self, path: String, media_type: String) -> &'static str {
-        transient_books::transient_book_content_type(&path, &media_type)
+    fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str {
+        transient_books::transient_book_content_type(path, media_type)
     }
 
     fn transient_book_page_content(
         &self,
-        path: String,
-        media_type: String,
-        pages: Vec<TransientBookPage>,
+        path: &str,
+        media_type: &str,
+        pages: &[TransientBookPage],
         page_number: u32,
     ) -> Option<(String, Vec<u8>)> {
         let pages = pages
-            .into_iter()
+            .iter()
             .map(|page| transient_books::TransientBookPage {
                 number: page.number,
-                file_name: page.file_name,
-                media_type: page.media_type,
+                file_name: page.file_name.clone(),
+                media_type: page.media_type.clone(),
                 width: page.width,
                 height: page.height,
                 size_bytes: page.size_bytes,
             })
             .collect::<Vec<_>>();
         transient_books::transient_book_page_content(
-            &path,
-            &media_type,
+            path,
+            media_type,
             pages.as_slice(),
             page_number,
         )

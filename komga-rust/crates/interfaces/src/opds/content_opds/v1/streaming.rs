@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::HttpAppState;
 
 pub(super) async fn build_book_feed_acquisition_entries(
     app: &HttpAppState,
@@ -203,7 +204,7 @@ async fn load_divina_page_media_types_for_opds(
     book_id: &str,
 ) -> Vec<String> {
     let persisted = media_assets
-        .load_persisted_book_pages(book_id.to_string())
+        .load_persisted_book_pages(book_id)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -219,10 +220,7 @@ async fn load_divina_page_media_types_for_opds(
         return dedup_media_types(persisted);
     }
 
-    let Ok(Some(media)) = media_assets
-        .load_persisted_book_media(book_id.to_string())
-        .await
-    else {
+    let Ok(Some(media)) = media_assets.load_persisted_book_media(book_id).await else {
         return vec![];
     };
 
@@ -233,7 +231,7 @@ async fn load_divina_page_media_types_for_opds(
 
     dedup_media_types(
         media_assets
-            .load_archive_page_rows(media)
+            .load_archive_page_rows(&media)
             .await
             .unwrap_or_default()
             .into_iter()

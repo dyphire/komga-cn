@@ -29,9 +29,7 @@ pub(crate) async fn load_persisted_books_page(
         && !search.is_empty()
     {
         let total_count = backend.load_persisted_book_count().await?;
-        let candidate_ids = backend
-            .search_book_ids(search.to_string(), total_count.max(1))
-            .await?;
+        let candidate_ids = backend.search_book_ids(search, total_count.max(1)).await?;
         if candidate_ids.is_empty() {
             books.clear();
         } else {
@@ -41,15 +39,12 @@ pub(crate) async fn load_persisted_books_page(
                 .map(|(index, id)| (id.clone(), index))
                 .collect();
             books = backend
-                .load_persisted_book_summaries_by_ids(
-                    context.user_id.as_deref().map(str::to_string),
-                    candidate_ids,
-                )
+                .load_persisted_book_summaries_by_ids(context.user_id.as_deref(), &candidate_ids)
                 .await?;
         }
     } else {
         books = backend
-            .load_persisted_book_summaries(context.user_id.as_deref().map(str::to_string))
+            .load_persisted_book_summaries(context.user_id.as_deref())
             .await?;
     }
 

@@ -12,7 +12,7 @@ pub async fn persisted_api_key_comment_exists(
     comment: &str,
 ) -> Option<bool> {
     identity
-        .persisted_api_key_comment_exists(user_id.to_string(), comment.to_string())
+        .persisted_api_key_comment_exists(user_id, comment)
         .await
 }
 
@@ -20,30 +20,28 @@ pub async fn persisted_api_key_metadata(
     identity: &dyn IdentityService,
     headers: &HeaderMap,
 ) -> Option<PersistedApiKeyMetadata> {
-    identity.persisted_api_key_metadata(headers.clone()).await
+    identity.persisted_api_key_metadata(headers).await
 }
 
 pub async fn persisted_api_key_user(
     identity: &dyn IdentityService,
     headers: &HeaderMap,
 ) -> Option<AuthOutcome> {
-    identity.persisted_api_key_user(headers.clone()).await
+    identity.persisted_api_key_user(headers).await
 }
 
 pub async fn persisted_api_key_user_by_token(
     identity: &dyn IdentityService,
     api_key: &str,
 ) -> Option<AuthOutcome> {
-    identity
-        .persisted_api_key_user_by_token(api_key.to_string())
-        .await
+    identity.persisted_api_key_user_by_token(api_key).await
 }
 
 pub async fn persisted_basic_user(
     identity: &dyn IdentityService,
     headers: &HeaderMap,
 ) -> Option<AuthOutcome> {
-    identity.persisted_basic_user(headers.clone()).await
+    identity.persisted_basic_user(headers).await
 }
 
 pub async fn persisted_cleanup_authentication_activity(
@@ -57,9 +55,7 @@ pub async fn persisted_create_api_key(
     user_id: &str,
     comment: &str,
 ) -> Option<PersistedApiKey> {
-    identity
-        .persisted_create_api_key(user_id.to_string(), comment.to_string())
-        .await
+    identity.persisted_create_api_key(user_id, comment).await
 }
 
 pub async fn persisted_delete_api_key_by_id(
@@ -68,7 +64,7 @@ pub async fn persisted_delete_api_key_by_id(
     api_key_id: &str,
 ) -> Option<bool> {
     identity
-        .persisted_delete_api_key_by_id(user_id.to_string(), api_key_id.to_string())
+        .persisted_delete_api_key_by_id(user_id, api_key_id)
         .await
 }
 
@@ -78,10 +74,7 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
     api_key_id: &str,
 ) -> Option<PersistedAuthenticationActivity> {
     identity
-        .persisted_latest_authentication_activity_by_user_and_api_key(
-            user_id.to_string(),
-            api_key_id.to_string(),
-        )
+        .persisted_latest_authentication_activity_by_user_and_api_key(user_id, api_key_id)
         .await
 }
 
@@ -89,7 +82,7 @@ pub async fn persisted_list_api_keys(
     identity: &dyn IdentityService,
     user_id: &str,
 ) -> Option<Vec<PersistedApiKey>> {
-    identity.persisted_list_api_keys(user_id.to_string()).await
+    identity.persisted_list_api_keys(user_id).await
 }
 
 pub async fn persisted_list_authentication_activity(
@@ -97,7 +90,7 @@ pub async fn persisted_list_authentication_activity(
     user_id: Option<&str>,
 ) -> Option<Vec<PersistedAuthenticationActivity>> {
     identity
-        .persisted_list_authentication_activity(user_id.map(str::to_string))
+        .persisted_list_authentication_activity(user_id)
         .await
 }
 
@@ -108,11 +101,7 @@ pub async fn persisted_record_failed_authentication_activity(
     error: &str,
 ) -> Option<()> {
     identity
-        .persisted_record_failed_authentication_activity(
-            email.map(str::to_string),
-            input,
-            error.to_string(),
-        )
+        .persisted_record_failed_authentication_activity(email, input, error)
         .await
 }
 
@@ -122,7 +111,7 @@ pub async fn persisted_record_successful_authentication_activity(
     input: AuthenticationActivityWriteInput,
 ) -> Option<()> {
     identity
-        .persisted_record_successful_authentication_activity(user.clone(), input)
+        .persisted_record_successful_authentication_activity(user, input)
         .await
 }
 
@@ -132,7 +121,7 @@ pub async fn persisted_update_password_by_user_id(
     password: &str,
 ) -> Option<bool> {
     identity
-        .persisted_update_password_by_user_id(user_id.to_string(), password.to_string())
+        .persisted_update_password_by_user_id(user_id, password)
         .await
 }
 

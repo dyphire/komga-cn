@@ -84,7 +84,7 @@ pub(crate) async fn load_persisted_series_page(
     {
         let total_count = backend.load_persisted_series_count().await?;
         let ranked_candidates = backend
-            .search_series_scored_ids(search.to_string(), total_count.max(1))
+            .search_series_scored_ids(search, total_count.max(1))
             .await?;
         let candidate_ids = ranked_candidates
             .iter()
@@ -99,7 +99,7 @@ pub(crate) async fn load_persisted_series_page(
                 .map(|(index, (_, id))| (id.clone(), index))
                 .collect();
             series = backend
-                .load_persisted_series_summaries_by_ids(candidate_ids)
+                .load_persisted_series_summaries_by_ids(&candidate_ids)
                 .await?;
         }
     } else {
@@ -309,9 +309,7 @@ pub(crate) async fn load_persisted_series_page(
             return Ok(page);
         };
 
-        let read_progress = backend
-            .load_series_read_progress_counts(user_id.to_string())
-            .await?;
+        let read_progress = backend.load_series_read_progress_counts(user_id).await?;
 
         if let Some(read_statuses) = filters.read_statuses.as_ref() {
             series = filter_rows(series, |row| {
@@ -739,7 +737,7 @@ pub(crate) async fn load_persisted_series_page(
         )
     }) {
         if let Some(user_id) = context.user_id.as_deref() {
-            backend.load_series_read_dates(user_id.to_string()).await?
+            backend.load_series_read_dates(user_id).await?
         } else {
             HashMap::new()
         }

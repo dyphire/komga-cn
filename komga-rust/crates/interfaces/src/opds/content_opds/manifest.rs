@@ -1,10 +1,10 @@
+use crate::identity_access::auth::AuthUser;
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
 use crate::discovery::detail::load_persisted_book_series_id;
-use crate::identity_access::auth::require_auth;
 use crate::media_assets::manifest_persistence::build_persisted_book_manifest;
 use crate::media_assets::types::{ManifestBuildOutcome, ManifestVariant};
 use crate::request_urls::app_absolute_url;
@@ -19,8 +19,9 @@ pub(crate) async fn opds_manifest(
     headers: HeaderMap,
     app: &HttpAppState,
     book_id: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_manifest_variant(headers, app, book_id, None).await
+    opds_manifest_variant(headers, app, book_id, None, user).await
 }
 
 pub(crate) async fn opds_manifest_with_profile(
@@ -28,8 +29,9 @@ pub(crate) async fn opds_manifest_with_profile(
     app: &HttpAppState,
     book_id: &str,
     profile: &str,
+    user: &AuthUser,
 ) -> Response {
-    opds_manifest_variant(headers, app, book_id, Some(profile)).await
+    opds_manifest_variant(headers, app, book_id, Some(profile), user).await
 }
 
 async fn opds_manifest_variant(
@@ -37,16 +39,13 @@ async fn opds_manifest_variant(
     app: &HttpAppState,
     book_id: &str,
     profile: Option<&str>,
+    user: &AuthUser,
 ) -> Response {
-    if let Some(response) = require_auth(&*app.services.runtime_identity, &headers) {
-        return response;
-    }
-
     let Some(variant) = manifest_variant(profile) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    match build_persisted_book_manifest(app, &headers, book_id, variant).await {
+    match build_persisted_book_manifest(app, user, &headers, book_id, variant).await {
         Ok(ManifestBuildOutcome::Found(_, mut payload)) => {
             let series_id = load_persisted_book_series_id(app, book_id)
                 .await

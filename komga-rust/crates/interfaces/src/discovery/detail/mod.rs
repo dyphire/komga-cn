@@ -18,7 +18,6 @@ use crate::helpers::{
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
     query_values, restricted_book_url,
 };
-use crate::identity_access::auth::{require_request_admin, require_request_auth};
 use crate::state::HttpAppState;
 use crate::state::{
     PersistedBookAuthorRecord, PersistedBookSiblingDirectionRecord,

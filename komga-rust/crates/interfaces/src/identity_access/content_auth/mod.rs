@@ -14,8 +14,8 @@ use crate::access_log::RequestConnectionInfo;
 use crate::discovery_auth::principal::principal_from_user_payload;
 
 use crate::identity_access::auth::{
-    AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user, bootstrap_user,
-    bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
+    Admin, AuthOutcome, AuthUser, PersistedAuthenticationActivity, bootstrap_api_key_user,
+    bootstrap_user, bootstrap_user_with_remember_me_cookies, bootstrap_user_with_remember_me_token,
     empty_auth_token_supplied, expired_remember_me_cookie, expired_session_cookie,
     invalidate_session_token, invalidate_user_sessions_for_runtime_key,
     persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
@@ -23,12 +23,12 @@ use crate::identity_access::auth::{
     persisted_list_api_keys, persisted_list_authentication_activity,
     persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
     persisted_users, remember_me_max_age_seconds, remember_me_requested,
-    remember_me_token_for_user_with_runtime_key, require_admin, require_auth, resolved_auth_user,
-    resolved_token, session_token_for_user_with_runtime_key, session_token_from_headers,
+    remember_me_token_for_user_with_runtime_key, resolved_auth_user, resolved_token,
+    session_token_for_user_with_runtime_key, session_token_from_headers,
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::operational::register_session_expired_event;
-use crate::state::{HttpAppState, IdentityService};
+use crate::state::{HttpAppState, IdentityAccessState, IdentityService};
 use komga_application::identity_access::{
     AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
 };
@@ -215,8 +215,8 @@ pub(super) async fn login_set_cookie(
     identity: &dyn IdentityService,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = require_auth(identity, &headers) {
-        return response;
+    if resolved_auth_user(identity, &headers).is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
     let token = resolved_token(&headers);
@@ -238,13 +238,10 @@ pub(super) async fn login_set_cookie(
         .into_response()
 }
 
-pub(super) async fn users_list(headers: HeaderMap, app: &HttpAppState) -> Response {
-    let identity = &*app.services.runtime_identity;
-    if let Some(response) = require_admin(identity, &headers) {
-        return response;
-    }
-
-    let users = persisted_users(identity).await.unwrap_or_default();
+pub(super) async fn users_list(app: &HttpAppState) -> Response {
+    let users = persisted_users(&*app.services.runtime_identity)
+        .await
+        .unwrap_or_default();
 
     Json(users.iter().map(user_payload_json).collect::<Vec<_>>()).into_response()
 }
@@ -362,7 +359,7 @@ pub(super) async fn users_delete(
     match app
         .services
         .runtime_identity
-        .delete_auth_user(target_user_id.clone())
+        .delete_auth_user(&target_user_id)
         .await
     {
         Ok(true) => {
@@ -449,7 +446,7 @@ pub(super) async fn users_update(
         .services
         .runtime_identity
         .update_auth_user(
-            target_user_id.clone(),
+            &target_user_id,
             UpdateAuthUserInput {
                 roles: roles_patch,
                 shared_libraries: shared_libraries_patch_raw.map(|shared_libraries| {
@@ -486,8 +483,8 @@ pub(super) async fn users_update(
 }
 
 pub(super) async fn logout(identity: &dyn IdentityService, headers: HeaderMap) -> Response {
-    if let Some(response) = require_auth(identity, &headers) {
-        return response;
+    if resolved_auth_user(identity, &headers).is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
     }
 
     if let Some(token) = session_token_from_headers(&headers) {
@@ -567,130 +564,134 @@ pub(super) async fn users_by_id_password(
 }
 
 pub(crate) async fn users_me_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     request: Request,
 ) -> Response {
-    users_me(&app, request).await
+    users_me(app.root.as_ref(), request).await
 }
 
-pub(crate) async fn users_list_route(
-    State(app): State<Arc<HttpAppState>>,
-    headers: HeaderMap,
-) -> Response {
-    users_list(headers, &app).await
+pub(crate) async fn users_list_route(State(app): State<IdentityAccessState>, _: Admin) -> Response {
+    users_list(app.root.as_ref()).await
 }
 
 pub(crate) async fn users_create_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_create(app, headers, connection_info, body).await
+    users_create(app.root.clone(), headers, connection_info, body).await
 }
 
 pub(crate) async fn users_update_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_update(app, headers, connection_info, path, body).await
+    users_update(app.root.clone(), headers, connection_info, path, body).await
 }
 
 pub(crate) async fn users_delete_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_delete(app, headers, connection_info, path).await
+    users_delete(app.root.clone(), headers, connection_info, path).await
 }
 
 pub(crate) async fn users_me_password_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_password(headers, connection_info, body, &app).await
+    users_me_password(headers, connection_info, body, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_by_id_password_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    users_by_id_password(headers, connection_info, path, body, &app).await
+    users_by_id_password(headers, connection_info, path, body, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_me_api_keys_create_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    users_me_api_keys_create(headers, connection_info, body, &app).await
+    users_me_api_keys_create(headers, connection_info, body, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_me_api_keys_list_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    users_me_api_keys_list(headers, connection_info, &app).await
+    users_me_api_keys_list(headers, connection_info, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_me_api_keys_delete_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
 ) -> Response {
-    users_me_api_keys_delete(headers, connection_info, path, &app).await
+    users_me_api_keys_delete(headers, connection_info, path, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_me_authentication_activity_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_me_authentication_activity(headers, connection_info, uri, &app).await
+    users_me_authentication_activity(headers, connection_info, uri, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_authentication_activity_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    users_authentication_activity(headers, connection_info, uri, &app).await
+    users_authentication_activity(headers, connection_info, uri, app.root.as_ref()).await
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
     path: Path<String>,
     uri: Uri,
 ) -> Response {
-    users_by_id_authentication_activity_latest(headers, connection_info, path, uri, &app).await
+    users_by_id_authentication_activity_latest(
+        headers,
+        connection_info,
+        path,
+        uri,
+        app.root.as_ref(),
+    )
+    .await
 }
 
 pub(crate) async fn login_set_cookie_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     headers: HeaderMap,
 ) -> Response {
-    login_set_cookie(&*app.services.runtime_identity, headers).await
+    login_set_cookie(&*app.identity.service, headers).await
 }
 
 pub(crate) async fn logout_route(
-    State(app): State<Arc<HttpAppState>>,
+    State(app): State<IdentityAccessState>,
     headers: HeaderMap,
 ) -> Response {
-    logout(&*app.services.runtime_identity, headers).await
+    logout(&*app.identity.service, headers).await
 }

@@ -16,6 +16,7 @@ const READIUM_PROGRESSION_MEDIA_TYPE: &str = "application/vnd.readium.progressio
 
 pub use books::{
     book_progression, book_progression_get, book_read_progress, book_read_progress_delete,
+    opds_v2_book_progression, opds_v2_book_progression_get,
 };
 pub(crate) use epub::{normalize_book_epub_locator, progression_is_older_than_existing};
 pub use readlists::{readlist_tachiyomi_read_progress_get, readlist_tachiyomi_read_progress_put};
@@ -30,7 +31,7 @@ pub(crate) async fn load_read_progress_from_services(
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.services
         .runtime_identity
-        .load_read_progress(book_id.to_string(), user_id.to_string())
+        .load_read_progress(book_id, user_id)
         .await
 }
 
@@ -40,7 +41,7 @@ pub(crate) async fn load_series_book_ids_from_services(
 ) -> Result<Vec<String>, String> {
     app.services
         .media_assets
-        .load_series_book_ids(series_id.to_string())
+        .load_series_book_ids(series_id)
         .await
 }
 
@@ -54,13 +55,7 @@ pub(crate) async fn persist_read_progress_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .persist_read_progress(
-            book_id.to_string(),
-            user_id.to_string(),
-            page,
-            completed,
-            locator,
-        )
+        .persist_read_progress(book_id, user_id, page, completed, locator)
         .await
 }
 
@@ -71,7 +66,7 @@ pub(crate) async fn delete_persisted_read_progress_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .delete_persisted_read_progress(book_id.to_string(), user_id.to_string())
+        .delete_persisted_read_progress(book_id, user_id)
         .await
 }
 
@@ -82,7 +77,7 @@ pub(crate) async fn refresh_series_read_progress_row_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .refresh_series_read_progress_row(series_id.to_string(), user_id.to_string())
+        .refresh_series_read_progress_row(series_id, user_id)
         .await
 }
 
@@ -93,7 +88,7 @@ pub(crate) async fn delete_series_read_progress_row_from_services(
 ) -> Result<(), String> {
     app.services
         .media_assets
-        .delete_series_read_progress_row(series_id.to_string(), user_id.to_string())
+        .delete_series_read_progress_row(series_id, user_id)
         .await
 }
 
@@ -104,6 +99,6 @@ pub(crate) async fn load_series_tachiyomi_progress_from_services(
 ) -> Result<Option<Value>, String> {
     app.services
         .media_assets
-        .load_series_tachiyomi_progress(series_id.to_string(), user_id.to_string())
+        .load_series_tachiyomi_progress(series_id, user_id)
         .await
 }

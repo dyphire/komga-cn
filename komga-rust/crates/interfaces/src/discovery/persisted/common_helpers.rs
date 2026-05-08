@@ -1,4 +1,11 @@
-use super::*;
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde_json::Value;
+use serde_json::json;
+
+use crate::helpers::query_values;
+use komga_domain::discovery::DiscoveryError;
 
 #[derive(Clone, Copy)]
 pub enum TextMatchMode {

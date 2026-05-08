@@ -785,7 +785,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_genres(library_ids, collection_id)
+            .load_persisted_genres(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -798,7 +798,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_tags(library_ids, collection_id)
+            .load_persisted_tags(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -811,7 +811,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_languages(library_ids, collection_id)
+            .load_persisted_languages(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -824,7 +824,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_publishers(library_ids, collection_id)
+            .load_persisted_publishers(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -837,7 +837,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_age_ratings(library_ids, collection_id)
+            .load_persisted_age_ratings(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -850,7 +850,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_sharing_labels(library_ids, collection_id)
+            .load_persisted_sharing_labels(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -863,7 +863,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_series_tags(library_ids, collection_id)
+            .load_persisted_series_tags(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -876,7 +876,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
     ) -> Result<Vec<String>, DiscoveryError> {
         self.browse
             .persisted
-            .load_persisted_series_release_dates(library_ids, collection_id)
+            .load_persisted_series_release_dates(library_ids.as_deref(), collection_id.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
@@ -895,7 +895,7 @@ impl DiscoveryListService for PersistedDiscoveryListFacade {
         });
         self.browse
             .persisted
-            .load_persisted_book_tags(persisted_scope, library_ids)
+            .load_persisted_book_tags(persisted_scope, library_ids.as_deref())
             .await
             .map_err(DiscoveryError::Persistence)
     }
