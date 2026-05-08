@@ -3,10 +3,6 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::json;
 use std::time::Duration;
 
-async fn lock_remember_me_contract() -> tokio::sync::MutexGuard<'static, ()> {
-    auth_session_runtime_env_lock().lock().await
-}
-
 fn response_cookies(response: &axum::response::Response) -> Vec<String> {
     response
         .headers()
@@ -111,7 +107,6 @@ async fn get_server_settings(app: axum::Router, admin_token: &str) -> axum::resp
 
 #[tokio::test]
 async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookies() {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-remember-me-basic-login-cookies").await;
     let response = login_with_basic_and_remember_me(
         ctx.app().clone(),
@@ -133,8 +128,6 @@ async fn basic_login_with_remember_me_true_issues_session_and_remember_me_cookie
 }
 
 pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
-    let _guard = lock_remember_me_contract().await;
-
     let ctx = TestFixture::builder("router-remember-me-session-expiry-reauth")
         .with_config(|config| {
             config.session_max_inactive_seconds = 1;
@@ -179,8 +172,6 @@ pub(crate) async fn verify_remember_me_reauthenticates_after_session_expiry() {
 }
 
 pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
-    let _guard = lock_remember_me_contract().await;
-
     let ctx = TestFixture::builder("router-remember-me-auto-login-records-source")
         .with_config(|config| {
             config.session_max_inactive_seconds = 1;
@@ -237,7 +228,6 @@ pub(crate) async fn verify_remember_me_auto_login_records_remember_me_source() {
 
 #[tokio::test]
 async fn logout_clears_session_and_remember_me_replay() {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-logout-clears-session-and-remember-me-replay").await;
     let login_response = login_with_basic_and_remember_me(
         ctx.app().clone(),
@@ -304,7 +294,6 @@ async fn logout_clears_session_and_remember_me_replay() {
 
 #[tokio::test]
 async fn malformed_remember_me_cookie_is_rejected() {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-malformed-remember-me-cookie-rejected").await;
     let response =
         users_me_with_cookie(ctx.app().clone(), "komga-remember-me=not-a-valid-token").await;
@@ -313,7 +302,6 @@ async fn malformed_remember_me_cookie_is_rejected() {
 
 #[tokio::test]
 async fn auth_resolution_priority_prefers_header_then_session_cookie_then_remember_me() {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-auth-resolution-priority").await;
     seed_router_library_restricted_user(
         ctx.paths(),
@@ -415,7 +403,6 @@ async fn auth_resolution_priority_prefers_header_then_session_cookie_then_rememb
 
 pub(crate) async fn verify_remember_me_duration_setting_requires_restart_before_cookie_ttl_changes()
 {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-remember-me-settings-restart-only").await;
 
     let admin_token = ctx.login_admin().await;
@@ -483,7 +470,6 @@ async fn remember_me_duration_setting_requires_restart_before_cookie_ttl_changes
 }
 
 pub(crate) async fn verify_remember_me_cold_start_uses_persisted_runtime_settings() {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::builder("router-remember-me-cold-start-runtime-settings")
         .with_seed(|paths| async move {
             upsert_server_setting(&paths, "REMEMBER_ME_KEY", "cold-start-remember-key").await;
@@ -530,7 +516,6 @@ async fn remember_me_cold_start_uses_persisted_runtime_settings() {
 
 pub(crate) async fn verify_rotating_remember_me_key_requires_restart_before_existing_cookie_is_invalidated()
  {
-    let _guard = lock_remember_me_contract().await;
     let ctx = TestFixture::new("router-remember-me-key-rotation-restart-only").await;
     let admin_token = ctx.login_admin().await;
     let login_response = login_with_basic_and_remember_me(

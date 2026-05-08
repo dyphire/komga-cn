@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const MEMBER_PASSWORD: &str = "router-contract-member-123";
+
 pub(super) async fn read_sse_until(
     mut body: axum::body::Body,
     predicate: impl Fn(&str) -> bool,
@@ -190,7 +192,6 @@ async fn import_book_for_sse(
 
 #[tokio::test]
 async fn router_sse_events_requires_authenticated_user() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-auth-required").await;
 
     let app = ctx.app().clone();
@@ -210,7 +211,6 @@ async fn router_sse_events_requires_authenticated_user() {
 
 #[tokio::test]
 async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-admin-task-heartbeat").await;
 
     let app = ctx.app().clone();
@@ -255,7 +255,6 @@ async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() 
 
 #[tokio::test]
 async fn router_sse_events_emit_library_changed_without_five_second_poll_delay() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-library-change").await;
 
     let app = ctx.app().clone();
@@ -312,7 +311,6 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-book-import-success").await;
     let source_file = temp_import_source_file(
         "router-sse-events-book-import-success",
@@ -368,7 +366,6 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
 
 #[tokio::test]
 async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-book-import-failure").await;
     let source_file = missing_import_source_file(
         "router-sse-events-book-import-failure",
@@ -424,13 +421,14 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-sse-password-reset";
+    let member_email = "member-sse-password-reset@example.org";
     let ctx = TestFixture::new("router-sse-events-session-expired").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
@@ -438,7 +436,7 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
     let app = ctx.app().clone();
     let admin_token = ctx.login_admin().await;
     let member_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .login_with_credentials(member_email, MEMBER_PASSWORD)
         .await;
 
     let response = app
@@ -455,13 +453,14 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
         .expect("member sse request should complete");
 
     let admin_app = app.clone();
+    let password_update_uri = format!("/api/v2/users/{member_user_id}/password");
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let response = admin_app
             .oneshot(
                 Request::builder()
                     .method("PATCH")
-                    .uri("/api/v2/users/member-user/password")
+                    .uri(password_update_uri)
                     .header("x-auth-token", &admin_token)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
@@ -484,7 +483,7 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
     assert!(
         parsed.events.iter().any(|event| {
             event.name == "SessionExpired"
-                && event.payload.get("userId") == Some(&Value::String("member-user".to_string()))
+                && event.payload.get("userId") == Some(&Value::String(member_user_id.to_string()))
         }),
         "SSE should emit SessionExpired for invalidated sessions: {body}"
     );
@@ -492,7 +491,6 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
 
 #[tokio::test]
 async fn router_sse_events_rejects_new_connections_after_shutdown_with_internal_server_error() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
     let ctx = TestFixture::new("router-sse-events-shutdown-rejects-new-connections").await;
 
     let app = ctx.app().clone();
@@ -529,13 +527,14 @@ async fn router_sse_events_rejects_new_connections_after_shutdown_with_internal_
 
 #[tokio::test]
 async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-sse-user-delete";
+    let member_email = "member-sse-user-delete@example.org";
     let ctx = TestFixture::new("router-sse-events-session-expired-user-delete").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
@@ -543,7 +542,7 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
     let app = ctx.app().clone();
     let admin_token = ctx.login_admin().await;
     let member_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .login_with_credentials(member_email, MEMBER_PASSWORD)
         .await;
 
     let response = app
@@ -560,13 +559,14 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
         .expect("member delete-target sse request should complete");
 
     let admin_app = app.clone();
+    let user_delete_uri = format!("/api/v2/users/{member_user_id}");
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let response = admin_app
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri("/api/v2/users/member-user")
+                    .uri(user_delete_uri)
                     .header("x-auth-token", &admin_token)
                     .body(Body::empty())
                     .expect("admin user delete request should build"),
@@ -586,7 +586,7 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
     assert!(
         parsed.events.iter().any(|event| {
             event.name == "SessionExpired"
-                && event.payload.get("userId") == Some(&Value::String("member-user".to_string()))
+                && event.payload.get("userId") == Some(&Value::String(member_user_id.to_string()))
         }),
         "SSE should emit SessionExpired when admin deletes a user: {body}"
     );
@@ -594,20 +594,21 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
 
 #[tokio::test]
 async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_password() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-sse-self-password";
+    let member_email = "member-sse-self-password@example.org";
     let ctx = TestFixture::new("router-sse-events-self-password-no-session-expired").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
 
     let app = ctx.app().clone();
     let member_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .login_with_credentials(member_email, MEMBER_PASSWORD)
         .await;
 
     let response = app

@@ -4,6 +4,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+const MEMBER_PASSWORD: &str = "router-contract-member-123";
+
 async fn login_member_with_remember_me(
     app: axum::Router,
     email: &str,
@@ -60,26 +62,22 @@ async fn login_member_with_remember_me(
 }
 
 pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cookie() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-password-reset-lifecycle";
+    let member_email = "member-password-reset@example.org";
     let ctx = TestFixture::new("router-remember-me-password-reset-lifecycle").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
 
     let app = ctx.app().clone();
     let admin_token = ctx.login_admin().await;
-    let (member_session_cookie, member_remember_me_cookie, member_user_id) =
-        login_member_with_remember_me(
-            app.clone(),
-            "member@example.org",
-            "router-contract-member-123",
-        )
-        .await;
+    let (member_session_cookie, member_remember_me_cookie, logged_in_member_user_id) =
+        login_member_with_remember_me(app.clone(), member_email, MEMBER_PASSWORD).await;
 
     let response = app
         .clone()
@@ -89,7 +87,7 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
                 .uri("/sse/v1/events")
                 .header(
                     "x-auth-token",
-                    ctx.login_with_credentials("member@example.org", "router-contract-member-123")
+                    ctx.login_with_credentials(member_email, MEMBER_PASSWORD)
                         .await,
                 )
                 .body(Body::empty())
@@ -100,13 +98,14 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
     assert_eq!(response.status(), StatusCode::OK);
 
     let admin_app = app.clone();
+    let password_update_uri = format!("/api/v2/users/{logged_in_member_user_id}/password");
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let response = admin_app
             .oneshot(
                 Request::builder()
                     .method("PATCH")
-                    .uri("/api/v2/users/member-user/password")
+                    .uri(password_update_uri)
                     .header("x-auth-token", &admin_token)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
@@ -129,7 +128,8 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
     assert!(
         parsed.events.iter().any(|event| {
             event.name == "SessionExpired"
-                && event.payload.get("userId") == Some(&Value::String(member_user_id.clone()))
+                && event.payload.get("userId")
+                    == Some(&Value::String(logged_in_member_user_id.clone()))
         }),
         "password reset should emit SessionExpired for the target user: {body}"
     );
@@ -175,31 +175,28 @@ async fn password_change_invalidates_existing_remember_me_cookie() {
 }
 
 pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_old_remember_me() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-self-password-change";
+    let member_email = "member-self-password@example.org";
     let ctx = TestFixture::new("router-remember-me-self-password-change").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
 
     let app = ctx.app().clone();
-    let (member_session_cookie, member_remember_me_cookie, _) = login_member_with_remember_me(
-        app.clone(),
-        "member@example.org",
-        "router-contract-member-123",
-    )
-    .await;
+    let (member_session_cookie, member_remember_me_cookie, _) =
+        login_member_with_remember_me(app.clone(), member_email, MEMBER_PASSWORD).await;
 
     let patch_response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("PATCH")
-                .uri("/api/v2/users/member-user/password")
+                .uri(format!("/api/v2/users/{member_user_id}/password"))
                 .header(
                     header::COOKIE,
                     format!("KOMGA-SESSION={member_session_cookie}"),
@@ -249,7 +246,7 @@ pub(crate) async fn verify_self_password_change_keeps_session_but_invalidates_ol
     assert_eq!(remember_replay_response.status(), StatusCode::UNAUTHORIZED);
 
     let new_session_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-456")
+        .login_with_credentials(member_email, "router-contract-member-456")
         .await;
     assert!(!new_session_token.is_empty());
 }
@@ -260,13 +257,14 @@ async fn self_password_change_keeps_session_but_invalidates_old_remember_me() {
 }
 
 pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_expired_event() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-admin-update-session-expired";
+    let member_email = "member-admin-update@example.org";
     let ctx = TestFixture::new("router-admin-user-update-session-expired-sse").await;
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
@@ -274,7 +272,7 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
     let app = ctx.app().clone();
     let admin_token = ctx.login_admin().await;
     let member_header_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .login_with_credentials(member_email, MEMBER_PASSWORD)
         .await;
 
     let response = app
@@ -292,13 +290,14 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
     assert_eq!(response.status(), StatusCode::OK);
 
     let admin_app = app.clone();
+    let user_update_uri = format!("/api/v2/users/{member_user_id}");
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let response = admin_app
             .oneshot(
                 Request::builder()
                     .method("PATCH")
-                    .uri("/api/v2/users/member-user")
+                    .uri(user_update_uri)
                     .header("x-auth-token", &admin_token)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
@@ -327,7 +326,7 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
     assert!(
         parsed.events.iter().any(|event| {
             event.name == "SessionExpired"
-                && event.payload.get("userId") == Some(&Value::String("member-user".to_string()))
+                && event.payload.get("userId") == Some(&Value::String(member_user_id.to_string()))
         }),
         "admin user update should emit SessionExpired for the target user: {body}"
     );
@@ -353,14 +352,15 @@ async fn admin_user_update_expires_sessions_and_emits_session_expired_event() {
 
 #[tokio::test]
 async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_session_expired() {
-    let _guard = auth_session_runtime_env_lock().lock().await;
+    let member_user_id = "member-delete-session-expired";
+    let member_email = "member-delete@example.org";
     let ctx = TestFixture::new("router-remember-me-user-delete-lifecycle").await;
 
     seed_router_library_restricted_user(
         ctx.paths(),
-        "member-user",
-        "member@example.org",
-        "router-contract-member-123",
+        member_user_id,
+        member_email,
+        MEMBER_PASSWORD,
         &["library-1"],
     )
     .await;
@@ -368,15 +368,10 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
     let app = ctx.app().clone();
     let admin_token = ctx.login_admin().await;
     let member_header_token = ctx
-        .login_with_credentials("member@example.org", "router-contract-member-123")
+        .login_with_credentials(member_email, MEMBER_PASSWORD)
         .await;
-    let (member_session_cookie, member_remember_me_cookie, member_user_id) =
-        login_member_with_remember_me(
-            app.clone(),
-            "member@example.org",
-            "router-contract-member-123",
-        )
-        .await;
+    let (member_session_cookie, member_remember_me_cookie, logged_in_member_user_id) =
+        login_member_with_remember_me(app.clone(), member_email, MEMBER_PASSWORD).await;
 
     let response = app
         .clone()
@@ -393,13 +388,14 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
     assert_eq!(response.status(), StatusCode::OK);
 
     let admin_app = app.clone();
+    let user_delete_uri = format!("/api/v2/users/{logged_in_member_user_id}");
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let response = admin_app
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri("/api/v2/users/member-user")
+                    .uri(user_delete_uri)
                     .header("x-auth-token", &admin_token)
                     .body(Body::empty())
                     .expect("remember-me user delete request should build"),
@@ -419,7 +415,8 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
     assert!(
         parsed.events.iter().any(|event| {
             event.name == "SessionExpired"
-                && event.payload.get("userId") == Some(&Value::String(member_user_id.clone()))
+                && event.payload.get("userId")
+                    == Some(&Value::String(logged_in_member_user_id.clone()))
         }),
         "user deletion should emit SessionExpired for the target user: {body}"
     );

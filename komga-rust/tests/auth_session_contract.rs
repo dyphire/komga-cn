@@ -5,7 +5,6 @@ use komga_server::app::build_router_with_config;
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::sync::{Mutex, OnceLock};
-use tokio::sync::Mutex as AsyncMutex;
 use tower::util::ServiceExt;
 
 mod support;
@@ -179,11 +178,6 @@ fn releases_env_lock() -> &'static Mutex<()> {
 fn announcements_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn auth_session_runtime_env_lock() -> &'static AsyncMutex<()> {
-    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| AsyncMutex::new(()))
 }
 
 async fn seed_announcement_read_ids(paths: &RuntimeDbPaths, user_id: &str, ids: &[&str]) {
