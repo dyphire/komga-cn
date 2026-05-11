@@ -2,7 +2,6 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::BooksFeedQuery;
 use komga_domain::discovery::PageEnvelope;
 use serde_json::{Value, json};
 
@@ -194,37 +193,27 @@ pub async fn books_latest(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
+    let resolved = super::super::query::resolve_latest_books_request(&uri, library_ids);
 
     match app
-        .discovery_list
-        .list_books_latest(
-            &context,
-            BooksFeedQuery {
-                library_ids,
-                page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_latest_books(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let (page, paged) = if unpaged {
+            let page = if resolved.response.kotlin_unpaged_shape {
                 (normalize_books_latest_unpaged_page_shape(page), true)
             } else {
                 (page, true)
-            };
-            let sorted = true;
-            let mut response =
-                Json(books_page_payload(page, context.is_admin, paged, sorted)).into_response();
+            }
+            .0;
+            let mut response = Json(books_page_payload(
+                page,
+                context.is_admin,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response();
             mark_runtime_owned(&mut response);
             response
         }

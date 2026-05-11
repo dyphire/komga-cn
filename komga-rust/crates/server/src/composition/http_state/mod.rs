@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
 use komga_infrastructure::discovery_detail_access::{
     books as infrastructure_detail_books, collections, readlists,
     series as infrastructure_detail_series,
 };
 use komga_infrastructure::discovery_persisted_access::{
-    authors, books as infrastructure_discovery_books, facets, library_mappings, models,
-    runtime_queries, series as infrastructure_discovery_series,
+    authors, library_mappings, models, runtime_queries, series as infrastructure_discovery_series,
 };
 use komga_infrastructure::metadata;
 use komga_infrastructure::opds_catalog_access;
@@ -18,8 +18,6 @@ use komga_infrastructure::operational_settings_access;
 use komga_infrastructure::page_hashes_access;
 use komga_interfaces::discovery::persisted::models::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-    PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedReadProgressSummary, PersistedSeriesSummary, PersistedWebLinkEntry,
 };
 use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
@@ -110,11 +108,13 @@ pub fn compose_http_runtime(
             db.clone(),
             config.lucene_data_directory.clone(),
         ));
-    let discovery_list: Arc<dyn komga_application::discovery::DiscoveryListService> =
-        Arc::from(http_state_discovery::compose_discovery_list_service(
+    let discovery_browse_service =
+        Arc::new(http_state_discovery::compose_discovery_browse_service(
             db.clone(),
             config.lucene_data_directory.clone(),
         ));
+    let discovery_browse: Arc<dyn DiscoveryBrowseService> = discovery_browse_service.clone();
+    let discovery_facets: Arc<dyn DiscoveryFacetService> = discovery_browse_service;
     let (opds_catalog, opds_persisted) =
         http_state_opds::compose_opds_services(&db, config.lucene_data_directory.as_path());
     let operational_settings_service: Arc<dyn OperationalSettingsService> =
@@ -172,7 +172,8 @@ pub fn compose_http_runtime(
         discovery_readlist_search,
         discovery_book_feeds,
         discovery_detail: discovery_detail_service,
-        discovery_list,
+        discovery_browse,
+        discovery_facets,
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,

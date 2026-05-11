@@ -77,7 +77,7 @@ pub async fn book_tags(
     };
 
     match app
-        .discovery_list
+        .discovery_facets
         .list_book_tags(&context, scope, service_library_ids)
         .await
     {

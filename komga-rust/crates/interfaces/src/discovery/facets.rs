@@ -293,7 +293,7 @@ pub async fn genres(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_genres(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -325,7 +325,7 @@ pub async fn tags(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_tags(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -357,7 +357,7 @@ pub async fn series_tags(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_series_tags(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -389,7 +389,7 @@ pub async fn languages(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_languages(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -421,7 +421,7 @@ pub async fn publishers(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_publishers(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -453,7 +453,7 @@ pub async fn age_ratings(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_age_ratings(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -485,7 +485,7 @@ pub async fn sharing_labels(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_sharing_labels(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {
@@ -517,7 +517,7 @@ pub async fn series_release_dates(
     let authorized_library_ids = scope.context.authorized_library_ids.clone();
     let domain_context = to_domain_query_context(scope.context);
     match app
-        .discovery_list
+        .discovery_facets
         .list_series_release_dates(&domain_context, authorized_library_ids, scope.collection_id)
         .await
     {

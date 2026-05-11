@@ -1,13 +1,7 @@
-use super::persisted::common_helpers::{
-    decode_query_component, internal_error_response, requested_query_values,
-};
+use super::persisted::common_helpers::{internal_error_response, requested_query_values};
 use super::persisted::models::PersistedSeriesSummary;
 use super::persisted::series_queries::series_page_payload;
-use super::series_routes::author_query_to_author_match;
-use crate::helpers::{
-    extract_full_text_search, mark_runtime_owned, query_bool, query_value, query_values,
-    to_domain_query_context,
-};
+use crate::helpers::{mark_runtime_owned, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
 use axum::Json;
@@ -15,7 +9,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::{SeriesBrowseQuery, SeriesReadModel};
+use komga_application::discovery::SeriesReadModel;
 use komga_domain::common_ids::{CollectionId, LibraryId};
 use komga_domain::discovery::{
     AgeRatingCondition, CompositeSeriesCondition, DateCondition, FilterOperator,
@@ -24,25 +18,6 @@ use komga_domain::discovery::{
 };
 use komga_domain::discovery::{DiscoveryError, PageEnvelope};
 use serde_json::{Value, json};
-
-fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
-    match query_value(query, key) {
-        Some(value) if value.eq_ignore_ascii_case("true") => Ok(Some(true)),
-        Some(value) if value.eq_ignore_ascii_case("false") => Ok(Some(false)),
-        Some(_) => Err(()),
-        None => Ok(None),
-    }
-}
-
-fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
-    let values = query_values(query, key)
-        .into_iter()
-        .map(|value| decode_query_component(value.trim()))
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-
-    (!values.is_empty()).then_some(values)
-}
 
 fn normalize_kotlin_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnvelope<T> {
     let normalized_size = page.total_elements.max(20);
@@ -56,30 +31,7 @@ fn normalize_kotlin_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> PageEnve
     page
 }
 
-fn author_query_to_filter_token(value: String) -> Option<String> {
-    let encoded = author_query_to_author_match(value);
-    let object = encoded.as_object()?;
-    if object.is_empty() {
-        return None;
-    }
-    let name = object
-        .get("name")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
-    let role = object
-        .get("role")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
-
-    match (name, role) {
-        (Some(name), Some(role)) => Some(format!("{name}::{role}")),
-        _ => Some(String::new()),
-    }
-}
-
-fn parse_legacy_series_sorts(
+pub(in crate::discovery) fn parse_legacy_series_sorts(
     sorts: &[String],
     search: Option<&str>,
     collection_ids: Option<&Vec<String>>,
@@ -136,6 +88,15 @@ async fn series_feed(
 ) -> Response {
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
+    let resolved = match super::query::resolve_series_feed_request(
+        &uri,
+        sorts,
+        exclude_newly_added,
+        kotlin_unpaged_page_shape,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
+    };
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
@@ -150,78 +111,23 @@ async fn series_feed(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let requested_page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let deleted = match optional_query_bool(query, "deleted") {
-        Ok(value) => value,
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-    let oneshot = match optional_query_bool(query, "oneshot") {
-        Ok(value) => value,
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-
-    let mut conditions = Vec::new();
-    if let Some(ids) = &requested_library_ids
-        && !ids.is_empty()
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::LibraryId(
-            InclusionCondition::Include(ids.iter().cloned().map(LibraryId::from).collect()),
-        )));
-    }
-    if let Some(val) = deleted {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Deleted(val)));
-    }
-    if let Some(val) = oneshot {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::OneShot(val)));
-    }
-    if exclude_newly_added {
-        conditions.push(SeriesCondition::Value(
-            SeriesValueCondition::ExcludeNewlyAdded(true),
-        ));
-    }
-
-    let filter = SeriesFilter {
-        condition: if conditions.len() == 1 {
-            conditions.pop()
-        } else if conditions.len() > 1 {
-            Some(SeriesCondition::Composite(CompositeSeriesCondition {
-                operator: FilterOperator::All,
-                conditions,
-            }))
-        } else {
-            None
-        },
-    };
-
     match app
-        .discovery_list
-        .list_series(
-            &context,
-            SeriesBrowseQuery {
-                filter,
-                sort: sorts,
-                search: None,
-                page: requested_page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_series(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let (page, paged) = if unpaged && kotlin_unpaged_page_shape {
-                (normalize_kotlin_unpaged_page_shape(page), true)
+            let page = if resolved.response.kotlin_unpaged_shape {
+                normalize_kotlin_unpaged_page_shape(page)
             } else {
-                (page, !unpaged)
+                page
             };
-            Json(series_read_model_page_payload(page, paged, true)).into_response()
+            Json(series_read_model_page_payload(
+                page,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response()
         }
         Err(e) => internal_error_response(format!("{e:?}")),
     }
@@ -253,18 +159,10 @@ pub async fn series_deprecated_get(
     let app = &app;
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let collection_ids = decoded_query_values(query, "collection_id");
-    let collection_ids_for_sort = collection_ids.clone();
-    let metadata_status = decoded_query_values(query, "status");
-    let read_status = decoded_query_values(query, "read_status");
-    let publishers = decoded_query_values(query, "publisher");
-    let languages = decoded_query_values(query, "language");
-    let genres = decoded_query_values(query, "genre");
-    let tags = decoded_query_values(query, "tag");
-    let age_ratings = decoded_query_values(query, "age_rating");
-    let release_years = decoded_query_values(query, "release_year");
-    let sharing_labels = decoded_query_values(query, "sharing_label");
-    let authors = decoded_query_values(query, "author");
+    let resolved = match super::query::resolve_deprecated_series_request(&uri) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
+    };
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
@@ -279,199 +177,18 @@ pub async fn series_deprecated_get(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let requested_page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let deleted = optional_query_bool(query, "deleted");
-    if deleted.is_err() {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let oneshot = optional_query_bool(query, "oneshot");
-    if oneshot.is_err() {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let complete = optional_query_bool(query, "complete");
-    if complete.is_err() {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let search = requested_query_values(query, "search")
-        .and_then(|values| values.into_iter().next())
-        .filter(|value| !value.trim().is_empty());
-    let sorts = query_values(query, "sort")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-
-    // Build domain SeriesFilter from query params
-    let mut conditions = Vec::new();
-
-    if let Some(ids) = &requested_library_ids
-        && !ids.is_empty()
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::LibraryId(
-            InclusionCondition::Include(ids.iter().cloned().map(LibraryId::from).collect()),
-        )));
-    }
-    if let Some(ids) = collection_ids.filter(|ids| !ids.is_empty()) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::CollectionId(
-            InclusionCondition::Include(ids.into_iter().map(CollectionId::from).collect()),
-        )));
-    }
-    if let Some(val) = deleted.unwrap_or(None) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Deleted(val)));
-    }
-    if let Some(val) = oneshot.unwrap_or(None) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::OneShot(val)));
-    }
-    if let Some(val) = complete.unwrap_or(None) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Complete(val)));
-    }
-    if let Some(statuses) = metadata_status.filter(|v| !v.is_empty()) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::SeriesStatus(
-            SeriesStatusCondition::Include(statuses),
-        )));
-    }
-    if let Some(statuses) = read_status.filter(|v| !v.is_empty()) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::ReadStatus(
-            ReadStatusCondition::Include(statuses),
-        )));
-    }
-    if let Some(vals) = publishers.filter(|v| !v.is_empty()) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Publisher(
-            InclusionCondition::Include(vals),
-        )));
-    }
-    if let Some(vals) = languages.filter(|v| !v.is_empty()) {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Language(
-            InclusionCondition::Include(vals),
-        )));
-    }
-    if let Some(vals) = genres
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|value| value.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Genre(
-            StringCondition::Exact(InclusionCondition::Include(vals)),
-        )));
-    }
-    if let Some(vals) = tags
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|value| value.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Tag(
-            StringCondition::Exact(InclusionCondition::Include(vals)),
-        )));
-    }
-    if let Some(values) = age_ratings.filter(|v| !v.is_empty()) {
-        let mut ratings = Vec::new();
-        let mut include_empty = false;
-        for value in values {
-            match value.parse::<u16>() {
-                Ok(rating) => ratings.push(rating),
-                Err(_) => include_empty = true,
-            }
-        }
-        if include_empty {
-            conditions.push(SeriesCondition::Value(SeriesValueCondition::AgeRating(
-                AgeRatingCondition::ExactOrEmpty(ratings),
-            )));
-        } else if !ratings.is_empty() {
-            conditions.push(SeriesCondition::Value(SeriesValueCondition::AgeRating(
-                AgeRatingCondition::Exact(InclusionCondition::Include(ratings)),
-            )));
-        }
-    }
-    if let Some(vals) = release_years
-        .map(|values| {
-            values
-                .into_iter()
-                .filter_map(|v| v.parse::<i32>().ok().map(|year| year.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::ReleaseDate(
-            DateCondition::StartsWith(InclusionCondition::Include(vals)),
-        )));
-    }
-    if let Some(vals) = sharing_labels
-        .map(|values| {
-            values
-                .into_iter()
-                .map(|value| value.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::SharingLabel(
-            StringCondition::Exact(InclusionCondition::Include(vals)),
-        )));
-    }
-    if let Some(vals) = authors
-        .map(|values| {
-            values
-                .into_iter()
-                .filter_map(author_query_to_filter_token)
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty())
-    {
-        conditions.push(SeriesCondition::Value(SeriesValueCondition::Author(
-            StringCondition::Exact(InclusionCondition::Include(vals)),
-        )));
-    }
-
-    let filter = SeriesFilter {
-        condition: if conditions.len() == 1 {
-            conditions.pop()
-        } else if conditions.len() > 1 {
-            Some(SeriesCondition::Composite(CompositeSeriesCondition {
-                operator: FilterOperator::All,
-                conditions,
-            }))
-        } else {
-            None
-        },
-    };
-
-    // Convert sort strings to domain SeriesSort
-    let domain_sorts =
-        parse_legacy_series_sorts(&sorts, search.as_deref(), collection_ids_for_sort.as_ref());
-    let sorted = !domain_sorts.is_empty();
-
     match app
-        .discovery_list
-        .list_series(
-            &context,
-            SeriesBrowseQuery {
-                filter,
-                sort: domain_sorts,
-                search,
-                page: requested_page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_series(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let mut response =
-                Json(series_read_model_page_payload(page, !unpaged, sorted)).into_response();
+            let mut response = Json(series_read_model_page_payload(
+                page,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response();
             mark_runtime_owned(&mut response);
             response
         }
@@ -486,22 +203,10 @@ pub async fn series_alphabetical_groups(
     Json(body): Json<Value>,
 ) -> Response {
     let app = &app;
-    if !body.is_object() {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-
-    let filter = match parse_series_filter_from_json(body.get("condition")) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("invalid series alphabetical-groups request: {e:?}") })),
-            )
-                .into_response();
-        }
+    let resolved = match super::query::resolve_series_alphabetical_groups_request(body) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
     };
-
-    let full_text_search = extract_full_text_search(&body);
 
     let interfaces_context = match app
         .discovery_auth
@@ -514,8 +219,8 @@ pub async fn series_alphabetical_groups(
     let context = to_domain_query_context(interfaces_context);
 
     match app
-        .discovery_list
-        .list_series_alphabetical_groups(&context, filter, full_text_search)
+        .discovery_browse
+        .list_series_alphabetical_groups(&context, resolved.request)
         .await
     {
         Ok(groups) => Json(Value::Array(groups)).into_response(),
@@ -549,74 +254,22 @@ pub async fn series_list(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let filter = match parse_series_filter_from_json(payload.get("condition")) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("invalid series filter: {e:?}") })),
-            )
-                .into_response();
-        }
+    let resolved = match super::query::resolve_series_list_request(&uri, payload) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
     };
-
-    let search = extract_full_text_search(&payload);
-    let has_search = search
-        .as_ref()
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    let query = uri.query().unwrap_or_default();
-    let query_sort_values = query_values(query, "sort")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-    let sort = if query_sort_values.is_empty() {
-        parse_series_sorts_from_json(payload.get("sort"), has_search)
-    } else {
-        parse_series_sorts_from_json_values(&query_sort_values, has_search)
-    };
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            payload
-                .get("page")
-                .and_then(|value| value.as_u64())
-                .map(|value| value as usize)
-        })
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            payload
-                .get("size")
-                .and_then(|value| value.as_u64())
-                .map(|value| value as usize)
-        })
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_value(query, "unpaged")
-        .map(|_| query_bool(query, "unpaged"))
-        .or_else(|| payload.get("unpaged").and_then(|value| value.as_bool()))
-        .unwrap_or(false);
-
-    let sorted = !sort.is_empty();
 
     match app
-        .discovery_list
-        .list_series(
-            &context,
-            SeriesBrowseQuery {
-                filter,
-                sort,
-                search,
-                page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_series(&context, resolved.request)
         .await
     {
-        Ok(page) => Json(series_read_model_page_payload(page, !unpaged, sorted)).into_response(),
+        Ok(page) => Json(series_read_model_page_payload(
+            page,
+            resolved.response.paged,
+            resolved.response.sorted,
+        ))
+        .into_response(),
         Err(DiscoveryError::InvalidSemantics(e)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
         }
@@ -1247,7 +900,7 @@ fn parse_series_condition_from_json(condition: &Value) -> Result<SeriesCondition
     }
 }
 
-pub(crate) fn parse_series_filter_from_json(
+pub(in crate::discovery) fn parse_series_filter_from_json(
     condition: Option<&Value>,
 ) -> Result<SeriesFilter, DiscoveryError> {
     let Some(condition) = condition else {
@@ -1260,7 +913,7 @@ pub(crate) fn parse_series_filter_from_json(
     })
 }
 
-pub(crate) fn parse_series_sorts_from_json(
+pub(in crate::discovery) fn parse_series_sorts_from_json(
     sorts: Option<&Value>,
     has_search: bool,
 ) -> Vec<SeriesSort> {
@@ -1276,7 +929,10 @@ pub(crate) fn parse_series_sorts_from_json(
     parse_series_sorts_from_json_values(&values, has_search)
 }
 
-fn parse_series_sorts_from_json_values(sorts: &[String], has_search: bool) -> Vec<SeriesSort> {
+pub(in crate::discovery) fn parse_series_sorts_from_json_values(
+    sorts: &[String],
+    has_search: bool,
+) -> Vec<SeriesSort> {
     let mut result = sorts
         .iter()
         .filter_map(|s| {

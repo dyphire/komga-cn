@@ -1,12 +1,10 @@
 use async_trait::async_trait;
 use komga_application::discovery::{
-    BookReadModel, BookTagScope, BooksBrowseQuery, BooksBrowseRequest, BooksFeedQuery,
-    DiscoveryBrowseService, DiscoveryListService, LatestBooksRequest, SeriesBrowseQuery,
-    SeriesBrowseRequest, SeriesReadModel,
+    BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
+    LatestBooksRequest, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest, SeriesReadModel,
 };
 use komga_domain::discovery::{
-    BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesFilter,
-    UnsupportedDiscoverySemantics,
+    BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, UnsupportedDiscoverySemantics,
 };
 use sqlx::SqlitePool;
 
@@ -70,8 +68,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: SeriesBrowseRequest,
     ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
-        let query = SeriesBrowseQuery::from(request);
-        queries::series::list_series_sqlx(self.pool.clone(), context, &query).await
+        queries::series::list_series_sqlx(self.pool.clone(), context, &request).await
     }
 
     async fn list_books(
@@ -79,8 +76,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: BooksBrowseRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let query = BooksBrowseQuery::from(request);
-        queries::books_media::list_books_sqlx(self.pool.clone(), context, &query).await
+        queries::books_media::list_books_sqlx(self.pool.clone(), context, &request).await
     }
 
     async fn list_latest_books(
@@ -88,7 +84,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
         context: &DiscoveryQueryContext,
         request: LatestBooksRequest,
     ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        let feed_query = BooksBrowseQuery {
+        let feed_query = BooksBrowseRequest {
             filter: BookFilter {
                 condition: request.library_ids.map(|ids| {
                     use komga_domain::common_ids::LibraryId;
@@ -120,45 +116,15 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
             },
             sort: vec![],
             search: None,
-            page: request.page.page,
-            size: request.page.size,
-            unpaged: request.page.unpaged,
+            page: request.page,
         };
         queries::books_media::list_books_latest_sqlx(self.pool.clone(), context, &feed_query).await
-    }
-}
-
-#[async_trait]
-impl DiscoveryListService for SqliteDiscoveryAdapter {
-    async fn list_series(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: SeriesBrowseQuery,
-    ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
-        DiscoveryBrowseService::list_series(self, context, query.into()).await
-    }
-
-    async fn list_books(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: BooksBrowseQuery,
-    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        DiscoveryBrowseService::list_books(self, context, query.into()).await
-    }
-
-    async fn list_books_latest(
-        &self,
-        context: &DiscoveryQueryContext,
-        query: BooksFeedQuery,
-    ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-        DiscoveryBrowseService::list_latest_books(self, context, query.into()).await
     }
 
     async fn list_series_alphabetical_groups(
         &self,
         _context: &DiscoveryQueryContext,
-        _filter: SeriesFilter,
-        _search: Option<String>,
+        _request: SeriesAlphabeticalGroupsRequest,
     ) -> Result<Vec<serde_json::Value>, DiscoveryError> {
         Err(DiscoveryError::UnsupportedSemantics(
             UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
@@ -166,7 +132,10 @@ impl DiscoveryListService for SqliteDiscoveryAdapter {
             ),
         ))
     }
+}
 
+#[async_trait]
+impl DiscoveryFacetService for SqliteDiscoveryAdapter {
     async fn list_genres(
         &self,
         _: &DiscoveryQueryContext,
@@ -291,7 +260,7 @@ fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {
 
 #[cfg(test)]
 mod tests {
-    use komga_application::discovery::{BooksBrowseQuery, DiscoveryListService};
+    use komga_application::discovery::{DiscoveryBrowseService, SeriesBrowseRequest};
     use komga_domain::common_ids::{ReadListId, SeriesId};
     use komga_domain::discovery::{
         BookCondition, BookFilter, BookValueCondition, CompositeBookCondition,
@@ -310,22 +279,22 @@ mod tests {
         }
     }
 
-    fn query_with(condition: BookCondition) -> BooksBrowseQuery {
-        BooksBrowseQuery {
+    fn query_with(condition: BookCondition) -> BooksBrowseRequest {
+        BooksBrowseRequest {
             filter: BookFilter {
                 condition: Some(condition),
                 direct_browse_book_id: None,
             },
-            ..BooksBrowseQuery::default()
+            ..BooksBrowseRequest::default()
         }
     }
 
-    fn series_query_with(condition: SeriesCondition) -> SeriesBrowseQuery {
-        SeriesBrowseQuery {
+    fn series_query_with(condition: SeriesCondition) -> SeriesBrowseRequest {
+        SeriesBrowseRequest {
             filter: SeriesFilter {
                 condition: Some(condition),
             },
-            ..SeriesBrowseQuery::default()
+            ..SeriesBrowseRequest::default()
         }
     }
 
@@ -357,7 +326,7 @@ mod tests {
         )
         .await;
 
-        let page = DiscoveryListService::list_books(
+        let page = DiscoveryBrowseService::list_books(
             &adapter,
             &query_context(),
             query_with(BookCondition::Value(BookValueCondition::SeriesId(
@@ -395,7 +364,7 @@ mod tests {
         )
         .await;
 
-        let page = DiscoveryListService::list_books(
+        let page = DiscoveryBrowseService::list_books(
             &adapter,
             &query_context(),
             query_with(BookCondition::Value(BookValueCondition::Tag(
@@ -434,7 +403,7 @@ mod tests {
             .await
             .unwrap();
 
-        let page = DiscoveryListService::list_books(
+        let page = DiscoveryBrowseService::list_books(
             &adapter,
             &query_context(),
             query_with(BookCondition::Value(BookValueCondition::ReadListId(
@@ -481,7 +450,7 @@ mod tests {
                 InclusionCondition::Include(vec![tag.to_string()]),
             )))
         };
-        let page = DiscoveryListService::list_books(
+        let page = DiscoveryBrowseService::list_books(
             &adapter,
             &query_context(),
             query_with(BookCondition::Composite(CompositeBookCondition {
@@ -535,7 +504,7 @@ mod tests {
                 InclusionCondition::Include(vec![tag.to_string()]),
             )))
         };
-        let page = DiscoveryListService::list_series(
+        let page = DiscoveryBrowseService::list_series(
             &adapter,
             &query_context(),
             series_query_with(SeriesCondition::Composite(CompositeSeriesCondition {

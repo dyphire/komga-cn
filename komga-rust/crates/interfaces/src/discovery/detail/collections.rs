@@ -13,7 +13,7 @@ use icu::collator::{
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
-use komga_application::discovery::SeriesBrowseQuery;
+use komga_application::discovery::{PageRequest, SeriesBrowseRequest};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -156,16 +156,18 @@ pub async fn collection_series(
     let domain_context = to_domain_query_context(visible_context);
 
     let result = match app
-        .discovery_list
+        .discovery_browse
         .list_series(
             &domain_context,
-            SeriesBrowseQuery {
+            SeriesBrowseRequest {
                 filter,
                 sort: vec![],
                 search: None,
-                page,
-                size,
-                unpaged,
+                page: PageRequest {
+                    page,
+                    size,
+                    unpaged,
+                },
             },
         )
         .await

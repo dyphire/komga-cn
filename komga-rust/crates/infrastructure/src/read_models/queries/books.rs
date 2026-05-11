@@ -1,6 +1,6 @@
 use komga_application::discovery::{
     BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
-    BookReadProgressReadModel, BooksBrowseQuery,
+    BookReadProgressReadModel, BooksBrowseRequest,
 };
 use komga_domain::discovery::{
     BookCondition, BookSort, BookValueCondition, CompositeBookCondition, DateCondition,
@@ -142,16 +142,16 @@ impl From<SqlxBookListRow> for BookReadModel {
 pub(in crate::read_models) async fn list_books_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &BooksBrowseQuery,
+    query: &BooksBrowseRequest,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
     list_books_sqlx_common(
         pool,
         context,
-        query.page,
-        query.size,
+        query.page.page,
+        query.page.size,
         query.filter.condition.as_ref(),
         query.search.as_deref(),
-        query.unpaged,
+        query.page.unpaged,
         book_ordering_from_sorts(&query.sort),
     )
     .await
@@ -160,16 +160,16 @@ pub(in crate::read_models) async fn list_books_sqlx(
 pub(in crate::read_models) async fn list_books_latest_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &BooksBrowseQuery,
+    query: &BooksBrowseRequest,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
     list_books_sqlx_common(
         pool,
         context,
-        query.page,
-        query.size,
+        query.page.page,
+        query.page.size,
         query.filter.condition.as_ref(),
         query.search.as_deref(),
-        query.unpaged,
+        query.page.unpaged,
         BookOrdering::LastModifiedDesc,
     )
     .await

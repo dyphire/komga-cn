@@ -2496,6 +2496,7 @@ dependencies = [
  "lopdf",
  "pdfium-render",
  "quick-xml",
+ "regex",
  "reqwest 0.13.3",
  "rusqlite",
  "rxing",

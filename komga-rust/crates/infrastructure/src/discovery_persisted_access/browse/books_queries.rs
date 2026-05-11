@@ -1,7 +1,5 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::state::PersistedDiscoveryListDataSource;
-
 use super::common_helpers::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
     normalized_text_matches,
@@ -17,7 +15,7 @@ use komga_domain::discovery::{
 };
 
 pub async fn load_book_poster_summaries(
-    backend: &dyn PersistedDiscoveryListDataSource,
+    backend: &dyn PersistedDiscoveryBrowseDataSource,
 ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
     backend.load_book_poster_summaries().await
 }
@@ -31,7 +29,7 @@ struct BookConditionEvaluationData {
 
 impl BookConditionEvaluationData {
     async fn load(
-        backend: &dyn PersistedDiscoveryListDataSource,
+        backend: &dyn PersistedDiscoveryBrowseDataSource,
         context: &DiscoveryQueryContext,
         condition: &BookCondition,
     ) -> Result<Self, String> {
@@ -496,7 +494,7 @@ fn matches_date_condition(
 }
 
 pub(crate) async fn load_persisted_books_page(
-    backend: &dyn PersistedDiscoveryListDataSource,
+    backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,
 ) -> Result<PageEnvelope<BookReadModel>, String> {
@@ -538,7 +536,7 @@ pub(crate) async fn load_persisted_books_page(
     }
 
     if let Some(restrictions) = context.restrictions.as_ref()
-        && let (Some(age), Some(crate::discovery_auth::principal::AgeRestrictionKind::Exclude)) =
+        && let (Some(age), Some(AgeRestrictionKind::Exclude)) =
             (restrictions.age, restrictions.age_restriction)
     {
         books = filter_rows(books, |row| {

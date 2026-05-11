@@ -6,6 +6,7 @@ use sqlx::{QueryBuilder, Row, Sqlite};
 
 pub mod authors;
 pub mod books;
+pub mod browse;
 mod common;
 pub mod facets;
 pub mod library_mappings;

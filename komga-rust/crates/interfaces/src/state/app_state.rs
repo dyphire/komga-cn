@@ -1,5 +1,5 @@
 use super::*;
-use komga_application::discovery::DiscoveryListService;
+use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
 
 #[derive(Clone)]
 pub struct HttpServices {
@@ -18,7 +18,8 @@ pub struct HttpServices {
     pub discovery_readlist_search: Arc<dyn DiscoveryReadlistSearchService>,
     pub discovery_book_feeds: Arc<dyn DiscoveryBookFeedService>,
     pub discovery_detail: Arc<dyn DiscoveryDetailService>,
-    pub discovery_list: Arc<dyn DiscoveryListService>,
+    pub discovery_browse: Arc<dyn DiscoveryBrowseService>,
+    pub discovery_facets: Arc<dyn DiscoveryFacetService>,
 }
 
 pub struct HttpAppState {

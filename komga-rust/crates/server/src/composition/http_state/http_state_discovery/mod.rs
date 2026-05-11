@@ -1,7 +1,7 @@
 use super::*;
 
-use komga_application::discovery::DiscoveryListService;
 use komga_infrastructure::database_handle::DatabaseHandle;
+use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
 use komga_infrastructure::search::index_lifecycle::SearchEntityType;
 use komga_infrastructure::search::runtime_tasks::{
     sync_entity_delete_from_index, sync_entity_upsert_from_database,
@@ -23,13 +23,12 @@ pub(super) fn compose_discovery_detail_service(
     detail_access::compose_discovery_detail_service(db, index_dir)
 }
 
-pub(super) fn compose_discovery_list_service(
+pub(super) fn compose_discovery_browse_service(
     db: DatabaseHandle,
     lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryListService> {
-    let persisted =
-        persisted_access::compose_persisted_discovery_list_data_source(db, lucene_data_directory);
-    komga_interfaces::discovery::compose_persisted_discovery_list_service(persisted)
+) -> SqliteDiscoveryBrowseService {
+    index_dirs::register_discovery_index_dir(db.database_file(), lucene_data_directory.as_path());
+    SqliteDiscoveryBrowseService::new(db, lucene_data_directory)
 }
 
 pub(super) fn compose_discovery_author_service(

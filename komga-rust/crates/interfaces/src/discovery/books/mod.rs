@@ -1,20 +1,17 @@
 mod duplicates;
 mod feeds;
-mod list_query;
+pub(in crate::discovery) mod list_query;
 mod tags;
 
 pub use duplicates::books_duplicates;
 pub use feeds::{books_latest, books_ondeck};
 pub use tags::book_tags;
 
-use super::persisted::common_helpers::{
-    decode_query_component, internal_error_response, requested_query_values,
-};
+use super::persisted::common_helpers::{internal_error_response, requested_query_values};
 use super::persisted::library_mappings::remap_requested_library_ids_for_persisted;
 use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
 use crate::helpers::{
-    books_page_payload, detail_access_denial_response, extract_full_text_search,
-    mark_runtime_owned, query_bool, query_value, query_values, to_domain_query_context,
+    books_page_payload, detail_access_denial_response, mark_runtime_owned, to_domain_query_context,
 };
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
@@ -24,13 +21,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::BooksBrowseQuery;
 use komga_domain::discovery::{DiscoveryError, PageEnvelope};
-use list_query::{
-    build_legacy_books_filter, legacy_series_books_book_filter,
-    legacy_series_books_sort_from_query, normalize_release_date_date_time,
-    parse_book_filter_from_json, parse_book_sorts_from_json, parse_book_sorts_from_json_values,
-};
 use serde_json::{Value, json};
 
 fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bool) -> Response {
@@ -75,76 +66,24 @@ pub async fn books_list(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let filter = match parse_book_filter_from_json(payload.get("condition")) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("invalid book filter: {e:?}") })),
-            )
-                .into_response();
-        }
+    let resolved = match super::query::resolve_books_list_request(&uri, payload) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
     };
-
-    let search = extract_full_text_search(&payload);
-    let has_search = search
-        .as_ref()
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    let query = uri.query().unwrap_or_default();
-    let query_sort_values = query_values(query, "sort")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-    let sort = if query_sort_values.is_empty() {
-        parse_book_sorts_from_json(payload.get("sort"), has_search)
-    } else {
-        parse_book_sorts_from_json_values(&query_sort_values, has_search)
-    };
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            payload
-                .get("page")
-                .and_then(|value| value.as_u64())
-                .map(|value| value as usize)
-        })
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .or_else(|| {
-            payload
-                .get("size")
-                .and_then(|value| value.as_u64())
-                .map(|value| value as usize)
-        })
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_value(query, "unpaged")
-        .map(|_| query_bool(query, "unpaged"))
-        .or_else(|| payload.get("unpaged").and_then(|value| value.as_bool()))
-        .unwrap_or(false);
-
-    let sorted = !sort.is_empty();
 
     match app
-        .discovery_list
-        .list_books(
-            &context,
-            BooksBrowseQuery {
-                filter,
-                sort,
-                search,
-                page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_books(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let mut response =
-                Json(books_page_payload(page, context.is_admin, !unpaged, sorted)).into_response();
+            let mut response = Json(books_page_payload(
+                page,
+                context.is_admin,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response();
             mark_runtime_owned(&mut response);
             response
         }
@@ -169,42 +108,26 @@ pub(crate) async fn books_deprecated_get(
         requested_library_ids.as_ref(),
     )
     .await;
-    let tags = requested_query_values(query, "tag");
-    let read_statuses = requested_query_values(query, "read_status");
-    let media_statuses = requested_query_values(query, "media_status").map(|values| {
-        values
-            .into_iter()
-            .map(|value| value.to_ascii_lowercase())
-            .collect()
-    });
-    let released_after = match query_value(query, "released_after") {
-        Some(value) => {
-            let decoded = decode_query_component(value);
-            let Some(normalized) = normalize_release_date_date_time(&decoded) else {
-                return StatusCode::BAD_REQUEST.into_response();
-            };
-            Some(normalized)
-        }
-        None => None,
-    };
-
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let search = requested_query_values(query, "search")
-        .and_then(|values| values.into_iter().next())
-        .filter(|value| !value.trim().is_empty());
-    let sorted = !query_values(query, "sort").is_empty() || search.is_some();
     let requested_non_empty_library_ids = requested_library_ids
         .as_ref()
         .is_some_and(|values| !values.is_empty());
-    if requested_non_empty_library_ids && library_ids.is_none() {
-        return empty_books_page_response(page, size, unpaged, sorted);
+    let empty_page_on_unmapped_library = requested_non_empty_library_ids && library_ids.is_none();
+    let auth_library_ids = library_ids.clone();
+    let resolved = match super::query::resolve_deprecated_books_request(
+        &uri,
+        library_ids,
+        empty_page_on_unmapped_library,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
+    };
+    if resolved.response.empty_page_on_unmapped_library {
+        return empty_books_page_response(
+            resolved.request.page.page,
+            resolved.request.page.size,
+            resolved.request.page.unpaged,
+            resolved.response.sorted,
+        );
     }
 
     let interfaces_context = match app
@@ -212,7 +135,7 @@ pub(crate) async fn books_deprecated_get(
         .resolve_query_context_with_persistence(
             &*app.identity.service,
             &headers,
-            library_ids.as_deref(),
+            auth_library_ids.as_deref(),
         )
         .await
     {
@@ -221,32 +144,19 @@ pub(crate) async fn books_deprecated_get(
     };
     let context = to_domain_query_context(interfaces_context);
 
-    let filter = build_legacy_books_filter(
-        library_ids,
-        tags,
-        read_statuses,
-        media_statuses,
-        released_after,
-    );
-
     match app
-        .discovery_list
-        .list_books(
-            &context,
-            BooksBrowseQuery {
-                filter,
-                sort: vec![],
-                search,
-                page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_books(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let mut response =
-                Json(books_page_payload(page, context.is_admin, !unpaged, sorted)).into_response();
+            let mut response = Json(books_page_payload(
+                page,
+                context.is_admin,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response();
             mark_runtime_owned(&mut response);
             response
         }
@@ -294,21 +204,10 @@ pub async fn series_books_deprecated(
         return detail_access_denial_response(denial);
     }
 
-    let filter = match legacy_series_books_book_filter(&resolved_series_id, &uri) {
-        Ok(filter) => filter,
-        Err(status) => return status.into_response(),
+    let resolved = match super::query::resolve_series_books_request(&resolved_series_id, &uri) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
     };
-
-    let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-    let unpaged = query_bool(query, "unpaged");
-    let sort = legacy_series_books_sort_from_query(&uri);
 
     let interfaces_context = match app
         .discovery_auth
@@ -321,24 +220,18 @@ pub async fn series_books_deprecated(
     let context = to_domain_query_context(interfaces_context);
 
     match app
-        .discovery_list
-        .list_books(
-            &context,
-            BooksBrowseQuery {
-                filter,
-                sort,
-                search: None,
-                page,
-                size,
-                unpaged,
-            },
-        )
+        .discovery_browse
+        .list_books(&context, resolved.request)
         .await
     {
         Ok(page) => {
-            let sorted = !query_values(query, "sort").is_empty();
-            let mut response =
-                Json(books_page_payload(page, context.is_admin, !unpaged, sorted)).into_response();
+            let mut response = Json(books_page_payload(
+                page,
+                context.is_admin,
+                resolved.response.paged,
+                resolved.response.sorted,
+            ))
+            .into_response();
             mark_runtime_owned(&mut response);
             response
         }

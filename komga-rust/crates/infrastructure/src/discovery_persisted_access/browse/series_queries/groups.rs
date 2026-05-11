@@ -1,11 +1,9 @@
-use crate::state::PersistedDiscoveryListDataSource;
-
 use super::models::SeriesFilterCriteria;
 use super::*;
 use komga_domain::discovery::SeriesCondition;
 
 pub(crate) async fn load_persisted_alphabetical_groups(
-    backend: &dyn PersistedDiscoveryListDataSource,
+    backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     condition: Option<SeriesCondition>,
     full_text_search: Option<String>,

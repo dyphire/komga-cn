@@ -3,7 +3,6 @@ use super::common_helpers::{
     normalized_text_matches,
 };
 use super::*;
-use crate::state::PersistedDiscoveryListDataSource;
 use komga_domain::discovery::{
     AgeRatingCondition, DateCondition, FilterOperator, InclusionCondition, ReadStatusCondition,
     SeriesCondition, SeriesStatusCondition, SeriesValueCondition, StringCondition,
@@ -82,7 +81,7 @@ struct SeriesConditionEvaluationData {
 
 impl SeriesConditionEvaluationData {
     async fn load(
-        backend: &dyn PersistedDiscoveryListDataSource,
+        backend: &dyn PersistedDiscoveryBrowseDataSource,
         context: &DiscoveryQueryContext,
         condition: &SeriesCondition,
     ) -> Result<Self, String> {
@@ -527,7 +526,7 @@ fn matches_date_condition(
 }
 
 pub(crate) async fn load_persisted_series_page(
-    backend: &dyn PersistedDiscoveryListDataSource,
+    backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
 ) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
@@ -576,7 +575,7 @@ pub(crate) async fn load_persisted_series_page(
     }
 
     if let Some(restrictions) = context.restrictions.as_ref() {
-        if let (Some(age), Some(crate::discovery_auth::principal::AgeRestrictionKind::Exclude)) =
+        if let (Some(age), Some(AgeRestrictionKind::Exclude)) =
             (restrictions.age, restrictions.age_restriction)
         {
             series = filter_rows(series, |row| {

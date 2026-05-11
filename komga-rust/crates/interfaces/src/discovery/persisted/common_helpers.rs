@@ -7,14 +7,6 @@ use serde_json::json;
 use crate::helpers::query_values;
 use komga_domain::discovery::DiscoveryError;
 
-#[derive(Clone, Copy)]
-pub enum TextMatchMode {
-    Exact,
-    Contains,
-    StartsWith,
-    EndsWith,
-}
-
 pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     let values = query_values(query, key)
         .into_iter()
@@ -22,15 +14,6 @@ pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
         .map(decode_query_component)
         .collect::<Vec<_>>();
     (!values.is_empty()).then_some(values)
-}
-
-pub fn first_group_key(title: &str) -> String {
-    title
-        .trim()
-        .chars()
-        .next()
-        .map(|ch| ch.to_lowercase().collect::<String>())
-        .unwrap_or_else(|| "#".to_string())
 }
 
 pub fn decode_query_component(value: &str) -> String {
@@ -84,58 +67,6 @@ pub fn discovery_error_response(error: DiscoveryError) -> Response {
 
 pub fn filter_rows<T>(rows: Vec<T>, mut predicate: impl FnMut(&T) -> bool) -> Vec<T> {
     rows.into_iter().filter(|row| predicate(row)).collect()
-}
-
-/// `expected` is assumed to already be normalized by the request parser.
-/// We only normalize the persisted-side value here so callers can share one
-/// matching path across exact/contains/prefix/suffix filters without repeating
-/// transport parsing rules at every site.
-pub fn normalized_text_matches(value: &str, expected: &[String], mode: TextMatchMode) -> bool {
-    let normalized = value.to_ascii_lowercase();
-    match mode {
-        TextMatchMode::Exact => expected.contains(&normalized),
-        TextMatchMode::Contains => expected
-            .iter()
-            .any(|candidate| normalized.contains(candidate)),
-        TextMatchMode::StartsWith => expected
-            .iter()
-            .any(|candidate| normalized.starts_with(candidate)),
-        TextMatchMode::EndsWith => expected
-            .iter()
-            .any(|candidate| normalized.ends_with(candidate)),
-    }
-}
-
-pub fn any_normalized_text_matches<'a>(
-    values: impl IntoIterator<Item = &'a str>,
-    expected: &[String],
-    mode: TextMatchMode,
-) -> bool {
-    values
-        .into_iter()
-        .any(|value| normalized_text_matches(value, expected, mode))
-}
-
-pub fn any_ignore_ascii_case<'a>(
-    values: impl IntoIterator<Item = &'a str>,
-    expected: &[String],
-) -> bool {
-    values.into_iter().any(|value| {
-        expected
-            .iter()
-            .any(|candidate| value.eq_ignore_ascii_case(candidate))
-    })
-}
-
-pub fn matches_optional_value<T>(
-    value: Option<T>,
-    missing_result: bool,
-    predicate: impl FnOnce(T) -> bool,
-) -> bool {
-    match value {
-        Some(value) => predicate(value),
-        None => missing_result,
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -192,30 +123,6 @@ mod tests {
         let filtered = super::filter_rows(rows, |row| *row != "book-1");
 
         assert_eq!(filtered, vec!["book-2", "book-3"]);
-    }
-
-    #[test]
-    fn normalized_text_matches_supports_all_modes() {
-        assert!(super::normalized_text_matches(
-            "Alpha",
-            &["alpha".to_string()],
-            super::TextMatchMode::Exact,
-        ));
-        assert!(super::normalized_text_matches(
-            "Alpha Beta",
-            &["ha be".to_string()],
-            super::TextMatchMode::Contains,
-        ));
-        assert!(super::normalized_text_matches(
-            "Alpha",
-            &["alp".to_string()],
-            super::TextMatchMode::StartsWith,
-        ));
-        assert!(super::normalized_text_matches(
-            "Alpha",
-            &["pha".to_string()],
-            super::TextMatchMode::EndsWith,
-        ));
     }
 
     #[test]

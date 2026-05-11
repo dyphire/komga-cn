@@ -1,6 +1,4 @@
-use crate::state::{DiscoveryLibraryMappingService, PersistedDiscoveryListDataSource};
-
-use super::*;
+use crate::state::DiscoveryLibraryMappingService;
 
 fn push_unique(values: &mut Vec<String>, value: &str) {
     if !values.iter().any(|candidate| candidate == value) {
@@ -59,23 +57,4 @@ pub async fn remap_requested_library_ids_for_persisted(
     }
 
     (!normalized.is_empty()).then_some(normalized)
-}
-
-pub async fn load_collection_memberships(
-    backend: &dyn PersistedDiscoveryListDataSource,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    backend.load_collection_memberships().await
-}
-
-pub async fn load_collection_ordering(
-    backend: &dyn PersistedDiscoveryListDataSource,
-    collection_id: &str,
-) -> Result<HashMap<String, i64>, String> {
-    backend.load_collection_ordering(collection_id).await
-}
-
-pub async fn load_readlist_memberships(
-    backend: &dyn PersistedDiscoveryListDataSource,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    backend.load_readlist_memberships().await
 }

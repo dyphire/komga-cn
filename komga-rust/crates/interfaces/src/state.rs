@@ -23,8 +23,6 @@ use tokio::sync::watch;
 
 use crate::discovery::persisted::models::{
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-    PersistedBookPosterSummary, PersistedBookSummary, PersistedBookTagsScope,
-    PersistedSeriesSummary,
 };
 use crate::discovery_auth::state::DiscoveryAuthState;
 

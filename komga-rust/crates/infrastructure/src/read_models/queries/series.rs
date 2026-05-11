@@ -1,4 +1,4 @@
-use komga_application::discovery::SeriesBrowseQuery;
+use komga_application::discovery::SeriesBrowseRequest;
 use komga_application::discovery::SeriesReadModel;
 use komga_domain::discovery::{
     AgeRatingCondition, CompositeSeriesCondition, DateCondition, DiscoveryError,
@@ -94,14 +94,14 @@ impl From<SqlxSeriesListRow> for SeriesReadModel {
 pub(in crate::read_models) async fn list_series_sqlx(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    query: &SeriesBrowseQuery,
+    query: &SeriesBrowseRequest,
 ) -> Result<PageEnvelope<SeriesReadModel>, DiscoveryError> {
     let allowed = effective_library_ids(context, None);
     if allowed.as_ref().is_some_and(Vec::is_empty) {
         return Ok(PageEnvelope::from_slice(
             vec![],
-            query.page,
-            query.size.max(1),
+            query.page.page,
+            query.page.size.max(1),
             0,
         ));
     }
@@ -126,8 +126,8 @@ pub(in crate::read_models) async fn list_series_sqlx(
         .await
         .map_err(map_sqlx_error)? as usize;
 
-    let safe_size = query.size.max(1);
-    let offset = query.page.saturating_mul(safe_size);
+    let safe_size = query.page.size.max(1);
+    let offset = query.page.page.saturating_mul(safe_size);
 
     let mut select_builder = QueryBuilder::<Sqlite>::new(
         r#"
@@ -199,7 +199,7 @@ pub(in crate::read_models) async fn list_series_sqlx(
 
     Ok(PageEnvelope::from_slice(
         rows.into_iter().map(SeriesReadModel::from).collect(),
-        query.page,
+        query.page.page,
         safe_size,
         total_elements,
     ))
@@ -232,7 +232,7 @@ fn apply_series_list_filters_sqlx<'args>(
     builder: &mut QueryBuilder<'args, Sqlite>,
     state: &mut SqlxWhereState,
     context: &DiscoveryQueryContext,
-    query: &SeriesBrowseQuery,
+    query: &SeriesBrowseRequest,
     allowed_library_ids: Option<&Vec<String>>,
 ) {
     query_filters_sqlx(

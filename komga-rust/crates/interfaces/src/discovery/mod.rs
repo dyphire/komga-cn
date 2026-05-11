@@ -1,14 +1,13 @@
 pub mod books;
-mod browse_service;
 pub mod detail;
 mod facets;
 pub mod persisted;
+mod query;
 pub mod series;
 mod series_routes;
 
 pub(crate) use books::books_deprecated_get as books_route;
 pub(crate) use books::series_books_deprecated as series_books_route;
-pub use browse_service::compose_persisted_discovery_list_service;
 pub(crate) use detail::series_collections as series_collections_route;
 pub(crate) use detail::series_detail as series_detail_route;
 pub(crate) use detail::series_metadata_update as series_metadata_update_route;
