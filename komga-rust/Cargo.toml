@@ -44,7 +44,7 @@ tar = "0.4.45"
 zip = "8.6.0"
 flate2 = "1.1.9"
 lopdf = "0.40.0"
-quick-xml = "0.39.2"
+quick-xml = "0.39.4"
 time = { version = "0.3.44", features = ["formatting", "parsing", "local-offset"] }
 tsid = "0.3.4"
 futures-util = "0.3.31"
