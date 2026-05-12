@@ -110,62 +110,31 @@ pub trait DiscoveryBrowseService: Send + Sync {
     ) -> Result<Vec<serde_json::Value>, DiscoveryError>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FacetKind {
+    Genres,
+    Tags,
+    Languages,
+    Publishers,
+    AgeRatings,
+    SharingLabels,
+    SeriesTags,
+    SeriesReleaseDates,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FacetScope {
+    pub library_ids: Option<Vec<String>>,
+    pub collection_id: Option<String>,
+}
+
 #[async_trait]
 pub trait DiscoveryFacetService: Send + Sync {
-    async fn list_genres(
+    async fn list_facet_values(
         &self,
         context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_tags(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_languages(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_publishers(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_age_ratings(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_sharing_labels(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_series_tags(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError>;
-
-    async fn list_series_release_dates(
-        &self,
-        context: &DiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
+        kind: FacetKind,
+        scope: FacetScope,
     ) -> Result<Vec<String>, DiscoveryError>;
 
     async fn list_book_tags(

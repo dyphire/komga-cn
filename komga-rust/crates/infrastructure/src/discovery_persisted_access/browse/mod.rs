@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use komga_application::discovery::{
     BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
-    LatestBooksRequest, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest, SeriesReadModel,
+    FacetKind, FacetScope, LatestBooksRequest, SeriesAlphabeticalGroupsRequest,
+    SeriesBrowseRequest, SeriesReadModel,
 };
 use komga_domain::discovery::{
     AgeRestrictionKind, BookSort, DiscoveryError,
@@ -666,123 +667,40 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
 
 #[async_trait]
 impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
-    async fn list_genres(
+    async fn list_facet_values(
         &self,
         _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
+        kind: FacetKind,
+        scope: FacetScope,
     ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_genres(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
+        let db = self.db.database_file();
+        let library_ids = scope.library_ids.as_deref();
+        let collection_id = scope.collection_id.as_deref();
 
-    async fn list_tags(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_tags(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_languages(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_languages(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_publishers(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_publishers(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_age_ratings(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_age_ratings(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_sharing_labels(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_sharing_labels(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_series_tags(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_series_tags(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
-        .map_err(DiscoveryError::Persistence)
-    }
-
-    async fn list_series_release_dates(
-        &self,
-        _context: &DomainDiscoveryQueryContext,
-        library_ids: Option<Vec<String>>,
-        collection_id: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        facets::load_persisted_series_release_dates(
-            self.db.database_file(),
-            library_ids.as_deref(),
-            collection_id.as_deref(),
-        )
-        .await
+        match kind {
+            FacetKind::Genres => {
+                facets::load_persisted_genres(db, library_ids, collection_id).await
+            }
+            FacetKind::Tags => facets::load_persisted_tags(db, library_ids, collection_id).await,
+            FacetKind::Languages => {
+                facets::load_persisted_languages(db, library_ids, collection_id).await
+            }
+            FacetKind::Publishers => {
+                facets::load_persisted_publishers(db, library_ids, collection_id).await
+            }
+            FacetKind::AgeRatings => {
+                facets::load_persisted_age_ratings(db, library_ids, collection_id).await
+            }
+            FacetKind::SharingLabels => {
+                facets::load_persisted_sharing_labels(db, library_ids, collection_id).await
+            }
+            FacetKind::SeriesTags => {
+                facets::load_persisted_series_tags(db, library_ids, collection_id).await
+            }
+            FacetKind::SeriesReleaseDates => {
+                facets::load_persisted_series_release_dates(db, library_ids, collection_id).await
+            }
+        }
         .map_err(DiscoveryError::Persistence)
     }
 
@@ -932,6 +850,7 @@ mod tests {
             .expect("library row should be inserted");
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_series(
         pool: &SqlitePool,
         id: &str,
@@ -1351,11 +1270,14 @@ mod tests {
         )
         .await;
 
-        let genres = DiscoveryFacetService::list_genres(
+        let genres = DiscoveryFacetService::list_facet_values(
             &fixture.service,
             &unrestricted_context(),
-            Some(vec!["library-1".to_string()]),
-            None,
+            FacetKind::Genres,
+            FacetScope {
+                library_ids: Some(vec!["library-1".to_string()]),
+                collection_id: None,
+            },
         )
         .await
         .expect("genres should load");

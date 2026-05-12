@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use komga_application::discovery::{
     BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
-    LatestBooksRequest, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest, SeriesReadModel,
+    FacetKind, FacetScope, LatestBooksRequest, SeriesAlphabeticalGroupsRequest,
+    SeriesBrowseRequest, SeriesReadModel,
 };
 use komga_domain::discovery::{
     BookFilter, DiscoveryError, DiscoveryQueryContext, PageEnvelope, UnsupportedDiscoverySemantics,
@@ -136,102 +137,11 @@ impl DiscoveryBrowseService for SqliteDiscoveryAdapter {
 
 #[async_trait]
 impl DiscoveryFacetService for SqliteDiscoveryAdapter {
-    async fn list_genres(
+    async fn list_facet_values(
         &self,
         _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_tags(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_languages(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_publishers(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_age_ratings(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_sharing_labels(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_series_tags(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
-    ) -> Result<Vec<String>, DiscoveryError> {
-        Err(DiscoveryError::UnsupportedSemantics(
-            UnsupportedDiscoverySemantics::UnsupportedSeriesSort(
-                "facets not supported in runtime adapter".to_string(),
-            ),
-        ))
-    }
-
-    async fn list_series_release_dates(
-        &self,
-        _: &DiscoveryQueryContext,
-        _: Option<Vec<String>>,
-        _: Option<String>,
+        _: FacetKind,
+        _: FacetScope,
     ) -> Result<Vec<String>, DiscoveryError> {
         Err(DiscoveryError::UnsupportedSemantics(
             UnsupportedDiscoverySemantics::UnsupportedSeriesSort(

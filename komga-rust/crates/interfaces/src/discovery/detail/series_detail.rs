@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 
+use super::series_persistence::ExistingSeriesMetadata;
 use super::*;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
@@ -158,150 +159,7 @@ pub async fn series_metadata_update(
         Err(error) => return internal_error_response(error),
     };
 
-    let status = body
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.status.as_str())
-        .to_string();
-    let status_lock = body
-        .get("statusLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.status_lock);
-    let title = body
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.title.as_str())
-        .to_string();
-    let title_lock = body
-        .get("titleLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.title_lock);
-    let title_sort = body
-        .get("titleSort")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.title_sort.as_str())
-        .to_string();
-    let title_sort_lock = body
-        .get("titleSortLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.title_sort_lock);
-    let summary = body
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.summary.as_str())
-        .to_string();
-    let summary_lock = body
-        .get("summaryLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.summary_lock);
-    let language = body
-        .get("language")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.language.as_str())
-        .to_string();
-    let language_lock = body
-        .get("languageLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.language_lock);
-    let publisher = body
-        .get("publisher")
-        .and_then(Value::as_str)
-        .unwrap_or(existing.publisher.as_str())
-        .to_string();
-    let publisher_lock = body
-        .get("publisherLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.publisher_lock);
-    let reading_direction = if body.contains_key("readingDirection") {
-        body.get("readingDirection")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    } else {
-        existing.reading_direction.clone()
-    };
-    let reading_direction_lock = body
-        .get("readingDirectionLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.reading_direction_lock);
-    let age_rating = if body.contains_key("ageRating") {
-        body.get("ageRating")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok())
-    } else {
-        existing.age_rating
-    };
-    let age_rating_lock = body
-        .get("ageRatingLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.age_rating_lock);
-    let genres = merge_string_list_field(body, "genres", &existing.genres);
-    let genres_lock = body
-        .get("genresLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.genres_lock);
-    let tags = merge_string_list_field(body, "tags", &existing.tags);
-    let tags_lock = body
-        .get("tagsLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.tags_lock);
-    let sharing_labels = merge_string_list_field(body, "sharingLabels", &existing.sharing_labels);
-    let sharing_labels_lock = body
-        .get("sharingLabelsLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.sharing_labels_lock);
-    let links = merge_links_field(body, "links", &existing.links);
-    let links_lock = body
-        .get("linksLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.links_lock);
-    let alternate_titles =
-        merge_alternate_titles_field(body, "alternateTitles", &existing.alternate_titles);
-    let alternate_titles_lock = body
-        .get("alternateTitlesLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.alternate_titles_lock);
-    let total_book_count = if body.contains_key("totalBookCount") {
-        body.get("totalBookCount")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok())
-    } else {
-        existing.total_book_count
-    };
-    let total_book_count_lock = body
-        .get("totalBookCountLock")
-        .and_then(Value::as_bool)
-        .unwrap_or(existing.total_book_count_lock);
-
-    let update = SeriesMetadataUpdateRecord {
-        status,
-        status_lock,
-        title,
-        title_lock,
-        title_sort,
-        title_sort_lock,
-        summary,
-        summary_lock,
-        reading_direction,
-        reading_direction_lock,
-        publisher,
-        publisher_lock,
-        age_rating,
-        age_rating_lock,
-        language,
-        language_lock,
-        genres,
-        genres_lock,
-        tags,
-        tags_lock,
-        total_book_count,
-        total_book_count_lock,
-        sharing_labels,
-        sharing_labels_lock,
-        links,
-        links_lock,
-        alternate_titles,
-        alternate_titles_lock,
-    };
+    let update = merge_series_metadata_patch(body, &existing);
 
     match persist_series_metadata_update(app, &series_id, update).await {
         Ok(true) => {
@@ -314,6 +172,74 @@ pub async fn series_metadata_update(
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
+    }
+}
+
+/// Merges a validated JSON patch onto existing series metadata, producing the
+/// full update record to persist.
+pub(super) fn merge_series_metadata_patch(
+    body: &serde_json::Map<String, Value>,
+    existing: &ExistingSeriesMetadata,
+) -> SeriesMetadataUpdateRecord {
+    let merge_str = |key: &str, fallback: &str| -> String {
+        body.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or(fallback)
+            .to_string()
+    };
+    let merge_bool = |key: &str, fallback: bool| -> bool {
+        body.get(key).and_then(Value::as_bool).unwrap_or(fallback)
+    };
+    let merge_nullable_str = |key: &str, fallback: &Option<String>| -> Option<String> {
+        if body.contains_key(key) {
+            body.get(key).and_then(Value::as_str).map(str::to_string)
+        } else {
+            fallback.clone()
+        }
+    };
+    let merge_nullable_u32 = |key: &str, fallback: Option<u32>| -> Option<u32> {
+        if body.contains_key(key) {
+            body.get(key)
+                .and_then(Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok())
+        } else {
+            fallback
+        }
+    };
+
+    SeriesMetadataUpdateRecord {
+        status: merge_str("status", &existing.status),
+        status_lock: merge_bool("statusLock", existing.status_lock),
+        title: merge_str("title", &existing.title),
+        title_lock: merge_bool("titleLock", existing.title_lock),
+        title_sort: merge_str("titleSort", &existing.title_sort),
+        title_sort_lock: merge_bool("titleSortLock", existing.title_sort_lock),
+        summary: merge_str("summary", &existing.summary),
+        summary_lock: merge_bool("summaryLock", existing.summary_lock),
+        reading_direction: merge_nullable_str("readingDirection", &existing.reading_direction),
+        reading_direction_lock: merge_bool("readingDirectionLock", existing.reading_direction_lock),
+        publisher: merge_str("publisher", &existing.publisher),
+        publisher_lock: merge_bool("publisherLock", existing.publisher_lock),
+        age_rating: merge_nullable_u32("ageRating", existing.age_rating),
+        age_rating_lock: merge_bool("ageRatingLock", existing.age_rating_lock),
+        language: merge_str("language", &existing.language),
+        language_lock: merge_bool("languageLock", existing.language_lock),
+        genres: merge_string_list_field(body, "genres", &existing.genres),
+        genres_lock: merge_bool("genresLock", existing.genres_lock),
+        tags: merge_string_list_field(body, "tags", &existing.tags),
+        tags_lock: merge_bool("tagsLock", existing.tags_lock),
+        total_book_count: merge_nullable_u32("totalBookCount", existing.total_book_count),
+        total_book_count_lock: merge_bool("totalBookCountLock", existing.total_book_count_lock),
+        sharing_labels: merge_string_list_field(body, "sharingLabels", &existing.sharing_labels),
+        sharing_labels_lock: merge_bool("sharingLabelsLock", existing.sharing_labels_lock),
+        links: merge_links_field(body, "links", &existing.links),
+        links_lock: merge_bool("linksLock", existing.links_lock),
+        alternate_titles: merge_alternate_titles_field(
+            body,
+            "alternateTitles",
+            &existing.alternate_titles,
+        ),
+        alternate_titles_lock: merge_bool("alternateTitlesLock", existing.alternate_titles_lock),
     }
 }
 

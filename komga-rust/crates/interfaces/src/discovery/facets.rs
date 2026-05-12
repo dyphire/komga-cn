@@ -12,6 +12,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use komga_application::discovery::{FacetKind, FacetScope};
 use serde_json::json;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
@@ -270,18 +271,17 @@ pub async fn authors_v2(
     Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
 }
 
-pub async fn genres(
-    State(app): State<DiscoveryState>,
-    _: Authenticated,
-    headers: HeaderMap,
-    uri: Uri,
+async fn collection_facet_handler(
+    app: &DiscoveryState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    kind: FacetKind,
 ) -> Response {
-    let app = &app;
     let query = uri.query().unwrap_or_default();
     let scope = match resolve_collection_facet_scope(
         &*app.identity.service,
         &app.discovery_auth,
-        &headers,
+        headers,
         query,
     )
     .await
@@ -290,16 +290,28 @@ pub async fn genres(
         Err(response) => return response,
     };
 
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
+    let domain_context = to_domain_query_context(scope.context.clone());
+    let facet_scope = FacetScope {
+        library_ids: scope.context.authorized_library_ids,
+        collection_id: scope.collection_id,
+    };
     match app
         .discovery_facets
-        .list_genres(&domain_context, authorized_library_ids, scope.collection_id)
+        .list_facet_values(&domain_context, kind, facet_scope)
         .await
     {
         Ok(values) => Json(json!(values)).into_response(),
         Err(error) => discovery_error_response(error),
     }
+}
+
+pub async fn genres(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    collection_facet_handler(&app, &headers, &uri, FacetKind::Genres).await
 }
 
 pub async fn tags(
@@ -308,30 +320,7 @@ pub async fn tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_tags(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::Tags).await
 }
 
 pub async fn series_tags(
@@ -340,30 +329,7 @@ pub async fn series_tags(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_series_tags(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::SeriesTags).await
 }
 
 pub async fn languages(
@@ -372,30 +338,7 @@ pub async fn languages(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_languages(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::Languages).await
 }
 
 pub async fn publishers(
@@ -404,30 +347,7 @@ pub async fn publishers(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_publishers(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::Publishers).await
 }
 
 pub async fn age_ratings(
@@ -436,30 +356,7 @@ pub async fn age_ratings(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_age_ratings(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::AgeRatings).await
 }
 
 pub async fn sharing_labels(
@@ -468,30 +365,7 @@ pub async fn sharing_labels(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_sharing_labels(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::SharingLabels).await
 }
 
 pub async fn series_release_dates(
@@ -500,28 +374,5 @@ pub async fn series_release_dates(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let app = &app;
-    let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        &headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
-
-    let authorized_library_ids = scope.context.authorized_library_ids.clone();
-    let domain_context = to_domain_query_context(scope.context);
-    match app
-        .discovery_facets
-        .list_series_release_dates(&domain_context, authorized_library_ids, scope.collection_id)
-        .await
-    {
-        Ok(values) => Json(json!(values)).into_response(),
-        Err(error) => discovery_error_response(error),
-    }
+    collection_facet_handler(&app, &headers, &uri, FacetKind::SeriesReleaseDates).await
 }
