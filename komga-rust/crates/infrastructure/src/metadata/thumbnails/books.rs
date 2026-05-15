@@ -287,8 +287,12 @@ pub async fn delete_book_thumbnail(pool: &SqlitePool, thumbnail_id: &str) -> Res
     let target_book_id = target.get::<String, _>("BOOK_ID");
     let target_type = target.get::<String, _>("TYPE");
     let deleted_selected = target.get::<bool, _>("SELECTED");
-    let series_id = load_book_series_id(pool, &target_book_id)
-        .await?
+    let series_id = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(&target_book_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("query book series id for thumbnail delete: {error}"))?
+        .map(|row| row.get::<String, _>("SERIES_ID"))
         .unwrap_or_default();
     if target_type != "USER_UPLOADED" {
         tx.rollback()

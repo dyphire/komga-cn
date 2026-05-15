@@ -53,7 +53,6 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
         komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool)
             .await
             .expect("CLI action main schema should bootstrap");
-        main_pool.close().await;
 
         let tasks_pool = komga_infrastructure::sqlite::connect_test_pool(&tasks_db_file, 1)
             .await
@@ -79,13 +78,10 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
             })
             .collect::<Vec<_>>();
 
-        let write_pool = komga_infrastructure::sqlite::connect_test_pool(&database_file, 1)
-            .await
-            .expect("CLI action fixture write pool should open");
-        persist_initial_bootstrap_users(&write_pool, &user_write_models)
+        persist_initial_bootstrap_users(&main_pool, &user_write_models)
             .await
             .expect("CLI action fixture user should persist");
-        write_pool.close().await;
+        main_pool.close().await;
     });
 }
 
