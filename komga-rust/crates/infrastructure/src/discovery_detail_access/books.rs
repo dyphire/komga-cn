@@ -1,7 +1,4 @@
-use std::path::Path as FsPath;
-
-use crate::sqlite::connect_read_pool;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
 pub struct PersistedBookResourceRecord {
@@ -74,13 +71,9 @@ pub enum PersistedBookSiblingDirectionRecord {
 }
 
 pub async fn load_book_id_by_sorted_position(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book-id remap db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT b.ID AS ID
          FROM BOOK b
@@ -91,7 +84,7 @@ pub async fn load_book_id_by_sorted_position(
          OFFSET ?"#,
     )
     .bind((index - 1) as i64)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query remapped book id: {error}"))?;
 
@@ -99,13 +92,9 @@ pub async fn load_book_id_by_sorted_position(
 }
 
 pub async fn load_persisted_book_resource(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedBookResourceRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book resource db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
@@ -117,7 +106,7 @@ pub async fn load_persisted_book_resource(
          GROUP BY b.LIBRARY_ID, sm.AGE_RATING"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted book resource: {error}"))?;
 
@@ -131,14 +120,10 @@ pub async fn load_persisted_book_resource(
 }
 
 pub async fn load_persisted_book_detail(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     book_id: &str,
     user_id: Option<&str>,
 ) -> Result<Option<PersistedBookDetailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book detail db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
                 COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT,
@@ -192,7 +177,7 @@ pub async fn load_persisted_book_detail(
     )
     .bind(user_id.unwrap_or_default())
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted book detail: {error}"))?;
 
@@ -263,14 +248,10 @@ pub async fn load_persisted_book_detail(
 }
 
 pub async fn load_persisted_book_sibling_id(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     book_id: &str,
     direction: PersistedBookSiblingDirectionRecord,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book sibling db: {error}"))?;
-
     let current = sqlx::query(
         r#"SELECT b.SERIES_ID, bm.NUMBER_SORT AS NUMBER_SORT
          FROM BOOK b
@@ -278,7 +259,7 @@ pub async fn load_persisted_book_sibling_id(
          WHERE b.ID = ?"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted current book for sibling lookup: {error}"))?;
 
@@ -304,7 +285,7 @@ pub async fn load_persisted_book_sibling_id(
             )
             .bind(&series_id)
             .bind(number_sort)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
         }
         PersistedBookSiblingDirectionRecord::Next => {
@@ -319,7 +300,7 @@ pub async fn load_persisted_book_sibling_id(
             )
             .bind(&series_id)
             .bind(number_sort)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
         }
     }

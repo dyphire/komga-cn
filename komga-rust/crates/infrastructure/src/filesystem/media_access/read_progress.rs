@@ -1,9 +1,5 @@
-use std::path::Path;
-
 use serde_json::{Value, json};
-use sqlx::Row;
-
-use crate::sqlite::connect_write_pool;
+use sqlx::{Row, SqlitePool};
 
 fn empty_series_tachiyomi_progress_payload() -> Value {
     json!({
@@ -17,13 +13,10 @@ fn empty_series_tachiyomi_progress_payload() -> Value {
 }
 
 pub async fn refresh_series_read_progress_row(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open series read progress db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT,
                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT,
@@ -33,7 +26,7 @@ pub async fn refresh_series_read_progress_row(
     )
     .bind(user_id_value)
     .bind(series_id)
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .map_err(|error| format!("query series read progress aggregates: {error}"))?;
     sqlx::query(
@@ -48,37 +41,31 @@ pub async fn refresh_series_read_progress_row(
     .bind(row.get::<i64, _>("READ_COUNT"))
     .bind(row.get::<i64, _>("IN_PROGRESS_COUNT"))
     .bind(row.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("upsert series read progress row: {error}"))?;
     Ok(())
 }
 
 pub async fn delete_series_read_progress_row(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open series read progress delete db: {error}"))?;
     sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
         .bind(series_id)
         .bind(user_id_value)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("delete series read progress row: {error}"))?;
     Ok(())
 }
 
 pub async fn load_series_tachiyomi_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
 ) -> Result<Option<Value>, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open series tachiyomi db: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT, rp.COMPLETED AS COMPLETED
          FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
@@ -88,7 +75,7 @@ pub async fn load_series_tachiyomi_progress(
     )
     .bind(user_id_value)
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series tachiyomi rows: {error}"))?;
     if rows.is_empty() {

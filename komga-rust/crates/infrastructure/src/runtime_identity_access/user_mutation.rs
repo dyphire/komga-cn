@@ -1,18 +1,15 @@
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use crate::auth::runtime_identity_access::persisted_users;
-use crate::sqlite::connect_write_pool;
 use komga_application::identity_access::{
     AuthUser, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput, UpdateAuthUserResult,
 };
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 pub async fn create_auth_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     input: CreateAuthUserInput,
 ) -> Result<Option<AuthUser>, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let email_exists = sqlx::query("SELECT 1 FROM USER WHERE LOWER(EMAIL) = LOWER(?) LIMIT 1")
@@ -92,7 +89,7 @@ pub async fn create_auth_user(
 
     tx.commit().await?;
 
-    persisted_users(database_file)
+    persisted_users(pool)
         .await
         .and_then(|users| {
             users
@@ -104,10 +101,9 @@ pub async fn create_auth_user(
 }
 
 pub async fn delete_auth_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     target_user_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let exists = sqlx::query("SELECT 1 FROM USER WHERE ID = ? LIMIT 1")
@@ -171,11 +167,10 @@ pub async fn delete_auth_user(
 }
 
 pub async fn update_auth_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     target_user_id: &str,
     patch: UpdateAuthUserInput,
 ) -> Result<UpdateAuthUserResult, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     let Some(user_row) = sqlx::query(

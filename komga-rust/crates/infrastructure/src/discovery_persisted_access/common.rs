@@ -14,7 +14,7 @@ pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
 }
 
 pub(super) async fn load_persisted_scoped_strings(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
     label: &str,
@@ -29,10 +29,6 @@ pub(super) async fn load_persisted_scoped_strings(
     {
         return Ok(Vec::new());
     }
-
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open {label} db: {error}"))?;
 
     let mut query = QueryBuilder::<Sqlite>::new(base_sql);
     let mut has_where = false;
@@ -66,7 +62,7 @@ pub(super) async fn load_persisted_scoped_strings(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted {label}: {error}"))?;
 

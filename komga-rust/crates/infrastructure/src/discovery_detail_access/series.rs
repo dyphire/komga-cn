@@ -1,7 +1,4 @@
-use std::path::Path as FsPath;
-
-use crate::sqlite::connect_read_pool;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
 pub struct PersistedSeriesResourceRecord {
@@ -120,13 +117,9 @@ pub struct SeriesMetadataUpdateRecord {
 }
 
 pub async fn load_persisted_series_resource(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series detail db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT s.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
@@ -137,7 +130,7 @@ pub async fn load_persisted_series_resource(
          GROUP BY s.LIBRARY_ID, sm.AGE_RATING"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted series resource: {error}"))?;
 
@@ -151,13 +144,9 @@ pub async fn load_persisted_series_resource(
 }
 
 pub async fn load_series_id_by_sorted_position(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series-id remap db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT s.ID AS ID
          FROM SERIES s
@@ -168,7 +157,7 @@ pub async fn load_series_id_by_sorted_position(
          OFFSET ?"#,
     )
     .bind((index - 1) as i64)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query remapped series id: {error}"))?;
 
@@ -176,13 +165,9 @@ pub async fn load_series_id_by_sorted_position(
 }
 
 pub async fn load_persisted_series_detail(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series detail db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.NAME AS NAME, s.URL AS URL,
                 s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE,
@@ -207,7 +192,7 @@ pub async fn load_persisted_series_detail(
                   METADATA_CREATED, METADATA_LAST_MODIFIED"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted series detail: {error}"))?;
 
@@ -221,7 +206,7 @@ pub async fn load_persisted_series_detail(
          WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .map_err(|error| format!("query persisted series books count: {error}"))?;
 
@@ -255,13 +240,9 @@ pub async fn load_persisted_series_detail(
 }
 
 pub async fn load_persisted_series_collections(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<PersistedCollectionRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series collection db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE
          FROM COLLECTION c
@@ -270,7 +251,7 @@ pub async fn load_persisted_series_collections(
          ORDER BY c.NAME COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted series collections: {error}"))?;
 
@@ -284,7 +265,7 @@ pub async fn load_persisted_series_collections(
              ORDER BY NUMBER ASC"#,
         )
         .bind(collection_id.clone())
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted collection series ids: {error}"))?;
 
@@ -305,13 +286,9 @@ pub async fn load_persisted_series_collections(
 }
 
 pub async fn load_existing_series_metadata(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series metadata db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY,
                 SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK, PUBLISHER,
@@ -322,7 +299,7 @@ pub async fn load_existing_series_metadata(
          WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query existing series metadata: {error}"))?;
 
@@ -334,7 +311,7 @@ pub async fn load_existing_series_metadata(
         r#"SELECT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY GENRE COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing series metadata genres: {error}"))?
     .into_iter()
@@ -345,7 +322,7 @@ pub async fn load_existing_series_metadata(
         r#"SELECT TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ? ORDER BY TAG COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing series metadata tags: {error}"))?
     .into_iter()
@@ -358,7 +335,7 @@ pub async fn load_existing_series_metadata(
              ORDER BY LABEL COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing series metadata sharing labels: {error}"))?
     .into_iter()
@@ -371,7 +348,7 @@ pub async fn load_existing_series_metadata(
              ORDER BY LABEL COLLATE NOCASE ASC, URL ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing series metadata links: {error}"))?
     .into_iter()
@@ -387,7 +364,7 @@ pub async fn load_existing_series_metadata(
              ORDER BY LABEL COLLATE NOCASE ASC, TITLE COLLATE NOCASE ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing series metadata alternate titles: {error}"))?
     .into_iter()
@@ -434,14 +411,10 @@ pub async fn load_existing_series_metadata(
 }
 
 pub async fn persist_series_metadata_update(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series metadata update db: {error}"))?;
-
     let mut tx = pool
         .begin()
         .await
@@ -617,20 +590,16 @@ async fn replace_series_metadata_links(
 }
 
 pub async fn refresh_series_after_metadata_update(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<(), String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series metadata refresh db: {error}"))?;
-
     sqlx::query(
         r#"UPDATE SERIES_METADATA
          SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
          WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("refresh series metadata timestamp: {error}"))?;
 
@@ -640,7 +609,7 @@ pub async fn refresh_series_after_metadata_update(
          WHERE ID = ?"#,
     )
     .bind(series_id)
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("refresh series row timestamp: {error}"))?;
 

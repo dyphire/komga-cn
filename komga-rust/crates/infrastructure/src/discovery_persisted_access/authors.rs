@@ -2,14 +2,10 @@ use super::*;
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 pub async fn load_persisted_author_names(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     search: &str,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open author names db: {error}"))?;
-
     if let Some(authorized_library_ids) = authorized_library_ids
         && authorized_library_ids.is_empty()
     {
@@ -35,7 +31,7 @@ pub async fn load_persisted_author_names(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted author names: {error}"))?;
 
@@ -48,13 +44,9 @@ pub async fn load_persisted_author_names(
 }
 
 pub async fn load_persisted_author_roles(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open author roles db: {error}"))?;
-
     if let Some(authorized_library_ids) = authorized_library_ids
         && authorized_library_ids.is_empty()
     {
@@ -80,7 +72,7 @@ pub async fn load_persisted_author_roles(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted author roles: {error}"))?;
 
@@ -99,14 +91,10 @@ fn author_search_key(value: &str) -> String {
 }
 
 pub async fn load_persisted_authors_by_scope(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     scope: &AuthorsScope,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<AuthorEntry>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open v2 authors db: {error}"))?;
-
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"SELECT a.NAME, a.ROLE
          FROM BOOK_METADATA_AUTHOR a
@@ -173,7 +161,7 @@ pub async fn load_persisted_authors_by_scope(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted v2 authors: {error}"))?;
 

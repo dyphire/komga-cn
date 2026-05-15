@@ -1,20 +1,13 @@
-use std::path::Path;
-
 use komga_application::media_assets::{EntityThumbnailBinary, SeriesThumbnailRecord};
 use reqwest::Url;
-use sqlx::Row;
-
-use crate::sqlite::connect_read_pool;
+use sqlx::{Row, SqlitePool};
 
 use super::{emit_thumbnail_series_event, generated_thumbnail_id};
 
 pub async fn load_persisted_series_thumbnails(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<SeriesThumbnailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series thumbnails db: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT ID, SERIES_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT
@@ -24,7 +17,7 @@ pub async fn load_persisted_series_thumbnails(
         "#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted series thumbnails: {error}"))?;
 
@@ -44,12 +37,9 @@ pub async fn load_persisted_series_thumbnails(
 }
 
 pub async fn load_selected_series_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open selected series thumbnail db: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT TYPE, MEDIA_TYPE, THUMBNAIL
@@ -60,7 +50,7 @@ pub async fn load_selected_series_thumbnail(
         "#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query selected series thumbnail: {error}"))?;
 
@@ -74,12 +64,9 @@ pub async fn load_selected_series_thumbnail(
 }
 
 pub async fn load_series_thumbnail_by_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open single series thumbnail db: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT TYPE, MEDIA_TYPE, THUMBNAIL, URL
@@ -89,7 +76,7 @@ pub async fn load_series_thumbnail_by_id(
         "#,
     )
     .bind(thumbnail_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query single series thumbnail: {error}"))?;
 
@@ -111,7 +98,7 @@ pub async fn load_series_thumbnail_by_id(
 }
 
 pub async fn insert_series_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -119,9 +106,6 @@ pub async fn insert_series_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<SeriesThumbnailRecord, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series thumbnail create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -223,13 +207,10 @@ fn load_thumbnail_bytes_or_sidecar(
 }
 
 pub async fn select_series_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series thumbnail select db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -306,13 +287,10 @@ pub async fn select_series_thumbnail(
 }
 
 pub async fn delete_series_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series thumbnail delete db: {error}"))?;
     let mut tx = pool
         .begin()
         .await

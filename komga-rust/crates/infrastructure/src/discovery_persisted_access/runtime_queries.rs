@@ -1,13 +1,9 @@
 use super::*;
 
 pub async fn load_persisted_ondeck_books(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<BookBrowseEntry>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open books ondeck db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
          FROM READ_PROGRESS_SERIES rps
@@ -32,7 +28,7 @@ pub async fn load_persisted_ondeck_books(
          ORDER BY rps.MOST_RECENT_READ_DATE DESC"#,
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted books ondeck: {error}"))?;
 
@@ -48,12 +44,8 @@ pub async fn load_persisted_ondeck_books(
 }
 
 pub async fn load_persisted_duplicate_books(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<Vec<BookBrowseEntry>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open books duplicates db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
          FROM BOOK b
@@ -67,7 +59,7 @@ pub async fn load_persisted_duplicate_books(
                             GROUP BY FILE_HASH, FILE_SIZE
                             HAVING COUNT(*) > 1)"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted books duplicates: {error}"))?;
 
@@ -83,7 +75,7 @@ pub async fn load_persisted_duplicate_books(
 }
 
 pub async fn load_persisted_book_tags(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     scope: Option<&BookTagsScope>,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
@@ -96,10 +88,6 @@ pub async fn load_persisted_book_tags(
     {
         return Ok(vec![]);
     }
-
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book tags db: {error}"))?;
 
     let rows = match scope {
         BookTagsScope::All => {
@@ -119,7 +107,7 @@ pub async fn load_persisted_book_tags(
                 separated.push_unseparated(")");
             }
             query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
-            query.build().fetch_all(&pool).await
+            query.build().fetch_all(pool).await
         }
         BookTagsScope::Series(series_id) => {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -140,7 +128,7 @@ pub async fn load_persisted_book_tags(
                 separated.push_unseparated(")");
             }
             query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
-            query.build().fetch_all(&pool).await
+            query.build().fetch_all(pool).await
         }
         BookTagsScope::Libraries(library_ids) => {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -165,7 +153,7 @@ pub async fn load_persisted_book_tags(
                 separated.push_unseparated(")");
             }
             query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
-            query.build().fetch_all(&pool).await
+            query.build().fetch_all(pool).await
         }
         BookTagsScope::ReadList(readlist_id) => {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -187,7 +175,7 @@ pub async fn load_persisted_book_tags(
                 separated.push_unseparated(")");
             }
             query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
-            query.build().fetch_all(&pool).await
+            query.build().fetch_all(pool).await
         }
     }
     .map_err(|error| format!("query persisted book tags: {error}"))?;
@@ -205,13 +193,9 @@ pub async fn load_persisted_book_tags(
 }
 
 pub async fn persisted_utc_date_minus_days(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     days: i64,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted date db: {error}"))?;
-
     let modifier = if days >= 0 {
         format!("-{days} days")
     } else {
@@ -220,7 +204,7 @@ pub async fn persisted_utc_date_minus_days(
 
     let row = sqlx::query(r#"SELECT date('now', ?) AS CUTOFF"#)
         .bind(modifier)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .map_err(|error| format!("query persisted utc cutoff date: {error}"))?;
 
@@ -228,20 +212,16 @@ pub async fn persisted_utc_date_minus_days(
 }
 
 pub async fn load_series_read_progress_counts(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<HashMap<String, (i64, i64)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series read-progress db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT
          FROM READ_PROGRESS_SERIES
          WHERE USER_ID = ?"#,
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series read-progress counts: {error}"))?;
 
@@ -259,13 +239,9 @@ pub async fn load_series_read_progress_counts(
 }
 
 pub async fn load_series_read_dates(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<HashMap<String, String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series read-date db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, MOST_RECENT_READ_DATE
          FROM READ_PROGRESS_SERIES
@@ -273,7 +249,7 @@ pub async fn load_series_read_dates(
            AND MOST_RECENT_READ_DATE IS NOT NULL"#,
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series read dates: {error}"))?;
 
@@ -289,18 +265,14 @@ pub async fn load_series_read_dates(
 }
 
 pub async fn load_series_total_book_counts(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<HashMap<String, i64>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series metadata db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, TOTAL_BOOK_COUNT
          FROM SERIES_METADATA
          WHERE TOTAL_BOOK_COUNT IS NOT NULL"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series total-book-counts: {error}"))?;
 

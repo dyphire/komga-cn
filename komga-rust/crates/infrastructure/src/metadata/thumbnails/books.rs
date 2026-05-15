@@ -1,20 +1,12 @@
-use std::path::Path;
-
 use komga_application::media_assets::{EntityThumbnailBinary, EntityThumbnailRecord};
 use sqlx::{Row, SqlitePool};
-
-use crate::sqlite::connect_read_pool;
 
 use super::{emit_thumbnail_book_event, generated_thumbnail_id};
 
 pub async fn load_persisted_book_thumbnails(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<EntityThumbnailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book thumbnails db: {error}"))?;
-
     let rows = sqlx::query(
         r#"
         SELECT ID, BOOK_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT
@@ -23,7 +15,7 @@ pub async fn load_persisted_book_thumbnails(
         "#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted book thumbnails: {error}"))?;
 
@@ -43,13 +35,9 @@ pub async fn load_persisted_book_thumbnails(
 }
 
 pub async fn load_selected_book_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open selected book thumbnail db: {error}"))?;
-
     let row = sqlx::query(
         r#"
         SELECT TYPE, MEDIA_TYPE, THUMBNAIL
@@ -60,7 +48,7 @@ pub async fn load_selected_book_thumbnail(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query selected book thumbnail: {error}"))?;
 
@@ -72,13 +60,9 @@ pub async fn load_selected_book_thumbnail(
 }
 
 pub async fn load_book_thumbnail_by_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open single book thumbnail db: {error}"))?;
-
     let row = sqlx::query(
         r#"
         SELECT TYPE, MEDIA_TYPE, THUMBNAIL
@@ -88,7 +72,7 @@ pub async fn load_book_thumbnail_by_id(
         "#,
     )
     .bind(thumbnail_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query single book thumbnail: {error}"))?;
 
@@ -109,7 +93,7 @@ async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<
 }
 
 pub async fn insert_book_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -117,9 +101,6 @@ pub async fn insert_book_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<EntityThumbnailRecord, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book thumbnail create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -202,7 +183,7 @@ pub async fn insert_book_thumbnail(
         .await
         .map_err(|error| format!("commit book thumbnail create tx: {error}"))?;
 
-    let series_id = load_book_series_id(&pool, book_id)
+    let series_id = load_book_series_id(pool, book_id)
         .await?
         .unwrap_or_default();
     let record = EntityThumbnailRecord {
@@ -219,13 +200,7 @@ pub async fn insert_book_thumbnail(
     Ok(record)
 }
 
-pub async fn select_book_thumbnail(
-    database_file: &Path,
-    thumbnail_id: &str,
-) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book thumbnail select db: {error}"))?;
+pub async fn select_book_thumbnail(pool: &SqlitePool, thumbnail_id: &str) -> Result<bool, String> {
     let mut tx = pool
         .begin()
         .await
@@ -278,20 +253,14 @@ pub async fn select_book_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit book thumbnail select tx: {error}"))?;
-    let selected_series_id = load_book_series_id(&pool, &target_book_id)
+    let selected_series_id = load_book_series_id(pool, &target_book_id)
         .await?
         .unwrap_or_default();
     emit_thumbnail_book_event(&target_book_id, &selected_series_id, true, true);
     Ok(true)
 }
 
-pub async fn delete_book_thumbnail(
-    database_file: &Path,
-    thumbnail_id: &str,
-) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book thumbnail delete db: {error}"))?;
+pub async fn delete_book_thumbnail(pool: &SqlitePool, thumbnail_id: &str) -> Result<bool, String> {
     let mut tx = pool
         .begin()
         .await
@@ -318,7 +287,7 @@ pub async fn delete_book_thumbnail(
     let target_book_id = target.get::<String, _>("BOOK_ID");
     let target_type = target.get::<String, _>("TYPE");
     let deleted_selected = target.get::<bool, _>("SELECTED");
-    let series_id = load_book_series_id(&pool, &target_book_id)
+    let series_id = load_book_series_id(pool, &target_book_id)
         .await?
         .unwrap_or_default();
     if target_type != "USER_UPLOADED" {

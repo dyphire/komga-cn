@@ -9,7 +9,7 @@ use image::GenericImageView;
 use lopdf::{Document as PdfDocument, Object};
 use pdfium_render::prelude::*;
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use zip::ZipArchive;
 
 use crate::load_pdfium;
@@ -18,7 +18,6 @@ use crate::metadata::{
 };
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
 use crate::resolve_stored_path;
-use crate::sqlite::connect_read_pool;
 
 const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
 const KOTLIN_PDF_MIN_EDGE: f64 = 3200.0;
@@ -63,7 +62,7 @@ struct TransientEpubManifestItem {
 }
 
 pub async fn infer_transient_series_and_number(
-    database_file: &Path,
+    pool: &SqlitePool,
     path_or_name: &str,
 ) -> (Option<String>, Option<f64>) {
     let inferred = infer_transient_metadata(path_or_name);
@@ -71,11 +70,6 @@ pub async fn infer_transient_series_and_number(
     if inferred.series_titles.is_empty() {
         return (None, number);
     }
-
-    let pool = match connect_read_pool(database_file).await {
-        Ok(pool) => pool,
-        Err(_) => return (None, number),
-    };
 
     for series_title in &inferred.series_titles {
         let exact_match = sqlx::query(
@@ -87,7 +81,7 @@ pub async fn infer_transient_series_and_number(
              LIMIT 1"#,
         )
         .bind(series_title.as_str())
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .ok()
         .flatten()
@@ -107,7 +101,7 @@ pub async fn infer_transient_series_and_number(
              LIMIT 1"#,
         )
         .bind(format!("%{}%", series_title))
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .ok()
         .flatten()
@@ -120,13 +114,9 @@ pub async fn infer_transient_series_and_number(
     (None, number)
 }
 
-pub async fn validate_transient_scan_root(database_file: &Path, root: &Path) -> Result<(), String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("transient scan validation db open failed: {error}"))?;
-
+pub async fn validate_transient_scan_root(pool: &SqlitePool, root: &Path) -> Result<(), String> {
     let library_roots = sqlx::query("SELECT ROOT AS ROOT FROM LIBRARY")
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("transient scan library roots query failed: {error}"))?
         .into_iter()

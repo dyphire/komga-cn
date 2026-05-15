@@ -1,12 +1,12 @@
 use super::*;
 
 pub async fn load_persisted_genres(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "genres",
@@ -22,7 +22,7 @@ pub async fn load_persisted_genres(
 }
 
 pub async fn load_persisted_tags(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
@@ -31,10 +31,6 @@ pub async fn load_persisted_tags(
     {
         return Ok(Vec::new());
     }
-
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open tags db: {error}"))?;
 
     let rows = if let Some(collection_id) = collection_id {
         let mut query = QueryBuilder::<Sqlite>::new(
@@ -73,7 +69,7 @@ pub async fn load_persisted_tags(
             separated.push_unseparated(")");
         }
         query.push(r#" ) ORDER BY lower(TAG), TAG"#);
-        query.build().fetch_all(&pool).await
+        query.build().fetch_all(pool).await
     } else if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
         let mut query = QueryBuilder::<Sqlite>::new(
             r#"SELECT TAG FROM (
@@ -99,7 +95,7 @@ pub async fn load_persisted_tags(
             separated.push_bind(library_id);
         }
         separated.push_unseparated(") ) ORDER BY lower(TAG), TAG");
-        query.build().fetch_all(&pool).await
+        query.build().fetch_all(pool).await
     } else {
         sqlx::query(
             r#"SELECT TAG
@@ -113,7 +109,7 @@ pub async fn load_persisted_tags(
                  JOIN BOOK b ON b.ID = bt.BOOK_ID )
              ORDER BY lower(TAG), TAG"#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
     }
     .map_err(|error| format!("query persisted tags: {error}"))?;
@@ -125,12 +121,12 @@ pub async fn load_persisted_tags(
 }
 
 pub async fn load_persisted_languages(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "languages",
@@ -146,12 +142,12 @@ pub async fn load_persisted_languages(
 }
 
 pub async fn load_persisted_publishers(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "publishers",
@@ -167,7 +163,7 @@ pub async fn load_persisted_publishers(
 }
 
 pub async fn load_persisted_age_ratings(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
@@ -176,10 +172,6 @@ pub async fn load_persisted_age_ratings(
     {
         return Ok(Vec::new());
     }
-
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open age-ratings db: {error}"))?;
 
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"SELECT DISTINCT sm.AGE_RATING AS VALUE
@@ -206,7 +198,7 @@ pub async fn load_persisted_age_ratings(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted age-ratings: {error}"))?;
 
@@ -220,12 +212,12 @@ pub async fn load_persisted_age_ratings(
 }
 
 pub async fn load_persisted_sharing_labels(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "sharing-labels",
@@ -241,12 +233,12 @@ pub async fn load_persisted_sharing_labels(
 }
 
 pub async fn load_persisted_series_release_dates(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let values = common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "series-release-dates",
@@ -276,12 +268,12 @@ pub async fn load_persisted_series_release_dates(
 }
 
 pub async fn load_persisted_series_tags(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
-        database_file,
+        pool,
         library_ids,
         collection_id,
         "series tags",

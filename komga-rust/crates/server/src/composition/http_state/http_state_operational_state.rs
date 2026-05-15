@@ -23,9 +23,9 @@ pub(super) struct SqliteLibraryCatalogService {
 }
 
 impl SqliteLibraryCatalogService {
-    pub(super) fn new(database_file: &Path, task_write_pool: SqlitePool) -> Self {
+    pub(super) fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
         Self {
-            adapter: SqliteLibraryCatalogAdapter::new(database_file.to_path_buf(), task_write_pool),
+            adapter: SqliteLibraryCatalogAdapter::new(read_pool, write_pool),
         }
     }
 }

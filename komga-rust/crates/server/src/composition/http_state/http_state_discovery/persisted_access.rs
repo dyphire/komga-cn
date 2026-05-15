@@ -60,19 +60,15 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
         search: &str,
         authorized_library_ids: Option<&[String]>,
     ) -> Result<Vec<String>, String> {
-        authors::load_persisted_author_names(
-            self.db.database_file(),
-            search,
-            authorized_library_ids,
-        )
-        .await
+        authors::load_persisted_author_names(self.db.read_pool(), search, authorized_library_ids)
+            .await
     }
 
     async fn load_author_roles(
         &self,
         authorized_library_ids: Option<&[String]>,
     ) -> Result<Vec<String>, String> {
-        authors::load_persisted_author_roles(self.db.database_file(), authorized_library_ids).await
+        authors::load_persisted_author_roles(self.db.read_pool(), authorized_library_ids).await
     }
 
     async fn load_authors_by_scope(
@@ -88,7 +84,7 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
             PersistedAuthorsScope::ReadList(id) => models::AuthorsScope::ReadList(id),
         };
         let rows = authors::load_persisted_authors_by_scope(
-            self.db.database_file(),
+            self.db.read_pool(),
             &mapped_scope,
             authorized_library_ids,
         )
@@ -106,7 +102,7 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
 #[async_trait::async_trait]
 impl DiscoveryLibraryMappingService for RuntimePersistedDiscoveryAccess {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-        library_mappings::load_persisted_library_ids(self.db.database_file()).await
+        library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
 }
 
@@ -150,13 +146,13 @@ impl DiscoveryBookFeedService for RuntimePersistedDiscoveryAccess {
         &self,
         user_id: &str,
     ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        runtime_queries::load_persisted_ondeck_books(self.db.database_file(), user_id)
+        runtime_queries::load_persisted_ondeck_books(self.db.read_pool(), user_id)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }
 
     async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        runtime_queries::load_persisted_duplicate_books(self.db.database_file())
+        runtime_queries::load_persisted_duplicate_books(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }

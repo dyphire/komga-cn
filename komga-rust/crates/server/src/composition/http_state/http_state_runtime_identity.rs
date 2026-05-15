@@ -132,25 +132,19 @@ impl IdentityService for RuntimeIdentityService {
     }
 
     async fn persisted_basic_user(&self, headers: &HeaderMap) -> Option<AuthOutcome> {
-        infrastructure_runtime_identity_access::persisted_basic_user(
-            headers,
-            self.db.database_file(),
-        )
-        .await
+        infrastructure_runtime_identity_access::persisted_basic_user(headers, self.db.read_pool())
+            .await
     }
 
     async fn persisted_api_key_user(&self, headers: &HeaderMap) -> Option<AuthOutcome> {
-        infrastructure_runtime_identity_access::persisted_api_key_user(
-            headers,
-            self.db.database_file(),
-        )
-        .await
+        infrastructure_runtime_identity_access::persisted_api_key_user(headers, self.db.read_pool())
+            .await
     }
 
     async fn persisted_api_key_user_by_token(&self, api_key: &str) -> Option<AuthOutcome> {
         infrastructure_runtime_identity_access::persisted_api_key_user_by_token(
             api_key,
-            self.db.database_file(),
+            self.db.read_pool(),
         )
         .await
     }
@@ -161,13 +155,13 @@ impl IdentityService for RuntimeIdentityService {
     ) -> Option<PersistedApiKeyMetadata> {
         infrastructure_runtime_identity_access::persisted_api_key_metadata(
             headers,
-            self.db.database_file(),
+            self.db.read_pool(),
         )
         .await
     }
 
     async fn persisted_users(&self) -> Option<Vec<AuthUser>> {
-        infrastructure_runtime_identity_access::persisted_users(self.db.database_file()).await
+        infrastructure_runtime_identity_access::persisted_users(self.db.read_pool()).await
     }
 
     async fn persisted_update_password_by_user_id(
@@ -176,7 +170,7 @@ impl IdentityService for RuntimeIdentityService {
         password: &str,
     ) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_update_password_by_user_id(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             password,
         )
@@ -189,7 +183,7 @@ impl IdentityService for RuntimeIdentityService {
         comment: &str,
     ) -> Option<PersistedApiKey> {
         infrastructure_runtime_identity_access::persisted_create_api_key(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             comment,
         )
@@ -198,7 +192,7 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_api_key_comment_exists(&self, user_id: &str, comment: &str) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_api_key_comment_exists(
-            self.db.database_file(),
+            self.db.read_pool(),
             user_id,
             comment,
         )
@@ -207,7 +201,7 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_list_api_keys(&self, user_id: &str) -> Option<Vec<PersistedApiKey>> {
         infrastructure_runtime_identity_access::persisted_list_api_keys(
-            self.db.database_file(),
+            self.db.read_pool(),
             user_id,
         )
         .await
@@ -219,7 +213,7 @@ impl IdentityService for RuntimeIdentityService {
         api_key_id: &str,
     ) -> Option<bool> {
         infrastructure_runtime_identity_access::persisted_delete_api_key_by_id(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             api_key_id,
         )
@@ -231,7 +225,7 @@ impl IdentityService for RuntimeIdentityService {
         user_id: Option<&str>,
     ) -> Option<Vec<PersistedAuthenticationActivity>> {
         infrastructure_runtime_identity_access::persisted_list_authentication_activity(
-            self.db.database_file(),
+            self.db.read_pool(),
             user_id,
         )
         .await
@@ -239,7 +233,7 @@ impl IdentityService for RuntimeIdentityService {
 
     async fn persisted_cleanup_authentication_activity(&self) -> Option<u64> {
         infrastructure_runtime_identity_access::persisted_cleanup_authentication_activity(
-            self.db.database_file(),
+            self.db.write_pool(),
         )
         .await
     }
@@ -250,7 +244,7 @@ impl IdentityService for RuntimeIdentityService {
         api_key_id: &str,
     ) -> Option<PersistedAuthenticationActivity> {
         infrastructure_runtime_identity_access::persisted_latest_authentication_activity_by_user_and_api_key(
-            self.db.database_file(),
+            self.db.read_pool(),
             user_id,
             api_key_id,
         )
@@ -264,7 +258,7 @@ impl IdentityService for RuntimeIdentityService {
         error: &str,
     ) -> Option<()> {
         infrastructure_auth_runtime_identity::persisted_record_failed_authentication_activity(
-            self.db.database_file(),
+            self.db.write_pool(),
             email,
             &input.source,
             error,
@@ -280,7 +274,7 @@ impl IdentityService for RuntimeIdentityService {
         input: AuthenticationActivityWriteInput,
     ) -> Option<()> {
         infrastructure_runtime_identity_access::persisted_record_successful_authentication_activity(
-            self.db.database_file(),
+            self.db.write_pool(),
             user,
             &input.source,
             input.api_key_id.as_deref(),
@@ -297,7 +291,7 @@ impl IdentityService for RuntimeIdentityService {
         allow_create: bool,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
         infrastructure_runtime_identity_access::ensure_oauth_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             email,
             allow_create,
         )
@@ -313,7 +307,7 @@ impl IdentityService for RuntimeIdentityService {
         book_id: &str,
     ) -> Result<Option<String>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_created_timestamp(
-            self.db.database_file(),
+            self.db.read_pool(),
             book_id,
         )
         .await
@@ -324,7 +318,7 @@ impl IdentityService for RuntimeIdentityService {
         book_id: &str,
     ) -> Result<Option<Value>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_book_last_epub_position_locator(
-            self.db.database_file(),
+            self.db.read_pool(),
             book_id,
         )
         .await
@@ -334,12 +328,9 @@ impl IdentityService for RuntimeIdentityService {
         &self,
         book_id: &str,
     ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
-        infrastructure_runtime_identity_access::load_book_media_file(
-            self.db.database_file(),
-            book_id,
-        )
-        .await
-        .map(|value| value.map(map_persisted_book_media_file))
+        infrastructure_runtime_identity_access::load_book_media_file(self.db.read_pool(), book_id)
+            .await
+            .map(|value| value.map(map_persisted_book_media_file))
     }
 
     async fn load_kobo_metadata_record(
@@ -347,7 +338,7 @@ impl IdentityService for RuntimeIdentityService {
         book_id: &str,
     ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_kobo_metadata_record(
-            self.db.database_file(),
+            self.db.read_pool(),
             book_id,
         )
         .await
@@ -380,7 +371,7 @@ impl IdentityService for RuntimeIdentityService {
         book_hash: &str,
     ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
         infrastructure_runtime_identity_access::load_koreader_book_target(
-            self.db.database_file(),
+            self.db.read_pool(),
             book_hash,
         )
         .await
@@ -394,7 +385,7 @@ impl IdentityService for RuntimeIdentityService {
         user_id: &str,
     ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_read_progress(
-            self.db.database_file(),
+            self.db.read_pool(),
             book_id,
             user_id,
         )
@@ -407,7 +398,7 @@ impl IdentityService for RuntimeIdentityService {
         thumbnail_id: &str,
     ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
         infrastructure_runtime_identity_access::load_thumbnail_by_id(
-            self.db.database_file(),
+            self.db.read_pool(),
             thumbnail_id,
         )
         .await
@@ -425,7 +416,7 @@ impl IdentityService for RuntimeIdentityService {
         locator: Option<Value>,
     ) -> Result<(), String> {
         infrastructure_runtime_identity_access::persist_read_progress_with_locator(
-            self.db.database_file(),
+            self.db.write_pool(),
             book_id,
             user_id,
             page,
@@ -439,11 +430,8 @@ impl IdentityService for RuntimeIdentityService {
     }
 
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, sqlx::Error> {
-        infrastructure_runtime_identity_access::persisted_book_exists(
-            self.db.database_file(),
-            book_id,
-        )
-        .await
+        infrastructure_runtime_identity_access::persisted_book_exists(self.db.read_pool(), book_id)
+            .await
     }
 
     async fn proxy_kobo_store_library_sync(
@@ -472,13 +460,12 @@ impl IdentityService for RuntimeIdentityService {
         &self,
         input: CreateAuthUserInput,
     ) -> Result<Option<AuthUser>, sqlx::Error> {
-        infrastructure_runtime_identity_access::create_auth_user(self.db.database_file(), input)
-            .await
+        infrastructure_runtime_identity_access::create_auth_user(self.db.write_pool(), input).await
     }
 
     async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, sqlx::Error> {
         infrastructure_runtime_identity_access::delete_auth_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             target_user_id,
         )
         .await
@@ -490,7 +477,7 @@ impl IdentityService for RuntimeIdentityService {
         patch: UpdateAuthUserInput,
     ) -> Result<UpdateAuthUserResult, sqlx::Error> {
         infrastructure_runtime_identity_access::update_auth_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             target_user_id,
             patch,
         )

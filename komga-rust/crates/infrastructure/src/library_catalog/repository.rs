@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use komga_application::library_catalog::{
     LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
 };
@@ -18,15 +16,15 @@ use crate::sqlite::write_models::libraries::{
 
 #[derive(Clone, Debug)]
 pub struct SqliteLibraryCatalogAdapter {
-    database_file: PathBuf,
-    task_write_pool: SqlitePool,
+    read_pool: SqlitePool,
+    write_pool: SqlitePool,
 }
 
 impl SqliteLibraryCatalogAdapter {
-    pub fn new(database_file: impl Into<PathBuf>, task_write_pool: SqlitePool) -> Self {
+    pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
         Self {
-            database_file: database_file.into(),
-            task_write_pool,
+            read_pool,
+            write_pool,
         }
     }
 }
@@ -36,7 +34,7 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
         &self,
         context: &DiscoveryQueryContext,
     ) -> Result<Vec<LibraryRecord>, DiscoveryError> {
-        let libraries = list_persisted_libraries(self.database_file.as_path(), context).await?;
+        let libraries = list_persisted_libraries(&self.read_pool, context).await?;
         Ok(libraries.into_iter().map(LibraryRecord::from).collect())
     }
 
@@ -45,26 +43,25 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
         context: &DiscoveryQueryContext,
         library_id: &str,
     ) -> Result<Option<LibraryRecord>, DiscoveryError> {
-        let library =
-            get_persisted_library(self.database_file.as_path(), context, library_id).await?;
+        let library = get_persisted_library(&self.read_pool, context, library_id).await?;
         Ok(library.map(LibraryRecord::from))
     }
 }
 
 impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String> {
-        load_persisted_library_write_model(self.database_file.as_path(), library_id)
+        load_persisted_library_write_model(&self.read_pool, library_id)
             .await
             .map(|library| library.map(LibraryRecord::from))
             .map_err(|error| format!("load persisted library: {error}"))
     }
 
     async fn validate_library(&self, library: &LibraryRecord) -> Result<(), String> {
-        validate_library_before_persist(self.database_file.as_path(), &library.clone().into()).await
+        validate_library_before_persist(&self.read_pool, &library.clone().into()).await
     }
 
     async fn create_library(&self, library: &LibraryRecord) -> Result<(), String> {
-        persist_library_create(self.database_file.as_path(), &library.clone().into())
+        persist_library_create(&self.write_pool, &library.clone().into())
             .await
             .map_err(|error| format!("persist library create: {error}"))?;
         register_runtime_sse_event(
@@ -77,7 +74,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     }
 
     async fn update_library(&self, library: &LibraryRecord) -> Result<bool, String> {
-        let updated = persist_library_update(self.database_file.as_path(), &library.clone().into())
+        let updated = persist_library_update(&self.write_pool, &library.clone().into())
             .await
             .map_err(|error| format!("persist library update: {error}"))?;
         if updated {
@@ -92,7 +89,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     }
 
     async fn delete_library(&self, library_id: &str) -> Result<bool, String> {
-        let deleted = delete_persisted_library(self.database_file.as_path(), library_id)
+        let deleted = delete_persisted_library(&self.write_pool, library_id)
             .await
             .map_err(|error| format!("delete persisted library: {error}"))?;
         if deleted {
@@ -111,7 +108,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         library_id: &str,
         koreader: bool,
     ) -> Result<Vec<String>, String> {
-        library_book_ids_with_empty_hash(self.database_file.as_path(), library_id, koreader).await
+        library_book_ids_with_empty_hash(&self.read_pool, library_id, koreader).await
     }
 
     async fn library_books_with_mismatched_extensions(
@@ -119,7 +116,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         library_id: &str,
     ) -> Result<Vec<(String, String)>, String> {
         crate::task_queue::media_helpers::media_queries::load_books_for_extension_repair(
-            &self.task_write_pool,
+            &self.write_pool,
             library_id,
         )
         .await
@@ -132,7 +129,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     }
 
     async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String> {
-        library_book_ids(self.database_file.as_path(), library_id)
+        library_book_ids(&self.read_pool, library_id)
             .await
             .map_err(|error| format!("load library book ids: {error}"))
     }
@@ -141,7 +138,7 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         &self,
         library_id: &str,
     ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, String> {
-        library_series_and_book_ids(self.database_file.as_path(), library_id)
+        library_series_and_book_ids(&self.read_pool, library_id)
             .await
             .map_err(|error| format!("load library series and book ids: {error}"))
     }

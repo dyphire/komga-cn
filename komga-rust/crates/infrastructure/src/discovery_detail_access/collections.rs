@@ -1,7 +1,4 @@
-use std::path::Path as FsPath;
-
-use crate::sqlite::connect_read_pool;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
 pub struct PersistedCollectionRecord {
@@ -17,34 +14,27 @@ pub struct PersistedSeriesRestrictionRecord {
     pub labels: Vec<String>,
 }
 
-pub async fn persisted_collections_exist(database_file: &FsPath) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collections exists db: {error}"))?;
+pub async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
     let row = sqlx::query(
         r#"SELECT 1 AS FOUND
 FROM COLLECTION
 LIMIT 1"#,
     )
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted collections existence: {error}"))?;
     Ok(row.is_some())
 }
 
 pub async fn load_persisted_collections(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<Vec<PersistedCollectionRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted collections db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
 ORDER BY NAME COLLATE NOCASE ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted collections: {error}"))?;
 
@@ -61,20 +51,16 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 }
 
 pub async fn load_persisted_collection_detail(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Option<PersistedCollectionRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted collection detail db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
 WHERE ID = ?"#,
     )
     .bind(collection_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted collection detail: {error}"))?;
 
@@ -88,13 +74,9 @@ WHERE ID = ?"#,
 }
 
 pub async fn load_persisted_collection_series_ids(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted collection series ids db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID
 FROM COLLECTION_SERIES
@@ -102,7 +84,7 @@ WHERE COLLECTION_ID = ?
 ORDER BY NUMBER ASC"#,
     )
     .bind(collection_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted collection series ids: {error}"))?;
 
@@ -113,12 +95,9 @@ ORDER BY NUMBER ASC"#,
 }
 
 pub async fn load_series_library_id(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series visibility db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT LIBRARY_ID
 FROM SERIES
@@ -126,7 +105,7 @@ WHERE ID = ?
 LIMIT 1"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query series library for visibility: {error}"))?;
 
@@ -134,13 +113,9 @@ LIMIT 1"#,
 }
 
 pub async fn load_series_restrictions(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<PersistedSeriesRestrictionRecord, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series restrictions db: {error}"))?;
-
     let age_row = sqlx::query(
         r#"SELECT AGE_RATING
 FROM SERIES_METADATA
@@ -148,7 +123,7 @@ WHERE SERIES_ID = ?
 LIMIT 1"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query series age rating for visibility: {error}"))?;
 
@@ -158,7 +133,7 @@ FROM SERIES_METADATA_SHARING
 WHERE SERIES_ID = ?"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series sharing labels for visibility: {error}"))?;
 
@@ -174,15 +149,12 @@ WHERE SERIES_ID = ?"#,
 }
 
 pub async fn persist_collection_create(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
     name: &str,
     ordered: bool,
     series_ids: &[String],
 ) -> Result<(), String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -213,15 +185,12 @@ VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
 }
 
 pub async fn persist_collection_update(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
     name: &str,
     ordered: bool,
     series_ids: &[String],
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection update db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -260,12 +229,9 @@ WHERE ID = ?"#,
 }
 
 pub async fn delete_persisted_collection(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection delete db: {error}"))?;
     let mut tx = pool
         .begin()
         .await

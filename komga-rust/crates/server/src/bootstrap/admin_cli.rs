@@ -1,4 +1,5 @@
 use bcrypt::{DEFAULT_COST, hash};
+use sqlx::SqlitePool;
 use std::fmt;
 use std::path::Path;
 
@@ -188,8 +189,12 @@ pub async fn run_admin_cli_commands(
     database_file: &Path,
     commands: &AdminCliCommands,
 ) -> Result<(), AdminCliActionError> {
+    let pool = komga_infrastructure::sqlite::connect_write_pool(database_file)
+        .await
+        .map_err(|error| AdminCliActionError::new(format!("failed to open database: {error}")))?;
+
     if commands.list_users {
-        print_user_list(database_file).await?;
+        print_user_list(&pool).await?;
     }
 
     if commands.reset_emails.is_empty() {
@@ -206,7 +211,7 @@ pub async fn run_admin_cli_commands(
 
     for email in &commands.reset_emails {
         let user = komga_infrastructure::sqlite::write_models::bootstrap_users::load_persisted_user_by_email(
-            database_file,
+            &pool,
             email,
         )
         .await;
@@ -242,7 +247,7 @@ pub async fn run_admin_cli_commands(
         .collect::<Result<Vec<_>, _>>()?;
 
     komga_infrastructure::sqlite::write_models::bootstrap_users::update_persisted_user_passwords(
-        database_file,
+        &pool,
         &password_updates,
     )
     .await
@@ -258,10 +263,10 @@ pub async fn run_admin_cli_commands(
     Ok(())
 }
 
-async fn print_user_list(database_file: &Path) -> Result<(), AdminCliActionError> {
+async fn print_user_list(pool: &SqlitePool) -> Result<(), AdminCliActionError> {
     let rows =
         komga_infrastructure::sqlite::write_models::bootstrap_users::list_persisted_user_emails(
-            database_file,
+            pool,
         )
         .await;
 

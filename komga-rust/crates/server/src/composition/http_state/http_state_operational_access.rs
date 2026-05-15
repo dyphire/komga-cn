@@ -20,45 +20,40 @@ pub(super) struct RuntimeOperationalRuntimeService {
 #[async_trait]
 impl OperationalRuntimeService for RuntimeOperationalRuntimeService {
     async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
-        operational_metrics_access::load_task_execution_values(self.tasks_db.database_file()).await
+        operational_metrics_access::load_task_execution_values(self.tasks_db.read_pool()).await
     }
 
     async fn load_libraries_count(&self) -> Result<f64, String> {
-        operational_metrics_access::load_libraries_count(self.main_db.database_file()).await
+        operational_metrics_access::load_libraries_count(self.main_db.read_pool()).await
     }
 
     async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
-        operational_metrics_access::load_series_grouped_by_library(self.main_db.database_file())
-            .await
+        operational_metrics_access::load_series_grouped_by_library(self.main_db.read_pool()).await
     }
 
     async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
-        operational_metrics_access::load_books_grouped_by_library(self.main_db.database_file())
-            .await
+        operational_metrics_access::load_books_grouped_by_library(self.main_db.read_pool()).await
     }
 
     async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
-        operational_metrics_access::load_books_filesize_grouped_by_library(
-            self.main_db.database_file(),
-        )
-        .await
-    }
-
-    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
-        operational_metrics_access::load_sidecars_grouped_by_library(self.main_db.database_file())
+        operational_metrics_access::load_books_filesize_grouped_by_library(self.main_db.read_pool())
             .await
     }
 
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        operational_metrics_access::load_sidecars_grouped_by_library(self.main_db.read_pool()).await
+    }
+
     async fn load_collections_count(&self) -> Result<f64, String> {
-        operational_metrics_access::load_collections_count(self.main_db.database_file()).await
+        operational_metrics_access::load_collections_count(self.main_db.read_pool()).await
     }
 
     async fn load_readlists_count(&self) -> Result<f64, String> {
-        operational_metrics_access::load_readlists_count(self.main_db.database_file()).await
+        operational_metrics_access::load_readlists_count(self.main_db.read_pool()).await
     }
 
     async fn load_task_failure_count(&self) -> Result<f64, String> {
-        operational_metrics_access::load_task_failure_count(self.main_db.database_file()).await
+        operational_metrics_access::load_task_failure_count(self.main_db.read_pool()).await
     }
 
     async fn load_sqlite_pool_snapshots(
@@ -98,7 +93,7 @@ pub(super) struct RuntimeOperationalSettingsService {
 impl OperationalSettingsService for RuntimeOperationalSettingsService {
     async fn load_announcement_read_ids(&self, user_id: &str) -> Result<Vec<String>, sqlx::Error> {
         komga_infrastructure::announcements_access::load_announcement_read_ids(
-            self.db.database_file(),
+            self.db.read_pool(),
             user_id,
         )
         .await
@@ -110,7 +105,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         ids: &[String],
     ) -> Result<(), sqlx::Error> {
         komga_infrastructure::announcements_access::save_announcements_read(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             ids,
         )
@@ -118,7 +113,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     }
 
     async fn load_claim_status(&self) -> Result<bool, sqlx::Error> {
-        komga_infrastructure::claims_access::load_claim_status(self.db.database_file()).await
+        komga_infrastructure::claims_access::load_claim_status(self.db.read_pool()).await
     }
 
     async fn claim_initial_admin_user(
@@ -128,7 +123,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         password_hash: &str,
     ) -> Result<ClaimInitialAdminUserResult, sqlx::Error> {
         komga_infrastructure::claims_access::claim_initial_admin_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             email,
             password_hash,
@@ -161,26 +156,22 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         allow_unauthorized_only: bool,
     ) -> Result<Value, sqlx::Error> {
         operational_settings_access::load_client_settings_global(
-            self.db.database_file(),
+            self.db.read_pool(),
             allow_unauthorized_only,
         )
         .await
     }
 
     async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, sqlx::Error> {
-        operational_settings_access::load_client_settings_user(self.db.database_file(), user_id)
-            .await
+        operational_settings_access::load_client_settings_user(self.db.read_pool(), user_id).await
     }
 
     async fn upsert_client_settings_global(
         &self,
         settings: &[(String, String, bool)],
     ) -> Result<(), sqlx::Error> {
-        operational_settings_access::upsert_client_settings_global(
-            self.db.database_file(),
-            settings,
-        )
-        .await
+        operational_settings_access::upsert_client_settings_global(self.db.write_pool(), settings)
+            .await
     }
 
     async fn upsert_client_settings_user(
@@ -189,7 +180,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         settings: &[(String, String)],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::upsert_client_settings_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             settings,
         )
@@ -197,8 +188,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     }
 
     async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), sqlx::Error> {
-        operational_settings_access::delete_client_settings_global(self.db.database_file(), keys)
-            .await
+        operational_settings_access::delete_client_settings_global(self.db.write_pool(), keys).await
     }
 
     async fn delete_client_settings_user(
@@ -207,7 +197,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         keys: &[String],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::delete_client_settings_user(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             keys,
         )
@@ -231,8 +221,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     }
 
     async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), sqlx::Error> {
-        operational_settings_access::delete_syncpoints_by_user(self.db.database_file(), user_id)
-            .await
+        operational_settings_access::delete_syncpoints_by_user(self.db.write_pool(), user_id).await
     }
 
     async fn delete_syncpoints_by_user_and_key_ids(
@@ -241,7 +230,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         key_ids: &[String],
     ) -> Result<(), sqlx::Error> {
         operational_settings_access::delete_syncpoints_by_user_and_key_ids(
-            self.db.database_file(),
+            self.db.write_pool(),
             user_id,
             key_ids,
         )
@@ -254,7 +243,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         size: u64,
         sorts: Vec<String>,
     ) -> Result<Value, sqlx::Error> {
-        operational_settings_access::load_history_page(self.db.database_file(), page, size, &sorts)
+        operational_settings_access::load_history_page(self.db.read_pool(), page, size, &sorts)
             .await
     }
 
@@ -266,7 +255,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
         page_hashes_access::load_page_hash_matches_page(
-            self.db.database_file(),
+            self.db.read_pool(),
             page_hash,
             page,
             size,
@@ -279,7 +268,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         &self,
         page_hash: &str,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-        page_hashes_access::load_page_hash_thumbnail(self.db.database_file(), page_hash).await
+        page_hashes_access::load_page_hash_thumbnail(self.db.read_pool(), page_hash).await
     }
 
     async fn load_unknown_page_hash_thumbnail(
@@ -288,7 +277,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         resize_to: Option<u32>,
     ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
         page_hashes_access::load_unknown_page_hash_thumbnail(
-            self.db.database_file(),
+            self.db.read_pool(),
             page_hash,
             resize_to,
         )
@@ -302,14 +291,8 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         actions: &[String],
         sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
-        page_hashes_access::load_page_hashes_page(
-            self.db.database_file(),
-            page,
-            size,
-            actions,
-            sorts,
-        )
-        .await
+        page_hashes_access::load_page_hashes_page(self.db.read_pool(), page, size, actions, sorts)
+            .await
     }
 
     async fn load_page_hashes_unknown_page(
@@ -318,20 +301,15 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         size: u64,
         sorts: &[String],
     ) -> Result<Value, sqlx::Error> {
-        page_hashes_access::load_page_hashes_unknown_page(
-            self.db.database_file(),
-            page,
-            size,
-            sorts,
-        )
-        .await
+        page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), page, size, sorts)
+            .await
     }
 
     async fn load_page_hash_delete_targets(
         &self,
         hash: &str,
     ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-        page_hashes_access::load_page_hash_delete_targets(self.db.database_file(), hash).await
+        page_hashes_access::load_page_hash_delete_targets(self.db.read_pool(), hash).await
     }
 
     async fn upsert_page_hash(
@@ -340,7 +318,14 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         size: Option<i64>,
         action: &str,
     ) -> Result<(), sqlx::Error> {
-        page_hashes_access::upsert_page_hash(self.db.database_file(), hash, size, action).await
+        page_hashes_access::upsert_page_hash(
+            self.db.read_pool(),
+            self.db.write_pool(),
+            hash,
+            size,
+            action,
+        )
+        .await
     }
 
     fn analyze_transient_book(&self, path: &str) -> TransientBookAnalysis {
@@ -372,7 +357,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
         &self,
         transient_name: &str,
     ) -> (Option<String>, Option<f64>) {
-        transient_books::infer_transient_series_and_number(self.db.database_file(), transient_name)
+        transient_books::infer_transient_series_and_number(self.db.read_pool(), transient_name)
             .await
     }
 
@@ -381,8 +366,7 @@ impl OperationalSettingsService for RuntimeOperationalSettingsService {
     }
 
     async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
-        transient_books::validate_transient_scan_root(self.db.database_file(), Path::new(path))
-            .await
+        transient_books::validate_transient_scan_root(self.db.read_pool(), Path::new(path)).await
     }
 
     fn load_transient_book_file_metadata(&self, path: &str) -> Option<TransientBookFileMetadata> {

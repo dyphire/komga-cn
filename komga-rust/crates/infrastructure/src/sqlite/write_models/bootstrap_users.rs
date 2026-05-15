@@ -1,8 +1,4 @@
-use std::path::Path;
-
-use sqlx::Row;
-
-use crate::sqlite::connect_write_pool;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone, Debug)]
 pub struct PersistedBootstrapUser {
@@ -18,14 +14,13 @@ pub struct InitialBootstrapUserWriteModel {
     pub roles: Vec<String>,
 }
 
-pub async fn list_persisted_user_emails(database_file: &Path) -> Result<Vec<String>, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
+pub async fn list_persisted_user_emails(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT EMAIL
            FROM USER
            ORDER BY EMAIL"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -35,10 +30,9 @@ pub async fn list_persisted_user_emails(database_file: &Path) -> Result<Vec<Stri
 }
 
 pub async fn load_persisted_user_by_email(
-    database_file: &Path,
+    pool: &SqlitePool,
     email: &str,
 ) -> Result<Option<PersistedBootstrapUser>, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, EMAIL
            FROM USER
@@ -46,7 +40,7 @@ pub async fn load_persisted_user_by_email(
            LIMIT 1"#,
     )
     .bind(email)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|row| PersistedBootstrapUser {
@@ -56,10 +50,9 @@ pub async fn load_persisted_user_by_email(
 }
 
 pub async fn update_persisted_user_passwords(
-    database_file: &Path,
+    pool: &SqlitePool,
     updates: &[(String, String)],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     for (user_id, hashed_password) in updates {
@@ -84,10 +77,9 @@ pub async fn update_persisted_user_passwords(
 }
 
 pub async fn persist_initial_bootstrap_users(
-    database_file: &Path,
+    pool: &SqlitePool,
     users: &[InitialBootstrapUserWriteModel],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
 
     for user in users {

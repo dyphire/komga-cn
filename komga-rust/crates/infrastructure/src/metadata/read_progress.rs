@@ -1,12 +1,9 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::Value;
 use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
-
-use crate::sqlite::connect_write_pool;
 
 fn serialize_locator(locator: Option<&Value>) -> Vec<u8> {
     locator
@@ -14,19 +11,14 @@ fn serialize_locator(locator: Option<&Value>) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-async fn open_pool_and_require_user(
-    database_file: &Path,
+async fn require_user_exists(
+    pool: &SqlitePool,
     user_id_value: &str,
-    open_context: &str,
     query_context: &str,
-) -> Result<SqlitePool, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open {open_context} db: {error}"))?;
-
+) -> Result<(), String> {
     let user_exists = sqlx::query("SELECT 1 FROM USER WHERE ID = ? LIMIT 1")
         .bind(user_id_value)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query {query_context} user: {error}"))?
         .is_some();
@@ -35,7 +27,7 @@ async fn open_pool_and_require_user(
         return Err("read-progress user not found".to_string());
     }
 
-    Ok(pool)
+    Ok(())
 }
 
 async fn load_book_series_id(
@@ -177,20 +169,14 @@ fn emit_read_progress_series_event(series_id: &str, user_id_value: &str, exists:
 }
 
 pub async fn persist_read_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
     page: u64,
     completed: bool,
     locator: Option<Value>,
 ) -> Result<(), String> {
-    let pool = open_pool_and_require_user(
-        database_file,
-        user_id_value,
-        "read-progress",
-        "read-progress",
-    )
-    .await?;
+    require_user_exists(pool, user_id_value, "read-progress").await?;
 
     sqlx::query(
         r#"
@@ -207,22 +193,18 @@ pub async fn persist_read_progress(
     .bind(page as i64)
     .bind(completed)
     .bind(serialize_locator(locator.as_ref()))
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("persist read-progress: {error}"))?;
 
-    let series_id = load_book_series_id(&pool, book_id, "read-progress").await?;
-    sync_series_read_progress_for_book(&pool, book_id, user_id_value, "read-progress").await?;
+    let series_id = load_book_series_id(pool, book_id, "read-progress").await?;
+    sync_series_read_progress_for_book(pool, book_id, user_id_value, "read-progress").await?;
 
     emit_read_progress_changed(book_id, user_id_value);
     if let Some(series_id) = series_id {
-        let exists = persisted_series_read_progress_exists(
-            &pool,
-            &series_id,
-            user_id_value,
-            "read-progress",
-        )
-        .await?;
+        let exists =
+            persisted_series_read_progress_exists(pool, &series_id, user_id_value, "read-progress")
+                .await?;
         emit_read_progress_series_event(&series_id, user_id_value, exists);
     }
 
@@ -231,7 +213,7 @@ pub async fn persist_read_progress(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn persist_book_progression(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
     progression: f64,
@@ -241,7 +223,7 @@ pub async fn persist_book_progression(
     device_name: Option<String>,
     locator: Option<Value>,
 ) -> Result<(), String> {
-    let page_count = load_book_page_count(database_file, book_id)
+    let page_count = load_book_page_count(pool, book_id)
         .await?
         .unwrap_or(1)
         .max(1);
@@ -266,9 +248,7 @@ pub async fn persist_book_progression(
         page_from_progression
     };
     let completed = effective_progression >= 0.99;
-    let pool =
-        open_pool_and_require_user(database_file, user_id_value, "progression", "progression")
-            .await?;
+    require_user_exists(pool, user_id_value, "progression").await?;
 
     sqlx::query(
         r#"
@@ -288,17 +268,17 @@ pub async fn persist_book_progression(
     .bind(device_id.unwrap_or_default())
     .bind(device_name.unwrap_or_default())
     .bind(serialize_locator(locator.as_ref()))
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("persist book progression: {error}"))?;
 
-    let series_id = load_book_series_id(&pool, book_id, "progression").await?;
-    sync_series_read_progress_for_book(&pool, book_id, user_id_value, "progression").await?;
+    let series_id = load_book_series_id(pool, book_id, "progression").await?;
+    sync_series_read_progress_for_book(pool, book_id, user_id_value, "progression").await?;
 
     emit_read_progress_changed(book_id, user_id_value);
     if let Some(series_id) = series_id {
         let exists =
-            persisted_series_read_progress_exists(&pool, &series_id, user_id_value, "progression")
+            persisted_series_read_progress_exists(pool, &series_id, user_id_value, "progression")
                 .await?;
         emit_read_progress_series_event(&series_id, user_id_value, exists);
     }
@@ -307,14 +287,10 @@ pub async fn persist_book_progression(
 }
 
 pub async fn load_book_progression(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
 ) -> Result<Option<Value>, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open book progression db: {error}"))?;
-
     let row = sqlx::query(
         r#"
         SELECT PAGE, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR
@@ -325,7 +301,7 @@ pub async fn load_book_progression(
     )
     .bind(book_id)
     .bind(user_id_value)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted book progression: {error}"))?;
 
@@ -369,17 +345,10 @@ pub async fn load_book_progression(
     })))
 }
 
-pub async fn load_book_page_count(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<u64>, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open book page-count db: {error}"))?;
-
+pub async fn load_book_page_count(pool: &SqlitePool, book_id: &str) -> Result<Option<u64>, String> {
     let row = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query book page-count: {error}"))?;
 
@@ -387,26 +356,23 @@ pub async fn load_book_page_count(
 }
 
 pub async fn delete_persisted_read_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open read-progress delete db: {error}"))?;
-    let series_id = load_book_series_id(&pool, book_id, "read-progress delete").await?;
+    let series_id = load_book_series_id(pool, book_id, "read-progress delete").await?;
 
     sqlx::query("DELETE FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?")
         .bind(book_id)
         .bind(user_id_value)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|error| format!("delete read-progress: {error}"))?;
 
     if let Some(series_id) = series_id {
-        sync_series_read_progress(&pool, &series_id, user_id_value, "read-progress delete").await?;
+        sync_series_read_progress(pool, &series_id, user_id_value, "read-progress delete").await?;
         let exists = persisted_series_read_progress_exists(
-            &pool,
+            pool,
             &series_id,
             user_id_value,
             "read-progress delete",
@@ -421,17 +387,13 @@ pub async fn delete_persisted_read_progress(
 }
 
 pub async fn readlist_tachiyomi_counters(
-    database_file: &Path,
+    pool: &SqlitePool,
     ordered_book_ids: &[String],
     user_id_value: &str,
 ) -> Result<(u64, u64, u64, u64, u64), String> {
     if ordered_book_ids.is_empty() {
         return Ok((0, 0, 0, 0, 0));
     }
-
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist tachiyomi db: {error}"))?;
 
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT BOOK_ID, COMPLETED FROM READ_PROGRESS WHERE USER_ID = ",
@@ -446,7 +408,7 @@ pub async fn readlist_tachiyomi_counters(
 
     let rows = query
         .build()
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query readlist tachiyomi counters: {error}"))?;
 
@@ -498,21 +460,18 @@ pub async fn readlist_tachiyomi_counters(
 }
 
 pub async fn persist_readlist_tachiyomi_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     ordered_book_ids: &[String],
     user_id_value: &str,
     last_book_read: usize,
 ) -> Result<Option<()>, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist tachiyomi write db: {error}"))?;
     for book_id in ordered_book_ids.iter().take(last_book_read) {
         let already_completed = sqlx::query(
             "SELECT COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
         )
         .bind(book_id)
         .bind(user_id_value)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query existing completion for tachiyomi write: {error}"))?
         .is_some_and(|row| row.get::<i64, _>("COMPLETED") != 0);
@@ -524,23 +483,16 @@ pub async fn persist_readlist_tachiyomi_progress(
             "SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
         )
         .bind(book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query page count for tachiyomi write: {error}"))?
         .map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64)
         .unwrap_or(1)
         .max(1);
 
-        persist_read_progress(
-            database_file,
-            book_id,
-            user_id_value,
-            page_count,
-            true,
-            None,
-        )
-        .await
-        .map_err(|error| format!("persist read progress for tachiyomi write: {error}"))?;
+        persist_read_progress(pool, book_id, user_id_value, page_count, true, None)
+            .await
+            .map_err(|error| format!("persist read progress for tachiyomi write: {error}"))?;
     }
 
     Ok(Some(()))

@@ -2,17 +2,13 @@ use super::*;
 use crate::discovery_persisted_access::models::{ReadProgressSummary, WebLinkEntry};
 
 pub async fn load_book_poster_summaries(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<HashMap<String, Vec<BookPosterSummary>>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book poster db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, TYPE, SELECTED
          FROM THUMBNAIL_BOOK"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query book posters: {error}"))?;
 
@@ -30,14 +26,10 @@ pub async fn load_book_poster_summaries(
 }
 
 pub async fn load_persisted_book_summaries(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     user_id: Option<&str>,
 ) -> Result<Vec<BookSummary>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open books db: {error}"))?;
-
-    let rows = fetch_persisted_book_summary_rows(&pool, user_id, None)
+    let rows = fetch_persisted_book_summary_rows(pool, user_id, None)
         .await
         .map_err(|error| format!("query persisted book summaries: {error}"))?;
 
@@ -45,7 +37,7 @@ pub async fn load_persisted_book_summaries(
 }
 
 pub async fn load_persisted_book_summaries_by_ids(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     user_id: Option<&str>,
     ids: &[String],
 ) -> Result<Vec<BookSummary>, String> {
@@ -53,11 +45,7 @@ pub async fn load_persisted_book_summaries_by_ids(
         return Ok(Vec::new());
     }
 
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open books db for ids query: {error}"))?;
-
-    let rows = fetch_persisted_book_summary_rows(&pool, user_id, Some(ids))
+    let rows = fetch_persisted_book_summary_rows(pool, user_id, Some(ids))
         .await
         .map_err(|error| format!("query persisted book summaries by ids: {error}"))?;
 
@@ -236,12 +224,9 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
     }
 }
 
-pub async fn load_persisted_book_count(database_file: &FsPath) -> Result<usize, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open books db for count: {error}"))?;
+pub async fn load_persisted_book_count(pool: &SqlitePool) -> Result<usize, String> {
     let row = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM BOOK"#)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .map_err(|error| format!("query persisted book count: {error}"))?;
     Ok(row.get::<i64, _>("COUNT").max(0) as usize)

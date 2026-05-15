@@ -6,10 +6,9 @@ use komga_infrastructure::runtime_identity_access::{
     persisted_basic_user, persisted_update_password_by_user_id,
 };
 use komga_infrastructure::sqlite::{connect_test_pool, setup};
-use std::path::PathBuf;
 use tempfile::TempDir;
 
-async fn create_test_db(case: &str) -> (TempDir, PathBuf, sqlx::Pool<sqlx::Sqlite>) {
+async fn create_test_db(case: &str) -> (TempDir, sqlx::Pool<sqlx::Sqlite>) {
     let temp_dir = TempDir::new().expect("temp dir should be created");
     let db_path = temp_dir.path().join(format!("{case}.sqlite"));
     let pool = connect_test_pool(&db_path, 1)
@@ -19,7 +18,7 @@ async fn create_test_db(case: &str) -> (TempDir, PathBuf, sqlx::Pool<sqlx::Sqlit
         .await
         .expect("test db should bootstrap main schema");
 
-    (temp_dir, db_path, pool)
+    (temp_dir, pool)
 }
 
 async fn insert_test_user(
@@ -61,20 +60,17 @@ fn kotlin_style_bcrypt_hash(password: &str) -> String {
         .replacen("$2b$", "$2a$", 1)
 }
 
-async fn persisted_password(db_path: &PathBuf, user_id: &str) -> String {
-    let pool = connect_test_pool(db_path, 1)
-        .await
-        .expect("test db should reopen");
+async fn persisted_password(pool: &sqlx::Pool<sqlx::Sqlite>, user_id: &str) -> String {
     sqlx::query_scalar::<_, String>("SELECT PASSWORD FROM USER WHERE ID = ?")
         .bind(user_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .expect("password should load")
 }
 
 #[tokio::test]
 async fn kotlin_bcrypt_hashes_verify_in_rust() {
-    let (_temp_dir, db_path, pool) = create_test_db("legacy-bcrypt").await;
+    let (_temp_dir, pool) = create_test_db("legacy-bcrypt").await;
     let raw_password = "kotlin-password";
     let legacy_hash = kotlin_style_bcrypt_hash(raw_password);
 
@@ -82,7 +78,7 @@ async fn kotlin_bcrypt_hashes_verify_in_rust() {
 
     let outcome = persisted_basic_user(
         &basic_auth_headers("admin@example.com", raw_password),
-        db_path.as_path(),
+        &pool,
     )
     .await;
 
@@ -96,21 +92,20 @@ async fn kotlin_bcrypt_hashes_verify_in_rust() {
 
 #[tokio::test]
 async fn password_updates_emit_bcrypt_hashes() {
-    let (_temp_dir, db_path, pool) = create_test_db("password-update").await;
+    let (_temp_dir, pool) = create_test_db("password-update").await;
     insert_test_user(&pool, "user-1", "admin@example.com", "old-password-hash").await;
 
-    let updated =
-        persisted_update_password_by_user_id(db_path.as_path(), "user-1", "new-password").await;
+    let updated = persisted_update_password_by_user_id(&pool, "user-1", "new-password").await;
 
     assert_eq!(updated, Some(true));
 
-    let stored_password = persisted_password(&db_path, "user-1").await;
+    let stored_password = persisted_password(&pool, "user-1").await;
     assert!(stored_password.starts_with("$2"));
     assert_eq!(stored_password.len(), 60);
 
     let outcome = persisted_basic_user(
         &basic_auth_headers("admin@example.com", "new-password"),
-        db_path.as_path(),
+        &pool,
     )
     .await;
 

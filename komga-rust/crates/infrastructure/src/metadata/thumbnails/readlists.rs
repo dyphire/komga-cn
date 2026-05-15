@@ -1,19 +1,12 @@
-use std::path::Path;
-
 use komga_application::media_assets::ReadlistThumbnailRecord;
-use sqlx::Row;
-
-use crate::sqlite::connect_read_pool;
+use sqlx::{Row, SqlitePool};
 
 use super::{emit_thumbnail_readlist_event, generated_thumbnail_id};
 
 pub async fn load_persisted_readlist_thumbnails(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<ReadlistThumbnailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist thumbnails db: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -23,7 +16,7 @@ pub async fn load_persisted_readlist_thumbnails(
         "#,
     )
     .bind(readlist_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted readlist thumbnails: {error}"))?;
 
@@ -44,7 +37,7 @@ pub async fn load_persisted_readlist_thumbnails(
 }
 
 pub async fn insert_readlist_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -52,9 +45,6 @@ pub async fn insert_readlist_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<ReadlistThumbnailRecord, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist thumbnail create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -135,13 +125,10 @@ pub async fn insert_readlist_thumbnail(
 }
 
 pub async fn select_readlist_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist thumbnail select db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -218,13 +205,10 @@ pub async fn select_readlist_thumbnail(
 }
 
 pub async fn delete_readlist_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist thumbnail delete db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -348,12 +332,9 @@ async fn normalize_readlist_thumbnail_selection(
 }
 
 pub async fn load_persisted_readlist_name(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist file db: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT NAME
@@ -362,17 +343,17 @@ pub async fn load_persisted_readlist_name(
         "#,
     )
     .bind(readlist_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted readlist name: {error}"))?;
     Ok(row.map(|row| row.get::<String, _>("NAME")))
 }
 
 pub async fn persisted_readlist_exists(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    Ok(load_persisted_readlist_name(database_file, readlist_id)
+    Ok(load_persisted_readlist_name(pool, readlist_id)
         .await?
         .is_some())
 }

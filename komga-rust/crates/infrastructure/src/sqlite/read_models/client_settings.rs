@@ -1,15 +1,10 @@
-use std::path::Path;
-
 use serde_json::{Value, json};
-use sqlx::Row;
-
-use crate::sqlite::connect_read_pool;
+use sqlx::{Row, SqlitePool};
 
 pub async fn load_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     allow_unauthorized_only: bool,
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = if allow_unauthorized_only {
         sqlx::query(
             r#"SELECT KEY, VALUE, ALLOW_UNAUTHORIZED
@@ -17,7 +12,7 @@ pub async fn load_client_settings_global(
              WHERE ALLOW_UNAUTHORIZED = 1
              ORDER BY KEY ASC"#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?
     } else {
         sqlx::query(
@@ -25,7 +20,7 @@ pub async fn load_client_settings_global(
              FROM CLIENT_SETTINGS_GLOBAL
              ORDER BY KEY ASC"#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?
     };
 
@@ -46,10 +41,9 @@ pub async fn load_client_settings_global(
 }
 
 pub async fn load_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT KEY, VALUE
          FROM CLIENT_SETTINGS_USER
@@ -57,7 +51,7 @@ pub async fn load_client_settings_user(
          ORDER BY KEY ASC"#,
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let mut map = serde_json::Map::new();

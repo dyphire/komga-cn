@@ -1,32 +1,30 @@
-use std::path::{Path, PathBuf};
-
 use komga_application::media_assets::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPort,
 };
-use sqlx::Row;
-
-use crate::sqlite::{connect_read_pool, connect_write_pool};
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone, Debug)]
 pub struct SqliteBookMetadataPort {
-    database_file: PathBuf,
+    read_pool: SqlitePool,
+    write_pool: SqlitePool,
 }
 
 impl SqliteBookMetadataPort {
-    pub fn new(database_file: impl Into<PathBuf>) -> Self {
+    pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
         Self {
-            database_file: database_file.into(),
+            read_pool,
+            write_pool,
         }
     }
 }
 
 impl BookMetadataPort for SqliteBookMetadataPort {
     async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
-        load_book_metadata(self.database_file.as_path(), book_id).await
+        load_book_metadata(&self.read_pool, book_id).await
     }
 
     async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String> {
-        load_book_series_id(self.database_file.as_path(), book_id).await
+        load_book_series_id(&self.read_pool, book_id).await
     }
 
     async fn persist_book_metadata(
@@ -34,18 +32,14 @@ impl BookMetadataPort for SqliteBookMetadataPort {
         book_id: &str,
         metadata: &BookMetadata,
     ) -> Result<bool, String> {
-        persist_book_metadata(self.database_file.as_path(), book_id, metadata).await
+        persist_book_metadata(&self.write_pool, book_id, metadata).await
     }
 }
 
 async fn load_book_metadata(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<BookMetadata>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book metadata db: {error}"))?;
-
     let row = sqlx::query(
         r#"
         SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
@@ -57,7 +51,7 @@ async fn load_book_metadata(
         "#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query existing book metadata: {error}"))?;
 
@@ -69,7 +63,7 @@ async fn load_book_metadata(
         "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY ROLE ASC, NAME ASC",
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing book metadata authors: {error}"))?;
 
@@ -77,7 +71,7 @@ async fn load_book_metadata(
         "SELECT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing book metadata tags: {error}"))?;
 
@@ -85,7 +79,7 @@ async fn load_book_metadata(
         "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query existing book metadata links: {error}"))?;
 
@@ -126,16 +120,10 @@ async fn load_book_metadata(
     }))
 }
 
-async fn load_book_series_id(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book series db: {error}"))?;
+async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
     let row = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query book series id: {error}"))?;
 
@@ -143,13 +131,10 @@ async fn load_book_series_id(
 }
 
 async fn persist_book_metadata(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     metadata: &BookMetadata,
 ) -> Result<bool, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open book metadata update db: {error}"))?;
     let mut tx = pool
         .begin()
         .await

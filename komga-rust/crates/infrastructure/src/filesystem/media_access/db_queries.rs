@@ -1,13 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, content_type_from_filename,
 };
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqlitePool};
 
 use crate::resolve_library_item_path;
-use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedMediaFileRow {
@@ -38,13 +37,9 @@ fn map_persisted_book_page_row(row: SqliteRow) -> BookPageRecord {
 }
 
 pub async fn load_persisted_book_media(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<BookMediaRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book media db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL,
             l.ROOT AS LIBRARY_ROOT,
@@ -56,7 +51,7 @@ pub async fn load_persisted_book_media(
          WHERE b.ID = ?"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted book media: {error}"))?;
 
@@ -73,16 +68,12 @@ pub async fn load_persisted_book_media(
 }
 
 pub async fn load_persisted_book_media_files(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book media files db: {error}"))?;
-
     sqlx::query("SELECT FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC")
         .bind(book_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted book media files: {error}"))
         .map(|rows| {
@@ -93,19 +84,15 @@ pub async fn load_persisted_book_media_files(
 }
 
 pub async fn load_persisted_media_file_records(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<PersistedMediaFileRow>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book media file records db: {error}"))?;
-
     sqlx::query(
         r#"SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE
          FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC"#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted media file records: {error}"))
     .map(|rows| {
@@ -123,16 +110,10 @@ pub async fn load_persisted_media_file_records(
     })
 }
 
-pub async fn book_media_is_ready_status(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open media status db: {error}"))?;
+pub async fn book_media_is_ready_status(pool: &SqlitePool, book_id: &str) -> Result<bool, String> {
     let row = sqlx::query("SELECT STATUS FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query media status: {error}"))?;
 
@@ -142,12 +123,9 @@ pub async fn book_media_is_ready_status(
 }
 
 pub async fn load_persisted_series_thumbnail_media(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<BookMediaRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series thumbnail db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
             COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
@@ -158,7 +136,7 @@ pub async fn load_persisted_series_thumbnail_media(
          ORDER BY b.NUMBER ASC, b.ID ASC LIMIT 1"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted series thumbnail media: {error}"))?;
 
@@ -175,33 +153,26 @@ pub async fn load_persisted_series_thumbnail_media(
 }
 
 pub async fn load_persisted_book_pages(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<BookPageRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book pages db: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
             CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
          FROM MEDIA_PAGE WHERE BOOK_ID = ? ORDER BY NUMBER ASC"#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted book pages: {error}"))?;
     Ok(rows.into_iter().map(map_persisted_book_page_row).collect())
 }
 
 pub async fn load_persisted_book_page_row(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     page_number: u64,
 ) -> Result<Option<BookPageRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open single book page db: {error}"))?;
-
     let Some(persisted_page_number) = public_page_number_to_persisted(page_number) else {
         return Ok(None);
     };
@@ -213,14 +184,14 @@ pub async fn load_persisted_book_page_row(
     )
     .bind(book_id)
     .bind(persisted_page_number)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query single persisted book page: {error}"))?;
     Ok(row.map(map_persisted_book_page_row))
 }
 
 pub async fn resolve_series_id_for_persisted(
-    database_file: &Path,
+    pool: &SqlitePool,
     requested_series_id: &str,
 ) -> String {
     let Some(index) = requested_series_id
@@ -233,21 +204,18 @@ pub async fn resolve_series_id_for_persisted(
         return requested_series_id.to_string();
     }
     if matches!(
-        load_persisted_series_thumbnail_media(database_file, requested_series_id).await,
+        load_persisted_series_thumbnail_media(pool, requested_series_id).await,
         Ok(Some(_))
     ) {
         return requested_series_id.to_string();
     }
-    match load_series_id_by_sorted_position(database_file, index).await {
+    match load_series_id_by_sorted_position(pool, index).await {
         Ok(Some(series_id)) => series_id,
         _ => requested_series_id.to_string(),
     }
 }
 
-pub async fn resolve_book_id_for_persisted(
-    database_file: &Path,
-    requested_book_id: &str,
-) -> String {
+pub async fn resolve_book_id_for_persisted(pool: &SqlitePool, requested_book_id: &str) -> String {
     let Some(index) = requested_book_id
         .strip_prefix("book-")
         .and_then(|value| value.parse::<usize>().ok())
@@ -258,24 +226,21 @@ pub async fn resolve_book_id_for_persisted(
         return requested_book_id.to_string();
     }
     if matches!(
-        load_persisted_book_media(database_file, requested_book_id).await,
+        load_persisted_book_media(pool, requested_book_id).await,
         Ok(Some(_))
     ) {
         return requested_book_id.to_string();
     }
-    match load_book_id_by_sorted_position(database_file, index).await {
+    match load_book_id_by_sorted_position(pool, index).await {
         Ok(Some(book_id)) => book_id,
         _ => requested_book_id.to_string(),
     }
 }
 
 async fn load_series_id_by_sorted_position(
-    database_file: &Path,
+    pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series-id remap db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT s.ID AS ID
          FROM SERIES s
@@ -285,19 +250,16 @@ async fn load_series_id_by_sorted_position(
          LIMIT 1 OFFSET ?"#,
     )
     .bind((index - 1) as i64)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query remapped series id: {error}"))?;
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
 async fn load_book_id_by_sorted_position(
-    database_file: &Path,
+    pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book-id remap db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT b.ID AS ID
          FROM BOOK b
@@ -306,37 +268,28 @@ async fn load_book_id_by_sorted_position(
          ORDER BY COALESCE(bm.TITLE, b.NAME) COLLATE NOCASE ASC, b.ID ASC LIMIT 1 OFFSET ?"#,
     )
     .bind((index - 1) as i64)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query remapped book id: {error}"))?;
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
-pub async fn persisted_book_exists(database_file: &Path, book_id: &str) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book-exists db: {error}"))?;
+pub async fn persisted_book_exists(pool: &SqlitePool, book_id: &str) -> Result<bool, String> {
     Ok(
         sqlx::query("SELECT 1 AS FOUND FROM BOOK WHERE ID = ? LIMIT 1")
             .bind(book_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .map_err(|error| format!("query persisted book existence: {error}"))?
             .is_some(),
     )
 }
 
-pub async fn persisted_series_exists(
-    database_file: &Path,
-    series_id: &str,
-) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series exists db: {error}"))?;
+pub async fn persisted_series_exists(pool: &SqlitePool, series_id: &str) -> Result<bool, String> {
     Ok(
         sqlx::query("SELECT 1 AS FOUND FROM SERIES WHERE ID = ? LIMIT 1")
             .bind(series_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .map_err(|error| format!("query persisted series existence: {error}"))?
             .is_some(),
@@ -344,43 +297,34 @@ pub async fn persisted_series_exists(
 }
 
 pub async fn load_persisted_series_oneshot(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<bool>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series oneshot db: {error}"))?;
     let row =
         sqlx::query("SELECT COALESCE(ONESHOT, 0) AS ONESHOT FROM SERIES WHERE ID = ? LIMIT 1")
             .bind(series_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .map_err(|error| format!("query persisted series oneshot: {error}"))?;
     Ok(row.map(|row| row.get::<i64, _>("ONESHOT") != 0))
 }
 
 pub async fn load_series_library_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series library db: {error}"))?;
     let row = sqlx::query("SELECT LIBRARY_ID FROM SERIES WHERE ID = ? LIMIT 1")
         .bind(series_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .map_err(|error| format!("query series library id: {error}"))?;
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
 
 pub async fn load_series_book_ids(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series books db: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT b.ID AS ID
          FROM BOOK b
@@ -389,7 +333,7 @@ pub async fn load_series_book_ids(
          ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series book ids: {error}"))?;
     Ok(rows
@@ -399,12 +343,9 @@ pub async fn load_series_book_ids(
 }
 
 pub async fn load_series_book_number_sorts(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<(String, f64)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series number sort db: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT b.ID AS ID, COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT
          FROM BOOK b
@@ -413,7 +354,7 @@ pub async fn load_series_book_number_sorts(
          ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series number sort rows: {error}"))?;
     Ok(rows
@@ -423,12 +364,9 @@ pub async fn load_series_book_number_sorts(
 }
 
 pub async fn load_book_restrictions(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book restrictions db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT sm.AGE_RATING AS AGE_RATING, COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS
          FROM BOOK b
@@ -439,7 +377,7 @@ pub async fn load_book_restrictions(
          GROUP BY sm.AGE_RATING"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query book restrictions: {error}"))?;
 
@@ -459,12 +397,9 @@ pub async fn load_book_restrictions(
 }
 
 pub async fn load_persisted_manifest_book(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<(String, String, String)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open manifest book db: {error}"))?;
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
             b.NAME AS FILE_NAME,
@@ -475,7 +410,7 @@ pub async fn load_persisted_manifest_book(
          WHERE b.ID = ?"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted manifest book: {error}"))?;
 
@@ -491,17 +426,14 @@ pub async fn load_persisted_manifest_book(
 }
 
 pub async fn load_persisted_epub_extension_blob(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open epub extension db: {error}"))?;
     let row = sqlx::query(
         "SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query epub extension blob: {error}"))?;
 
@@ -518,12 +450,9 @@ pub async fn load_persisted_epub_extension_blob(
 }
 
 pub async fn load_readlist_archive_entries(
-    database_file: &Path,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<(String, PathBuf)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist archive db: {error}"))?;
     let rows = sqlx::query(
         r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT
          FROM READLIST_BOOK rb
@@ -533,7 +462,7 @@ pub async fn load_readlist_archive_entries(
          ORDER BY rb.NUMBER ASC"#,
     )
     .bind(readlist_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query readlist archive entries: {error}"))?;
 
@@ -552,12 +481,9 @@ pub async fn load_readlist_archive_entries(
 }
 
 pub async fn load_series_archive_entries(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series archive db: {error}"))?;
     let series_row = sqlx::query(
         r#"SELECT s.LIBRARY_ID AS LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE
          FROM SERIES s
@@ -566,7 +492,7 @@ pub async fn load_series_archive_entries(
          LIMIT 1"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query series archive metadata: {error}"))?;
     let Some(series_row) = series_row else {
@@ -583,7 +509,7 @@ pub async fn load_series_archive_entries(
          ORDER BY b.NUMBER ASC, b.ID ASC"#,
     )
     .bind(series_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series archive entries: {error}"))?;
 
@@ -602,12 +528,9 @@ pub async fn load_series_archive_entries(
     Ok(Some((series_title, library_id, entries)))
 }
 
-pub async fn persisted_book_ids(database_file: &Path) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open book list db: {error}"))?;
+pub async fn persisted_book_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
     let rows = sqlx::query("SELECT ID FROM BOOK ORDER BY ID ASC")
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query persisted book ids: {error}"))?;
     Ok(rows

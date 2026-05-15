@@ -1,12 +1,12 @@
 use std::fs;
 use std::io::Read;
-use std::path::Path;
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, PageHashDeleteTarget, PageHashThumbnail, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
 };
 use serde_json::Value;
+use sqlx::SqlitePool;
 use std::io::Cursor;
 use zip::ZipArchive;
 
@@ -27,59 +27,58 @@ use crate::sqlite::read_models::page_hashes::{
     load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
 use crate::sqlite::write_models::page_hashes::upsert_page_hash as upsert_page_hash_model;
-use crate::sqlite::{connect_read_pool, connect_write_pool};
+use std::path::Path;
 
 const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
 
 pub async fn load_page_hashes_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     page: u64,
     size: u64,
     actions: &[String],
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hashes_page_model(database_file, page, size, actions, sorts).await
+    load_page_hashes_page_model(pool, page, size, actions, sorts).await
 }
 
 pub async fn load_page_hashes_unknown_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     page: u64,
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hashes_unknown_page_model(database_file, page, size, sorts).await
+    load_page_hashes_unknown_page_model(pool, page, size, sorts).await
 }
 
 pub async fn load_page_hash_matches_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
     page: u64,
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    load_page_hash_matches_page_model(database_file, page_hash, page, size, sorts).await
+    load_page_hash_matches_page_model(pool, page_hash, page, size, sorts).await
 }
 
 pub async fn load_page_hash_delete_targets(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-    load_page_hash_delete_targets_model(database_file, page_hash).await
+    load_page_hash_delete_targets_model(pool, page_hash).await
 }
 
 pub async fn load_page_hash_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-    if let Some(bytes) = load_page_hash_thumbnail_model(database_file, page_hash).await? {
+    if let Some(bytes) = load_page_hash_thumbnail_model(pool, page_hash).await? {
         return Ok(Some(PageHashThumbnail {
             bytes,
             media_type: "image/jpeg".to_string(),
         }));
     }
 
-    let Some((bytes, media_type)) =
-        load_unknown_page_hash_source_bytes(database_file, page_hash).await?
+    let Some((bytes, media_type)) = load_unknown_page_hash_source_bytes(pool, page_hash).await?
     else {
         return Ok(None);
     };
@@ -88,15 +87,15 @@ pub async fn load_page_hash_thumbnail(
 }
 
 pub async fn load_unknown_page_hash_thumbnail(
-    database_file: &Path,
+    read_pool: &SqlitePool,
     page_hash: &str,
     resize_to: Option<u32>,
 ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-    let Some(target) = load_unknown_page_hash_match_target(database_file, page_hash).await? else {
+    let Some(target) = load_unknown_page_hash_match_target(read_pool, page_hash).await? else {
         return Ok(None);
     };
 
-    let Some(media) = load_persisted_book_media(database_file, &target.book_id)
+    let Some(media) = load_persisted_book_media(read_pool, &target.book_id)
         .await
         .map_err(as_sqlx_protocol_error)?
     else {
@@ -104,7 +103,7 @@ pub async fn load_unknown_page_hash_thumbnail(
     };
 
     let Some(page) =
-        load_page_hash_page_row(database_file, &target.book_id, &media, target.page_number)
+        load_page_hash_page_row(read_pool, &target.book_id, &media, target.page_number)
             .await
             .map_err(as_sqlx_protocol_error)?
     else {
@@ -153,18 +152,19 @@ pub async fn load_unknown_page_hash_thumbnail(
 }
 
 pub async fn upsert_page_hash(
-    database_file: &Path,
+    read_pool: &SqlitePool,
+    write_pool: &SqlitePool,
     page_hash: &str,
     size: Option<i64>,
     action: &str,
 ) -> Result<(), sqlx::Error> {
-    let existed = page_hash_exists(database_file, page_hash).await?;
-    upsert_page_hash_model(database_file, page_hash, size, action).await?;
+    let existed = page_hash_exists(read_pool, page_hash).await?;
+    upsert_page_hash_model(write_pool, page_hash, size, action).await?;
 
     if !existed
-        && let Some(thumbnail) = build_known_page_hash_thumbnail(database_file, page_hash).await?
+        && let Some(thumbnail) = build_known_page_hash_thumbnail(read_pool, page_hash).await?
     {
-        insert_page_hash_thumbnail(database_file, page_hash, &thumbnail).await?;
+        insert_page_hash_thumbnail(write_pool, page_hash, &thumbnail).await?;
     }
 
     Ok(())
@@ -205,12 +205,12 @@ async fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Op
 }
 
 async fn load_page_hash_page_row(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     media: &BookMediaRecord,
     page_number: u64,
 ) -> Result<Option<BookPageRecord>, String> {
-    if let Some(row) = load_persisted_book_page_row(database_file, book_id, page_number).await? {
+    if let Some(row) = load_persisted_book_page_row(pool, book_id, page_number).await? {
         return Ok(Some(row));
     }
 
@@ -255,22 +255,20 @@ fn as_sqlx_protocol_error(error: String) -> sqlx::Error {
     sqlx::Error::Protocol(error)
 }
 
-async fn page_hash_exists(database_file: &Path, page_hash: &str) -> Result<bool, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
+async fn page_hash_exists(pool: &SqlitePool, page_hash: &str) -> Result<bool, sqlx::Error> {
     let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM PAGE_HASH WHERE HASH = ? LIMIT 1")
         .bind(page_hash)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?
         .is_some();
     Ok(exists)
 }
 
 async fn build_known_page_hash_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
-    let Some((bytes, _)) = load_unknown_page_hash_source_bytes(database_file, page_hash).await?
-    else {
+    let Some((bytes, _)) = load_unknown_page_hash_source_bytes(pool, page_hash).await? else {
         return Ok(None);
     };
 
@@ -278,10 +276,10 @@ async fn build_known_page_hash_thumbnail(
 }
 
 async fn load_unknown_page_hash_source_bytes(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<(Vec<u8>, String)>, sqlx::Error> {
-    let Some(source) = load_unknown_page_hash_source(database_file, page_hash).await? else {
+    let Some(source) = load_unknown_page_hash_source(pool, page_hash).await? else {
         return Ok(None);
     };
     if !source.media_type.starts_with("image/") {
@@ -298,15 +296,14 @@ async fn load_unknown_page_hash_source_bytes(
 }
 
 async fn insert_page_hash_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     page_hash: &str,
     thumbnail: &[u8],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     sqlx::query("INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)")
         .bind(page_hash)
         .bind(thumbnail)
-        .execute(&pool)
+        .execute(pool)
         .await?;
     Ok(())
 }
@@ -332,7 +329,7 @@ mod tests {
     use zip::CompressionMethod;
     use zip::write::SimpleFileOptions;
 
-    async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>) {
+    async fn create_test_db(case: &str) -> sqlx::Pool<sqlx::Sqlite> {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("page-hashes.sqlite");
@@ -343,7 +340,7 @@ mod tests {
             .await
             .expect("test db should bootstrap main schema");
 
-        (db_path, pool)
+        pool
     }
 
     async fn insert_library_and_series(
@@ -443,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_page_hash_thumbnail_returns_persisted_thumbnail_with_jpeg_content_type() {
-        let (db_path, pool) = create_test_db("persisted-thumbnail").await;
+        let pool = create_test_db("persisted-thumbnail").await;
         let expected = vec![1_u8, 2, 3, 4];
 
         sqlx::query("INSERT INTO PAGE_HASH_THUMBNAIL (HASH, THUMBNAIL) VALUES (?, ?)")
@@ -453,7 +450,7 @@ mod tests {
             .await
             .expect("thumbnail row should be inserted");
 
-        let thumbnail = load_page_hash_thumbnail(db_path.as_path(), "hash-1")
+        let thumbnail = load_page_hash_thumbnail(&pool, "hash-1")
             .await
             .expect("thumbnail lookup should succeed")
             .expect("thumbnail should exist");
@@ -464,8 +461,11 @@ mod tests {
 
     #[tokio::test]
     async fn load_page_hash_thumbnail_reads_plain_image_file_when_source_is_image() {
-        let (db_path, pool) = create_test_db("plain-image-fallback").await;
-        let root = db_path.parent().expect("db path should have a parent");
+        let pool = create_test_db("plain-image-fallback").await;
+        let root = std::env::temp_dir().join(format!(
+            "komga-page-hashes-plain-image-fallback-root-{}",
+            std::process::id()
+        ));
         let library_root = root.join("library-root");
         let library_root_value = library_root.to_string_lossy().to_string();
         fs::create_dir_all(&library_root).expect("library root should be created");
@@ -504,7 +504,7 @@ mod tests {
         .await
         .expect("media page row should be inserted");
 
-        let thumbnail = load_page_hash_thumbnail(db_path.as_path(), "hash-2")
+        let thumbnail = load_page_hash_thumbnail(&pool, "hash-2")
             .await
             .expect("thumbnail lookup should succeed")
             .expect("thumbnail should exist");
@@ -515,8 +515,11 @@ mod tests {
 
     #[tokio::test]
     async fn load_page_hash_thumbnail_reads_zip_entry_when_source_is_archive() {
-        let (db_path, pool) = create_test_db("zip-fallback").await;
-        let root = db_path.parent().expect("db path should have a parent");
+        let pool = create_test_db("zip-fallback").await;
+        let root = std::env::temp_dir().join(format!(
+            "komga-page-hashes-zip-fallback-root-{}",
+            std::process::id()
+        ));
         let library_root = root.join("library-root");
         let library_root_value = library_root.to_string_lossy().to_string();
         fs::create_dir_all(&library_root).expect("library root should be created");
@@ -555,7 +558,7 @@ mod tests {
         .await
         .expect("media page row should be inserted");
 
-        let thumbnail = load_page_hash_thumbnail(db_path.as_path(), "hash-3")
+        let thumbnail = load_page_hash_thumbnail(&pool, "hash-3")
             .await
             .expect("thumbnail lookup should succeed")
             .expect("thumbnail should exist");
@@ -566,8 +569,11 @@ mod tests {
 
     #[tokio::test]
     async fn load_page_hash_thumbnail_reads_zip_entry_when_source_uses_legacy_file_urls() {
-        let (db_path, pool) = create_test_db("zip-fallback-legacy-file-url").await;
-        let root = db_path.parent().expect("db path should have a parent");
+        let pool = create_test_db("zip-fallback-legacy-file-url").await;
+        let root = std::env::temp_dir().join(format!(
+            "komga-page-hashes-zip-fallback-legacy-root-{}",
+            std::process::id()
+        ));
         let library_root = root.join("library root");
         fs::create_dir_all(&library_root).expect("legacy library root should be created");
 
@@ -607,7 +613,7 @@ mod tests {
         .await
         .expect("legacy media page row should be inserted");
 
-        let thumbnail = load_page_hash_thumbnail(db_path.as_path(), "hash-legacy")
+        let thumbnail = load_page_hash_thumbnail(&pool, "hash-legacy")
             .await
             .expect("legacy thumbnail lookup should succeed")
             .expect("legacy thumbnail should exist");

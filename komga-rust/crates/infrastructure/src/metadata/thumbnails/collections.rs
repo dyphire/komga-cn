@@ -1,19 +1,12 @@
-use std::path::Path;
-
 use komga_application::media_assets::CollectionThumbnailRecord;
-use sqlx::Row;
-
-use crate::sqlite::connect_read_pool;
+use sqlx::{Row, SqlitePool};
 
 use super::{emit_thumbnail_collection_event, generated_thumbnail_id};
 
 pub async fn persisted_collection_exists(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection exists db: {error}"))?;
     let row = sqlx::query(
         r#"
         SELECT 1 AS FOUND
@@ -23,19 +16,16 @@ pub async fn persisted_collection_exists(
         "#,
     )
     .bind(collection_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted collection existence: {error}"))?;
     Ok(row.is_some())
 }
 
 pub async fn load_persisted_collection_thumbnails(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Vec<CollectionThumbnailRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection thumbnails db: {error}"))?;
     let rows = sqlx::query(
         r#"
         SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -45,7 +35,7 @@ pub async fn load_persisted_collection_thumbnails(
         "#,
     )
     .bind(collection_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted collection thumbnails: {error}"))?;
 
@@ -66,7 +56,7 @@ pub async fn load_persisted_collection_thumbnails(
 }
 
 pub async fn insert_collection_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -74,9 +64,6 @@ pub async fn insert_collection_thumbnail(
     height: i64,
     selected: bool,
 ) -> Result<CollectionThumbnailRecord, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection thumbnail create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -157,12 +144,9 @@ pub async fn insert_collection_thumbnail(
 }
 
 pub async fn select_collection_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection thumbnail select db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -220,13 +204,10 @@ pub async fn select_collection_thumbnail(
 }
 
 pub async fn delete_collection_thumbnail(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection thumbnail delete db: {error}"))?;
     let mut tx = pool
         .begin()
         .await

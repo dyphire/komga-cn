@@ -9,11 +9,18 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         return;
     }
 
+    let pool = match komga_infrastructure::sqlite::connect_read_pool(config.database_file.as_path())
+        .await
+    {
+        Ok(pool) => pool,
+        Err(error) => {
+            eprintln!("failed to open database for noclaim bootstrap: {error}");
+            return;
+        }
+    };
+
     let existing_users =
-        komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(
-            config.database_file.as_path(),
-        )
-        .await;
+        komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(&pool).await;
 
     let existing_users = match existing_users {
         Ok(count) => count,
@@ -84,8 +91,20 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         );
     }
 
-    if let Err(error) = komga_infrastructure::sqlite::write_models::bootstrap_users::persist_initial_bootstrap_users(
+    let write_pool = match komga_infrastructure::sqlite::connect_write_pool(
         config.database_file.as_path(),
+    )
+    .await
+    {
+        Ok(pool) => pool,
+        Err(error) => {
+            eprintln!("failed to open write database for noclaim bootstrap: {error}");
+            return;
+        }
+    };
+
+    if let Err(error) = komga_infrastructure::sqlite::write_models::bootstrap_users::persist_initial_bootstrap_users(
+        &write_pool,
         &users_to_persist,
     )
     .await

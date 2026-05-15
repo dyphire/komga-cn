@@ -26,12 +26,9 @@ pub(in crate::task_queue) async fn hash_book_pages(
         return Ok(());
     }
 
-    persist_book_page_hashes_from_media_content(
-        runtime.database().main_db().database_file(),
-        book_id,
-    )
-    .await
-    .map_err(TaskExecutionError::runtime)
+    persist_book_page_hashes_from_media_content(runtime.database().read_pool(), book_id)
+        .await
+        .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn hash_book(

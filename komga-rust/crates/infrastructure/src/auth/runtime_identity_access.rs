@@ -17,11 +17,11 @@ use komga_application::identity_access::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha512};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use super::session_store::RememberMeRuntimeSettings;
 use super::session_store::session_token_store;
-use crate::sqlite::{connect_read_pool, connect_write_pool};
+use crate::sqlite::connect_read_pool;
 
 static API_KEY_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -113,15 +113,12 @@ pub fn take_oauth2_authorization_state(
     )
 }
 
-pub async fn persisted_basic_user(
-    headers: &HeaderMap,
-    database_file: &Path,
-) -> Option<AuthOutcome> {
+pub async fn persisted_basic_user(headers: &HeaderMap, pool: &SqlitePool) -> Option<AuthOutcome> {
     let Some((username, password)) = basic_credentials(headers) else {
         return Some(AuthOutcome::Missing);
     };
 
-    let mut users = open_persisted_users(database_file).await?;
+    let mut users = open_persisted_users(pool).await?;
     let Some(user) = users
         .iter_mut()
         .find(|user| user.email.eq_ignore_ascii_case(&username))
@@ -135,36 +132,29 @@ pub async fn persisted_basic_user(
     }
 }
 
-pub async fn persisted_api_key_user(
-    headers: &HeaderMap,
-    database_file: &Path,
-) -> Option<AuthOutcome> {
+pub async fn persisted_api_key_user(headers: &HeaderMap, pool: &SqlitePool) -> Option<AuthOutcome> {
     let Some(api_key) = api_key_header_value(headers) else {
         return Some(AuthOutcome::Missing);
     };
 
-    persisted_api_key_user_by_token(api_key.as_str(), database_file).await
+    persisted_api_key_user_by_token(api_key.as_str(), pool).await
 }
 
 pub async fn persisted_api_key_user_by_token(
     api_key: &str,
-    database_file: &Path,
+    pool: &SqlitePool,
 ) -> Option<AuthOutcome> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Some(AuthOutcome::Missing);
     }
 
-    let mut users = open_persisted_users(database_file).await?;
+    let mut users = open_persisted_users(pool).await?;
     let api_key_hash = sha512_hex(api_key);
-    let pool = match connect_read_pool(database_file).await {
-        Ok(pool) => pool,
-        Err(_) => return None,
-    };
 
     let row = sqlx::query("SELECT USER_ID FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
         .bind(api_key_hash)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await;
 
     let Ok(row) = row else {
@@ -184,14 +174,13 @@ pub async fn persisted_api_key_user_by_token(
 
 pub async fn persisted_api_key_metadata(
     headers: &HeaderMap,
-    database_file: &Path,
+    pool: &SqlitePool,
 ) -> Option<PersistedApiKeyMetadata> {
     let api_key = api_key_header_value(headers)?;
     let api_key_hash = sha512_hex(&api_key);
-    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
         .bind(api_key_hash)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await;
 
     let row = row.ok()??;
@@ -201,28 +190,27 @@ pub async fn persisted_api_key_metadata(
     })
 }
 
-pub async fn persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
-    open_persisted_users(database_file).await
+pub async fn persisted_users(pool: &SqlitePool) -> Option<Vec<AuthUser>> {
+    open_persisted_users(pool).await
 }
 
 pub async fn persisted_update_password_by_user_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     password: &str,
 ) -> Option<bool> {
     let hashed_password = hash_bcrypt_password(password, DEFAULT_COST).ok()?;
-    let pool = connect_write_pool(database_file).await.ok()?;
     let update = sqlx::query("UPDATE USER SET PASSWORD = ? WHERE ID = ?")
         .bind(hashed_password)
         .bind(user_id)
-        .execute(&pool)
+        .execute(pool)
         .await;
 
     update.ok().map(|result| result.rows_affected() > 0)
 }
 
 pub async fn persisted_create_api_key(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     comment: &str,
 ) -> Option<PersistedApiKey> {
@@ -233,7 +221,6 @@ pub async fn persisted_create_api_key(
     if normalized_comment.is_empty() {
         return None;
     }
-    let pool = connect_write_pool(database_file).await.ok()?;
 
     let insert =
         sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
@@ -241,7 +228,7 @@ pub async fn persisted_create_api_key(
             .bind(user_id)
             .bind(generated_key_hash)
             .bind(normalized_comment)
-            .execute(&pool)
+            .execute(pool)
             .await;
 
     insert.ok()?;
@@ -251,7 +238,7 @@ pub async fn persisted_create_api_key(
     )
     .bind(&generated_id)
     .bind(user_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .ok()?;
 
@@ -268,7 +255,7 @@ pub async fn persisted_create_api_key(
 }
 
 pub async fn persisted_api_key_comment_exists(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     comment: &str,
 ) -> Option<bool> {
@@ -277,13 +264,12 @@ pub async fn persisted_api_key_comment_exists(
         return Some(false);
     }
 
-    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query(
         "SELECT 1 FROM USER_API_KEY WHERE USER_ID = ? AND LOWER(COMMENT) = LOWER(?) LIMIT 1",
     )
     .bind(user_id)
     .bind(normalized_comment)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .ok()?;
 
@@ -291,15 +277,14 @@ pub async fn persisted_api_key_comment_exists(
 }
 
 pub async fn persisted_list_api_keys(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Option<Vec<PersistedApiKey>> {
-    let pool = connect_read_pool(database_file).await.ok()?;
     let rows = sqlx::query(
         "SELECT ID, USER_ID, COMMENT, CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await;
 
     let rows = rows.ok()?;
@@ -318,25 +303,23 @@ pub async fn persisted_list_api_keys(
 }
 
 pub async fn persisted_delete_api_key_by_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     api_key_id: &str,
 ) -> Option<bool> {
-    let pool = connect_write_pool(database_file).await.ok()?;
     let delete = sqlx::query("DELETE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ?")
         .bind(api_key_id)
         .bind(user_id)
-        .execute(&pool)
+        .execute(pool)
         .await;
 
     delete.ok().map(|result| result.rows_affected() > 0)
 }
 
 pub async fn persisted_list_authentication_activity(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: Option<&str>,
 ) -> Option<Vec<PersistedAuthenticationActivity>> {
-    let pool = connect_read_pool(database_file).await.ok()?;
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
             r#"
@@ -357,7 +340,7 @@ pub async fn persisted_list_authentication_activity(
             "#,
         )
         .bind(user_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
     } else {
         sqlx::query(
@@ -377,7 +360,7 @@ pub async fn persisted_list_authentication_activity(
             ORDER BY DATE_TIME DESC
             "#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
     };
 
@@ -400,23 +383,21 @@ pub async fn persisted_list_authentication_activity(
     )
 }
 
-pub async fn persisted_cleanup_authentication_activity(database_file: &Path) -> Option<u64> {
-    let pool = connect_write_pool(database_file).await.ok()?;
+pub async fn persisted_cleanup_authentication_activity(pool: &SqlitePool) -> Option<u64> {
     let deleted = sqlx::query(
         "DELETE FROM AUTHENTICATION_ACTIVITY WHERE datetime(DATE_TIME) < datetime('now', '-1 month')",
     )
-    .execute(&pool)
+    .execute(pool)
     .await;
 
     deleted.ok().map(|result| result.rows_affected())
 }
 
 pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     api_key_id: &str,
 ) -> Option<PersistedAuthenticationActivity> {
-    let pool = connect_read_pool(database_file).await.ok()?;
     let row = sqlx::query(
         r#"
         SELECT
@@ -439,7 +420,7 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
     )
     .bind(user_id)
     .bind(api_key_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await;
 
     let row = row.ok()??;
@@ -459,7 +440,7 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
 }
 
 pub async fn persisted_record_successful_authentication_activity(
-    database_file: &Path,
+    pool: &SqlitePool,
     user: &AuthUser,
     source: &str,
     api_key_id: Option<&str>,
@@ -467,7 +448,6 @@ pub async fn persisted_record_successful_authentication_activity(
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> Option<()> {
-    let pool = connect_write_pool(database_file).await.ok()?;
     let insert_with_user_id = sqlx::query(
         r#"
         INSERT INTO AUTHENTICATION_ACTIVITY (
@@ -493,7 +473,7 @@ pub async fn persisted_record_successful_authentication_activity(
     .bind(source)
     .bind(api_key_id)
     .bind(api_key_comment)
-    .execute(&pool)
+    .execute(pool)
     .await;
 
     let insert = match insert_with_user_id {
@@ -524,7 +504,7 @@ pub async fn persisted_record_successful_authentication_activity(
             .bind(source)
             .bind(api_key_id)
             .bind(api_key_comment)
-            .execute(&pool)
+            .execute(pool)
             .await
         }
     };
@@ -533,7 +513,7 @@ pub async fn persisted_record_successful_authentication_activity(
 }
 
 pub async fn persisted_record_failed_authentication_activity(
-    database_file: &Path,
+    pool: &SqlitePool,
     email: Option<&str>,
     source: &str,
     error: &str,
@@ -544,11 +524,10 @@ pub async fn persisted_record_failed_authentication_activity(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let pool = connect_write_pool(database_file).await.ok()?;
     let user_id = if let Some(email) = normalized_email.as_deref() {
         sqlx::query("SELECT ID FROM USER WHERE lower(EMAIL) = lower(?) LIMIT 1")
             .bind(email)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .ok()?
             .map(|row| row.get::<String, _>("ID"))
@@ -581,18 +560,18 @@ pub async fn persisted_record_failed_authentication_activity(
     .bind(source)
     .bind(Option::<String>::None)
     .bind(Option::<String>::None)
-    .execute(&pool)
+    .execute(pool)
     .await
     .ok()
     .map(|_| ())
 }
 
 pub async fn ensure_oauth_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     email: &str,
     allow_create: bool,
 ) -> Result<Option<AuthUser>, sqlx::Error> {
-    if let Some(users) = persisted_users(database_file).await
+    if let Some(users) = persisted_users(pool).await
         && let Some(user) = users
             .into_iter()
             .find(|user| auth_user_email_equals(user, email))
@@ -619,7 +598,6 @@ pub async fn ensure_oauth_user(
     let password_hash = hash_bcrypt_password(generated_password.as_str(), DEFAULT_COST)
         .unwrap_or_else(|_| "oauth2-disabled-password".to_string());
 
-    let pool = connect_write_pool(database_file).await?;
     let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) VALUES (?, ?, ?, ?)",
     )
@@ -627,7 +605,7 @@ pub async fn ensure_oauth_user(
     .bind(email)
     .bind(password_hash)
     .bind(true)
-    .execute(&pool)
+    .execute(pool)
     .await?;
 
     let created = insert_result.rows_affected() > 0;
@@ -635,7 +613,7 @@ pub async fn ensure_oauth_user(
     let persisted_user_id =
         sqlx::query("SELECT ID FROM USER WHERE lower(EMAIL) = lower(?) LIMIT 1")
             .bind(email)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await?
             .map(|row| row.get::<String, _>("ID"));
 
@@ -644,12 +622,12 @@ pub async fn ensure_oauth_user(
             sqlx::query("INSERT OR IGNORE INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
                 .bind(&persisted_user_id)
                 .bind(role)
-                .execute(&pool)
+                .execute(pool)
                 .await?;
         }
     }
 
-    Ok(persisted_users(database_file).await.and_then(|users| {
+    Ok(persisted_users(pool).await.and_then(|users| {
         users
             .into_iter()
             .find(|user| auth_user_email_equals(user, email))
@@ -715,12 +693,11 @@ fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
     }
 }
 
-async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
-    let pool = connect_read_pool(database_file).await.ok()?;
+async fn open_persisted_users(pool: &SqlitePool) -> Option<Vec<AuthUser>> {
     let user_rows = sqlx::query(
         "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER ORDER BY EMAIL",
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await;
 
     let Ok(user_rows) = user_rows else {
@@ -736,7 +713,7 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
         let user_id = row.get::<String, _>("ID");
         let roles = sqlx::query("SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE")
             .bind(&user_id)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await
             .ok()?
             .into_iter()
@@ -748,7 +725,7 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
             "SELECT LIBRARY_ID FROM USER_LIBRARY_SHARING WHERE USER_ID = ? ORDER BY LIBRARY_ID",
         )
         .bind(&user_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .ok()?
         .into_iter()
@@ -759,7 +736,7 @@ async fn open_persisted_users(database_file: &Path) -> Option<Vec<AuthUser>> {
             "SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY ALLOW DESC, LABEL",
         )
         .bind(&user_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .ok()?;
 

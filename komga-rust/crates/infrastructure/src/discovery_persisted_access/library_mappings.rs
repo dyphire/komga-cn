@@ -1,10 +1,6 @@
 use super::*;
 
-pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<String>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted browse-library db: {error}"))?;
-
+pub async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
         r#"SELECT LIBRARY_ID AS ID
          FROM (
@@ -18,7 +14,7 @@ pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<St
          )
          ORDER BY ID COLLATE NOCASE ASC, ID ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted browse-library ids: {error}"))?;
 
@@ -29,17 +25,13 @@ pub async fn load_persisted_library_ids(database_file: &FsPath) -> Result<Vec<St
 }
 
 pub async fn load_collection_memberships(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series collection db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, COLLECTION_ID
          FROM COLLECTION_SERIES"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query series collection memberships: {error}"))?;
 
@@ -54,20 +46,16 @@ pub async fn load_collection_memberships(
 }
 
 pub async fn load_collection_ordering(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open collection ordering db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, NUMBER
          FROM COLLECTION_SERIES
          WHERE COLLECTION_ID = ?"#,
     )
     .bind(collection_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query collection ordering: {error}"))?;
 
@@ -83,17 +71,13 @@ pub async fn load_collection_ordering(
 }
 
 pub async fn load_readlist_memberships(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist memberships db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, READLIST_ID
          FROM READLIST_BOOK"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query readlist memberships: {error}"))?;
 
@@ -108,20 +92,16 @@ pub async fn load_readlist_memberships(
 }
 
 pub async fn load_readlist_ordering(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist ordering db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, NUMBER
          FROM READLIST_BOOK
          WHERE READLIST_ID = ?"#,
     )
     .bind(readlist_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query readlist ordering: {error}"))?;
 

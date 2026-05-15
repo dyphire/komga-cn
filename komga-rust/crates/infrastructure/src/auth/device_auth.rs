@@ -1,13 +1,12 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use flate2::read::GzDecoder;
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::{connect_read_pool, connect_write_pool};
 use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 #[derive(Clone)]
@@ -77,10 +76,9 @@ pub enum KoreaderBookLookupError {
 }
 
 pub async fn load_kobo_metadata_record(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(bm.SUMMARY, '') AS SUMMARY,
@@ -111,7 +109,7 @@ pub async fn load_kobo_metadata_record(
  LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     let contributor_rows = sqlx::query(
@@ -123,7 +121,7 @@ pub async fn load_kobo_metadata_record(
  ORDER BY NAME ASC"#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let contributor_names = contributor_rows
@@ -166,10 +164,9 @@ pub async fn load_kobo_metadata_record(
 }
 
 pub async fn load_book_media_file(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
        COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
@@ -181,7 +178,7 @@ pub async fn load_book_media_file(
  LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|row| {
@@ -200,10 +197,9 @@ pub async fn load_book_media_file(
 }
 
 pub async fn load_thumbnail_by_id(
-    database_file: &Path,
+    pool: &SqlitePool,
     thumbnail_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
  FROM THUMBNAIL_BOOK tb
@@ -213,7 +209,7 @@ pub async fn load_thumbnail_by_id(
  LIMIT 1"#,
     )
     .bind(thumbnail_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     let Some(row) = row else {
@@ -240,11 +236,7 @@ pub async fn load_thumbnail_by_id(
     }
 }
 
-pub async fn persisted_book_exists(
-    database_file: &Path,
-    book_id: &str,
-) -> Result<bool, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
+pub async fn persisted_book_exists(pool: &SqlitePool, book_id: &str) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT 1 AS FOUND
  FROM BOOK
@@ -253,16 +245,15 @@ pub async fn persisted_book_exists(
  LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
     Ok(row.is_some())
 }
 
 pub async fn load_book_last_epub_position_locator(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB
  FROM MEDIA
@@ -270,7 +261,7 @@ pub async fn load_book_last_epub_position_locator(
  LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     let Some(row) = row else {
@@ -310,10 +301,9 @@ pub async fn load_book_last_epub_position_locator(
 }
 
 pub async fn load_book_created_timestamp(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT CREATED_DATE
  FROM BOOK
@@ -322,7 +312,7 @@ pub async fn load_book_created_timestamp(
  LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(row
@@ -332,11 +322,10 @@ pub async fn load_book_created_timestamp(
 }
 
 pub async fn load_read_progress(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT PAGE, COMPLETED, CREATED_DATE, LAST_MODIFIED_DATE,
        COALESCE(DEVICE_ID, '') AS DEVICE_ID,
@@ -349,7 +338,7 @@ pub async fn load_read_progress(
     )
     .bind(book_id)
     .bind(user_id_value)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|row| PersistedReadProgressRecord {
@@ -368,7 +357,7 @@ pub async fn load_read_progress(
 }
 
 pub async fn persist_read_progress_with_locator(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
     page: i64,
@@ -378,10 +367,6 @@ pub async fn persist_read_progress_with_locator(
     last_modified: &str,
     locator: Option<Value>,
 ) -> Result<(), String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open read-progress db: {error}"))?;
-
     let user_exists = sqlx::query(
         r#"SELECT 1
  FROM USER
@@ -389,7 +374,7 @@ pub async fn persist_read_progress_with_locator(
  LIMIT 1"#,
     )
     .bind(user_id_value)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query read-progress user: {error}"))?
     .is_some();
@@ -422,7 +407,7 @@ pub async fn persist_read_progress_with_locator(
     .bind(device_name)
     .bind(last_modified)
     .bind(locator_blob)
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|error| format!("persist read-progress with locator: {error}"))?;
 
@@ -430,12 +415,9 @@ pub async fn persist_read_progress_with_locator(
 }
 
 pub async fn load_koreader_book_target(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|_| KoreaderBookLookupError::Persistence)?;
     let rows = sqlx::query(
         r#"SELECT b.ID AS BOOK_ID,
          COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -447,7 +429,7 @@ pub async fn load_koreader_book_target(
  ORDER BY b.ID ASC"#,
     )
     .bind(book_hash)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|_| KoreaderBookLookupError::Persistence)?;
 

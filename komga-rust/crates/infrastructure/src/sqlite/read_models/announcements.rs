@@ -1,14 +1,9 @@
-use std::path::Path;
-
-use sqlx::Row;
-
-use crate::sqlite::connect_read_pool;
+use sqlx::{Row, SqlitePool};
 
 pub async fn load_announcement_read_ids(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ANNOUNCEMENT_ID
          FROM ANNOUNCEMENTS_READ
@@ -16,7 +11,7 @@ pub async fn load_announcement_read_ids(
          ORDER BY ANNOUNCEMENT_ID ASC"#,
     )
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows

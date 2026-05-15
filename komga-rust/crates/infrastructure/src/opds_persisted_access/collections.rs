@@ -1,13 +1,11 @@
 use std::collections::HashSet;
-use std::path::Path;
 
-use crate::sqlite::connect_read_pool;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use super::records::{
@@ -16,10 +14,9 @@ use super::records::{
 };
 
 pub async fn load_publishers(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT sm.PUBLISHER AS PUBLISHER, s.LIBRARY_ID AS LIBRARY_ID
 FROM SERIES_METADATA sm
@@ -28,7 +25,7 @@ WHERE sm.PUBLISHER IS NOT NULL
   AND trim(sm.PUBLISHER) != ''
 ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let mut values = Vec::new();
@@ -69,10 +66,9 @@ fn tertiary_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
 }
 
 pub async fn load_collections(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = if let Some(library_id) = library_id {
         sqlx::query(
             r#"SELECT DISTINCT c.ID, c.NAME, c.ORDERED,
@@ -84,7 +80,7 @@ WHERE s.LIBRARY_ID = ?
 ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC"#,
         )
         .bind(library_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?
     } else {
         sqlx::query(
@@ -92,7 +88,7 @@ ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC"#,
 FROM COLLECTION
 ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?
     };
 
@@ -122,10 +118,9 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
 }
 
 pub async fn load_collection(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Option<PersistedNamedRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION
@@ -133,7 +128,7 @@ WHERE ID = ?
 LIMIT 1"#,
     )
     .bind(collection_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|row| PersistedNamedRecord {
@@ -147,10 +142,9 @@ LIMIT 1"#,
 }
 
 pub async fn load_collection_books(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Vec<PersistedBookFeedRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME,
        COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
@@ -171,7 +165,7 @@ ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
          b.ID ASC"#,
     )
     .bind(collection_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -190,11 +184,10 @@ ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
 }
 
 pub async fn load_collection_series(
-    database_file: &Path,
+    pool: &SqlitePool,
     collection_id: &str,
     ordered: bool,
 ) -> Result<Vec<PersistedSeriesRecord>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let query = if ordered {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
@@ -225,7 +218,7 @@ ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"
     };
     let rows = sqlx::query(query)
         .bind(collection_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
 
     Ok(rows

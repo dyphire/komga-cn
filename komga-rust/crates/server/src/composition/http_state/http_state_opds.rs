@@ -32,7 +32,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         size: usize,
     ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String> {
         opds_catalog_access::load_browse_series_navigation_entries(
-            self.db.database_file(),
+            self.db.read_pool(),
             allowed_library_ids,
             library_id,
             publishers,
@@ -60,7 +60,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         library_id: Option<&str>,
     ) -> Result<Vec<BrowsePublisherEntry>, String> {
         opds_catalog_access::load_browse_publisher_entries(
-            self.db.database_file(),
+            self.db.read_pool(),
             allowed_library_ids,
             library_id,
         )
@@ -80,7 +80,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         user_id: &str,
         library_id: Option<&str>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        opds_catalog_access::load_keep_reading_books(self.db.database_file(), user_id, library_id)
+        opds_catalog_access::load_keep_reading_books(self.db.read_pool(), user_id, library_id)
             .await
             .map(|rows| rows.into_iter().map(map_opds_book_feed_entry).collect())
             .map_err(|error| error.to_string())
@@ -91,7 +91,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         user_id: &str,
         library_id: Option<&str>,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        opds_catalog_access::load_on_deck_books(self.db.database_file(), user_id, library_id)
+        opds_catalog_access::load_on_deck_books(self.db.read_pool(), user_id, library_id)
             .await
             .map(|rows| rows.into_iter().map(map_opds_book_feed_entry).collect())
             .map_err(|error| error.to_string())
@@ -102,7 +102,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         library_id: Option<&str>,
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        opds_catalog_access::load_latest_books(self.db.database_file(), library_id, limit)
+        opds_catalog_access::load_latest_books(self.db.read_pool(), library_id, limit)
             .await
             .map(|rows| rows.into_iter().map(map_opds_book_feed_entry).collect())
             .map_err(|error| error.to_string())
@@ -117,7 +117,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         limit: i64,
     ) -> Result<Vec<OpdsBookFeedEntry>, String> {
         opds_catalog_access::load_latest_books_paged(
-            self.db.database_file(),
+            self.db.read_pool(),
             allowed_library_ids,
             user_id,
             library_id,
@@ -134,7 +134,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         library_id: Option<&str>,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
-        opds_catalog_access::load_latest_series(self.db.database_file(), library_id, limit)
+        opds_catalog_access::load_latest_series(self.db.read_pool(), library_id, limit)
             .await
             .map(|rows| rows.into_iter().map(map_opds_series_entry).collect())
             .map_err(|error| error.to_string())
@@ -148,7 +148,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         opds_catalog_access::load_latest_series_paged(
-            self.db.database_file(),
+            self.db.read_pool(),
             allowed_library_ids,
             library_id,
             offset,
@@ -165,7 +165,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         offset: i64,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
-        opds_catalog_access::load_library_series(self.db.database_file(), library_id, offset, limit)
+        opds_catalog_access::load_library_series(self.db.read_pool(), library_id, offset, limit)
             .await
             .map(|rows| rows.into_iter().map(map_opds_series_entry).collect())
             .map_err(|error| error.to_string())
@@ -180,7 +180,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String> {
         opds_catalog_access::load_series_page(
-            self.db.database_file(),
+            self.db.read_pool(),
             allowed_library_ids,
             search,
             publishers,
@@ -193,7 +193,7 @@ impl OpdsCatalogService for RuntimeOpdsCatalogService {
     }
 
     async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
-        opds_catalog_access::load_all_readlists(self.db.database_file())
+        opds_catalog_access::load_all_readlists(self.db.read_pool())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -217,7 +217,7 @@ pub(super) struct RuntimeOpdsPersistedService {
 #[async_trait]
 impl OpdsPersistedService for RuntimeOpdsPersistedService {
     async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
-        opds_persisted_access::load_libraries(self.db.database_file())
+        opds_persisted_access::load_libraries(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(map_persisted_library_record).collect())
             .map_err(|error| error.to_string())
@@ -227,7 +227,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         library_id: &str,
     ) -> Result<Option<PersistedLibraryRecord>, String> {
-        opds_persisted_access::load_library(self.db.database_file(), library_id)
+        opds_persisted_access::load_library(self.db.read_pool(), library_id)
             .await
             .map(|value| value.map(map_persisted_library_record))
             .map_err(|error| error.to_string())
@@ -237,7 +237,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         library_id: &str,
     ) -> Result<Vec<PersistedReadlistRecord>, String> {
-        opds_persisted_access::load_readlists_for_library(self.db.database_file(), library_id)
+        opds_persisted_access::load_readlists_for_library(self.db.read_pool(), library_id)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -248,7 +248,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
     }
 
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
-        opds_persisted_access::load_series(self.db.database_file(), series_id)
+        opds_persisted_access::load_series(self.db.read_pool(), series_id)
             .await
             .map(|value| value.map(map_persisted_series_record))
             .map_err(|error| error.to_string())
@@ -262,7 +262,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         limit: i64,
     ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
         opds_persisted_access::load_series_books_paged(
-            self.db.database_file(),
+            self.db.read_pool(),
             series_id,
             user_id,
             offset,
@@ -278,7 +278,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
     }
 
     async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
-        opds_persisted_access::load_series_tags(self.db.database_file(), series_id)
+        opds_persisted_access::load_series_tags(self.db.read_pool(), series_id)
             .await
             .map_err(|error| error.to_string())
     }
@@ -287,7 +287,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         readlist_id: &str,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
-        opds_persisted_access::load_readlist(self.db.database_file(), readlist_id)
+        opds_persisted_access::load_readlist(self.db.read_pool(), readlist_id)
             .await
             .map(|value| value.map(map_persisted_readlist_record))
             .map_err(|error| error.to_string())
@@ -297,7 +297,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         readlist_id: &str,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-        opds_persisted_access::load_readlist_books(self.db.database_file(), readlist_id)
+        opds_persisted_access::load_readlist_books(self.db.read_pool(), readlist_id)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -321,7 +321,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
     > {
         let trimmed_query = query.trim();
         let (series, books, collections, readlists) = if trimmed_query.is_empty() {
-            load_blank_opds_search_results(self.db.database_file()).await?
+            load_blank_opds_search_results(self.db.read_pool()).await?
         } else {
             let index_dir = resolve_discovery_index_dir(
                 self.db.database_file(),
@@ -329,26 +329,18 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
             );
             match SearchQueryLifecycle::bootstrap(index_dir.as_path()) {
                 Ok(index) => (
-                    load_ranked_series_search_results(
-                        self.db.database_file(),
-                        &index,
-                        trimmed_query,
-                    )
-                    .await?,
-                    load_ranked_book_search_results(self.db.database_file(), &index, trimmed_query)
+                    load_ranked_series_search_results(self.db.read_pool(), &index, trimmed_query)
+                        .await?,
+                    load_ranked_book_search_results(self.db.read_pool(), &index, trimmed_query)
                         .await?,
                     load_ranked_collection_search_results(
-                        self.db.database_file(),
+                        self.db.read_pool(),
                         &index,
                         trimmed_query,
                     )
                     .await?,
-                    load_ranked_readlist_search_results(
-                        self.db.database_file(),
-                        &index,
-                        trimmed_query,
-                    )
-                    .await?,
+                    load_ranked_readlist_search_results(self.db.read_pool(), &index, trimmed_query)
+                        .await?,
                 ),
                 Err(_) => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
             }
@@ -378,7 +370,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
     ) -> Result<Vec<String>, String> {
-        opds_persisted_access::load_publishers(self.db.database_file(), allowed_library_ids)
+        opds_persisted_access::load_publishers(self.db.read_pool(), allowed_library_ids)
             .await
             .map_err(|error| error.to_string())
     }
@@ -387,7 +379,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         library_id: Option<&str>,
     ) -> Result<Vec<PersistedNamedRecord>, String> {
-        opds_persisted_access::load_collections(self.db.database_file(), library_id)
+        opds_persisted_access::load_collections(self.db.read_pool(), library_id)
             .await
             .map(|rows| rows.into_iter().map(map_persisted_named_record).collect())
             .map_err(|error| error.to_string())
@@ -397,7 +389,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         collection_id: &str,
     ) -> Result<Option<PersistedNamedRecord>, String> {
-        opds_persisted_access::load_collection(self.db.database_file(), collection_id)
+        opds_persisted_access::load_collection(self.db.read_pool(), collection_id)
             .await
             .map(|value| value.map(map_persisted_named_record))
             .map_err(|error| error.to_string())
@@ -407,7 +399,7 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         &self,
         collection_id: &str,
     ) -> Result<Vec<PersistedBookFeedRecord>, String> {
-        opds_persisted_access::load_collection_books(self.db.database_file(), collection_id)
+        opds_persisted_access::load_collection_books(self.db.read_pool(), collection_id)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -422,14 +414,10 @@ impl OpdsPersistedService for RuntimeOpdsPersistedService {
         collection_id: &str,
         ordered: bool,
     ) -> Result<Vec<PersistedSeriesRecord>, String> {
-        opds_persisted_access::load_collection_series(
-            self.db.database_file(),
-            collection_id,
-            ordered,
-        )
-        .await
-        .map(|rows| rows.into_iter().map(map_persisted_series_record).collect())
-        .map_err(|error| error.to_string())
+        opds_persisted_access::load_collection_series(self.db.read_pool(), collection_id, ordered)
+            .await
+            .map(|rows| rows.into_iter().map(map_persisted_series_record).collect())
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -672,7 +660,7 @@ fn map_persisted_book_feed_record(
 }
 
 async fn load_blank_opds_search_results(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
 ) -> Result<
     (
         Vec<opds_persisted_access::PersistedSeriesSearchRecord>,
@@ -683,98 +671,89 @@ async fn load_blank_opds_search_results(
     String,
 > {
     Ok((
-        opds_persisted_access::load_series_search_records_limited(
-            database_file,
-            OPDS_SEARCH_GROUP_LIMIT,
-        )
-        .await
-        .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
-        opds_persisted_access::load_book_search_records_limited(
-            database_file,
-            OPDS_SEARCH_GROUP_LIMIT,
-        )
-        .await
-        .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
+        opds_persisted_access::load_series_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
+        opds_persisted_access::load_book_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
         opds_persisted_access::load_collection_search_records_limited(
-            database_file,
+            pool,
             OPDS_SEARCH_GROUP_LIMIT,
         )
         .await
         .map_err(|error| format!("load blank OPDS collection search rows: {error}"))?,
-        opds_persisted_access::load_readlist_search_records_limited(
-            database_file,
-            OPDS_SEARCH_GROUP_LIMIT,
-        )
-        .await
-        .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
+        opds_persisted_access::load_readlist_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
     ))
 }
 
 async fn load_ranked_series_search_results(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<opds_persisted_access::PersistedSeriesSearchRecord>, String> {
-    let limit = opds_persisted_access::load_series_search_count(database_file)
+    let limit = opds_persisted_access::load_series_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS series search count: {error}"))?
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Series, limit)
         .unwrap_or_default();
-    ordered_series_search_rows(database_file, &ids).await
+    ordered_series_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_book_search_results(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<opds_persisted_access::PersistedBookSearchRecord>, String> {
-    let limit = opds_persisted_access::load_book_search_count(database_file)
+    let limit = opds_persisted_access::load_book_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS book search count: {error}"))?
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Book, limit)
         .unwrap_or_default();
-    ordered_book_search_rows(database_file, &ids).await
+    ordered_book_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_collection_search_results(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<opds_persisted_access::PersistedNamedRecord>, String> {
-    let limit = opds_persisted_access::load_collection_search_count(database_file)
+    let limit = opds_persisted_access::load_collection_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS collection search count: {error}"))?
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::Collection, limit)
         .unwrap_or_default();
-    ordered_collection_search_rows(database_file, &ids).await
+    ordered_collection_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_readlist_search_results(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     index: &SearchQueryLifecycle,
     query: &str,
 ) -> Result<Vec<opds_persisted_access::PersistedNamedRecord>, String> {
-    let limit = opds_persisted_access::load_readlist_search_count(database_file)
+    let limit = opds_persisted_access::load_readlist_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS readlist search count: {error}"))?
         .max(1);
     let ids = index
         .search_ids(query, SearchEntityType::ReadList, limit)
         .unwrap_or_default();
-    ordered_readlist_search_rows(database_file, &ids).await
+    ordered_readlist_search_rows(pool, &ids).await
 }
 
 async fn ordered_series_search_rows(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     ids: &[String],
 ) -> Result<Vec<opds_persisted_access::PersistedSeriesSearchRecord>, String> {
-    let rows = opds_persisted_access::load_series_search_records_by_ids(database_file, ids)
+    let rows = opds_persisted_access::load_series_search_records_by_ids(pool, ids)
         .await
         .map_err(|error| format!("load OPDS series search rows by ids: {error}"))?;
     let mut by_id = rows
@@ -785,10 +764,10 @@ async fn ordered_series_search_rows(
 }
 
 async fn ordered_book_search_rows(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     ids: &[String],
 ) -> Result<Vec<opds_persisted_access::PersistedBookSearchRecord>, String> {
-    let rows = opds_persisted_access::load_book_search_records_by_ids(database_file, ids)
+    let rows = opds_persisted_access::load_book_search_records_by_ids(pool, ids)
         .await
         .map_err(|error| format!("load OPDS book search rows by ids: {error}"))?;
     let mut by_id = rows
@@ -799,10 +778,10 @@ async fn ordered_book_search_rows(
 }
 
 async fn ordered_collection_search_rows(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     ids: &[String],
 ) -> Result<Vec<opds_persisted_access::PersistedNamedRecord>, String> {
-    let rows = opds_persisted_access::load_collection_search_records_by_ids(database_file, ids)
+    let rows = opds_persisted_access::load_collection_search_records_by_ids(pool, ids)
         .await
         .map_err(|error| format!("load OPDS collection search rows by ids: {error}"))?;
     let mut by_id = rows
@@ -813,10 +792,10 @@ async fn ordered_collection_search_rows(
 }
 
 async fn ordered_readlist_search_rows(
-    database_file: &std::path::Path,
+    pool: &sqlx::SqlitePool,
     ids: &[String],
 ) -> Result<Vec<opds_persisted_access::PersistedNamedRecord>, String> {
-    let rows = opds_persisted_access::load_readlist_search_records_by_ids(database_file, ids)
+    let rows = opds_persisted_access::load_readlist_search_records_by_ids(pool, ids)
         .await
         .map_err(|error| format!("load OPDS readlist search rows by ids: {error}"))?;
     let mut by_id = rows

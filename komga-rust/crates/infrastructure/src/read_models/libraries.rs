@@ -1,9 +1,8 @@
-use std::path::Path;
+use sqlx::SqlitePool;
 
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::queries;
-use crate::sqlite::connect_read_pool;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedLibraryReadModel {
@@ -40,26 +39,16 @@ pub struct PersistedLibraryReadModel {
 }
 
 pub async fn list_persisted_libraries(
-    database_file: &Path,
+    pool: &SqlitePool,
     context: &DiscoveryQueryContext,
 ) -> Result<Vec<PersistedLibraryReadModel>, DiscoveryError> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(map_sqlx_error)?;
-    queries::libraries::list_persisted_libraries_sqlx(pool, context).await
+    queries::libraries::list_persisted_libraries_sqlx(pool.clone(), context).await
 }
 
 pub async fn get_persisted_library(
-    database_file: &Path,
+    pool: &SqlitePool,
     context: &DiscoveryQueryContext,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryReadModel>, DiscoveryError> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(map_sqlx_error)?;
-    queries::libraries::get_persisted_library_sqlx(pool, context, library_id).await
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> DiscoveryError {
-    DiscoveryError::Persistence(error.to_string())
+    queries::libraries::get_persisted_library_sqlx(pool.clone(), context, library_id).await
 }

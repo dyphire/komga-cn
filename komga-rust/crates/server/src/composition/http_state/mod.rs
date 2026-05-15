@@ -150,7 +150,7 @@ pub fn compose_http_runtime(
     let services = HttpServices {
         library_catalog: Arc::new(
             http_state_operational_state::SqliteLibraryCatalogService::new(
-                config.database_file.as_path(),
+                db.read_pool().clone(),
                 db.write_pool().clone(),
             ),
         ),

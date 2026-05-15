@@ -449,7 +449,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_book_poster_summaries(
         &self,
     ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
-        let rows = books::load_book_poster_summaries(self.db.database_file()).await?;
+        let rows = books::load_book_poster_summaries(self.db.read_pool()).await?;
         Ok(rows
             .into_iter()
             .map(|(book_id, values)| {
@@ -471,7 +471,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
         &self,
         user_id: Option<&str>,
     ) -> Result<Vec<PersistedBookSummary>, String> {
-        books::load_persisted_book_summaries(self.db.database_file(), user_id)
+        books::load_persisted_book_summaries(self.db.read_pool(), user_id)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
     }
@@ -481,65 +481,65 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
         user_id: Option<&str>,
         ids: &[String],
     ) -> Result<Vec<PersistedBookSummary>, String> {
-        books::load_persisted_book_summaries_by_ids(self.db.database_file(), user_id, ids)
+        books::load_persisted_book_summaries_by_ids(self.db.read_pool(), user_id, ids)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
     }
 
     async fn load_persisted_book_count(&self) -> Result<usize, String> {
-        books::load_persisted_book_count(self.db.database_file()).await
+        books::load_persisted_book_count(self.db.read_pool()).await
     }
 
     async fn load_collection_memberships(
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        library_mappings::load_collection_memberships(self.db.database_file()).await
+        library_mappings::load_collection_memberships(self.db.read_pool()).await
     }
 
     async fn load_collection_ordering(
         &self,
         collection_id: &str,
     ) -> Result<HashMap<String, i64>, String> {
-        library_mappings::load_collection_ordering(self.db.database_file(), collection_id).await
+        library_mappings::load_collection_ordering(self.db.read_pool(), collection_id).await
     }
 
     async fn load_readlist_memberships(
         &self,
     ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-        library_mappings::load_readlist_memberships(self.db.database_file()).await
+        library_mappings::load_readlist_memberships(self.db.read_pool()).await
     }
 
     async fn load_readlist_ordering(
         &self,
         readlist_id: &str,
     ) -> Result<HashMap<String, i64>, String> {
-        library_mappings::load_readlist_ordering(self.db.database_file(), readlist_id).await
+        library_mappings::load_readlist_ordering(self.db.read_pool(), readlist_id).await
     }
 
     async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
-        runtime_queries::persisted_utc_date_minus_days(self.db.database_file(), days).await
+        runtime_queries::persisted_utc_date_minus_days(self.db.read_pool(), days).await
     }
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
     ) -> Result<HashMap<String, (i64, i64)>, String> {
-        runtime_queries::load_series_read_progress_counts(self.db.database_file(), user_id).await
+        runtime_queries::load_series_read_progress_counts(self.db.read_pool(), user_id).await
     }
 
     async fn load_series_read_dates(
         &self,
         user_id: &str,
     ) -> Result<HashMap<String, String>, String> {
-        runtime_queries::load_series_read_dates(self.db.database_file(), user_id).await
+        runtime_queries::load_series_read_dates(self.db.read_pool(), user_id).await
     }
 
     async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
-        runtime_queries::load_series_total_book_counts(self.db.database_file()).await
+        runtime_queries::load_series_total_book_counts(self.db.read_pool()).await
     }
 
     async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
-        series::load_persisted_series_summaries(self.db.database_file())
+        series::load_persisted_series_summaries(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
     }
@@ -548,13 +548,13 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
         &self,
         ids: &[String],
     ) -> Result<Vec<PersistedSeriesSummary>, String> {
-        series::load_persisted_series_summaries_by_ids(self.db.database_file(), ids)
+        series::load_persisted_series_summaries_by_ids(self.db.read_pool(), ids)
             .await
             .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
     }
 
     async fn load_persisted_series_count(&self) -> Result<usize, String> {
-        series::load_persisted_series_count(self.db.database_file()).await
+        series::load_persisted_series_count(self.db.read_pool()).await
     }
 
     async fn search_book_ids(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
@@ -673,7 +673,7 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
         kind: FacetKind,
         scope: FacetScope,
     ) -> Result<Vec<String>, DiscoveryError> {
-        let db = self.db.database_file();
+        let db = self.db.read_pool();
         let library_ids = scope.library_ids.as_deref();
         let collection_id = scope.collection_id.as_deref();
 
@@ -718,7 +718,7 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
         });
 
         runtime_queries::load_persisted_book_tags(
-            self.db.database_file(),
+            self.db.read_pool(),
             scope.as_ref(),
             library_ids.as_deref(),
         )

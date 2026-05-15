@@ -1,10 +1,7 @@
-use std::path::Path;
-
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::persisted_paths::resolve_stored_path;
 use crate::sql::content_libraries::DELETE_LIBRARY_DEPENDENCY_SQL;
-use crate::sqlite::connect_write_pool;
 
 #[derive(Clone, Debug)]
 pub struct PersistedLibraryWriteModel {
@@ -41,10 +38,9 @@ pub struct PersistedLibraryWriteModel {
 }
 
 pub async fn persist_library_create(
-    database_file: &Path,
+    pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     insert_library_row(&mut tx, library).await?;
     replace_library_exclusions(&mut tx, &library.id, &library.scan_directory_exclusions).await?;
@@ -53,10 +49,9 @@ pub async fn persist_library_create(
 }
 
 pub async fn persist_library_update(
-    database_file: &Path,
+    pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<bool, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let updated = update_library_row(&mut tx, library).await?;
     if !updated {
@@ -69,10 +64,9 @@ pub async fn persist_library_update(
 }
 
 pub async fn delete_persisted_library(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let exists = sqlx::query(
         r#"SELECT 1
@@ -108,10 +102,9 @@ pub async fn delete_persisted_library(
 }
 
 pub async fn load_persisted_library_write_model(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryWriteModel>, sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let row = sqlx::query(
         r#"SELECT ID,
                NAME,
@@ -146,7 +139,7 @@ pub async fn load_persisted_library_write_model(
            WHERE ID = ?"#,
     )
     .bind(library_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     let Some(row) = row else {
@@ -161,7 +154,7 @@ pub async fn load_persisted_library_write_model(
            ORDER BY EXCLUSION COLLATE NOCASE ASC"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
     library.scan_directory_exclusions = exclusions
         .into_iter()
@@ -172,7 +165,7 @@ pub async fn load_persisted_library_write_model(
 }
 
 pub async fn validate_library_before_persist(
-    database_file: &Path,
+    pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), String> {
     let root_path = resolve_stored_path(&library.root);
@@ -183,11 +176,8 @@ pub async fn validate_library_before_persist(
         return Err("library root must be a directory".to_string());
     }
 
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open library validation db: {error}"))?;
     let rows = sqlx::query(r#"SELECT ID, NAME, ROOT FROM LIBRARY"#)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query library validation rows: {error}"))?;
 
@@ -216,14 +206,10 @@ pub async fn validate_library_before_persist(
 }
 
 pub async fn library_book_ids_with_empty_hash(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     koreader: bool,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open library hash query db: {error}"))?;
-
     let sql = if koreader {
         r#"SELECT ID
            FROM BOOK
@@ -240,7 +226,7 @@ pub async fn library_book_ids_with_empty_hash(
 
     let rows = sqlx::query(sql)
         .bind(library_id)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query books with empty hash: {error}"))?;
 
@@ -251,14 +237,13 @@ pub async fn library_book_ids_with_empty_hash(
 }
 
 pub async fn library_book_ids(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<Vec<String>>, sqlx::Error> {
-    let Some(_) = load_persisted_library_write_model(database_file, library_id).await? else {
+    let Some(_) = load_persisted_library_write_model(pool, library_id).await? else {
         return Ok(None);
     };
 
-    let pool = connect_write_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT ID
            FROM BOOK
@@ -266,7 +251,7 @@ pub async fn library_book_ids(
            ORDER BY ID ASC"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(Some(
@@ -277,14 +262,13 @@ pub async fn library_book_ids(
 }
 
 pub async fn library_series_and_book_ids(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, sqlx::Error> {
-    let Some(_) = load_persisted_library_write_model(database_file, library_id).await? else {
+    let Some(_) = load_persisted_library_write_model(pool, library_id).await? else {
         return Ok(None);
     };
 
-    let pool = connect_write_pool(database_file).await?;
     let series_rows = sqlx::query(
         r#"SELECT ID
            FROM SERIES
@@ -292,7 +276,7 @@ pub async fn library_series_and_book_ids(
            ORDER BY ID ASC"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
     let book_rows = sqlx::query(
         r#"SELECT ID, SERIES_ID
@@ -301,7 +285,7 @@ pub async fn library_series_and_book_ids(
            ORDER BY ID ASC"#,
     )
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(Some((

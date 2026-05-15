@@ -1,12 +1,9 @@
-use std::path::Path;
-
-use crate::sqlite::connect_write_pool;
+use sqlx::SqlitePool;
 
 pub async fn upsert_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     settings: &[(String, String, bool)],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     for (key, value, allow_unauthorized) in settings {
         sqlx::query(
@@ -27,11 +24,10 @@ pub async fn upsert_client_settings_global(
 }
 
 pub async fn upsert_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     settings: &[(String, String)],
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     for (key, value) in settings {
         sqlx::query(
@@ -51,14 +47,13 @@ pub async fn upsert_client_settings_user(
 }
 
 pub async fn delete_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     keys: &[String],
 ) -> Result<(), sqlx::Error> {
     if keys.is_empty() {
         return Ok(());
     }
 
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     for key in keys {
         sqlx::query(r#"DELETE FROM CLIENT_SETTINGS_GLOBAL WHERE KEY = ?"#)
@@ -71,7 +66,7 @@ pub async fn delete_client_settings_global(
 }
 
 pub async fn delete_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     keys: &[String],
 ) -> Result<(), sqlx::Error> {
@@ -79,7 +74,6 @@ pub async fn delete_client_settings_user(
         return Ok(());
     }
 
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     for key in keys {
         sqlx::query(

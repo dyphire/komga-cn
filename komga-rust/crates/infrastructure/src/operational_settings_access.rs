@@ -15,10 +15,9 @@ use crate::sqlite::write_models::client_settings::{
     upsert_client_settings_global as upsert_client_settings_global_model,
     upsert_client_settings_user as upsert_client_settings_user_model,
 };
-use crate::sqlite::{connect_read_pool, connect_write_pool};
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
 
@@ -31,10 +30,9 @@ struct PersistedHistoricalEvent {
 }
 
 pub async fn delete_syncpoints_by_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<(), sqlx::Error> {
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let sync_point_ids = load_syncpoint_ids_for_user(&mut tx, user_id, None).await?;
     delete_syncpoint_children(&mut tx, &sync_point_ids).await?;
@@ -51,15 +49,14 @@ pub async fn delete_syncpoints_by_user(
 }
 
 pub async fn delete_syncpoints_by_user_and_key_ids(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     key_ids: &[String],
 ) -> Result<(), sqlx::Error> {
     if key_ids.is_empty() {
-        return delete_syncpoints_by_user(database_file, user_id).await;
+        return delete_syncpoints_by_user(pool, user_id).await;
     }
 
-    let pool = connect_write_pool(database_file).await?;
     let mut tx = pool.begin().await?;
     let sync_point_ids = load_syncpoint_ids_for_user(&mut tx, user_id, Some(key_ids)).await?;
     delete_syncpoint_children(&mut tx, &sync_point_ids).await?;
@@ -230,18 +227,16 @@ fn load_server_settings_map_sync(
 }
 
 pub async fn load_history_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     page: u64,
     size: u64,
     sorts: &[String],
 ) -> Result<Value, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
-
     let total_elements = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
         FROM HISTORICAL_EVENT"#,
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await?
     .get::<i64, _>("COUNT") as u64;
 
@@ -262,7 +257,7 @@ pub async fn load_history_page(
     let events = sqlx::query(&sql)
         .bind((size.min(i64::MAX as u64)) as i64)
         .bind((offset.min(i64::MAX as u64)) as i64)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?
         .into_iter()
         .map(|row| PersistedHistoricalEvent {
@@ -290,7 +285,7 @@ pub async fn load_history_page(
             query = query.bind(&event.id);
         }
 
-        let property_rows = query.fetch_all(&pool).await?;
+        let property_rows = query.fetch_all(pool).await?;
         for row in property_rows {
             let event_id = row.get::<String, _>("ID");
             let key = row.get::<String, _>("EVENT_KEY");
@@ -394,47 +389,47 @@ fn history_sort_clause(sort: &str) -> Option<String> {
 }
 
 pub async fn load_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     allow_unauthorized_only: bool,
 ) -> Result<Value, sqlx::Error> {
-    load_client_settings_global_model(database_file, allow_unauthorized_only).await
+    load_client_settings_global_model(pool, allow_unauthorized_only).await
 }
 
 pub async fn load_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Value, sqlx::Error> {
-    load_client_settings_user_model(database_file, user_id).await
+    load_client_settings_user_model(pool, user_id).await
 }
 
 pub async fn upsert_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     settings: &[(String, String, bool)],
 ) -> Result<(), sqlx::Error> {
-    upsert_client_settings_global_model(database_file, settings).await
+    upsert_client_settings_global_model(pool, settings).await
 }
 
 pub async fn upsert_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     settings: &[(String, String)],
 ) -> Result<(), sqlx::Error> {
-    upsert_client_settings_user_model(database_file, user_id, settings).await
+    upsert_client_settings_user_model(pool, user_id, settings).await
 }
 
 pub async fn delete_client_settings_global(
-    database_file: &Path,
+    pool: &SqlitePool,
     keys: &[String],
 ) -> Result<(), sqlx::Error> {
-    delete_client_settings_global_model(database_file, keys).await
+    delete_client_settings_global_model(pool, keys).await
 }
 
 pub async fn delete_client_settings_user(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     keys: &[String],
 ) -> Result<(), sqlx::Error> {
-    delete_client_settings_user_model(database_file, user_id, keys).await
+    delete_client_settings_user_model(pool, user_id, keys).await
 }
 
 fn parse_u64(value: Option<&Option<String>>) -> Option<u64> {
@@ -488,7 +483,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>) {
+    async fn create_test_db(case: &str) -> sqlx::Pool<sqlx::Sqlite> {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings.sqlite");
@@ -507,10 +502,10 @@ mod tests {
             .await
             .expect("user row should be inserted");
 
-        (db_path, pool)
+        pool
     }
 
-    async fn create_history_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>) {
+    async fn create_history_test_db(case: &str) -> sqlx::Pool<sqlx::Sqlite> {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings-history.sqlite");
@@ -521,10 +516,10 @@ mod tests {
             .await
             .expect("history test db should bootstrap main schema");
 
-        (db_path, pool)
+        pool
     }
 
-    async fn create_syncpoint_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>) {
+    async fn create_syncpoint_test_db(case: &str) -> sqlx::Pool<sqlx::Sqlite> {
         let root = unique_temp_dir(case);
         fs::create_dir_all(&root).expect("temp root should be created");
         let db_path = root.join("operational-settings-syncpoints.sqlite");
@@ -544,7 +539,7 @@ mod tests {
                 .expect("sync point fixture user should be inserted");
         }
 
-        (db_path, pool)
+        pool
     }
 
     fn unique_temp_dir(case: &str) -> PathBuf {
@@ -560,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_client_settings_global_filters_unauthorized_only_without_injecting_defaults() {
-        let (db_path, pool) = create_test_db("load-global").await;
+        let pool = create_test_db("load-global").await;
 
         sqlx::query(
             "INSERT INTO CLIENT_SETTINGS_GLOBAL (KEY, VALUE, ALLOW_UNAUTHORIZED) VALUES (?, ?, ?)",
@@ -581,7 +576,7 @@ mod tests {
         .await
         .expect("private setting should be inserted");
 
-        let all = load_client_settings_global(db_path.as_path(), false)
+        let all = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should load");
         let all = all
@@ -591,7 +586,7 @@ mod tests {
         assert_eq!(all["private.setting"]["value"], "private-value");
         assert!(all.get("webui.oauth2.hide_login").is_none());
 
-        let unauthorized_only = load_client_settings_global(db_path.as_path(), true)
+        let unauthorized_only = load_client_settings_global(&pool, true)
             .await
             .expect("filtered global settings should load");
         let unauthorized_only = unauthorized_only
@@ -604,10 +599,10 @@ mod tests {
 
     #[tokio::test]
     async fn client_settings_access_round_trips_global_and_user_changes() {
-        let (db_path, _pool) = create_test_db("round-trip").await;
+        let pool = create_test_db("round-trip").await;
 
         upsert_client_settings_global(
-            db_path.as_path(),
+            &pool,
             &[
                 (
                     "public.setting".to_string(),
@@ -624,14 +619,14 @@ mod tests {
         .await
         .expect("global settings should persist");
         upsert_client_settings_user(
-            db_path.as_path(),
+            &pool,
             "user-1",
             &[("reader.page_size".to_string(), "42".to_string())],
         )
         .await
         .expect("user settings should persist");
 
-        let global = load_client_settings_global(db_path.as_path(), false)
+        let global = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should reload");
         let global = global
@@ -640,24 +635,20 @@ mod tests {
         assert_eq!(global["public.setting"]["value"], "public-value");
         assert_eq!(global["private.setting"]["value"], "private-value");
 
-        let user = load_client_settings_user(db_path.as_path(), "user-1")
+        let user = load_client_settings_user(&pool, "user-1")
             .await
             .expect("user settings should reload");
         let user = user.as_object().expect("user settings should be an object");
         assert_eq!(user["reader.page_size"]["value"], "42");
 
-        delete_client_settings_global(db_path.as_path(), &["private.setting".to_string()])
+        delete_client_settings_global(&pool, &["private.setting".to_string()])
             .await
             .expect("global setting should delete");
-        delete_client_settings_user(
-            db_path.as_path(),
-            "user-1",
-            &["reader.page_size".to_string()],
-        )
-        .await
-        .expect("user setting should delete");
+        delete_client_settings_user(&pool, "user-1", &["reader.page_size".to_string()])
+            .await
+            .expect("user setting should delete");
 
-        let global = load_client_settings_global(db_path.as_path(), false)
+        let global = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should reload after delete");
         let global = global
@@ -666,7 +657,7 @@ mod tests {
         assert!(global.get("private.setting").is_none());
         assert_eq!(global["public.setting"]["value"], "public-value");
 
-        let user = load_client_settings_user(db_path.as_path(), "user-1")
+        let user = load_client_settings_user(&pool, "user-1")
             .await
             .expect("user settings should reload after delete");
         assert!(
@@ -678,7 +669,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_history_page_returns_expected_shape_and_order() {
-        let (db_path, pool) = create_history_test_db("history-page").await;
+        let pool = create_history_test_db("history-page").await;
 
         sqlx::query(
             "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
@@ -712,7 +703,7 @@ mod tests {
         .await
         .expect("event property should be inserted");
 
-        let page = load_history_page(db_path.as_path(), 0, 20, &[])
+        let page = load_history_page(&pool, 0, 20, &[])
             .await
             .expect("history page should load");
         let page = page.as_object().expect("history page should be an object");
@@ -750,7 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_history_page_honors_supported_sort_override() {
-        let (db_path, pool) = create_history_test_db("history-page-type-sort").await;
+        let pool = create_history_test_db("history-page-type-sort").await;
 
         sqlx::query(
             "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
@@ -775,7 +766,7 @@ mod tests {
         .await
         .expect("book event should be inserted");
 
-        let page = load_history_page(db_path.as_path(), 0, 20, &["type,asc".to_string()])
+        let page = load_history_page(&pool, 0, 20, &["type,asc".to_string()])
             .await
             .expect("history page with type sort should load");
         let content = page["content"]
@@ -788,7 +779,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_history_page_marks_unknown_sort_as_unsorted() {
-        let (db_path, pool) = create_history_test_db("history-page-unknown-sort").await;
+        let pool = create_history_test_db("history-page-unknown-sort").await;
 
         sqlx::query(
             "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
@@ -802,7 +793,7 @@ mod tests {
         .await
         .expect("event should be inserted");
 
-        let page = load_history_page(db_path.as_path(), 0, 20, &["unknown,asc".to_string()])
+        let page = load_history_page(&pool, 0, 20, &["unknown,asc".to_string()])
             .await
             .expect("history page with unknown sort should load");
 
@@ -826,7 +817,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_syncpoints_by_user_removes_all_rows_for_user() {
-        let (db_path, pool) = create_syncpoint_test_db("syncpoints-delete-all").await;
+        let pool = create_syncpoint_test_db("syncpoints-delete-all").await;
 
         for (id, user_id, key_id) in [
             ("sp-1", "user-1", "key-1"),
@@ -842,7 +833,7 @@ mod tests {
                 .expect("sync point should be inserted");
         }
 
-        delete_syncpoints_by_user(db_path.as_path(), "user-1")
+        delete_syncpoints_by_user(&pool, "user-1")
             .await
             .expect("all sync points for user should delete");
 
@@ -859,7 +850,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_syncpoints_by_user_and_key_ids_removes_matching_key_set() {
-        let (db_path, pool) = create_syncpoint_test_db("syncpoints-delete-many").await;
+        let pool = create_syncpoint_test_db("syncpoints-delete-many").await;
 
         for (id, user_id, key_id) in [
             ("sp-1", "user-1", "key-1"),
@@ -877,7 +868,7 @@ mod tests {
         }
 
         delete_syncpoints_by_user_and_key_ids(
-            db_path.as_path(),
+            &pool,
             "user-1",
             &["key-1".to_string(), "key-3".to_string()],
         )

@@ -776,7 +776,7 @@ pub async fn cleanup_authentication_activity_once(
     }
 
     crate::auth::runtime_identity_access::persisted_cleanup_authentication_activity(
-        runtime.job().database().main_db().database_file(),
+        runtime.job().database().main_db().write_pool(),
     )
     .await
     .ok_or_else(|| {

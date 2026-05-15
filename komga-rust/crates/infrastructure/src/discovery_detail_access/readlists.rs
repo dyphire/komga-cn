@@ -1,7 +1,4 @@
-use std::path::Path as FsPath;
-
-use crate::sqlite::connect_read_pool;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
 pub struct PersistedReadlistRecord {
@@ -35,34 +32,27 @@ pub struct PersistedBookAuthorRecord {
     pub role: String,
 }
 
-pub async fn persisted_readlists_exist(database_file: &FsPath) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlists exists db: {error}"))?;
+pub async fn persisted_readlists_exist(pool: &SqlitePool) -> Result<bool, String> {
     let row = sqlx::query(
         r#"SELECT 1 AS FOUND
 FROM READLIST
 LIMIT 1"#,
     )
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted readlists existence: {error}"))?;
     Ok(row.is_some())
 }
 
 pub async fn load_persisted_readlists(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<Vec<PersistedReadlistRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted readlists db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
 ORDER BY NAME COLLATE NOCASE ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted readlists: {error}"))?;
 
@@ -80,20 +70,16 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 }
 
 pub async fn load_persisted_readlist_detail(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlistRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted readlist detail db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
 WHERE ID = ?"#,
     )
     .bind(readlist_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query persisted readlist detail: {error}"))?;
 
@@ -108,13 +94,9 @@ WHERE ID = ?"#,
 }
 
 pub async fn load_persisted_readlist_book_rows(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted readlist books db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT rb.BOOK_ID, b.LIBRARY_ID
 FROM READLIST_BOOK rb
@@ -123,7 +105,7 @@ WHERE rb.READLIST_ID = ?
 ORDER BY rb.NUMBER ASC"#,
     )
     .bind(readlist_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted readlist books: {error}"))?;
 
@@ -137,12 +119,8 @@ ORDER BY rb.NUMBER ASC"#,
 }
 
 pub async fn load_comicrack_match_candidates(
-    database_file: &FsPath,
+    pool: &SqlitePool,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open comicrack match candidates db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT s.ID AS SERIES_ID,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -156,7 +134,7 @@ LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
 LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query comicrack match candidates: {error}"))?;
 
@@ -174,20 +152,16 @@ LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
 }
 
 pub async fn load_persisted_book_authors(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open persisted book authors db: {error}"))?;
-
     let rows = sqlx::query(
         r#"SELECT NAME, COALESCE(ROLE, '') AS ROLE
 FROM BOOK_METADATA_AUTHOR
 WHERE BOOK_ID = ?"#,
     )
     .bind(book_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await
     .map_err(|error| format!("query persisted book authors: {error}"))?;
 
@@ -201,16 +175,13 @@ WHERE BOOK_ID = ?"#,
 }
 
 pub async fn persist_readlist_create(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
     name: &str,
     summary: &str,
     ordered: bool,
     book_ids: &[String],
 ) -> Result<(), String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist create db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -241,16 +212,13 @@ VALUES (?, ?, ?, ?, ?)"#,
 }
 
 pub async fn persist_readlist_update(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
     name: &str,
     summary: &str,
     ordered: bool,
     book_ids: &[String],
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist update db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -291,12 +259,9 @@ WHERE ID = ?"#,
 }
 
 pub async fn delete_persisted_readlist(
-    database_file: &FsPath,
+    pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open readlist delete db: {error}"))?;
     let mut tx = pool
         .begin()
         .await

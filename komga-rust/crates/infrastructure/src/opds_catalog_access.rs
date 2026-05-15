@@ -1,8 +1,6 @@
 use std::collections::HashSet;
-use std::path::Path;
 
-use crate::sqlite::connect_read_pool;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
 pub struct BrowseSeriesNavigationEntry {
     pub id: String,
@@ -113,14 +111,13 @@ fn library_visible(allowed_library_ids: Option<&HashSet<String>>, library_id: &s
 }
 
 pub async fn load_browse_series_navigation_entries(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
     publishers: &[String],
     page: usize,
     size: usize,
 ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok((vec![], 0));
@@ -162,7 +159,7 @@ WHERE {where_clause}"#,
         count_query = count_query.bind(publisher);
     }
     let total = count_query
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await?
         .get::<i64, _>("TOTAL")
         .max(0) as usize;
@@ -193,7 +190,7 @@ OFFSET ?"#,
     let rows = rows_query
         .bind(size as i64)
         .bind((page.saturating_mul(size)) as i64)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
 
     Ok((
@@ -208,11 +205,10 @@ OFFSET ?"#,
 }
 
 pub async fn load_browse_publisher_entries(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
 ) -> Result<Vec<BrowsePublisherEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT DISTINCT
     sm.PUBLISHER AS PUBLISHER,
@@ -227,7 +223,7 @@ ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
     )
     .bind(library_id)
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let mut seen = HashSet::new();
@@ -248,11 +244,10 @@ ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
 }
 
 pub async fn load_keep_reading_books(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     library_id: Option<&str>,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     b.ID,
@@ -323,7 +318,7 @@ ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC"#,
     .bind(user_id)
     .bind(library_id)
     .bind(library_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -365,11 +360,10 @@ ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC"#,
 }
 
 pub async fn load_on_deck_books(
-    database_file: &Path,
+    pool: &SqlitePool,
     user_id: &str,
     library_id: Option<&str>,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     b.ID,
@@ -460,7 +454,7 @@ ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_IN
     .bind(user_id)
     .bind(user_id)
     .bind(user_id)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let mut seen_series = HashSet::<String>::new();
@@ -506,22 +500,21 @@ ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_IN
 }
 
 pub async fn load_latest_books(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    load_latest_books_paged(database_file, None, None, library_id, 0, limit).await
+    load_latest_books_paged(pool, None, None, library_id, 0, limit).await
 }
 
 pub async fn load_latest_books_paged(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     user_id: Option<&str>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -614,7 +607,7 @@ OFFSET ?"#,
     for id in &authorized_library_ids {
         query = query.bind(id);
     }
-    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+    let rows = query.bind(limit).bind(offset).fetch_all(pool).await?;
 
     Ok(rows
         .into_iter()
@@ -655,21 +648,20 @@ OFFSET ?"#,
 }
 
 pub async fn load_latest_series(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    load_latest_series_paged(database_file, None, library_id, 0, limit).await
+    load_latest_series_paged(pool, None, library_id, 0, limit).await
 }
 
 pub async fn load_latest_series_paged(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -713,7 +705,7 @@ OFFSET ?"#,
     for id in &authorized_library_ids {
         query = query.bind(id);
     }
-    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+    let rows = query.bind(limit).bind(offset).fetch_all(pool).await?;
 
     Ok(rows
         .into_iter()
@@ -730,12 +722,11 @@ OFFSET ?"#,
 }
 
 pub async fn load_library_series(
-    database_file: &Path,
+    pool: &SqlitePool,
     library_id: &str,
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let rows = sqlx::query(
         r#"SELECT
     s.ID,
@@ -758,7 +749,7 @@ OFFSET ?"#,
     .bind(library_id)
     .bind(limit)
     .bind(offset)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -776,14 +767,13 @@ OFFSET ?"#,
 }
 
 pub async fn load_series_page(
-    database_file: &Path,
+    pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
     offset: i64,
     limit: i64,
 ) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
         return Ok(vec![]);
@@ -836,7 +826,7 @@ OFFSET ?"#,
     for publisher in publishers {
         query = query.bind(publisher);
     }
-    let rows = query.bind(limit).bind(offset).fetch_all(&pool).await?;
+    let rows = query.bind(limit).bind(offset).fetch_all(pool).await?;
 
     Ok(rows
         .into_iter()
@@ -861,10 +851,7 @@ OFFSET ?"#,
         .collect())
 }
 
-pub async fn load_all_readlists(
-    database_file: &Path,
-) -> Result<Vec<OpdsReadlistEntry>, sqlx::Error> {
-    let pool = connect_read_pool(database_file).await?;
+pub async fn load_all_readlists(pool: &SqlitePool) -> Result<Vec<OpdsReadlistEntry>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT
     ID,
@@ -873,7 +860,7 @@ pub async fn load_all_readlists(
 FROM READLIST
 ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
     )
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
