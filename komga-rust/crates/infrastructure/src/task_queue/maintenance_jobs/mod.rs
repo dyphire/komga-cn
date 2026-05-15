@@ -1,12 +1,10 @@
 use super::*;
-use crate::task_queue::TaskRuntimeContext;
-
 mod cleanup_delete_jobs;
 mod conversion_jobs;
 mod metadata_jobs;
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {

@@ -293,7 +293,7 @@ fn periodic_scan_iteration_logs_completion_only_when_due_and_stays_silent_when_i
         let task_queue = task_queue.clone();
         async move {
             let mut last_run = HashMap::new();
-            let pool = connect_test_pool(runtime.main_db.database_file(), 1)
+            let pool = connect_test_pool(runtime.job().database().main_db().database_file(), 1)
                 .await
                 .expect("periodic scan failure db should open");
             sqlx::query("UPDATE LIBRARY SET SCAN_INTERVAL = ? WHERE ID = ?")
@@ -579,24 +579,12 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
         Some("authentication_activity_cleanup")
     );
 
-    let skip_pools = runtime.block_on(async {
-        let task_write_pool = connect_task_write_pool(config.main_db.database_file())
-            .await
-            .expect("test private write pool should open");
-        let task_read_pool = connect_task_pool(
-            config.main_db.database_file(),
-            default_read_max_connections(),
-        )
-        .await
-        .expect("test private read pool should open");
-        (task_write_pool, task_read_pool)
-    });
-    let skip_runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool: skip_pools.0,
-        task_read_pool: skip_pools.1,
-        ..config.clone()
-    };
+    let skip_runtime = config
+        .clone()
+        .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        });
     let skip_logs = capture_router_logs_async_result(&log_config, async move {
         komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
             &skip_runtime,
@@ -632,14 +620,25 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
             connect_task_pool(&failure_root_db_path, default_read_max_connections())
                 .await
                 .expect("test private read pool should open");
-        TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(failure_root_db_path)
+        TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(failure_root_db_path)
                 .await
                 .expect("test db should open"),
+            config.worker().tasks_db_file().to_path_buf(),
+            config.job().search().lucene_data_directory().to_path_buf(),
+            config.worker().consumes_queue(),
+            config.worker().task_pool_size(),
             task_write_pool,
             task_read_pool,
-            ..config
-        }
+        )
+        .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(config.job().database().owns_main_database()),
+            owns_filesystem_scan_output: Some(
+                config.job().filesystem().owns_filesystem_scan_output(),
+            ),
+            owns_sidecar_output: Some(config.job().filesystem().owns_sidecar_output()),
+            owns_search_index: Some(config.job().search().owns_search_index()),
+        })
     });
     let failure_logs = capture_router_logs_async_result(&log_config, async move {
         komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::TaskRuntimeContext;
+use super::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
 use sqlx::SqlitePool;
 
 use crate::database_handle::DatabaseHandle;
@@ -50,6 +50,21 @@ impl RuntimeTestFixture {
         consumes_queue: bool,
         owns_search_index: bool,
     ) -> TaskRuntimeContext {
+        self.runtime_context_with_overrides(
+            consumes_queue,
+            TaskRuntimeOwnershipOverrides {
+                owns_search_index: Some(owns_search_index),
+                ..TaskRuntimeOwnershipOverrides::default()
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn runtime_context_with_overrides(
+        &self,
+        consumes_queue: bool,
+        overrides: TaskRuntimeOwnershipOverrides,
+    ) -> TaskRuntimeContext {
         let main_db = DatabaseHandle::file_backed(self.database_file.clone())
             .await
             .expect("runtime test main db should open");
@@ -59,19 +74,16 @@ impl RuntimeTestFixture {
         let task_read_pool = connect_task_pool(&self.database_file, default_read_max_connections())
             .await
             .expect("runtime test private read pool should open");
-        TaskRuntimeContext {
+        TaskRuntimeContext::new(
             main_db,
-            tasks_db_file: self.tasks_db_file.clone(),
-            lucene_data_directory: self.lucene_dir.clone(),
+            self.tasks_db_file.clone(),
+            self.lucene_dir.clone(),
             consumes_queue,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index,
-            task_pool_size: 1,
+            1,
             task_write_pool,
             task_read_pool,
-        }
+        )
+        .with_ownership_overrides(overrides)
     }
 
     pub(crate) async fn cleanup(self) {

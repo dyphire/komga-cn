@@ -1,8 +1,8 @@
-use super::TaskRuntimeContext;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::operational_settings_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
+use crate::task_queue::JobRuntime;
 use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
 }
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -32,7 +32,7 @@ pub(super) async fn try_execute(
 }
 
 async fn execute_analyze_book(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -65,7 +65,7 @@ async fn execute_analyze_book(
 }
 
 async fn execute_rebuild_index(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let entity_types = parse_rebuild_index_entities(task.payload.as_deref())?;
@@ -75,13 +75,13 @@ async fn execute_rebuild_index(
 }
 
 async fn execute_find_book_thumbnails_to_regenerate(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
     let book_ids = if for_bigger_result_only {
         let settings_store =
-            ServerSettingsStore::new(runtime.main_db.database_file().to_path_buf());
+            ServerSettingsStore::new(runtime.database().main_db().database_file().to_path_buf());
         let settings = load_server_settings(&settings_store)
             .await
             .map_err(|error| {
@@ -169,7 +169,6 @@ fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::TaskRuntimeContext;
     use super::*;
     use crate::database_handle::DatabaseHandle;
     use crate::sqlite::{
@@ -178,6 +177,7 @@ mod tests {
     };
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
+    use crate::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
     use image::{ImageBuffer, Rgba};
     use komga_application::task_processing::TaskQueueAdminPort;
     use sqlx::{Row, SqlitePool};
@@ -242,7 +242,7 @@ mod tests {
         task: &TaskQueueRecord,
         task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(runtime, task, task_target).await {
+        match try_execute(&runtime.job(), task, task_target).await {
             Some(Ok(outcome)) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))
@@ -428,21 +428,17 @@ mod tests {
         let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
             .await
             .expect("test private read pool should open");
-        let runtime = TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(database_file.clone())
+        let runtime = TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(database_file.clone())
                 .await
                 .expect("test db should open"),
             tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-            task_pool_size: 1,
+            lucene_dir,
+            false,
+            1,
             task_write_pool,
             task_read_pool,
-        };
+        );
         let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test").await;
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
@@ -509,21 +505,17 @@ mod tests {
         let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
             .await
             .expect("test private read pool should open");
-        let runtime = TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(database_file.clone())
+        let runtime = TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(database_file.clone())
                 .await
                 .expect("test db should open"),
             tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-            task_pool_size: 1,
+            lucene_dir,
+            false,
+            1,
             task_write_pool,
             task_read_pool,
-        };
+        );
         let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test")
                 .await;
@@ -752,21 +744,21 @@ mod tests {
         let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
             .await
             .expect("test private read pool should open");
-        let runtime = TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(database_file.clone())
+        let runtime = TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(database_file.clone())
                 .await
                 .expect("test db should open"),
             tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-            task_pool_size: 1,
+            lucene_dir,
+            false,
+            1,
             task_write_pool,
             task_read_pool,
-        };
+        )
+        .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        });
         let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-adjust-test",
@@ -967,21 +959,21 @@ mod tests {
         let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
             .await
             .expect("test private read pool should open");
-        let runtime = TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(database_file.clone())
+        let runtime = TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(database_file.clone())
                 .await
                 .expect("test db should open"),
             tasks_db_file,
-            lucene_data_directory: lucene_dir,
-            consumes_queue: false,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: false,
-            task_pool_size: 1,
+            lucene_dir,
+            false,
+            1,
             task_write_pool,
             task_read_pool,
-        };
+        )
+        .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        });
         let scheduler = TaskQueueScheduler::for_runtime(
             runtime.clone(),
             "analyze-book-read-progress-keep-test",

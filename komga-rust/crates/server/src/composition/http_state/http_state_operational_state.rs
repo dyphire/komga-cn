@@ -260,19 +260,15 @@ mod tests {
             connect_task_pool(main_db.database_file(), default_read_max_connections())
                 .await
                 .expect("test task read pool should open");
-        TaskRuntimeContext {
+        TaskRuntimeContext::new(
             main_db,
-            tasks_db_file: root.join("tasks.sqlite"),
-            lucene_data_directory: root.join("lucene"),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-            task_pool_size: 1,
+            root.join("tasks.sqlite"),
+            root.join("lucene"),
+            true,
+            1,
             task_write_pool,
             task_read_pool,
-        }
+        )
     }
 
     fn scan_library_task() -> TaskQueueRecord {
@@ -289,7 +285,8 @@ mod tests {
     async fn enqueue_task_records_respects_urgent_wakeup_policy() {
         for (urgent, timeout_ms, should_notify) in [(true, 100_u64, true), (false, 25_u64, false)] {
             let runtime = test_task_runtime_context().await;
-            let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+            let task_execution_pool =
+                TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
             let task_queue = Arc::new(Mutex::new(
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
@@ -322,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn apply_task_pool_size_resizes_execution_pool_and_wakes_scheduler() {
         let runtime = test_task_runtime_context().await;
-        let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+        let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
         let task_queue = Arc::new(Mutex::new(
             TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
         ));

@@ -1,7 +1,4 @@
 use super::*;
-use komga_infrastructure::sqlite::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
-};
 
 #[tokio::test]
 async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
@@ -14,18 +11,14 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
     )
     .expect("book file should be written for hash fixture");
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -34,7 +27,7 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database hash-book should still drain cleanly");
 
@@ -100,7 +93,7 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
                 .with_simple_type("HashBook"),
         )
         .await;
-    scheduler.process_available(&runtime).await.expect(
+    scheduler.process_available(&runtime.job()).await.expect(
         "hash-book task should skip cleanly when library hash-files was disabled after enqueue",
     );
 
@@ -150,7 +143,7 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
         .enqueue(TaskQueueRecord::new("HashBook_book-1", 1_000, None).with_simple_type("HashBook"))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("hash-book task should skip cleanly when the book already has a hash");
 
@@ -226,18 +219,14 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
     .expect("page-hash fixture media page row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -250,7 +239,7 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database page-hash should still drain cleanly");
 
@@ -319,7 +308,7 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
         )
         .await;
     scheduler
-        .process_available(&runtime).await
+        .process_available(&runtime.job()).await
         .expect("koreader-hash task should skip cleanly when library hash-koreader was disabled after enqueue");
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -360,7 +349,7 @@ async fn runtime_skips_book_koreader_hash_when_book_already_has_hash() {
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("koreader-hash task should skip cleanly when the book already has a koreader hash");
 
@@ -446,7 +435,7 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
                 .with_simple_type("HashBookPages"),
         )
         .await;
-    scheduler.process_available(&runtime).await.expect(
+    scheduler.process_available(&runtime.job()).await.expect(
         "page-hash task should skip cleanly when library hash-pages was disabled after enqueue",
     );
 

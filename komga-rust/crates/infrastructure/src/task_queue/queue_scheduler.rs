@@ -36,9 +36,10 @@ impl TaskQueueScheduler {
         wakeup: std::sync::Arc<Notify>,
     ) -> Self {
         let runtime = config.task_runtime_context();
-        let consumes_queue = runtime.consumes_queue;
+        let worker = runtime.worker();
+        let consumes_queue = worker.consumes_queue();
         let persisted_store = if consumes_queue {
-            SqliteTaskQueueStore::new(runtime.tasks_db_file.clone()).await
+            SqliteTaskQueueStore::new(worker.tasks_db_file().to_path_buf()).await
         } else {
             None
         };
@@ -172,7 +173,7 @@ impl TaskQueueScheduler {
 
     pub async fn process_available(
         &self,
-        runtime: &TaskRuntimeContext,
+        runtime: &JobRuntime<'_>,
     ) -> Result<usize, TaskExecutionError> {
         if !self.consumes_queue {
             return Ok(0);
@@ -207,7 +208,7 @@ impl TaskQueueScheduler {
 
     pub async fn recover_and_process(
         &self,
-        runtime: &TaskRuntimeContext,
+        runtime: &JobRuntime<'_>,
     ) -> Result<usize, TaskExecutionError> {
         let mut inner = self.inner.lock().await;
         self.ensure_admin_loaded(&mut inner).await;

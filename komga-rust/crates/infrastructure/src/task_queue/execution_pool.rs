@@ -54,7 +54,10 @@ impl TaskExecutionPoolHandle {
         Self::new_with_executor(
             task_pool_size,
             Arc::new(|runtime, task| {
-                Box::pin(async move { task_executor::execute_task(&runtime, &task).await })
+                Box::pin(async move {
+                    let job = runtime.job();
+                    task_executor::execute_task(&job, &task).await
+                })
             }),
         )
     }

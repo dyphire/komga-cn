@@ -12,10 +12,10 @@ use crate::search::index_lifecycle::SearchEntityType;
 use crate::search::runtime_tasks::sync_entity_delete_from_index;
 
 pub(super) async fn delete_book_task(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    if !runtime.task_runtime_context().owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
@@ -32,14 +32,15 @@ pub(super) async fn delete_book_task(
 }
 
 async fn load_book_delete_target(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<Option<(String, bool)>, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    Ok(load_book_delete_decision(&runtime.task_read_pool, book_id)
-        .await
-        .map_err(TaskExecutionError::runtime)?
-        .map(|target| (target.series_id, target.oneshot)))
+    Ok(
+        load_book_delete_decision(runtime.database().read_pool(), book_id)
+            .await
+            .map_err(TaskExecutionError::runtime)?
+            .map(|target| (target.series_id, target.oneshot)),
+    )
 }
 
 fn emit_book_changed_after_file_delete(book_id: &str, series_id: &str, library_id: &str) {
@@ -67,15 +68,14 @@ fn emit_series_changed_after_file_delete(series_id: &str, library_id: &str) {
     );
 }
 
-async fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    let Some(context) = load_book_delete_sse_context(&runtime.task_read_pool, book_id)
+async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), TaskExecutionError> {
+    let Some(context) = load_book_delete_sse_context(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
-    let Some(work) = load_book_delete_work(&runtime.task_read_pool, book_id)
+    let Some(work) = load_book_delete_work(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -96,14 +96,14 @@ async fn delete_book(runtime: &RuntimeConfig, book_id: &str) -> Result<(), TaskE
     remove_sidecar_thumbnail_files(&sidecar_thumbnail_paths).await?;
     remove_empty_parent_directory(&book_path).await?;
 
-    soft_delete_book_rows(&runtime.task_write_pool, book_id, &work.series_id)
+    soft_delete_book_rows(runtime.database().write_pool(), book_id, &work.series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
-    if runtime.owns_search_index {
+    if runtime.search().owns_search_index() {
         sync_entity_delete_from_index(
-            &runtime.task_read_pool,
-            runtime.lucene_data_directory.as_path(),
+            runtime.database().read_pool(),
+            runtime.search().lucene_data_directory(),
             SearchEntityType::Book,
             book_id,
         )
@@ -226,21 +226,20 @@ async fn remove_sidecar_thumbnail_files<T: AsRef<Path>>(
 }
 
 pub(super) async fn delete_series(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     series_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    if !runtime.task_runtime_context().owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
-    let runtime_context = runtime.task_runtime_context();
-    let Some(context) = load_series_delete_sse_context(&runtime_context.task_read_pool, series_id)
+    let Some(context) = load_series_delete_sse_context(runtime.database().read_pool(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
-    let work = load_series_delete_work(&runtime_context.task_read_pool, series_id)
+    let work = load_series_delete_work(runtime.database().read_pool(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
@@ -264,19 +263,19 @@ pub(super) async fn delete_series(
     remove_sidecar_thumbnail_files(&sidecar_thumbnail_paths).await?;
     remove_empty_directory(&series_path).await?;
 
-    soft_delete_series_book_rows(&runtime_context.task_write_pool, series_id)
+    soft_delete_series_book_rows(runtime.database().write_pool(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
-    soft_delete_series_rows(&runtime_context.task_write_pool, series_id)
+    soft_delete_series_rows(runtime.database().write_pool(), series_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
-    if runtime_context.owns_search_index {
+    if runtime.search().owns_search_index() {
         for book_id in &work.book_ids {
             sync_entity_delete_from_index(
-                &runtime_context.task_read_pool,
-                runtime_context.lucene_data_directory.as_path(),
+                runtime.database().read_pool(),
+                runtime.search().lucene_data_directory(),
                 SearchEntityType::Book,
                 book_id,
             )
@@ -284,8 +283,8 @@ pub(super) async fn delete_series(
             .map_err(TaskExecutionError::runtime)?;
         }
         sync_entity_delete_from_index(
-            &runtime_context.task_read_pool,
-            runtime_context.lucene_data_directory.as_path(),
+            runtime.database().read_pool(),
+            runtime.search().lucene_data_directory(),
             SearchEntityType::Series,
             series_id,
         )

@@ -6,6 +6,7 @@ use komga_infrastructure::sqlite::setup::bootstrap_pool;
 use komga_infrastructure::sqlite::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
+use komga_infrastructure::task_queue::TaskRuntimeOwnershipOverrides;
 
 #[test]
 fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing_it_inline() {
@@ -142,21 +143,23 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
             let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
                 .await
                 .expect("test private read pool should open");
-            komga_infrastructure::task_queue::TaskRuntimeContext {
-                main_db: DatabaseHandle::file_backed(db_path)
+            komga_infrastructure::task_queue::TaskRuntimeContext::new(
+                DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
-                tasks_db_file: root.join("tasks.sqlite"),
-                lucene_data_directory: root.join("lucene"),
-                consumes_queue: false,
-                owns_main_database: false,
-                owns_filesystem_scan_output: false,
-                owns_sidecar_output: false,
-                owns_search_index: false,
-                task_pool_size: 1,
+                root.join("tasks.sqlite"),
+                root.join("lucene"),
+                false,
+                1,
                 task_write_pool,
                 task_read_pool,
-            }
+            )
+            .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+                owns_main_database: Some(false),
+                owns_filesystem_scan_output: Some(false),
+                owns_sidecar_output: Some(false),
+                owns_search_index: Some(false),
+            })
         });
 
     let mut config =
@@ -218,19 +221,21 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
                 connect_task_pool(root.join("database.sqlite"), default_read_max_connections())
                     .await
                     .expect("test private read pool should open");
-            komga_infrastructure::task_queue::TaskRuntimeContext {
+            komga_infrastructure::task_queue::TaskRuntimeContext::new(
                 main_db,
-                tasks_db_file: root.join("tasks.sqlite"),
-                lucene_data_directory: root.join("lucene"),
-                consumes_queue: true,
-                owns_main_database: true,
-                owns_filesystem_scan_output: false,
-                owns_sidecar_output: false,
-                owns_search_index: false,
-                task_pool_size: 1,
+                root.join("tasks.sqlite"),
+                root.join("lucene"),
+                true,
+                1,
                 task_write_pool,
                 task_read_pool,
-            }
+            )
+            .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+                owns_filesystem_scan_output: Some(false),
+                owns_sidecar_output: Some(false),
+                owns_search_index: Some(false),
+                ..TaskRuntimeOwnershipOverrides::default()
+            })
         });
 
     let mut config = runtime_config_for_logging_contract(
@@ -476,21 +481,23 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
             let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
                 .await
                 .expect("test private read pool should open");
-            komga_infrastructure::task_queue::TaskRuntimeContext {
-                main_db: DatabaseHandle::file_backed(db_path)
+            komga_infrastructure::task_queue::TaskRuntimeContext::new(
+                DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
-                tasks_db_file: skip_root.join("tasks.sqlite"),
-                lucene_data_directory: skip_root.join("lucene"),
-                consumes_queue: false,
-                owns_main_database: false,
-                owns_filesystem_scan_output: false,
-                owns_sidecar_output: false,
-                owns_search_index: false,
-                task_pool_size: 1,
+                skip_root.join("tasks.sqlite"),
+                skip_root.join("lucene"),
+                false,
+                1,
                 task_write_pool,
                 task_read_pool,
-            }
+            )
+            .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+                owns_main_database: Some(false),
+                owns_filesystem_scan_output: Some(false),
+                owns_sidecar_output: Some(false),
+                owns_search_index: Some(false),
+            })
         });
     let mut skip_config = runtime_config_for_logging_contract(
         "komga-runtime-startup-library-scan-processing-skip-logs",

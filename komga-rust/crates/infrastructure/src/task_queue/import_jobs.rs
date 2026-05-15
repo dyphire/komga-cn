@@ -1,4 +1,4 @@
-use super::TaskRuntimeContext;
+use super::JobRuntime;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::filesystem::import::FilesystemImportPort;
 use komga_application::media_assets::MediaImportService;
@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::PathBuf;
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
     match task.simple_type.as_str() {
@@ -20,7 +20,7 @@ pub(super) async fn try_execute(
 }
 
 async fn process_import_book_task(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<Vec<TaskQueueRecord>, TaskExecutionError> {
     process_import_task(
@@ -37,7 +37,7 @@ async fn process_import_book_task(
 }
 
 async fn process_import_task<F, Fut>(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     missing_payload_message: &'static str,
     process: F,
@@ -59,7 +59,7 @@ where
 }
 
 fn prepare_import_task(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     missing_payload_message: &str,
 ) -> Result<Option<(PathBuf, String, i32)>, TaskExecutionError> {
@@ -67,12 +67,12 @@ fn prepare_import_task(
         .payload
         .clone()
         .ok_or_else(|| TaskExecutionError::invalid_task(missing_payload_message))?;
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(None);
     }
 
     Ok(Some((
-        runtime.main_db.database_file().to_path_buf(),
+        runtime.database().main_db().database_file().to_path_buf(),
         payload,
         task.priority,
     )))

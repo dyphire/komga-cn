@@ -66,7 +66,7 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
         )
         .await;
     let processed = scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("aggregate-series-metadata task should process for series booksMetadata fixture");
     assert_eq!(processed, 1);
@@ -186,7 +186,7 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
         )
         .await;
     let processed = scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("aggregate-series-metadata task should preserve series metadata title fields");
     assert_eq!(processed, 1);

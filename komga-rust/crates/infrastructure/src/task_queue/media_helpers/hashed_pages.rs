@@ -58,7 +58,7 @@ pub(in crate::task_queue) fn remove_hashed_pages_task_id(book_id: &str) -> Strin
 }
 
 pub(in crate::task_queue) async fn remove_hashed_pages(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
     pages: &[HashedPageToDelete],
 ) -> Result<bool, TaskExecutionError> {
@@ -131,7 +131,6 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         .map(|metadata| metadata_updated_unix_seconds(&metadata))
         .unwrap_or_default();
 
-    let runtime_context = runtime.task_runtime_context();
     let book_id = book_id.to_string();
     let analyze_book_id = book_id.clone();
     let removed_page_events = removed_pages
@@ -146,7 +145,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         .collect::<Vec<_>>();
 
     persist_removed_hashed_pages(
-        &runtime_context.task_write_pool,
+        runtime.database().write_pool(),
         &book_id,
         &deleted_count_by_hash,
         file_last_modified,
@@ -158,7 +157,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     super::index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
     persist_duplicate_page_deleted_events(
-        &runtime_context.task_write_pool,
+        runtime.database().write_pool(),
         &book_id,
         &source.series_id,
         &source.file_path,
@@ -171,12 +170,11 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
 }
 
 pub(in crate::task_queue) async fn load_book_archive_source(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<Option<BookArchiveSource>, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
     Ok(
-        load_persisted_book_archive_source(&runtime.task_read_pool, book_id)
+        load_persisted_book_archive_source(runtime.database().read_pool(), book_id)
             .await
             .map_err(TaskExecutionError::runtime)?
             .map(|source| BookArchiveSource {
@@ -190,11 +188,10 @@ pub(in crate::task_queue) async fn load_book_archive_source(
 }
 
 async fn load_book_hashed_pages(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    load_persisted_book_hashed_pages(&runtime.task_read_pool, book_id)
+    load_persisted_book_hashed_pages(runtime.database().read_pool(), book_id)
         .await
         .map(|pages| {
             pages

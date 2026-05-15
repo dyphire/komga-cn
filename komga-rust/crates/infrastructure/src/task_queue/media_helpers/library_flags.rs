@@ -23,11 +23,10 @@ pub(in crate::task_queue) struct LibraryMaintenanceFlags {
 }
 
 pub(in crate::task_queue) async fn load_library_hashing_flags(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     library_id: &str,
 ) -> Result<LibraryHashingFlags, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    let flags = load_persisted_library_hashing_flags(&runtime.task_read_pool, library_id)
+    let flags = load_persisted_library_hashing_flags(runtime.database().read_pool(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)?;
 
@@ -39,13 +38,13 @@ pub(in crate::task_queue) async fn load_library_hashing_flags(
 }
 
 pub(in crate::task_queue) async fn load_library_maintenance_flags(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     library_id: &str,
 ) -> Result<LibraryMaintenanceFlags, TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    let flags = load_persisted_library_maintenance_flags(&runtime.task_read_pool, library_id)
-        .await
-        .map_err(TaskExecutionError::runtime)?;
+    let flags =
+        load_persisted_library_maintenance_flags(runtime.database().read_pool(), library_id)
+            .await
+            .map_err(TaskExecutionError::runtime)?;
 
     Ok(LibraryMaintenanceFlags {
         repair_extensions: flags.repair_extensions,

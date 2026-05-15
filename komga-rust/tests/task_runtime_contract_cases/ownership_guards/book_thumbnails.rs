@@ -1,7 +1,4 @@
 use super::*;
-use komga_infrastructure::sqlite::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
-};
 
 const GIF_1X1: &[u8] = &[
     0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
@@ -14,18 +11,14 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
     let ctx = TestFixture::new("runtime-blocked-main-database-thumbnail").await;
     write_router_epub_resource(ctx.paths(), "books/book-1.epub", "OEBPS/cover.gif", GIF_1X1);
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
@@ -35,7 +28,7 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
         ))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database thumbnail generation should still drain cleanly");
 
@@ -75,7 +68,7 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("generate-book-thumbnail task should replace invalid selected thumbnail cleanly");
 

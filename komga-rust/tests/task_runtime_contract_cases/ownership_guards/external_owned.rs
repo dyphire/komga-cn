@@ -1,7 +1,4 @@
 use super::*;
-use komga_infrastructure::sqlite::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
-};
 
 #[tokio::test]
 async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_external_owned() {
@@ -41,18 +38,14 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     .expect("authentication activity row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
         &runtime,
     )
@@ -126,19 +119,15 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     .expect("stale media page row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -147,7 +136,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database analyze-book should still drain cleanly");
 
@@ -227,18 +216,14 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     .expect("book sidecar row should be inserted");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_sidecar_output: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_sidecar_output: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new(
@@ -248,7 +233,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         ))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked sidecar metadata refresh should still drain cleanly");
 
@@ -295,18 +280,14 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
     .expect("series metadata title should be updated for aggregation fixture");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -319,7 +300,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database aggregation should still drain cleanly");
 
@@ -377,18 +358,14 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .expect("delete empty readlists setting should be enabled");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_main_database: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_main_database: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -397,7 +374,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("blocked main-database cleanup should still drain cleanly");
 

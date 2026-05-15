@@ -28,7 +28,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should analyze the seeded book successfully");
 
@@ -47,7 +47,7 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
         .enqueue(scan_library_task("library-1", 900, true))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("deep scan should complete successfully after the book archive changes");
 
@@ -83,7 +83,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial oneshot scan should complete successfully");
 
@@ -107,7 +107,7 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("oneshot rescan should complete successfully after rename");
 
@@ -167,7 +167,7 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("scan should treat configured oneshots directories like Kotlin does");
 
@@ -356,7 +356,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
             .enqueue(scan_library_task("library-1", 900, false))
             .await;
         scheduler
-            .process_available(&runtime)
+            .process_available(&runtime.job())
             .await
             .expect("initial scan should analyze seeded books successfully");
 
@@ -406,7 +406,7 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
             .enqueue(scan_library_task("library-1", 900, false))
             .await;
         scheduler
-            .process_available(&runtime)
+            .process_available(&runtime.job())
             .await
             .expect("regular scan should complete successfully after seriesChanged trigger");
 
@@ -439,7 +439,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should apply provider numbering successfully");
 
@@ -465,7 +465,7 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("rescan should preserve provider numbering after Kotlin-like resort");
 
@@ -520,7 +520,7 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("scanner rescan skip task should process successfully");
 
@@ -652,7 +652,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should create persisted metadata seeds");
 
@@ -687,7 +687,7 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("rescan should recreate missing metadata seed rows");
 
@@ -713,7 +713,7 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should persist the seeded series before missing-series rescan");
 
@@ -730,7 +730,7 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("rescan should soft-delete missing persisted series successfully");
 
@@ -824,7 +824,7 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should publish runtime SSE events successfully");
 
@@ -876,7 +876,7 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("missing-series rescan should publish runtime SSE events successfully");
 
@@ -938,7 +938,7 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial scan should seed scanner SSE mixed-order fixture successfully");
 
@@ -961,7 +961,7 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .enqueue(scan_library_task("library-1", 900, false))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("mixed rescan should publish runtime SSE events successfully");
 

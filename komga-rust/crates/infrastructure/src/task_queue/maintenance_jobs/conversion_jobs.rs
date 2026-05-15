@@ -1,9 +1,8 @@
 use super::*;
-use crate::task_queue::TaskRuntimeContext;
 use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -18,7 +17,7 @@ pub(super) async fn try_execute(
 }
 
 async fn execute_repair_extension(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
@@ -26,7 +25,7 @@ async fn execute_repair_extension(
             "RepairExtension task must include a book id",
         ));
     };
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -36,7 +35,7 @@ async fn execute_repair_extension(
 }
 
 async fn execute_find_books_to_convert(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -45,7 +44,7 @@ async fn execute_find_books_to_convert(
             "FindBooksToConvert task must include a library id",
         ));
     };
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -64,7 +63,7 @@ async fn execute_find_books_to_convert(
 }
 
 async fn execute_convert_book(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
@@ -72,7 +71,7 @@ async fn execute_convert_book(
             "ConvertBook task must include a book id",
         ));
     };
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -131,7 +130,7 @@ mod tests {
         task: &TaskQueueRecord,
         task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(runtime, task, task_target).await {
+        match try_execute(&runtime.job(), task, task_target).await {
             Some(Ok(outcome)) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))

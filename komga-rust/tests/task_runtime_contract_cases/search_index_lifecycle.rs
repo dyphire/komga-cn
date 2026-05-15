@@ -17,7 +17,7 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     let processed = scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("isolated runtime should process queued tasks without task-execution failure");
     assert_eq!(
@@ -47,7 +47,7 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
         .await;
 
     let processed = scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("legacy upgrade index task should be consumed as a compatibility no-op");
     assert_eq!(
@@ -142,7 +142,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("rebuild index task should succeed for incremental sync contract");
 
@@ -174,7 +174,7 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("refresh-series-metadata task should process for incremental sync contract");
 
@@ -384,7 +384,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial rebuild index task should succeed for readlist search sync fixture");
 
@@ -465,7 +465,7 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("readlist-only metadata refresh should sync readlist search document");
 
@@ -498,7 +498,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("initial rebuild index task should succeed for scoped rebuild fixture");
 
@@ -548,7 +548,7 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("scoped rebuild index task should succeed");
 

@@ -9,7 +9,7 @@ pub(crate) trait TaskHandler {
 
     #[allow(dead_code)]
     async fn execute(
-        runtime: &super::TaskRuntimeContext,
+        runtime: &super::JobRuntime<'_>,
         task: &TaskQueueRecord,
         task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError>;
@@ -37,7 +37,7 @@ macro_rules! impl_target_payload {
             /// Execute the task. Currently stub; will be wired to real execution in a future phase.
             #[allow(dead_code)]
             async fn execute(
-                _runtime: &super::TaskRuntimeContext,
+                _runtime: &super::JobRuntime<'_>,
                 _task: &TaskQueueRecord,
                 _task_target: Option<&str>,
             ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -89,7 +89,7 @@ impl TaskHandler for ScanLibraryHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -148,7 +148,7 @@ impl TaskHandler for ImportBookHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -174,7 +174,7 @@ impl TaskHandler for FindBookThumbnailsToRegenerateHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -218,7 +218,7 @@ impl TaskHandler for RefreshBookMetadataHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -246,7 +246,7 @@ impl TaskHandler for RebuildIndexHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -262,7 +262,7 @@ impl TaskHandler for UpgradeIndexHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -322,7 +322,7 @@ impl TaskHandler for RemoveHashedPagesHandler {
     }
 
     async fn execute(
-        _runtime: &super::TaskRuntimeContext,
+        _runtime: &super::JobRuntime<'_>,
         _task: &TaskQueueRecord,
         _task_target: Option<&str>,
     ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -376,7 +376,7 @@ pub fn compatibility_payload(kind: TaskKind, record: &PersistedTaskStoreRecord) 
 }
 
 pub(crate) async fn execute(
-    runtime: &super::TaskRuntimeContext,
+    runtime: &super::JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {

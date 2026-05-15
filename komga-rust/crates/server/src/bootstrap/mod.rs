@@ -69,11 +69,11 @@ pub(crate) async fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig
         sidecar_writer_reason = writer_decision_reason(sidecar_writer_decision),
         search_writer_decision = writer_decision_label(search_writer_decision),
         search_writer_reason = writer_decision_reason(search_writer_decision),
-        consumes_queue = task_runtime.consumes_queue,
-        owns_main_database = task_runtime.owns_main_database,
-        owns_filesystem_scan_output = task_runtime.owns_filesystem_scan_output,
-        owns_sidecar_output = task_runtime.owns_sidecar_output,
-        owns_search_index = task_runtime.owns_search_index,
+        consumes_queue = task_runtime.worker().consumes_queue(),
+        owns_main_database = task_runtime.job().database().owns_main_database(),
+        owns_filesystem_scan_output = task_runtime.job().filesystem().owns_filesystem_scan_output(),
+        owns_sidecar_output = task_runtime.job().filesystem().owns_sidecar_output(),
+        owns_search_index = task_runtime.job().search().owns_search_index(),
         "Resolved startup runtime identity",
     );
 }

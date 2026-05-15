@@ -2,7 +2,7 @@ use super::*;
 use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -22,10 +22,10 @@ pub(super) async fn try_execute(
 }
 
 async fn execute_hash_book_pages(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -40,7 +40,7 @@ async fn execute_hash_book_pages(
 }
 
 async fn execute_hash_book(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
     koreader: bool,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -61,11 +61,11 @@ async fn execute_hash_book(
 }
 
 async fn execute_find_books_with_missing_page_hash(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -93,11 +93,11 @@ async fn execute_find_books_with_missing_page_hash(
 }
 
 async fn execute_find_duplicate_pages_to_delete(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -131,11 +131,11 @@ async fn execute_find_duplicate_pages_to_delete(
 }
 
 async fn execute_remove_hashed_pages(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
@@ -240,7 +240,7 @@ mod tests {
         task: &TaskQueueRecord,
         task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(runtime, task, task_target).await {
+        match try_execute(&runtime.job(), task, task_target).await {
             Some(Ok(outcome)) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))

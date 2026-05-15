@@ -1,7 +1,4 @@
 use super::*;
-use komga_infrastructure::sqlite::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
-};
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch() {
@@ -58,18 +55,14 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         .expect("existing series genres should be cleared before EPUB provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -82,7 +75,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("EPUB series metadata refresh task should process successfully");
 
@@ -176,18 +169,14 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
     .expect("series metadata should be reset before invalid language refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -200,7 +189,7 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("invalid language series metadata refresh task should process successfully");
 
@@ -282,18 +271,14 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
     .expect("series metadata should be reset before generic sidecar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -306,7 +291,7 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("generic series sidecar refresh task should process successfully");
 
@@ -407,18 +392,14 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         .expect("existing collection memberships should be normalized before ComicInfo provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -431,7 +412,7 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("ComicInfo series metadata refresh task should process successfully");
 
@@ -605,18 +586,14 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
     .expect("series metadata should be reset before deleted-book provider refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -629,7 +606,7 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("deleted-book series metadata refresh task should process successfully");
 
@@ -729,18 +706,14 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     .expect("series metadata should be reset before Mylar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -753,7 +726,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("Mylar series metadata refresh task should process successfully");
 
@@ -840,18 +813,14 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     .expect("series metadata should be reset before disabled Mylar refresh test");
     pool.close().await;
 
-    let task_write_pool = connect_task_write_pool(&ctx.paths().main_db)
-        .await
-        .expect("test private write pool should open");
-    let task_read_pool = connect_task_pool(&ctx.paths().main_db, default_read_max_connections())
-        .await
-        .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext {
-        owns_search_index: false,
-        task_write_pool,
-        task_read_pool,
-        ..runtime_task_context(ctx.paths()).await
-    };
+    let runtime = runtime_task_context_with_overrides(
+        ctx.paths(),
+        TaskRuntimeOwnershipOverrides {
+            owns_search_index: Some(false),
+            ..TaskRuntimeOwnershipOverrides::default()
+        },
+    )
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
@@ -864,7 +833,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("disabled Mylar series metadata refresh task should process successfully");
 

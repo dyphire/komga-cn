@@ -10,7 +10,7 @@ async fn run_empty_trash(paths: &RuntimeDbPaths) {
         )
         .await;
     scheduler
-        .process_available(&runtime)
+        .process_available(&runtime.job())
         .await
         .expect("empty-trash cleanup should process successfully");
 }

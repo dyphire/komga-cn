@@ -9,14 +9,13 @@ use super::media_queries::{
 use super::media_updates::persist_book_hash;
 use super::*;
 use crate::filesystem::media_access::hashes::persist_book_page_hashes_from_media_content;
-use crate::task_queue::TaskRuntimeContext;
 use tokio::fs;
 
 pub(in crate::task_queue) async fn hash_book_pages(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let Some(library_id) = load_book_library_id(&runtime.task_read_pool, book_id)
+    let Some(library_id) = load_book_library_id(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -27,21 +26,24 @@ pub(in crate::task_queue) async fn hash_book_pages(
         return Ok(());
     }
 
-    persist_book_page_hashes_from_media_content(runtime.main_db.database_file(), book_id)
-        .await
-        .map_err(TaskExecutionError::runtime)
+    persist_book_page_hashes_from_media_content(
+        runtime.database().main_db().database_file(),
+        book_id,
+    )
+    .await
+    .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn hash_book(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
     koreader: bool,
 ) -> Result<(), TaskExecutionError> {
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
-    let Some(state) = load_book_hash_runtime_state(&runtime.task_read_pool, book_id)
+    let Some(state) = load_book_hash_runtime_state(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -72,7 +74,7 @@ pub(in crate::task_queue) async fn hash_book(
         }
     }
 
-    let Some(file_path) = load_book_file_path(&runtime.task_read_pool, book_id)
+    let Some(file_path) = load_book_file_path(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -94,44 +96,45 @@ pub(in crate::task_queue) async fn hash_book(
         .map(|value| format!("{value:02x}"))
         .collect::<String>();
 
-    persist_book_hash(&runtime.task_write_pool, book_id, &hash, koreader)
+    persist_book_hash(runtime.database().write_pool(), book_id, &hash, koreader)
         .await
         .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_for_thumbnail_regeneration(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_persisted_non_deleted_book_ids(&runtime.task_read_pool)
+    load_persisted_non_deleted_book_ids(runtime.database().read_pool())
         .await
         .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_with_undersized_generated_thumbnails(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     max_edge: i64,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_books_with_undersized_generated_thumbnails(&runtime.task_read_pool, max_edge)
+    load_books_with_undersized_generated_thumbnails(runtime.database().read_pool(), max_edge)
         .await
         .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_with_missing_page_hash(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     library_id: Option<&str>,
 ) -> Result<Vec<String>, TaskExecutionError> {
-    load_persisted_books_with_missing_page_hash(&runtime.task_read_pool, library_id)
+    load_persisted_books_with_missing_page_hash(runtime.database().read_pool(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_duplicate_pages_to_delete(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     library_id: &str,
 ) -> Result<HashMap<String, Vec<HashedPageToDelete>>, TaskExecutionError> {
-    let persisted = load_persisted_duplicate_pages_to_delete(&runtime.task_read_pool, library_id)
-        .await
-        .map_err(TaskExecutionError::runtime)?;
+    let persisted =
+        load_persisted_duplicate_pages_to_delete(runtime.database().read_pool(), library_id)
+            .await
+            .map_err(TaskExecutionError::runtime)?;
 
     Ok(persisted
         .into_iter()

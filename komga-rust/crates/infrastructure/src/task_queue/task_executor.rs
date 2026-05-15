@@ -1,8 +1,8 @@
-use super::TaskRuntimeContext;
+use super::JobRuntime;
 use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 
 pub(super) async fn execute_task(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let task_target = super::queue_core::task_target(task);

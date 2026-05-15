@@ -1,11 +1,10 @@
 use super::*;
-use crate::task_queue::TaskRuntimeContext;
 use komga_application::task_processing::{
     LibraryScanPipeline, ScanOneLibrary, ScanOneLibraryResult,
 };
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -17,7 +16,7 @@ pub(super) async fn try_execute(
 }
 
 async fn handle_scan_library(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -39,7 +38,7 @@ async fn handle_scan_library(
         .and_then(parse_scan_library_payload_deep)
         .or_else(|| task_target.and_then(parse_scan_library_task_target_deep_scan))
         .unwrap_or(false);
-    let result = if !runtime.owns_filesystem_scan_output {
+    let result = if !runtime.filesystem().owns_filesystem_scan_output() {
         ScanOneLibraryResult::skipped_external_owned(library_id)
     } else {
         let pipeline = SqliteFilesystemLibraryScanPipeline::for_runtime(runtime);

@@ -23,7 +23,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
             let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
             scheduler.enqueue(task).await;
             scheduler
-                .process_available(&runtime)
+                .process_available(&runtime.job())
                 .await
                 .expect("upgrade-index lifecycle fixture should process successfully")
         }
@@ -102,8 +102,9 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
         let failed_task = failed_task.clone();
         let disowned_task = disowned_task.clone();
         async move {
-            let mut runtime = runtime_task_context_from_config(&config).await;
-            runtime.task_pool_size = 2;
+            let runtime = runtime_task_context_from_config(&config)
+                .await
+                .with_task_pool_size(2);
             let task_queue = std::sync::Arc::new(tokio::sync::Mutex::new(
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
@@ -208,7 +209,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
             assert_eq!(claimed.id, "UpgradeIndex:logging-recover");
 
             scheduler
-                .recover_and_process(&runtime)
+                .recover_and_process(&runtime.job())
                 .await
                 .expect("recover fixture should reclaim and complete the disowned task")
         }

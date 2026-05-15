@@ -37,21 +37,20 @@ fn mark_extension_repair_skipped(cache_key: &str) {
 }
 
 pub(in crate::task_queue) async fn repair_extension(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    let database_file = runtime.main_db.database_file().to_path_buf();
+    let database_file = runtime.database().main_db().database_file().to_path_buf();
     let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
 
-    let Some(row) = load_book_for_extension_repair(&runtime.task_read_pool, book_id)
+    let Some(row) = load_book_for_extension_repair(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
         return Ok(());
     };
 
-    let flags = load_library_maintenance_flags(&runtime, &row.library_id).await?;
+    let flags = load_library_maintenance_flags(runtime, &row.library_id).await?;
     if !flags.repair_extensions {
         return Ok(());
     }
@@ -121,7 +120,7 @@ pub(in crate::task_queue) async fn repair_extension(
     let file_last_modified = metadata_updated_unix_seconds(&destination_metadata);
 
     let repair_result = persist_book_extension_repair(
-        &runtime.task_write_pool,
+        runtime.database().write_pool(),
         &book_id,
         &library_id,
         &book_url,
@@ -218,7 +217,7 @@ mod tests {
 
         let runtime = fixture.runtime_context(true, true).await;
 
-        repair_extension(&runtime, "book-1")
+        repair_extension(&runtime.job(), "book-1")
             .await
             .expect("first repair-extension call should skip EPUB-detected-as-ZIP cleanly");
 
@@ -233,7 +232,7 @@ mod tests {
             .expect("repair-extensions media type should be changed after first skipped run");
         pool.close().await;
 
-        repair_extension(&runtime, "book-1")
+        repair_extension(&runtime.job(), "book-1")
             .await
             .expect("second repair-extension call should short-circuit previously skipped books");
 
@@ -275,7 +274,7 @@ mod tests {
 
         let runtime = fixture.runtime_context(true, true).await;
 
-        repair_extension(&runtime, "book-1")
+        repair_extension(&runtime.job(), "book-1")
             .await
             .expect("first repair-extension call should ignore already-correct books cleanly");
 
@@ -295,7 +294,7 @@ mod tests {
             .expect("repair-extensions candidate book url should be changed after first run");
         pool.close().await;
 
-        repair_extension(&runtime, "book-1")
+        repair_extension(&runtime.job(), "book-1")
             .await
             .expect("second repair-extension call should repair newly mismatched books");
 
@@ -342,7 +341,7 @@ mod tests {
 
         let skipped_runtime = skipped_fixture.runtime_context(true, true).await;
 
-        repair_extension(&skipped_runtime, "book-1")
+        repair_extension(&skipped_runtime.job(), "book-1")
             .await
             .expect("first runtime should mark its epub-detected-as-zip book as skipped");
 
@@ -365,7 +364,7 @@ mod tests {
 
         let candidate_runtime = candidate_fixture.runtime_context(true, true).await;
 
-        repair_extension(&candidate_runtime, "book-1")
+        repair_extension(&candidate_runtime.job(), "book-1")
             .await
             .expect("separate runtime database should still repair its own mismatched book");
 

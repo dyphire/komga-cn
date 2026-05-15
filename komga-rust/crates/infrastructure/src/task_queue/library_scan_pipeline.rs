@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use super::TaskRuntimeContext;
+use super::JobRuntime;
 use komga_application::task_processing::{
     BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
     LibraryScanScheduleState, LibraryTaskBatch, RefreshBookMetadataPayload, ScanOneLibrary,
@@ -48,11 +48,11 @@ pub struct SqliteFilesystemLibraryScanPipeline {
 }
 
 impl SqliteFilesystemLibraryScanPipeline {
-    pub fn for_runtime(runtime: &TaskRuntimeContext) -> Self {
+    pub fn for_runtime(runtime: &JobRuntime<'_>) -> Self {
         Self {
-            owns_main_database: runtime.owns_main_database,
-            task_read_pool: runtime.task_read_pool.clone(),
-            task_write_pool: runtime.task_write_pool.clone(),
+            owns_main_database: runtime.database().owns_main_database(),
+            task_read_pool: runtime.database().read_pool().clone(),
+            task_write_pool: runtime.database().write_pool().clone(),
         }
     }
 

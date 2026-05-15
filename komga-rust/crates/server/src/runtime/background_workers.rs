@@ -73,7 +73,8 @@ impl TaskRuntime {
         let runtime = crate::config::task_runtime_context(config).await;
         let background =
             prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
-        let tasks_db = open_database_handle(runtime.tasks_db_file.clone(), "tasks").await?;
+        let tasks_db =
+            open_database_handle(runtime.worker().tasks_db_file().to_path_buf(), "tasks").await?;
         let worker_runtime_guard = match mode {
             TaskRuntimeMode::WorkersEnabled { shutdown_rx } => Some(spawn_runtime_workers(
                 background.task_queue.clone(),
@@ -93,7 +94,7 @@ impl TaskRuntime {
         Ok(StartedTaskRuntime {
             router_parts: TaskRouterParts {
                 http: HttpRuntimeParts {
-                    main_db: runtime.main_db,
+                    main_db: runtime.job().database().main_db().clone(),
                     tasks_db,
                     task_engine,
                 },

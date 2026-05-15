@@ -3,6 +3,7 @@ use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
 use komga_infrastructure::sqlite::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
+use komga_infrastructure::task_queue::TaskRuntimeOwnershipOverrides;
 
 mod runtime_startup_contract_cases;
 use std::collections::BTreeMap;
@@ -21,40 +22,42 @@ async fn runtime_task_context(
     let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
         .await
         .expect("test private read pool should open");
-    komga_infrastructure::task_queue::TaskRuntimeContext {
-        main_db: DatabaseHandle::file_backed(config.database_file.clone())
+    komga_infrastructure::task_queue::TaskRuntimeContext::new(
+        DatabaseHandle::file_backed(config.database_file.clone())
             .await
             .expect("test db should open"),
-        tasks_db_file: config.tasks_db_file.clone(),
-        lucene_data_directory: config.lucene_data_directory.clone(),
-        consumes_queue: matches!(
+        config.tasks_db_file.clone(),
+        config.lucene_data_directory.clone(),
+        matches!(
             config.writer_decision(komga_config::writer_ownership::WriterKind::TasksDatabase),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
         ),
-        owns_main_database: matches!(
+        config.task_pool_size,
+        task_write_pool,
+        task_read_pool,
+    )
+    .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+        owns_main_database: Some(matches!(
             config.writer_decision(komga_config::writer_ownership::WriterKind::MainDatabase),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
-        ),
-        owns_filesystem_scan_output: matches!(
+        )),
+        owns_filesystem_scan_output: Some(matches!(
             config
                 .writer_decision(komga_config::writer_ownership::WriterKind::FilesystemScanOutput),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
-        ),
-        owns_sidecar_output: matches!(
+        )),
+        owns_sidecar_output: Some(matches!(
             config.writer_decision(komga_config::writer_ownership::WriterKind::SidecarOutput),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
-        ),
-        owns_search_index: matches!(
+        )),
+        owns_search_index: Some(matches!(
             config.writer_decision(komga_config::writer_ownership::WriterKind::SearchIndex),
             komga_config::writer_ownership::WriterDecision::Allowed
                 | komga_config::writer_ownership::WriterDecision::Isolated
-        ),
-        task_pool_size: config.task_pool_size,
-        task_write_pool,
-        task_read_pool,
-    }
+        )),
+    })
 }

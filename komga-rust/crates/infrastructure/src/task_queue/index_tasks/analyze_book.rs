@@ -9,19 +9,18 @@ pub(in crate::task_queue) struct AnalyzeBookOutcome {
 }
 
 pub(in crate::task_queue) async fn analyze_book(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<AnalyzeBookOutcome, TaskExecutionError> {
     let book_id = book_id.to_string();
-    let runtime = runtime.task_runtime_context();
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
             media_status: String::new(),
         });
     }
 
-    let Some(input) = analyze_book_input(&runtime.task_read_pool, &book_id)
+    let Some(input) = analyze_book_input(runtime.database().read_pool(), &book_id)
         .await
         .map_err(TaskExecutionError::runtime)?
     else {
@@ -58,18 +57,18 @@ pub(in crate::task_queue) async fn analyze_book(
     let current_page_count = persisted.pages.len() as i64;
 
     persist_book_analysis(
-        &runtime.task_write_pool,
-        runtime.main_db.database_file(),
-        runtime.lucene_data_directory.as_path(),
+        runtime.database().write_pool(),
+        runtime.database().main_db().database_file(),
+        runtime.search().lucene_data_directory(),
         &book_id,
         &persisted,
-        runtime.owns_search_index,
+        runtime.search().owns_search_index(),
     )
     .await
     .map_err(TaskExecutionError::runtime)?;
 
     adjust_analyzed_book_read_progress(
-        &runtime.task_write_pool,
+        runtime.database().write_pool(),
         &book_id,
         &input.series_id,
         &input.previous_media_status,

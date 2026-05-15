@@ -5,26 +5,24 @@ use super::*;
 use crate::sql::task_queue::{EMPTY_TRASH_BOOK_DEPENDENCY_SQL, EMPTY_TRASH_SERIES_DEPENDENCY_SQL};
 
 pub(super) async fn empty_trash(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     library_id: &str,
 ) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    if !runtime.owns_main_database {
+    if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
-    empty_trash_rows(&runtime.task_write_pool, library_id)
+    empty_trash_rows(runtime.database().write_pool(), library_id)
         .await
         .map_err(TaskExecutionError::runtime)
 }
 
-pub(super) async fn cleanup_empty_sets(runtime: &RuntimeConfig) -> Result<(), TaskExecutionError> {
-    let runtime = runtime.task_runtime_context();
-    if !runtime.owns_main_database {
+pub(super) async fn cleanup_empty_sets(runtime: &JobRuntime<'_>) -> Result<(), TaskExecutionError> {
+    if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
-    cleanup_empty_sets_rows(&runtime.task_write_pool)
+    cleanup_empty_sets_rows(runtime.database().write_pool())
         .await
         .map_err(TaskExecutionError::runtime)
 }

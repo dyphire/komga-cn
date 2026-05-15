@@ -1,12 +1,11 @@
 use super::*;
-use crate::task_queue::TaskRuntimeContext;
 use komga_application::task_processing::{SeriesPayload, TaskKind, TaskRequest};
 use std::collections::BTreeSet;
 
 use serde_json::Value;
 
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -34,7 +33,7 @@ pub(super) async fn try_execute(
 }
 
 async fn execute_refresh_book_metadata(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -63,7 +62,7 @@ async fn execute_refresh_book_metadata(
 }
 
 async fn execute_refresh_series_metadata(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -85,7 +84,7 @@ async fn execute_refresh_series_metadata(
 }
 
 async fn execute_aggregate_series_metadata(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(series_id) = task_target else {
@@ -99,7 +98,7 @@ async fn execute_aggregate_series_metadata(
 }
 
 async fn execute_refresh_book_local_artwork(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
@@ -113,7 +112,7 @@ async fn execute_refresh_book_local_artwork(
 }
 
 async fn execute_generate_book_thumbnail(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(book_id) = task_target else {
@@ -127,7 +126,7 @@ async fn execute_generate_book_thumbnail(
 }
 
 async fn execute_refresh_series_local_artwork(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     let Some(series_id) = task_target else {

@@ -71,7 +71,7 @@ const BACKGROUND_TASK_WORKER: &str = "background_task";
 const AUTHENTICATION_ACTIVITY_CLEANUP_WORKER: &str = "authentication_activity_cleanup";
 
 fn log_and_skip_if_main_db_unowned(component: &str, runtime: &TaskRuntimeContext) -> bool {
-    if runtime.owns_main_database {
+    if runtime.job().database().owns_main_database() {
         return false;
     }
 
@@ -97,7 +97,7 @@ pub async fn prepare_task_queue(
         wakeup.clone(),
     )
     .await;
-    if runtime.consumes_queue {
+    if runtime.worker().consumes_queue() {
         let _ = task_queue.disown_all().await;
     }
 
@@ -139,14 +139,14 @@ pub async fn prepare_task_queue(
         }
     }
 
-    if !runtime.consumes_queue {
+    if !runtime.worker().consumes_queue() {
         log_runtime_bootstrap(
             STARTUP_SEARCH_TASK_COMPONENT,
             "skipped",
             &runtime,
             RuntimeLifecycleFields::default().with_skip_reason("queue_consumption_disabled"),
         );
-    } else if !runtime.owns_search_index {
+    } else if !runtime.job().search().owns_search_index() {
         log_runtime_bootstrap(
             STARTUP_SEARCH_TASK_COMPONENT,
             "skipped",
@@ -194,7 +194,7 @@ pub async fn prepare_task_queue(
     RuntimeBackgroundState {
         task_queue: Arc::new(AsyncMutex::new(task_queue)),
         task_wakeup: wakeup,
-        task_execution_pool: TaskExecutionPoolHandle::new(runtime.task_pool_size),
+        task_execution_pool: TaskExecutionPoolHandle::new(runtime.worker().task_pool_size()),
     }
 }
 
@@ -274,7 +274,7 @@ async fn process_startup_library_scans_inner(
     .await?;
     if startup_scan_batch.is_empty() {
         let profiles = load_scan_profiles(
-            runtime.main_db.read_pool(),
+            runtime.job().database().main_db().read_pool(),
             "load startup library scan profiles for processing skip boundary",
         )
         .await?;
@@ -296,7 +296,7 @@ async fn process_startup_library_scans_inner(
     let startup_scan_task_count = startup_scan_batch.len();
     task_queue.enqueue_batch(startup_scan_batch).await;
     task_queue
-        .process_available(runtime)
+        .process_available(&runtime.job())
         .await
         .map_err(|error| error.to_string())?;
     Ok(startup_scan_task_count)
@@ -308,16 +308,18 @@ fn spawn_periodic_library_scan_workers(
     runtime: TaskRuntimeContext,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    if !runtime.consumes_queue || !runtime.owns_main_database {
+    if !runtime.worker().consumes_queue() || !runtime.job().database().owns_main_database() {
         log_worker_event(
             PERIODIC_LIBRARY_SCAN_WORKER,
             "skipped",
             &runtime,
-            RuntimeLifecycleFields::default().with_skip_reason(if !runtime.consumes_queue {
-                "queue_consumption_disabled"
-            } else {
-                "main_database_not_owned"
-            }),
+            RuntimeLifecycleFields::default().with_skip_reason(
+                if !runtime.worker().consumes_queue() {
+                    "queue_consumption_disabled"
+                } else {
+                    "main_database_not_owned"
+                },
+            ),
         );
         return;
     }
@@ -407,7 +409,7 @@ fn spawn_background_task_worker(
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    if !runtime.consumes_queue {
+    if !runtime.worker().consumes_queue() {
         log_worker_event(
             BACKGROUND_TASK_WORKER,
             "skipped",
@@ -468,7 +470,7 @@ pub async fn run_background_task_iteration(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
 ) -> Result<usize, String> {
-    let task_execution_pool = TaskExecutionPoolHandle::new(runtime.task_pool_size);
+    let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
     let mut result_rx = task_execution_pool
         .take_result_receiver()
         .expect("one-shot background task iteration should own the result receiver");
@@ -649,7 +651,7 @@ fn spawn_authentication_activity_cleanup_worker(
     runtime: TaskRuntimeContext,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) {
-    if !runtime.owns_main_database {
+    if !runtime.job().database().owns_main_database() {
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
             "skipped",
@@ -742,7 +744,7 @@ async fn wait_for_worker_shutdown(shutdown_rx: &mut watch::Receiver<bool>) {
 pub async fn cleanup_authentication_activity_once(
     runtime: &TaskRuntimeContext,
 ) -> Result<(), String> {
-    if !runtime.owns_main_database {
+    if !runtime.job().database().owns_main_database() {
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
             "skipped",
@@ -759,10 +761,10 @@ pub async fn cleanup_authentication_activity_once(
         RuntimeLifecycleFields::default(),
     );
 
-    if runtime.main_db.database_file().is_dir() {
+    if runtime.job().database().main_db().database_file().is_dir() {
         let error_message = format!(
             "failed to open sqlite database at {}: path is a directory",
-            runtime.main_db.database_file().display()
+            runtime.job().database().main_db().database_file().display()
         );
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -774,13 +776,13 @@ pub async fn cleanup_authentication_activity_once(
     }
 
     crate::auth::runtime_identity_access::persisted_cleanup_authentication_activity(
-        runtime.main_db.database_file(),
+        runtime.job().database().main_db().database_file(),
     )
     .await
     .ok_or_else(|| {
         let error_message = format!(
             "failed to clean up authentication activity using {}",
-            runtime.main_db.database_file().display()
+            runtime.job().database().main_db().database_file().display()
         );
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -812,7 +814,7 @@ async fn bootstrap_startup_search_task_inner(
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
 ) -> Result<usize, String> {
-    if !runtime.owns_search_index {
+    if !runtime.job().search().owns_search_index() {
         return Ok(0);
     }
 
@@ -892,12 +894,12 @@ async fn bootstrap_startup_library_scans_inner(
     task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
 ) -> Result<usize, String> {
-    if !runtime.owns_main_database {
+    if !runtime.job().database().owns_main_database() {
         return Ok(0);
     }
 
     let profiles = load_scan_profiles(
-        runtime.main_db.read_pool(),
+        runtime.job().database().main_db().read_pool(),
         "load startup library scan profiles",
     )
     .await?;
@@ -936,7 +938,7 @@ async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
+    SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Startup,
             &LibraryScanScheduleState::default(),
@@ -949,7 +951,7 @@ async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> Result<LibraryTaskBatch, String> {
-    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
+    SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Tick,
             &LibraryScanScheduleState {
@@ -967,7 +969,7 @@ async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> Result<(), String> {
-    SqliteFilesystemLibraryScanPipeline::for_runtime(runtime)
+    SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
         .map_err(|error| format!("build periodic library scan state: {error}"))
@@ -1076,9 +1078,9 @@ fn log_runtime_bootstrap(
             event = WORKER_BOOTSTRAP_EVENT,
             component,
             outcome,
-            consumes_queue = runtime.consumes_queue,
-            owns_main_database = runtime.owns_main_database,
-            owns_search_index = runtime.owns_search_index,
+            consumes_queue = runtime.worker().consumes_queue(),
+            owns_main_database = runtime.job().database().owns_main_database(),
+            owns_search_index = runtime.job().search().owns_search_index(),
             skip_reason = fields.skip_reason,
             startup_task = fields.startup_task,
             library_id = fields.library_id,
@@ -1094,9 +1096,9 @@ fn log_runtime_bootstrap(
             event = WORKER_BOOTSTRAP_EVENT,
             component,
             outcome,
-            consumes_queue = runtime.consumes_queue,
-            owns_main_database = runtime.owns_main_database,
-            owns_search_index = runtime.owns_search_index,
+            consumes_queue = runtime.worker().consumes_queue(),
+            owns_main_database = runtime.job().database().owns_main_database(),
+            owns_search_index = runtime.job().search().owns_search_index(),
             skip_reason = fields.skip_reason,
             startup_task = fields.startup_task,
             library_id = fields.library_id,
@@ -1127,9 +1129,9 @@ fn log_worker_event(
             event,
             worker_id,
             outcome,
-            consumes_queue = runtime.consumes_queue,
-            owns_main_database = runtime.owns_main_database,
-            owns_search_index = runtime.owns_search_index,
+            consumes_queue = runtime.worker().consumes_queue(),
+            owns_main_database = runtime.job().database().owns_main_database(),
+            owns_search_index = runtime.job().search().owns_search_index(),
             in_span = Span::current().id().is_some(),
             skip_reason = fields.skip_reason,
             library_id = fields.library_id,
@@ -1144,9 +1146,9 @@ fn log_worker_event(
             event,
             worker_id,
             outcome,
-            consumes_queue = runtime.consumes_queue,
-            owns_main_database = runtime.owns_main_database,
-            owns_search_index = runtime.owns_search_index,
+            consumes_queue = runtime.worker().consumes_queue(),
+            owns_main_database = runtime.job().database().owns_main_database(),
+            owns_search_index = runtime.job().search().owns_search_index(),
             in_span = Span::current().id().is_some(),
             skip_reason = fields.skip_reason,
             library_id = fields.library_id,
@@ -1218,21 +1220,17 @@ mod tests {
         let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
             .await
             .expect("test private read pool should open");
-        TaskRuntimeContext {
-            main_db: DatabaseHandle::file_backed(db_path)
+        TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(db_path)
                 .await
                 .expect("test db should open"),
-            tasks_db_file: root.join("tasks.sqlite"),
-            lucene_data_directory: root.join("lucene"),
-            consumes_queue: true,
-            owns_main_database: true,
-            owns_filesystem_scan_output: true,
-            owns_sidecar_output: true,
-            owns_search_index: true,
-            task_pool_size: 1,
+            root.join("tasks.sqlite"),
+            root.join("lucene"),
+            true,
+            1,
             task_write_pool,
             task_read_pool,
-        }
+        )
     }
 
     #[tokio::test]

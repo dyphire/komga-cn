@@ -1,8 +1,6 @@
 use super::*;
-use crate::task_queue::TaskRuntimeContext;
-
 pub(super) async fn try_execute(
-    runtime: &TaskRuntimeContext,
+    runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
@@ -40,7 +38,7 @@ pub(super) async fn try_execute(
 }
 
 async fn execute_empty_trash(
-    runtime: &RuntimeConfig,
+    runtime: &JobRuntime<'_>,
     library_id: &str,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
     super::super::cleanup_tasks::empty_trash(runtime, library_id).await?;
