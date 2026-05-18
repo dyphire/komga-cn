@@ -1,9 +1,12 @@
 use super::*;
-use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entry_bytes};
-use image::GenericImageView;
+use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entries_bytes};
 use lopdf::{Document as PdfDocument, Object};
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::path::Path;
+
+const IMAGE_DIMENSIONS_INITIAL_READ_BYTES: usize = 512;
+const IMAGE_DIMENSIONS_READ_CHUNK_BYTES: usize = 16 * 1024;
+const IMAGE_DIMENSIONS_MAX_READ_BYTES: usize = 1024 * 1024;
 
 pub(in crate::task_queue) fn media_type_from_path(path: &str) -> String {
     let extension = PathBuf::from(path)
@@ -120,11 +123,8 @@ pub(in crate::task_queue) fn analyze_zip_media_pages(
 
         let media_type = media_type_from_entry_name(&file_name);
         let dimensions = if analyze_dimensions && media_type.starts_with("image/") {
-            let mut bytes = Vec::new();
-            entry
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("read zip entry bytes for '{file_name}': {error}"))?;
-            image_dimensions_from_bytes(&bytes)
+            image_dimensions_from_reader(&mut entry)
+                .map_err(|error| format!("read zip entry dimensions for '{file_name}': {error}"))?
         } else {
             None
         };
@@ -146,30 +146,40 @@ pub(in crate::task_queue) fn analyze_rar_media_pages(
     file_path: &Path,
     analyze_dimensions: bool,
 ) -> Result<Vec<AnalyzedMediaPageRow>, String> {
+    if analyze_dimensions {
+        return Ok(read_rar_entries_bytes(file_path)?
+            .into_iter()
+            .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
+            .map(|entry| {
+                analyzed_rar_media_page(
+                    entry.file_name,
+                    entry.unpacked_size,
+                    image_dimensions_from_bytes(&entry.bytes),
+                )
+            })
+            .collect::<Vec<_>>());
+    }
+
     Ok(list_rar_entries(file_path)?
         .into_iter()
         .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
-        .map(|entry| {
-            let dimensions = if analyze_dimensions {
-                read_rar_entry_bytes(file_path, &entry.file_name)
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    .and_then(image_dimensions_from_bytes)
-            } else {
-                None
-            };
-            let (width, height) = split_dimensions(dimensions);
-
-            AnalyzedMediaPageRow {
-                media_type: media_type_from_entry_name(&entry.file_name),
-                file_name: entry.file_name,
-                width,
-                height,
-                file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
-            }
-        })
+        .map(|entry| analyzed_rar_media_page(entry.file_name, entry.unpacked_size, None))
         .collect::<Vec<_>>())
+}
+
+fn analyzed_rar_media_page(
+    file_name: String,
+    unpacked_size: u64,
+    dimensions: Option<(i64, i64)>,
+) -> AnalyzedMediaPageRow {
+    let (width, height) = split_dimensions(dimensions);
+    AnalyzedMediaPageRow {
+        media_type: media_type_from_entry_name(&file_name),
+        file_name,
+        width,
+        height,
+        file_size: unpacked_size.try_into().unwrap_or(i64::MAX),
+    }
 }
 
 pub(in crate::task_queue) fn analyze_pdf_media_pages(
@@ -198,9 +208,48 @@ pub(in crate::task_queue) fn analyze_pdf_media_pages(
 }
 
 fn image_dimensions_from_bytes(bytes: &[u8]) -> Option<(i64, i64)> {
-    let image = image::load_from_memory(bytes).ok()?;
-    let (width, height) = image.dimensions();
+    let (width, height) = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
     Some((i64::from(width), i64::from(height)))
+}
+
+fn image_dimensions_from_reader(reader: &mut dyn Read) -> std::io::Result<Option<(i64, i64)>> {
+    let mut bytes = Vec::with_capacity(IMAGE_DIMENSIONS_INITIAL_READ_BYTES);
+    let mut next_read_size = IMAGE_DIMENSIONS_INITIAL_READ_BYTES;
+    let mut buffer = [0; 4096];
+
+    loop {
+        let remaining = IMAGE_DIMENSIONS_MAX_READ_BYTES.saturating_sub(bytes.len());
+        if remaining == 0 {
+            return Ok(None);
+        }
+
+        let mut bytes_left = next_read_size.min(remaining);
+        let bytes_before_read = bytes.len();
+        while bytes_left > 0 {
+            let read_size = buffer.len().min(bytes_left);
+            let bytes_read = reader.read(&mut buffer[..read_size])?;
+            if bytes_read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..bytes_read]);
+            bytes_left -= bytes_read;
+        }
+
+        let bytes_read = bytes.len() - bytes_before_read;
+        if bytes_read == 0 {
+            return Ok(image_dimensions_from_bytes(&bytes));
+        }
+
+        if let Some(dimensions) = image_dimensions_from_bytes(&bytes) {
+            return Ok(Some(dimensions));
+        }
+
+        next_read_size = IMAGE_DIMENSIONS_READ_CHUNK_BYTES;
+    }
 }
 
 fn split_dimensions(dimensions: Option<(i64, i64)>) -> (Option<i64>, Option<i64>) {
@@ -307,7 +356,76 @@ pub(in crate::task_queue) fn is_rar_media_type(media_type: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{self, Read};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct CountingImageReader {
+        bytes: Vec<u8>,
+        position: usize,
+    }
+
+    impl CountingImageReader {
+        fn new(bytes: Vec<u8>) -> Self {
+            Self { bytes, position: 0 }
+        }
+
+        fn bytes_read(&self) -> usize {
+            self.position
+        }
+
+        fn total_len(&self) -> usize {
+            self.bytes.len()
+        }
+    }
+
+    impl Read for CountingImageReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let available = self.bytes.len().saturating_sub(self.position);
+            let bytes_to_read = available.min(buffer.len());
+            if bytes_to_read == 0 {
+                return Ok(0);
+            }
+
+            let end = self.position + bytes_to_read;
+            buffer[..bytes_to_read].copy_from_slice(&self.bytes[self.position..end]);
+            self.position = end;
+            Ok(bytes_to_read)
+        }
+    }
+
+    fn minimal_png_bytes() -> Vec<u8> {
+        vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x10, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0xF8, 0x62, 0xEA, 0x0E, 0x00, 0x00, 0x00, 0x08, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x48, 0x06, 0x89, 0xD2, 0x00, 0x00, 0x00,
+            0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ]
+    }
+
+    #[test]
+    fn image_dimensions_from_bytes_reads_header_without_decoding_full_image() {
+        assert_eq!(
+            image_dimensions_from_bytes(&minimal_png_bytes()),
+            Some((32, 16)),
+        );
+    }
+
+    #[test]
+    fn image_dimensions_from_reader_stops_after_dimensions_are_known() {
+        let mut png_with_large_tail = minimal_png_bytes();
+        png_with_large_tail.resize(1024 * 1024, 0xFF);
+        let mut reader = CountingImageReader::new(png_with_large_tail);
+
+        assert_eq!(
+            image_dimensions_from_reader(&mut reader).expect("dimension read should succeed"),
+            Some((32, 16)),
+        );
+        assert!(
+            reader.bytes_read() < reader.total_len(),
+            "dimensions should not require reading the whole image entry"
+        );
+    }
 
     #[test]
     fn analyze_book_media_file_marks_invalid_pdf_as_error_instead_of_ready() {
@@ -343,6 +461,24 @@ mod tests {
             "application/x-rar-compressed; version=4"
         );
         assert!(!analysis.pages.is_empty());
+    }
+
+    #[test]
+    fn analyze_book_media_file_reads_rar_page_dimensions() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/rar4.rar");
+
+        let analysis = analyze_book_media_file(&fixture_path, true)
+            .expect("rar4 fixture analysis should succeed");
+
+        assert_eq!(analysis.status, "READY");
+        assert!(
+            analysis
+                .pages
+                .iter()
+                .any(|page| page.width == Some(48) && page.height == Some(48)),
+            "rar analysis should populate page dimensions"
+        );
     }
 
     #[test]

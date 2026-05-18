@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use unrar::Archive;
@@ -7,10 +8,11 @@ const RAR4_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x00";
 const RAR5_SIGNATURE: &[u8] = b"Rar!\x1A\x07\x01\x00";
 
 pub(crate) fn detect_rar_media_type(path: &Path) -> &'static str {
-    let Ok(header) = fs::read(path).map(|bytes| bytes.into_iter().take(8).collect::<Vec<_>>())
-    else {
+    let mut header = [0; 8];
+    let Ok(bytes_read) = fs::File::open(path).and_then(|mut file| file.read(&mut header)) else {
         return "application/x-rar-compressed";
     };
+    let header = &header[..bytes_read];
 
     if header.starts_with(RAR5_SIGNATURE) {
         "application/x-rar-compressed; version=5"
@@ -25,6 +27,13 @@ pub(crate) fn detect_rar_media_type(path: &Path) -> &'static str {
 pub(crate) struct RarEntryRecord {
     pub file_name: String,
     pub unpacked_size: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RarEntryBytesRecord {
+    pub file_name: String,
+    pub unpacked_size: u64,
+    pub bytes: Vec<u8>,
 }
 
 pub(crate) fn list_rar_entries(path: &Path) -> Result<Vec<RarEntryRecord>, String> {
@@ -45,6 +54,50 @@ pub(crate) fn list_rar_entries(path: &Path) -> Result<Vec<RarEntryRecord>, Strin
         });
     }
     drop(archive);
+
+    Ok(entries)
+}
+
+pub(crate) fn read_rar_entries_bytes(path: &Path) -> Result<Vec<RarEntryBytesRecord>, String> {
+    let mut archive = Archive::new(path)
+        .open_for_processing()
+        .map_err(|error| format!("open rar for processing '{}': {error}", path.display()))?;
+
+    let mut entries = Vec::new();
+    loop {
+        let Some(header) = archive
+            .read_header()
+            .map_err(|error| format!("read rar header '{}': {error}", path.display()))?
+        else {
+            break;
+        };
+
+        let file_name = header.entry().filename.to_string_lossy().replace('\\', "/");
+        let unpacked_size = header.entry().unpacked_size;
+        if header.entry().is_directory() {
+            archive = header.skip().map_err(|error| {
+                format!(
+                    "skip rar entry '{file_name}' in '{}': {error}",
+                    path.display()
+                )
+            })?;
+            continue;
+        }
+
+        let (bytes, rest) = header.read().map_err(|error| {
+            format!(
+                "read rar entry '{}' from '{}': {error}",
+                file_name,
+                path.display()
+            )
+        })?;
+        archive = rest;
+        entries.push(RarEntryBytesRecord {
+            file_name,
+            unpacked_size,
+            bytes,
+        });
+    }
 
     Ok(entries)
 }
