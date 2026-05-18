@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::MediaAssetsService;
+use komga_infrastructure::media_reader::MediaReader;
 
 #[derive(Clone)]
 pub(super) struct PersistedReadlistBookAccessRecord {
@@ -14,7 +14,7 @@ pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool
 }
 
 pub(crate) async fn user_can_access_book_media(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,
@@ -23,7 +23,7 @@ pub(crate) async fn user_can_access_book_media(
         return false;
     }
 
-    let Ok(Some((age_rating, labels))) = media_assets.load_book_restrictions(book_id).await else {
+    let Ok(Some((age_rating, labels))) = reader.book_restrictions(book_id).await else {
         return true;
     };
 
@@ -95,8 +95,8 @@ pub(super) async fn visible_readlist_books_for_user(
         }
 
         let (age_rating, sharing_labels) = app
-            .media_assets
-            .load_book_restrictions(&book.book_id)
+            .reader
+            .book_restrictions(&book.book_id)
             .await
             .ok()
             .flatten()

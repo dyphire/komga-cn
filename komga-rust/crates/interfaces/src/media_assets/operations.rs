@@ -5,9 +5,8 @@ use axum::extract::State;
 use komga_application::media_assets::{
     BookMetadataAuthor as ApplicationBookMetadataAuthor,
     BookMetadataLink as ApplicationBookMetadataLink,
-    BookMetadataPatch as ApplicationBookMetadataPatch,
+    BookMetadataPatch as ApplicationBookMetadataPatch, MetadataUpdateResult,
 };
-use komga_application::runtime_sse::register_runtime_sse_event;
 
 #[derive(Deserialize)]
 pub struct BooksThumbnailsRegenerateQuery {
@@ -101,55 +100,13 @@ pub async fn book_metadata_update(
         }
     };
 
-    let service = app.media_assets.book_metadata_service();
-
-    match service.update_book_metadata(&book_id, &patch).await {
-        Ok(Some(series_id)) => {
-            if let Err(error) = app
-                .media_assets
-                .refresh_book_search_documents_after_metadata_update(
-                    &app.operational.runtime.lucene_data_directory,
-                    &book_id,
-                )
-                .await
-            {
-                return internal_error_response(error);
-            }
-
-            if let Some(series_id) = series_id {
-                let task = TaskRequest::with_payload(
-                    TaskKind::AggregateSeriesMetadata,
-                    SeriesPayload::new(&series_id),
-                )
-                .priority(80)
-                .into_queue_record();
-                if let Err(error) = process_task_side_effects(&app, vec![task]).await {
-                    return internal_error_response(error);
-                }
-            }
-
-            if let Ok(Some(book)) = app
-                .discovery_detail
-                .load_persisted_book_detail(&book_id, None)
-                .await
-            {
-                register_runtime_sse_event(
-                    "BookChanged",
-                    json!({
-                        "bookId": book.id,
-                        "seriesId": book.series_id,
-                        "libraryId": book.library_id,
-                    }),
-                    false,
-                    None,
-                );
-            }
-
+    match app.metadata.update_book(&book_id, &patch).await {
+        Ok(MetadataUpdateResult::Updated) => {
             let mut response = StatusCode::NO_CONTENT.into_response();
             mark_runtime_owned(&mut response);
             response
         }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(MetadataUpdateResult::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -203,55 +160,14 @@ pub async fn book_metadata_batch_update(
         updates.push((book_id.clone(), patch));
     }
 
-    let service = app.media_assets.book_metadata_service();
-    let updated_book_ids = updates
-        .iter()
-        .map(|(book_id, _)| book_id.clone())
-        .collect::<Vec<_>>();
-    let affected_series_ids = match service.batch_update_book_metadata(updates).await {
-        Ok(series_ids) => series_ids.into_iter().collect::<BTreeSet<_>>(),
-        Err(error) => return internal_error_response(error),
-    };
-
-    if !affected_series_ids.is_empty() {
-        let tasks = affected_series_ids
-            .into_iter()
-            .map(|series_id| {
-                TaskRequest::with_payload(
-                    TaskKind::AggregateSeriesMetadata,
-                    SeriesPayload::new(series_id),
-                )
-                .priority(80)
-                .into_queue_record()
-            })
-            .collect::<Vec<_>>();
-        if let Err(error) = process_task_side_effects(&app, tasks).await {
-            return internal_error_response(error);
+    match app.metadata.update_books_batch(updates).await {
+        Ok(_) => {
+            let mut response = StatusCode::NO_CONTENT.into_response();
+            mark_runtime_owned(&mut response);
+            response
         }
+        Err(error) => internal_error_response(error),
     }
-
-    for updated_book_id in updated_book_ids {
-        if let Ok(Some(book)) = app
-            .discovery_detail
-            .load_persisted_book_detail(&updated_book_id, None)
-            .await
-        {
-            register_runtime_sse_event(
-                "BookChanged",
-                json!({
-                    "bookId": book.id,
-                    "seriesId": book.series_id,
-                    "libraryId": book.library_id,
-                }),
-                false,
-                None,
-            );
-        }
-    }
-
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    mark_runtime_owned(&mut response);
-    response
 }
 
 fn parse_book_metadata_patch(
@@ -509,11 +425,7 @@ pub async fn series_analyze(
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
-    let book_ids = match app
-        .media_assets
-        .load_series_book_ids(&resolved_series_id)
-        .await
-    {
+    let book_ids = match app.reader.series_book_ids(&resolved_series_id).await {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };
@@ -535,7 +447,7 @@ pub async fn series_metadata_refresh(
     _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    let book_ids = match app.media_assets.load_series_book_ids(&series_id).await {
+    let book_ids = match app.reader.series_book_ids(&series_id).await {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };

@@ -45,7 +45,8 @@ async fn opds_manifest_variant(
     };
 
     match build_persisted_book_manifest(
-        app.media_assets.as_ref(),
+        &app.reader,
+        &app.content,
         app.discovery_detail.as_ref(),
         user,
         &headers,

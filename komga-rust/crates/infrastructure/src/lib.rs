@@ -7,12 +7,15 @@ use pdfium_render::prelude::*;
 pub mod announcements_access;
 pub mod auth;
 pub mod claims_access;
+pub mod content_resolver;
 pub mod context;
 pub mod database_handle;
 pub mod discovery_detail_access;
 pub mod discovery_persisted_access;
+pub mod event_emitter_adapter;
 pub mod filesystem;
 pub mod library_catalog;
+pub mod media_reader;
 pub mod metadata;
 pub mod opds_catalog_access;
 pub mod opds_manifest_access;
@@ -21,13 +24,17 @@ pub mod operational_metrics_access;
 pub mod operational_settings_access;
 pub mod page_hashes_access;
 mod persisted_paths;
+pub mod progress_writer;
 mod rar_support;
 pub mod read_models;
 pub mod runtime_identity_access;
 pub mod search;
+pub mod search_sync_adapter;
 pub mod sql;
 pub mod sqlite;
+pub mod task_enqueue_adapter;
 pub mod task_queue;
+pub mod thumbnail_writer;
 
 pub(crate) use persisted_paths::{
     resolve_library_item_path, resolve_optional_library_item_path, resolve_rooted_path,

@@ -1,4 +1,4 @@
-use std::future::Future;
+use async_trait::async_trait;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BookMetadataAuthor {
@@ -56,34 +56,29 @@ pub struct BookMetadataPatch {
     pub links_lock: Option<bool>,
 }
 
-pub trait BookMetadataPort {
-    fn load_book_metadata(
-        &self,
-        book_id: &str,
-    ) -> impl Future<Output = Result<Option<BookMetadata>, String>>;
-
-    fn load_book_series_id(
-        &self,
-        book_id: &str,
-    ) -> impl Future<Output = Result<Option<String>, String>>;
-
-    fn persist_book_metadata(
+#[async_trait]
+pub trait BookMetadataPort: Send + Sync {
+    async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String>;
+    async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String>;
+    async fn load_book_library_id(&self, book_id: &str) -> Result<Option<String>, String>;
+    async fn persist_book_metadata(
         &self,
         book_id: &str,
         metadata: &BookMetadata,
-    ) -> impl Future<Output = Result<bool, String>>;
+    ) -> Result<bool, String>;
 }
 
-pub struct BookMetadataService<P> {
-    port: P,
+pub struct BookMetadataService {
+    port: Box<dyn BookMetadataPort>,
 }
 
-impl<P> BookMetadataService<P>
-where
-    P: BookMetadataPort,
-{
-    pub fn new(port: P) -> Self {
+impl BookMetadataService {
+    pub fn new(port: Box<dyn BookMetadataPort>) -> Self {
         Self { port }
+    }
+
+    pub fn port(&self) -> &dyn BookMetadataPort {
+        self.port.as_ref()
     }
 
     pub async fn update_book_metadata(

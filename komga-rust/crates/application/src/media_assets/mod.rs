@@ -1,6 +1,7 @@
 mod contracts;
 mod file_import;
 mod metadata_update;
+pub mod metadata_writer;
 mod page_hash_models;
 mod page_retrieval;
 mod read_progress;
@@ -20,6 +21,7 @@ pub use metadata_update::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataPort,
     BookMetadataService,
 };
+pub use metadata_writer::{MetadataUpdateResult, MetadataWriter};
 pub use page_hash_models::{PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashThumbnail};
 pub use page_retrieval::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,

@@ -113,7 +113,8 @@ async fn opds_book_page_streaming_links(
     last_read_date: Option<&str>,
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
-        app.media_assets.as_ref(),
+        &app.reader,
+        &app.content,
         book_id,
         media_type,
         page_count,
@@ -172,7 +173,8 @@ async fn opds_book_page_streaming_links(
 }
 
 async fn opds_book_page_stream_media_types(
-    media_assets: &dyn crate::state::MediaAssetsService,
+    reader: &komga_infrastructure::media_reader::MediaReader,
+    content: &komga_infrastructure::content_resolver::ContentResolver,
     book_id: &str,
     media_type: &str,
     page_count: i64,
@@ -193,18 +195,19 @@ async fn opds_book_page_stream_media_types(
         )
         || (media_type == "application/epub+zip" && epub_divina_compatible)
     {
-        return load_divina_page_media_types_for_opds(media_assets, book_id).await;
+        return load_divina_page_media_types_for_opds(reader, content, book_id).await;
     }
 
     vec![]
 }
 
 async fn load_divina_page_media_types_for_opds(
-    media_assets: &dyn crate::state::MediaAssetsService,
+    reader: &komga_infrastructure::media_reader::MediaReader,
+    content: &komga_infrastructure::content_resolver::ContentResolver,
     book_id: &str,
 ) -> Vec<String> {
-    let persisted = media_assets
-        .load_persisted_book_pages(book_id)
+    let persisted = reader
+        .book_pages(book_id)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -220,7 +223,7 @@ async fn load_divina_page_media_types_for_opds(
         return dedup_media_types(persisted);
     }
 
-    let Ok(Some(media)) = media_assets.load_persisted_book_media(book_id).await else {
+    let Ok(Some(media)) = reader.book_media(book_id).await else {
         return vec![];
     };
 
@@ -230,8 +233,8 @@ async fn load_divina_page_media_types_for_opds(
     }
 
     dedup_media_types(
-        media_assets
-            .load_archive_page_rows(&media)
+        content
+            .archive_page_rows(&media)
             .await
             .unwrap_or_default()
             .into_iter()

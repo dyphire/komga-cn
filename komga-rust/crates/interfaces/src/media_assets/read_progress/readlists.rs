@@ -10,11 +10,7 @@ async fn load_tachiyomi_readlist_book_ids(
 ) -> Result<Option<Vec<String>>, String> {
     let visible_books = visible_readlist_books_for_user(app, readlist_id, user).await?;
     if visible_books.is_empty() {
-        let readlist_exists = app
-            .media_assets
-            .load_persisted_readlist_name(readlist_id)
-            .await?
-            .is_some();
+        let readlist_exists = app.reader.readlist_name(readlist_id).await?.is_some();
         return Ok(
             (readlist_exists && (user_shared_all_libraries(user) || user_is_admin(user)))
                 .then_some(Vec::new()),
@@ -40,7 +36,7 @@ pub async fn readlist_tachiyomi_read_progress_get(
     };
 
     let counters = match app
-        .media_assets
+        .reader
         .readlist_tachiyomi_counters(&ordered_book_ids, user_id(&user))
         .await
     {
@@ -97,7 +93,7 @@ pub async fn readlist_tachiyomi_read_progress_put(
     }
 
     match app
-        .media_assets
+        .progress
         .persist_readlist_tachiyomi_progress(
             &ordered_book_ids,
             user_id(&user),

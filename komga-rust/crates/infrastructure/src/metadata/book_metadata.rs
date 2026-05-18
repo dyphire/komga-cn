@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use komga_application::media_assets::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPort,
 };
@@ -18,6 +19,7 @@ impl SqliteBookMetadataPort {
     }
 }
 
+#[async_trait]
 impl BookMetadataPort for SqliteBookMetadataPort {
     async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
         load_book_metadata(&self.read_pool, book_id).await
@@ -25,6 +27,10 @@ impl BookMetadataPort for SqliteBookMetadataPort {
 
     async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String> {
         load_book_series_id(&self.read_pool, book_id).await
+    }
+
+    async fn load_book_library_id(&self, book_id: &str) -> Result<Option<String>, String> {
+        load_book_library_id(&self.read_pool, book_id).await
     }
 
     async fn persist_book_metadata(
@@ -128,6 +134,16 @@ async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<
         .map_err(|error| format!("query book series id: {error}"))?;
 
     Ok(row.map(|row| row.get::<String, _>("SERIES_ID")))
+}
+
+async fn load_book_library_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
+    let row = sqlx::query("SELECT LIBRARY_ID FROM BOOK WHERE ID = ? LIMIT 1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| format!("query book library id: {error}"))?;
+
+    Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
 
 async fn persist_book_metadata(

@@ -796,16 +796,14 @@ pub async fn kobo_library_book_state_update(
             },
         });
 
-        match normalize_book_epub_locator(app.media_assets.as_ref(), &book_id, &request_locator)
-            .await
-        {
+        match normalize_book_epub_locator(&app.reader, &book_id, &request_locator).await {
             Ok(locator) => locator,
             Err(_) => return kobo_state_update_failure(book_id.as_str()),
         }
     };
 
     let stale_progression = match progression_is_older_than_existing(
-        app.media_assets.as_ref(),
+        &app.reader,
         &book_id,
         user_id_value,
         progress_last_modified.as_str(),
@@ -839,15 +837,15 @@ pub async fn kobo_library_book_state_update(
         });
 
     let persist_result = app
-        .media_assets
+        .progress
         .persist_book_progression(
             &book_id,
             user_id_value,
             locator_progression,
             false,
-            Some(progress_last_modified.as_str()),
-            Some(device_id.as_str()),
-            Some(device_name.as_str()),
+            Some(progress_last_modified.clone()),
+            Some(device_id.to_string()),
+            Some(device_name.to_string()),
             Some(locator),
         )
         .await;
@@ -910,14 +908,13 @@ pub async fn kobo_book_file_epub(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let media = match app.media_assets.load_persisted_book_media(&book_id).await {
+    let media = match app.reader.book_media(&book_id).await {
         Ok(Some(media)) => media,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    if !user_can_access_book_media(app.media_assets.as_ref(), &book_id, &current_user, &media).await
-    {
+    if !user_can_access_book_media(&app.reader, &book_id, &current_user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -938,11 +935,7 @@ pub async fn kobo_book_file_epub(
                 .into_response();
         }
     } else {
-        match app
-            .media_assets
-            .read_media_file_bytes(&media.file_path)
-            .await
-        {
+        match app.content.read_media_file_bytes(&media.file_path).await {
             Some(body) => body,
             None => {
                 return (

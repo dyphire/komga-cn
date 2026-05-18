@@ -23,8 +23,10 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
-use crate::state::{DiscoveryDetailService, MediaAssetsService, ServerSettingsService};
+use crate::state::{DiscoveryDetailService, ServerSettingsService};
 use komga_application::media_assets::{BookMediaRecord, BookPageRecord};
+use komga_infrastructure::content_resolver::ContentResolver;
+use komga_infrastructure::media_reader::MediaReader;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BookPageResponseOptions {
@@ -44,16 +46,17 @@ impl Default for BookPageResponseOptions {
 }
 
 pub(crate) async fn book_file_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if let Ok(Some(media)) = media_assets.load_persisted_book_media(book_id).await {
-        if !user_can_access_book_media(media_assets, book_id, user, &media).await {
+    if let Ok(Some(media)) = reader.book_media(book_id).await {
+        if !user_can_access_book_media(reader, book_id, user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        let Some(body) = media_assets.read_media_file_bytes(&media.file_path).await else {
+        let Some(body) = content.read_media_file_bytes(&media.file_path).await else {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": "File not found, it may have moved" })),
@@ -77,8 +80,10 @@ pub(crate) async fn book_file_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn book_page_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     discovery_detail: &dyn DiscoveryDetailService,
     user: &AuthUser,
     headers: &HeaderMap,
@@ -107,10 +112,7 @@ pub(crate) async fn book_page_response(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    if let Ok(Some(media)) = media_assets
-        .load_persisted_book_media(&resolved_book_id)
-        .await
-    {
+    if let Ok(Some(media)) = reader.book_media(&resolved_book_id).await {
         let last_modified = file_last_modified_header_value(media.file_path.as_path());
         if let Some(last_modified) = last_modified.as_deref()
             && if_modified_since_matches(headers, last_modified)
@@ -119,8 +121,8 @@ pub(crate) async fn book_page_response(
         }
 
         let book_display_name = media.file_name.clone();
-        if !media_assets
-            .book_media_is_ready_status(&resolved_book_id)
+        if !reader
+            .book_media_is_ready(&resolved_book_id)
             .await
             .unwrap_or(false)
         {
@@ -134,7 +136,7 @@ pub(crate) async fn book_page_response(
         if !user_is_admin(user) && !user_has_role(user, "PAGE_STREAMING") {
             return StatusCode::FORBIDDEN.into_response();
         }
-        if !user_can_access_book_media(media_assets, &resolved_book_id, user, &media).await {
+        if !user_can_access_book_media(reader, &resolved_book_id, user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
         if !book_media_supports_page_api(&media) {
@@ -145,14 +147,14 @@ pub(crate) async fn book_page_response(
             && options.content_negotiation
             && accept_header_prefers_pdf(headers)
         {
-            let page_count = media_assets
+            let page_count = content
                 .detect_pdf_page_count(&media)
                 .unwrap_or(media.page_count);
             if requested_page_number as u64 > page_count {
                 return page_number_does_not_exist_response();
             }
             if let Some(bytes) =
-                media_assets.read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
+                content.read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
             {
                 let last_modified = file_last_modified_header_value(media.file_path.as_path());
                 if let Some(last_modified) = last_modified.as_deref()
@@ -174,7 +176,8 @@ pub(crate) async fn book_page_response(
         }
 
         let page_row = match load_page_row(
-            media_assets,
+            reader,
+            content,
             &resolved_book_id,
             &media,
             requested_page_number as u64,
@@ -187,8 +190,8 @@ pub(crate) async fn book_page_response(
             Err(error) => return internal_error_response(error),
         };
 
-        if let Some(bytes) = media_assets
-            .resolve_book_page_bytes(&media, &page_row, requested_page_number as u64)
+        if let Some(bytes) = content
+            .resolve_page_bytes(&media, &page_row, requested_page_number as u64)
             .await
         {
             let mut effective_bytes = bytes;
@@ -234,7 +237,8 @@ pub(crate) async fn book_page_response(
 }
 
 pub(crate) async fn book_page_raw_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     discovery_detail: &dyn DiscoveryDetailService,
     user: &AuthUser,
     headers: &HeaderMap,
@@ -247,10 +251,7 @@ pub(crate) async fn book_page_raw_response(
     let page_number = page_number_signed as u32;
     let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
 
-    if let Ok(Some(media)) = media_assets
-        .load_persisted_book_media(&resolved_book_id)
-        .await
-    {
+    if let Ok(Some(media)) = reader.book_media(&resolved_book_id).await {
         if !user_has_role(user, "PAGE_STREAMING") {
             return StatusCode::FORBIDDEN.into_response();
         }
@@ -263,7 +264,7 @@ pub(crate) async fn book_page_raw_response(
         }
 
         let book_display_name = media.file_name.clone();
-        if !user_can_access_book_media(media_assets, &resolved_book_id, user, &media).await {
+        if !user_can_access_book_media(reader, &resolved_book_id, user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
         if !book_media_is_pdf(&media) {
@@ -272,8 +273,8 @@ pub(crate) async fn book_page_raw_response(
                 "Extractor does not support raw extraction of pages",
             );
         }
-        if !media_assets
-            .book_media_is_ready_status(&resolved_book_id)
+        if !reader
+            .book_media_is_ready(&resolved_book_id)
             .await
             .unwrap_or(false)
         {
@@ -283,16 +284,14 @@ pub(crate) async fn book_page_raw_response(
             return json_error_response(StatusCode::NOT_FOUND, "File not found, it may have moved");
         }
 
-        let page_count = media_assets
+        let page_count = content
             .detect_pdf_page_count(&media)
             .unwrap_or(media.page_count);
         if page_number == 0 || page_number as u64 > page_count {
             return page_number_does_not_exist_response();
         }
 
-        if let Some(bytes) =
-            media_assets.read_pdf_page_as_single_page_pdf(&media, page_number as u64)
-        {
+        if let Some(bytes) = content.read_pdf_page_as_single_page_pdf(&media, page_number as u64) {
             return asset_ok_with_inline_disposition(
                 &book_display_name,
                 page_number,
@@ -308,17 +307,20 @@ pub(crate) async fn book_page_raw_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     headers: &HeaderMap,
     book_id: &str,
     user: &AuthUser,
 ) -> Response {
-    if let Ok(Some(media)) = media_assets.load_persisted_book_media(book_id).await {
-        if !user_can_access_book_media(media_assets, book_id, user, &media).await {
+    if let Ok(Some(media)) = reader.book_media(book_id).await {
+        if !user_can_access_book_media(reader, book_id, user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        if let Some(bytes) = load_book_thumbnail_source_bytes(media_assets, book_id, &media).await {
+        if let Some(bytes) =
+            load_book_thumbnail_source_bytes(reader, content, book_id, &media).await
+        {
             return response_from_thumbnail_jpeg_bytes(headers, bytes);
         }
 
@@ -329,7 +331,7 @@ pub(crate) async fn book_thumbnail_opds_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_small_default_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
     server_settings: &dyn ServerSettingsService,
     headers: &HeaderMap,
     book_id: &str,
@@ -341,7 +343,7 @@ pub(crate) async fn book_thumbnail_opds_small_default_response(
     };
 
     book_thumbnail_opds_small_response(
-        media_assets,
+        reader,
         headers,
         book_id,
         thumbnail_max_edge_from_setting(settings.thumbnail_size),
@@ -351,18 +353,18 @@ pub(crate) async fn book_thumbnail_opds_small_default_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_small_response(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
     headers: &HeaderMap,
     book_id: &str,
     max_edge: u32,
     user: &AuthUser,
 ) -> Response {
-    if let Ok(Some(media)) = media_assets.load_persisted_book_media(book_id).await {
-        if !user_can_access_book_media(media_assets, book_id, user, &media).await {
+    if let Ok(Some(media)) = reader.book_media(book_id).await {
+        if !user_can_access_book_media(reader, book_id, user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        match media_assets.load_selected_book_thumbnail(book_id).await {
+        match reader.selected_book_thumbnail(book_id).await {
             Ok(Some(thumbnail)) => {
                 if thumbnail.thumbnail_type == "GENERATED" {
                     return response_from_thumbnail_bytes(
@@ -421,48 +423,44 @@ async fn resolve_book_id_for_persisted(
 }
 
 async fn load_book_thumbnail_source_bytes(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     book_id: &str,
     media: &BookMediaRecord,
 ) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = media_assets.load_selected_book_thumbnail(book_id).await
+    if let Ok(Some(thumbnail)) = reader.selected_book_thumbnail(book_id).await
         && thumbnail.thumbnail_type != "GENERATED"
     {
         return Some(thumbnail.thumbnail);
     }
 
     if book_media_is_epub(media) {
-        return media_assets
-            .load_epub_cover_bytes(media)
+        return content
+            .epub_cover_bytes(media)
             .await
             .map(|(bytes, _)| bytes);
     }
 
     if book_media_is_pdf(media) {
-        let page_row = media_assets
-            .load_persisted_book_page_row(book_id, 1)
+        let page_row = reader
+            .book_page(book_id, 1)
             .await
             .ok()
             .flatten()
-            .or_else(|| media_assets.load_pdf_page_row(media, 1))?;
-        return media_assets
-            .render_book_page_thumbnail(media, &page_row, 1, 300)
+            .or_else(|| content.pdf_page_row(media, 1))?;
+        return content
+            .render_page_thumbnail(media, &page_row, 1, 300)
             .await;
     }
 
     if book_media_is_single_image(media) {
-        return media_assets.read_media_file_bytes(&media.file_path).await;
+        return content.read_media_file_bytes(&media.file_path).await;
     }
 
-    let page_row = if let Some(page_row) = media_assets
-        .load_persisted_book_page_row(book_id, 1)
-        .await
-        .ok()
-        .flatten()
-    {
+    let page_row = if let Some(page_row) = reader.book_page(book_id, 1).await.ok().flatten() {
         page_row
     } else {
-        media_assets.load_archive_page_row(media, 1).await?
+        content.archive_page_row(media, 1).await?
     };
     let media_type = if page_row.media_type.is_empty() {
         content_type_from_filename(&page_row.file_name, &media.media_type)
@@ -473,17 +471,15 @@ async fn load_book_thumbnail_source_bytes(
         return None;
     }
 
-    media_assets
-        .resolve_book_page_bytes(media, &page_row, 1)
-        .await
+    content.resolve_page_bytes(media, &page_row, 1).await
 }
 
 async fn single_image_page_row(
-    media_assets: &dyn MediaAssetsService,
+    content: &ContentResolver,
     media: &BookMediaRecord,
     page_number: u64,
 ) -> BookPageRecord {
-    let (width, height) = read_media_image_dimensions(media_assets, media.file_path.as_path())
+    let (width, height) = read_media_image_dimensions(content, media.file_path.as_path())
         .await
         .map(|(width, height)| (Some(width), Some(height)))
         .unwrap_or((None, None));
@@ -493,7 +489,7 @@ async fn single_image_page_row(
         media_type: content_type_from_filename(&media.file_name, &media.media_type),
         width,
         height,
-        file_size: media_assets
+        file_size: content
             .read_media_file_size(&media.file_path)
             .await
             .unwrap_or(0),
@@ -501,26 +497,24 @@ async fn single_image_page_row(
 }
 
 async fn load_page_row(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     book_id: &str,
     media: &BookMediaRecord,
     page_number: u64,
     allow_pdf_fallback: bool,
 ) -> Result<Option<BookPageRecord>, String> {
-    match media_assets
-        .load_persisted_book_page_row(book_id, page_number)
-        .await
-    {
+    match reader.book_page(book_id, page_number).await {
         Ok(Some(row)) => Ok(Some(row)),
         Ok(None) if book_media_is_single_image(media) && page_number == 1 => Ok(Some(
-            single_image_page_row(media_assets, media, page_number).await,
+            single_image_page_row(content, media, page_number).await,
         )),
         Ok(None) => {
-            if let Some(row) = media_assets.load_archive_page_row(media, page_number).await {
+            if let Some(row) = content.archive_page_row(media, page_number).await {
                 return Ok(Some(row));
             }
             if allow_pdf_fallback {
-                return Ok(media_assets.load_pdf_page_row(media, page_number));
+                return Ok(content.pdf_page_row(media, page_number));
             }
             Ok(None)
         }
@@ -688,11 +682,8 @@ fn convert_page_image_bytes(
     Some(output.into_inner())
 }
 
-async fn read_media_image_dimensions(
-    media_assets: &dyn MediaAssetsService,
-    path: &Path,
-) -> Option<(i64, i64)> {
-    let bytes = media_assets.read_media_file_bytes(path).await?;
+async fn read_media_image_dimensions(content: &ContentResolver, path: &Path) -> Option<(i64, i64)> {
+    let bytes = content.read_media_file_bytes(path).await?;
     let image = image::load_from_memory(&bytes).ok()?;
     Some((i64::from(image.width()), i64::from(image.height())))
 }

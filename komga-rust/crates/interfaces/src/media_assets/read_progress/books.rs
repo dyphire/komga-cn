@@ -28,14 +28,14 @@ async fn load_accessible_book_media(
     book_id: &str,
     user: &AuthUser,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
+    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
         return Err(StatusCode::NOT_FOUND.into_response());
     };
 
-    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
+    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
@@ -231,13 +231,13 @@ async fn book_progression_response(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
+    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
+    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -272,7 +272,7 @@ async fn book_progression_response(
             return invalid_progression_payload();
         };
         let normalized_locator =
-            match normalize_book_epub_locator(app.media_assets.as_ref(), book_id, locator).await {
+            match normalize_book_epub_locator(&app.reader, book_id, locator).await {
                 Ok(locator) => locator,
                 Err(response) => return response,
             };
@@ -296,17 +296,13 @@ async fn book_progression_response(
         return invalid_progression_payload();
     }
 
-    let stale_progression = match progression_is_older_than_existing(
-        app.media_assets.as_ref(),
-        book_id,
-        user_id(user),
-        modified,
-    )
-    .await
-    {
-        Ok(stale) => stale,
-        Err(error) => return internal_error_response(error),
-    };
+    let stale_progression =
+        match progression_is_older_than_existing(&app.reader, book_id, user_id(user), modified)
+            .await
+        {
+            Ok(stale) => stale,
+            Err(error) => return internal_error_response(error),
+        };
     if stale_progression {
         return (
             StatusCode::CONFLICT,
@@ -316,15 +312,15 @@ async fn book_progression_response(
     }
 
     match app
-        .media_assets
+        .progress
         .persist_book_progression(
             book_id,
             user_id(user),
             progression,
             !is_epub,
-            Some(modified),
-            Some(device_id),
-            Some(device_name),
+            Some(modified.to_owned()),
+            Some(device_id.to_owned()),
+            Some(device_name.to_owned()),
             locator_to_persist,
         )
         .await
@@ -362,13 +358,13 @@ async fn book_progression_get_response(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(media) = (match app.media_assets.load_persisted_book_media(book_id).await {
+    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(app.media_assets.as_ref(), book_id, user, &media).await {
+    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 

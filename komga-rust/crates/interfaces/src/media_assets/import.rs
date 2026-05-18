@@ -9,7 +9,7 @@ use komga_application::task_processing::TaskQueueRecord as ApplicationTaskQueueR
 use tracing::error;
 
 use crate::identity_access::auth::Admin;
-use crate::state::{MediaAssetsState, RuntimeMediaImportService};
+use crate::state::MediaAssetsState;
 
 pub async fn books_import(
     State(app): State<MediaAssetsState>,
@@ -23,24 +23,20 @@ pub async fn books_import(
         }
     };
 
-    let service = app.media_assets.media_import_service();
-    enqueue_books_best_effort(service.as_ref(), payload, &app).await;
+    enqueue_books_best_effort(payload, &app).await;
 
     let mut response = StatusCode::ACCEPTED.into_response();
     mark_runtime_owned(&mut response);
     response
 }
 
-async fn enqueue_books_best_effort(
-    service: &dyn RuntimeMediaImportService,
-    payload: BooksImportPayload,
-    app: &MediaAssetsState,
-) {
+async fn enqueue_books_best_effort(payload: BooksImportPayload, app: &MediaAssetsState) {
     for book in payload.books {
         let source_file = book.source_file.display().to_string();
         let series_id = book.series_id.clone();
         let task_id_suffix = kotlin_import_book_task_id_suffix(&book);
-        match service
+        match app
+            .import
             .enqueue_books(
                 application_import_payload(BooksImportPayload {
                     copy_mode: payload.copy_mode,
@@ -116,49 +112,13 @@ fn interface_task_record(task: ApplicationTaskQueueRecord) -> TaskQueueRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
-
-    use komga_application::task_processing::{TaskKind, TaskRequest};
+    use std::sync::Arc;
 
     use crate::state::{
-        HttpServerRequestsState, IdentityState, MediaAssetsState, OAuth2ClientConfig,
-        OperationalBuildMetadata, OperationalState, RemoteCacheEntry, RuntimeState,
-        SseOperationalState, StartupTimingState, TaskEngine, TaskQueueState, TransientBooksStore,
-        tests::{NoopDiscoveryDetailService, NoopMediaAssetsService},
+        IdentityState, MediaAssetsState, TaskEngine, TaskQueueState,
+        tests::NoopDiscoveryDetailService,
     };
-
-    struct StubImportService;
-
-    impl RuntimeMediaImportService for StubImportService {
-        fn enqueue_books(
-            &self,
-            payload: ApplicationBooksImportPayload,
-            next_task_id: &mut dyn FnMut() -> String,
-        ) -> Result<Vec<ApplicationTaskQueueRecord>, String> {
-            let book = payload
-                .books
-                .into_iter()
-                .next()
-                .expect("test payload should contain one book");
-            Ok(vec![
-                TaskRequest::new(TaskKind::ImportBook)
-                    .priority(100)
-                    .group(book.series_id)
-                    .into_queue_record_with_id(&next_task_id()),
-            ])
-        }
-
-        fn process_queued_book_payload<'a>(
-            &'a self,
-            _task_payload: &'a str,
-            _import_priority: i32,
-        ) -> futures_util::future::BoxFuture<'a, Result<Vec<ApplicationTaskQueueRecord>, String>>
-        {
-            Box::pin(async { panic!("process_queued_book_payload should not be called in tests") })
-        }
-    }
 
     struct TestTaskEngine {
         persisted_ids: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -215,57 +175,43 @@ mod tests {
     }
 
     fn test_media_state(task_queue: Arc<dyn TaskEngine>) -> MediaAssetsState {
-        let operational = OperationalState {
-            runtime: RuntimeState {
-                tasks_db_file: PathBuf::from("/tmp/tasks.db"),
-                lucene_data_directory: PathBuf::from("/tmp/lucene"),
-                fonts_data_directory: PathBuf::from("/tmp/fonts"),
-                log_file: PathBuf::from("/tmp/komga.log"),
-                config_dir: None,
-                bind_address: "127.0.0.1:0".parse().expect("bind address"),
-                configuration_bind_address: "127.0.0.1:0"
-                    .parse()
-                    .expect("configuration bind address"),
-                server_context_path: None,
-                configuration_server_context_path: None,
-            },
-            startup_timing: StartupTimingState::default(),
-            http_server_requests: HttpServerRequestsState::default(),
-            remember_me_runtime_key: "test".to_string(),
-            build_metadata: OperationalBuildMetadata {
-                version: "0.1.0".to_string(),
-                build_time: "2026-04-09T00:00:00Z".to_string(),
-                git_branch: None,
-                git_commit_id: None,
-                git_commit_time: None,
-            },
-            oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
-            oauth2_account_creation: false,
-            oidc_email_verification: false,
-            sse: Arc::new(Mutex::new(SseOperationalState::default())),
-            announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-            releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-            transient_books: Arc::new(Mutex::new(
-                TransientBooksStore::with_records(HashMap::new()),
-            )),
-            shutdown_trigger: None,
-        };
+        use komga_infrastructure::content_resolver::ContentResolver;
+        use komga_infrastructure::filesystem::import::FilesystemImportPort;
+        use komga_infrastructure::media_reader::MediaReader;
+        use komga_infrastructure::progress_writer::ProgressWriter;
+        use komga_infrastructure::thumbnail_writer::ThumbnailWriter;
+
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("test pool");
 
         MediaAssetsState {
             read_progress: crate::state::ReadProgressState::default(),
-            operational,
             identity: IdentityState {
                 service: crate::state::default_test_identity_service(),
             },
-            media_assets: Arc::new(NoopMediaAssetsService),
-            task_queue: TaskQueueState { engine: task_queue },
+            task_queue: TaskQueueState {
+                engine: task_queue.clone(),
+            },
             discovery_detail: Arc::new(NoopDiscoveryDetailService),
+            reader: MediaReader::new(pool.clone()),
+            content: ContentResolver,
+            thumbnails: ThumbnailWriter::new(pool.clone()),
+            progress: ProgressWriter::new(pool.clone()),
+            metadata: Arc::new(komga_application::media_assets::MetadataWriter::new(
+                Box::new(crate::state::tests::NoopBookMetadataPort),
+                Box::new(crate::state::tests::NoopSearchSyncPort),
+                Box::new(
+                    komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter::new(task_queue),
+                ),
+                Box::new(komga_infrastructure::event_emitter_adapter::SseBookEventEmitter),
+            )),
+            import: Arc::new(komga_application::media_assets::MediaImportService::new(
+                FilesystemImportPort::new("/tmp/test.db"),
+            )),
         }
     }
 
     #[tokio::test]
     async fn enqueue_books_best_effort_keeps_later_books_when_earlier_enqueue_fails() {
-        let service = StubImportService;
         let payload = BooksImportPayload {
             copy_mode: ImportCopyMode::Copy,
             books: vec![
@@ -288,7 +234,7 @@ mod tests {
             persisted_ids: persisted_ids.clone(),
         }));
 
-        enqueue_books_best_effort(&service, payload, &media_state).await;
+        enqueue_books_best_effort(payload, &media_state).await;
 
         assert_eq!(
             persisted_ids.lock().await.clone(),

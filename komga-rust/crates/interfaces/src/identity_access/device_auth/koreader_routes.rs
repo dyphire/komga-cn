@@ -261,12 +261,8 @@ async fn koreader_epub_progress_value(
         return None;
     }
 
-    let (_extension_class, blob) = app
-        .media_assets
-        .load_persisted_epub_extension_blob(book_id)
-        .await
-        .ok()??;
-    let positions = app.media_assets.decode_epub_positions(&blob).ok()?;
+    let (_extension_class, blob) = app.reader.epub_extension_blob(book_id).await.ok()??;
+    let positions = app.content.decode_epub_positions_blob(&blob).ok()?;
     let unique_hrefs = dedup_epub_hrefs(&positions);
 
     unique_hrefs
@@ -369,13 +365,9 @@ pub async fn koreader_put_progress(
     let (progression, use_locator_position_for_page, locator) =
         match koreader_media_profile(target.media_type.as_str()) {
             Some(KoreaderMediaProfile::Epub) => {
-                match app
-                    .media_assets
-                    .load_persisted_epub_extension_blob(&target.id)
-                    .await
-                {
+                match app.reader.epub_extension_blob(&target.id).await {
                     Ok(Some((_extension_class, blob))) => {
-                        let Ok(positions) = app.media_assets.decode_epub_positions(&blob) else {
+                        let Ok(positions) = app.content.decode_epub_positions_blob(&blob) else {
                             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                         };
                         let unique_hrefs = dedup_epub_hrefs(&positions);
@@ -461,15 +453,15 @@ pub async fn koreader_put_progress(
 
     let modified = now_sync_marker();
     if app
-        .media_assets
+        .progress
         .persist_book_progression(
             &target.id,
             &user_id_value,
             progression,
             use_locator_position_for_page,
-            Some(modified.as_str()),
-            Some(payload.device_id.as_str()),
-            Some(payload.device.as_str()),
+            Some(modified),
+            Some(payload.device_id.clone()),
+            Some(payload.device.clone()),
             Some(locator),
         )
         .await

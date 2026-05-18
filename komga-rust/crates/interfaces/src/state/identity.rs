@@ -260,7 +260,9 @@ pub struct IdentityAccessState {
     pub(crate) operational: OperationalState,
     pub(crate) identity: IdentityState,
     pub(crate) server_settings: Arc<dyn ServerSettingsService>,
-    pub(crate) media_assets: Arc<dyn MediaAssetsService>,
+    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
+    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
+    pub(crate) progress: komga_infrastructure::progress_writer::ProgressWriter,
 }
 
 impl FromRef<Arc<HttpAppState>> for IdentityState {
@@ -279,7 +281,9 @@ impl FromRef<Arc<HttpAppState>> for IdentityAccessState {
             operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             server_settings: app.services.server_settings.clone(),
-            media_assets: app.services.media_assets.clone(),
+            reader: app.services.media_reader.clone(),
+            content: app.services.content_resolver.clone(),
+            progress: app.services.progress_writer.clone(),
         }
     }
 }

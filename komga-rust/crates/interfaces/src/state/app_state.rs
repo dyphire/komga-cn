@@ -9,7 +9,6 @@ pub struct HttpServices {
     pub runtime_identity: Arc<dyn IdentityService>,
     pub operational_runtime: Arc<dyn OperationalRuntimeService>,
     pub operational_settings: Arc<dyn OperationalSettingsService>,
-    pub media_assets: Arc<dyn MediaAssetsService>,
     pub opds_catalog: Arc<dyn OpdsCatalogService>,
     pub opds_persisted: Arc<dyn OpdsPersistedService>,
     pub discovery_authors: Arc<dyn DiscoveryAuthorService>,
@@ -20,6 +19,16 @@ pub struct HttpServices {
     pub discovery_detail: Arc<dyn DiscoveryDetailService>,
     pub discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub discovery_facets: Arc<dyn DiscoveryFacetService>,
+    pub media_reader: komga_infrastructure::media_reader::MediaReader,
+    pub content_resolver: komga_infrastructure::content_resolver::ContentResolver,
+    pub thumbnail_writer: komga_infrastructure::thumbnail_writer::ThumbnailWriter,
+    pub progress_writer: komga_infrastructure::progress_writer::ProgressWriter,
+    pub metadata_writer: Arc<komga_application::media_assets::MetadataWriter>,
+    pub import_service: Arc<
+        komga_application::media_assets::MediaImportService<
+            komga_infrastructure::filesystem::import::FilesystemImportPort,
+        >,
+    >,
 }
 
 pub struct HttpAppState {

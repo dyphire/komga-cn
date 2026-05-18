@@ -43,7 +43,6 @@ use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 
 mod http_state_discovery;
-mod http_state_media_assets;
 mod http_state_opds;
 mod http_state_operational_access;
 mod http_state_operational_state;
@@ -65,9 +64,6 @@ pub fn compose_http_runtime(
         Arc::from(http_state_runtime_identity::compose_runtime_identity_service(db.clone()));
     let operational_runtime_service: Arc<dyn OperationalRuntimeService> = Arc::new(
         http_state_operational_access::compose_operational_runtime_service(db.clone(), tasks_db),
-    );
-    let media_assets_service: Arc<dyn komga_interfaces::state::MediaAssetsService> = Arc::from(
-        http_state_media_assets::compose_media_assets_service(db.clone()),
     );
     let discovery_detail_service: Arc<dyn DiscoveryDetailService> =
         Arc::from(http_state_discovery::compose_discovery_detail_service(
@@ -147,6 +143,27 @@ pub fn compose_http_runtime(
         session_runtime_key,
         remember_me_runtime_key: remember_me_runtime_key.clone(),
     };
+    let task_engine_arc: Arc<dyn komga_application::task_processing::TaskEngine> =
+        Arc::from(task_engine);
+    let metadata_writer = Arc::new(komga_application::media_assets::MetadataWriter::new(
+        Box::new(metadata::SqliteBookMetadataPort::new(
+            db.read_pool().clone(),
+            db.write_pool().clone(),
+        )),
+        Box::new(
+            komga_infrastructure::search_sync_adapter::SearchSyncAdapter::new(
+                db.write_pool().clone(),
+                config.database_file.clone(),
+                config.lucene_data_directory.clone(),
+            ),
+        ),
+        Box::new(
+            komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter::new(
+                task_engine_arc.clone(),
+            ),
+        ),
+        Box::new(komga_infrastructure::event_emitter_adapter::SseBookEventEmitter),
+    ));
     let services = HttpServices {
         library_catalog: Arc::new(
             http_state_operational_state::SqliteLibraryCatalogService::new(
@@ -154,7 +171,7 @@ pub fn compose_http_runtime(
                 db.write_pool().clone(),
             ),
         ),
-        task_queue: Arc::from(task_engine),
+        task_queue: task_engine_arc,
         server_settings: Arc::new(
             http_state_operational_state::RuntimeServerSettingsService::new(
                 config.database_file.as_path(),
@@ -163,7 +180,6 @@ pub fn compose_http_runtime(
         runtime_identity: runtime_identity_service,
         operational_runtime: operational_runtime_service,
         operational_settings: operational_settings_service,
-        media_assets: media_assets_service,
         opds_catalog: Arc::new(opds_catalog),
         opds_persisted: Arc::new(opds_persisted),
         discovery_authors,
@@ -174,6 +190,20 @@ pub fn compose_http_runtime(
         discovery_detail: discovery_detail_service,
         discovery_browse,
         discovery_facets,
+        media_reader: komga_infrastructure::media_reader::MediaReader::new(db.read_pool().clone()),
+        content_resolver: komga_infrastructure::content_resolver::ContentResolver,
+        thumbnail_writer: komga_infrastructure::thumbnail_writer::ThumbnailWriter::new(
+            db.write_pool().clone(),
+        ),
+        progress_writer: komga_infrastructure::progress_writer::ProgressWriter::new(
+            db.write_pool().clone(),
+        ),
+        metadata_writer,
+        import_service: Arc::new(komga_application::media_assets::MediaImportService::new(
+            komga_infrastructure::filesystem::import::FilesystemImportPort::new(
+                db.database_file().to_path_buf(),
+            ),
+        )),
     };
     let operational = http_state_operational_state::compose_operational_state(
         config,

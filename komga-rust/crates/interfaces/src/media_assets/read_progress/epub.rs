@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::MediaAssetsService;
+use komga_infrastructure::media_reader::MediaReader;
 
 fn decode_epub_extension_positions_and_layout(blob: &[u8]) -> Result<(Vec<Value>, bool), String> {
     let mut decoder = GzDecoder::new(blob);
@@ -179,7 +179,7 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
 }
 
 pub(crate) async fn normalize_book_epub_locator(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
     book_id: &str,
     locator: &Value,
 ) -> Result<Value, Response> {
@@ -197,7 +197,7 @@ pub(crate) async fn normalize_book_epub_locator(
         return Err(progression_bad_request("location.progression is required"));
     };
 
-    let persisted_media_files = match media_assets.load_persisted_book_media_files(book_id).await {
+    let persisted_media_files = match reader.book_media_files(book_id).await {
         Ok(files) => files,
         Err(error) => return Err(internal_error_response(error)),
     };
@@ -212,10 +212,7 @@ pub(crate) async fn normalize_book_epub_locator(
         )));
     }
 
-    let extension = match media_assets
-        .load_persisted_epub_extension_blob(book_id)
-        .await
-    {
+    let extension = match reader.epub_extension_blob(book_id).await {
         Ok(extension) => extension,
         Err(error) => return Err(internal_error_response(error)),
     };
@@ -250,7 +247,7 @@ pub(crate) async fn normalize_book_epub_locator(
 }
 
 pub(crate) async fn progression_is_older_than_existing(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
     book_id: &str,
     user_id: &str,
     modified: &str,
@@ -258,8 +255,7 @@ pub(crate) async fn progression_is_older_than_existing(
     let Ok(new_modified) = OffsetDateTime::parse(modified, &Rfc3339) else {
         return Ok(false);
     };
-    let Some(existing_progression) = media_assets.load_book_progression(book_id, user_id).await?
-    else {
+    let Some(existing_progression) = reader.book_progression(book_id, user_id).await? else {
         return Ok(false);
     };
     let Some(existing_modified) = existing_progression.get("modified").and_then(Value::as_str)
@@ -278,14 +274,10 @@ pub(super) async fn load_epub_locator_for_page(
     book_id: &str,
     page: u64,
 ) -> Result<Option<Value>, String> {
-    match app
-        .media_assets
-        .load_persisted_epub_extension_blob(book_id)
-        .await
-    {
+    match app.reader.epub_extension_blob(book_id).await {
         Ok(Some((_class, blob))) => Ok(app
-            .media_assets
-            .decode_epub_positions(&blob)
+            .content
+            .decode_epub_positions_blob(&blob)
             .ok()
             .and_then(|positions| positions.get(page.saturating_sub(1) as usize).cloned())),
         Ok(None) => Ok(None),

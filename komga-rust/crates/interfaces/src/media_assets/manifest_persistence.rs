@@ -1,7 +1,9 @@
 use super::*;
-use crate::state::{DiscoveryDetailService, MediaAssetsService};
+use crate::state::DiscoveryDetailService;
 use flate2::read::GzDecoder;
 use komga_application::media_assets::BookPageRecord;
+use komga_infrastructure::content_resolver::ContentResolver;
+use komga_infrastructure::media_reader::{MediaReader, PersistedMediaFileRow};
 use std::io::Read;
 
 const EPUB_PROFILE_URL: &str = "https://readium.org/webpub-manifest/profiles/epub";
@@ -194,14 +196,14 @@ fn decode_epub_extension_payload(blob: &[u8]) -> Result<Value, String> {
         .map_err(|error| format!("parse epub extension blob json: {error}"))
 }
 
-fn epub_link(entry: &PersistedMediaFileRecord, headers: &HeaderMap, book_id: &str) -> Value {
+fn epub_link(entry: &PersistedMediaFileRow, headers: &HeaderMap, book_id: &str) -> Value {
     json!({
         "href": epub_resource_href(headers, book_id, entry.file_name.as_str()),
         "type": entry.media_type,
     })
 }
 
-fn epub_sub_type_matches(entry: &PersistedMediaFileRecord, expected: &str) -> bool {
+fn epub_sub_type_matches(entry: &PersistedMediaFileRow, expected: &str) -> bool {
     entry
         .sub_type
         .as_deref()
@@ -273,7 +275,7 @@ fn persisted_epub_manifest_payload(
     book_id: &str,
     title: &str,
     media_type: &str,
-    media_files: &[PersistedMediaFileRecord],
+    media_files: &[PersistedMediaFileRow],
     extension_blob: Option<&[u8]>,
     metadata_additions: Option<&serde_json::Map<String, Value>>,
     epub_divina_compatible: bool,
@@ -365,8 +367,10 @@ fn persisted_epub_manifest_payload(
     Ok(payload)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_manifest_reading_order(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     headers: &HeaderMap,
     book_id: &str,
     media: &PersistedBookMedia,
@@ -385,7 +389,7 @@ async fn build_manifest_reading_order(
             .collect::<Vec<_>>(),
         (ManifestVariant::Divina, ManifestProfile::Pdf)
         | (ManifestVariant::Divina, ManifestProfile::Divina) => {
-            let persisted_rows = media_assets.load_persisted_book_pages(book_id).await?;
+            let persisted_rows = reader.book_pages(book_id).await?;
             let effective_rows = if !persisted_rows.is_empty() {
                 reading_order_entries(
                     headers,
@@ -393,10 +397,10 @@ async fn build_manifest_reading_order(
                     persisted_rows,
                     (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
                 )
-            } else if let Some(archive_rows) = media_assets.load_archive_page_rows(media).await {
+            } else if let Some(archive_rows) = content.archive_page_rows(media).await {
                 reading_order_entries(headers, book_id, archive_rows, None)
             } else {
-                reading_order_entries(headers, book_id, media_assets.load_generated_pdf_page_rows(media), None)
+                reading_order_entries(headers, book_id, content.generated_pdf_page_rows(media), None)
             };
 
             if effective_rows.is_empty() {
@@ -678,16 +682,15 @@ fn extend_webpub_metadata_with_role_authors(
 }
 
 pub(crate) async fn build_persisted_book_manifest(
-    media_assets: &dyn MediaAssetsService,
+    reader: &MediaReader,
+    content: &ContentResolver,
     discovery_detail: &dyn DiscoveryDetailService,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
-    let Some((library_id, title, media_type)) =
-        media_assets.load_persisted_manifest_book(book_id).await?
-    else {
+    let Some((library_id, title, media_type)) = reader.manifest_book(book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
 
@@ -695,10 +698,10 @@ pub(crate) async fn build_persisted_book_manifest(
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
-    let Some(media) = media_assets.load_persisted_book_media(book_id).await? else {
+    let Some(media) = reader.book_media(book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
-    if !user_can_access_book_media(media_assets, book_id, user, &media).await {
+    if !user_can_access_book_media(reader, book_id, user, &media).await {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
@@ -727,12 +730,8 @@ pub(crate) async fn build_persisted_book_manifest(
         (effective_variant, profile),
         (ManifestVariant::Epub, ManifestProfile::Epub)
     ) {
-        let media_files = media_assets
-            .load_persisted_media_file_records(book_id)
-            .await?;
-        let extension_blob = media_assets
-            .load_persisted_epub_extension_blob(book_id)
-            .await?;
+        let media_files = reader.media_file_records(book_id).await?;
+        let extension_blob = reader.epub_extension_blob(book_id).await?;
         let payload = persisted_epub_manifest_payload(
             headers,
             book_id,
@@ -750,7 +749,8 @@ pub(crate) async fn build_persisted_book_manifest(
     }
 
     let reading_order = build_manifest_reading_order(
-        media_assets,
+        reader,
+        content,
         headers,
         book_id,
         &media,
