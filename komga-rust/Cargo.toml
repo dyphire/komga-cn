@@ -19,7 +19,7 @@ axum = "0.8.6"
 axum-extra = { version = "0.12.5", features = ["cookie", "multipart"] }
 base64 = "0.22.1"
 bcrypt = "0.19.1"
-config = "0.15.19"
+config = "0.15.23"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
