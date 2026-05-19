@@ -3,37 +3,14 @@ use std::path::PathBuf;
 use komga_application::task_processing::{
     OpaqueTask, PersistedTaskRowShape, TaskKind, TaskQueueRecord,
 };
-use serde_json::{Map, Value, json};
 use sqlx::Row;
 use sqlx::SqlitePool;
 
+use super::task_identity::{
+    PersistedTaskStoreRecord, fallback_task_payload, persisted_payload_for_known_task,
+    runtime_task_class_name,
+};
 use crate::sqlite::{connect_shared_pool, default_read_max_connections};
-
-pub(super) fn task_target_from_id<'a>(id: &'a str, simple_type: &str) -> Option<&'a str> {
-    id.strip_prefix(simple_type).and_then(|suffix| {
-        suffix
-            .strip_prefix(':')
-            .or_else(|| suffix.strip_prefix('_'))
-    })
-}
-
-pub(super) fn task_target(task: &TaskQueueRecord) -> Option<&str> {
-    task_target_from_id(&task.id, &task.simple_type)
-}
-
-pub(super) fn persisted_task_target(task: &PersistedTaskStoreRecord) -> Option<&str> {
-    task_target_from_id(&task.id, &task.simple_type)
-}
-
-#[derive(Clone, Debug)]
-pub struct PersistedTaskStoreRecord {
-    pub id: String,
-    pub simple_type: String,
-    pub priority: i32,
-    pub group: Option<String>,
-    pub payload: Option<String>,
-    pub owner: Option<String>,
-}
 
 #[derive(Clone, Debug)]
 pub struct SqliteTaskQueueStore {
@@ -228,117 +205,9 @@ fn known_persisted_row(kind: TaskKind, task: &PersistedTaskStoreRecord) -> Persi
         group: task.group.clone(),
         class_name: def.persisted_class_name.to_string(),
         simple_type: def.simple_type.to_string(),
-        payload: persisted_compatibility_payload(kind, task),
+        payload: persisted_payload_for_known_task(kind, task),
         owner: task.owner.clone(),
     }
-}
-
-fn runtime_task_class_name(simple_type: &str) -> String {
-    format!(
-        "org.gotson.komga.task.{}.RuntimeTask",
-        simple_type.to_ascii_lowercase()
-    )
-}
-
-fn fallback_task_payload(task: &PersistedTaskStoreRecord) -> String {
-    json!({
-        "id": task.id,
-        "simpleType": task.simple_type,
-        "priority": task.priority,
-        "groupId": task.group,
-    })
-    .to_string()
-}
-
-pub(super) fn optional_string_value(value: Option<&str>) -> Value {
-    value
-        .map(|value| Value::String(value.to_string()))
-        .unwrap_or(Value::Null)
-}
-
-pub(super) fn task_group_value(task: &PersistedTaskStoreRecord) -> Value {
-    task.group.clone().map(Value::String).unwrap_or(Value::Null)
-}
-
-pub(super) fn task_payload(
-    task: &PersistedTaskStoreRecord,
-    fields: impl IntoIterator<Item = (&'static str, Value)>,
-) -> String {
-    let mut payload = Map::new();
-    for (key, value) in fields {
-        payload.insert(key.to_string(), value);
-    }
-    payload.insert("priority".to_string(), Value::from(task.priority));
-    payload.insert("groupId".to_string(), task_group_value(task));
-    payload.insert("uniqueId".to_string(), Value::String(task.id.clone()));
-    Value::Object(payload).to_string()
-}
-
-pub(super) fn payload_contains_key(task: &PersistedTaskStoreRecord, key: &str) -> bool {
-    payload_json(task)
-        .as_ref()
-        .and_then(Value::as_object)
-        .is_some_and(|payload| payload.contains_key(key))
-}
-
-pub(super) fn payload_json(task: &PersistedTaskStoreRecord) -> Option<Value> {
-    task.payload
-        .as_deref()
-        .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
-}
-
-pub(super) fn legacy_bool_payload_value(
-    task: &PersistedTaskStoreRecord,
-    primary_key: &str,
-    fallback_key: &str,
-) -> bool {
-    payload_json(task)
-        .as_ref()
-        .and_then(|payload| {
-            payload
-                .get(primary_key)
-                .or_else(|| payload.get(fallback_key))
-        })
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-pub(super) fn scan_library_target(task: &PersistedTaskStoreRecord) -> Option<String> {
-    payload_json(task)
-        .as_ref()
-        .and_then(|payload| payload.get("libraryId"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            persisted_task_target(task).map(|target| {
-                target
-                    .split_once("_DEEP_")
-                    .map(|(library_id, _)| library_id)
-                    .unwrap_or(target)
-                    .to_string()
-            })
-        })
-}
-
-pub(super) fn scan_library_deep(task: &PersistedTaskStoreRecord) -> bool {
-    payload_json(task)
-        .as_ref()
-        .and_then(|payload| payload.get("scanDeep").or_else(|| payload.get("deep")))
-        .and_then(Value::as_bool)
-        .or_else(|| {
-            task.id
-                .rsplit_once("_DEEP_")
-                .and_then(|(_, deep_scan)| deep_scan.parse::<bool>().ok())
-        })
-        .unwrap_or(false)
-}
-
-fn persisted_compatibility_payload(kind: TaskKind, task: &PersistedTaskStoreRecord) -> String {
-    let compatibility_payload = super::task_handlers::compatibility_payload(kind, task);
-
-    compatibility_payload
-        .or_else(|| task.payload.clone())
-        .unwrap_or_else(|| fallback_task_payload(task))
 }
 
 #[cfg(test)]

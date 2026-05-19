@@ -10,12 +10,13 @@ use crate::search::runtime_tasks::{
 use komga_application::task_processing::{TaskProcessingError, TaskQueueOrchestrator};
 
 mod runtime_context;
-use queue_core::{PersistedTaskStoreRecord, SqliteTaskQueueStore};
+use queue_core::SqliteTaskQueueStore;
 pub use runtime_context::{
     DatabaseRuntime, FilesystemRuntime, JobRuntime, SearchRuntime, TaskRuntimeConfig,
     TaskRuntimeContext, TaskRuntimeOwnershipOverrides, WorkerRuntime,
 };
 use sha2::{Digest, Sha256};
+use task_identity::PersistedTaskStoreRecord;
 use zip::ZipArchive;
 
 mod cleanup_tasks;
@@ -35,6 +36,7 @@ mod scanner_jobs;
 mod scanner_support;
 mod task_executor;
 pub mod task_handlers;
+mod task_identity;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod worker_runtime;
