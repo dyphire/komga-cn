@@ -15,9 +15,8 @@ use super::artwork_support::{
     MarkSelectedPreference, book_thumbnail_housekeeping, import_book_local_artwork_thumbnail,
     import_series_local_artwork_thumbnail, load_book_local_artwork_urls,
     load_series_local_artwork_urls, render_generated_thumbnail_from_image_bytes,
-    render_pdf_thumbnail,
+    render_pdf_thumbnail, thumbnail_max_edge_from_setting,
 };
-use super::thumbnail_max_edge_from_setting;
 
 pub async fn refresh_book_local_artwork(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
     let book_id = book_id.to_string();

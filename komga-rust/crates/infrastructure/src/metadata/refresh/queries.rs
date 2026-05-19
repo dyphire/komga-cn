@@ -1,0 +1,262 @@
+use komga_application::media_assets::{
+    BookMediaRecord, BookMetadata, BookMetadataAuthor, BookMetadataLink, BookPageRecord,
+};
+use sqlx::{Row, SqlitePool};
+
+use crate::resolve_library_item_path;
+
+pub(super) async fn load_book_media_for_refresh(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> Result<Option<BookMediaRecord>, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL,
+               l.ROOT AS LIBRARY_ROOT,
+               COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+               COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
+        FROM BOOK b
+        JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+        LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+        WHERE b.ID = ?
+        "#,
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query persisted book media for refresh: {error}"))?;
+
+    Ok(row.map(|row| BookMediaRecord {
+        library_id: row.get::<String, _>("LIBRARY_ID"),
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
+        file_path: resolve_library_item_path(
+            row.get::<String, _>("LIBRARY_ROOT").as_str(),
+            row.get::<String, _>("BOOK_URL").as_str(),
+        ),
+        file_name: row.get::<String, _>("FILE_NAME"),
+        page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
+    }))
+}
+
+pub(super) async fn load_book_page_row_for_refresh(
+    pool: &SqlitePool,
+    book_id: &str,
+    page_number: u64,
+) -> Result<Option<BookPageRecord>, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
+               CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
+        FROM MEDIA_PAGE
+        WHERE BOOK_ID = ? AND NUMBER = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(book_id)
+    .bind(page_number as i64)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query single persisted book page for refresh: {error}"))?;
+
+    Ok(row.map(|row| BookPageRecord {
+        number: row.get::<i64, _>("NUMBER") as u64,
+        file_name: row.get::<String, _>("FILE_NAME"),
+        media_type: row.get::<String, _>("MEDIA_TYPE"),
+        width: row.get::<Option<i64>, _>("WIDTH"),
+        height: row.get::<Option<i64>, _>("HEIGHT"),
+        file_size: row.get::<i64, _>("FILE_SIZE"),
+    }))
+}
+
+pub(super) async fn load_book_metadata_for_refresh(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> Result<Option<BookMetadata>, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
+               NUMBER_SORT_LOCK, RELEASE_DATE, RELEASE_DATE_LOCK, AUTHORS_LOCK, TAGS_LOCK, ISBN,
+               ISBN_LOCK, LINKS_LOCK
+        FROM BOOK_METADATA
+        WHERE BOOK_ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query existing book metadata for refresh: {error}"))?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let author_rows = sqlx::query(
+        "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY ROLE ASC, NAME ASC",
+    )
+    .bind(book_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("query existing book metadata authors for refresh: {error}"))?;
+
+    let tag_rows = sqlx::query(
+        "SELECT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
+    )
+    .bind(book_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("query existing book metadata tags for refresh: {error}"))?;
+
+    let link_rows = sqlx::query(
+        "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
+    )
+    .bind(book_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("query existing book metadata links for refresh: {error}"))?;
+
+    Ok(Some(BookMetadata {
+        title: row.get::<String, _>("TITLE"),
+        title_lock: row.get::<i64, _>("TITLE_LOCK") != 0,
+        summary: row.get::<String, _>("SUMMARY"),
+        summary_lock: row.get::<i64, _>("SUMMARY_LOCK") != 0,
+        number: row.get::<String, _>("NUMBER"),
+        number_lock: row.get::<i64, _>("NUMBER_LOCK") != 0,
+        number_sort: row.get::<f64, _>("NUMBER_SORT"),
+        number_sort_lock: row.get::<i64, _>("NUMBER_SORT_LOCK") != 0,
+        release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
+        release_date_lock: row.get::<i64, _>("RELEASE_DATE_LOCK") != 0,
+        authors: author_rows
+            .into_iter()
+            .map(|entry| BookMetadataAuthor {
+                name: entry.get::<String, _>("NAME"),
+                role: entry.get::<String, _>("ROLE"),
+            })
+            .collect(),
+        authors_lock: row.get::<i64, _>("AUTHORS_LOCK") != 0,
+        tags: tag_rows
+            .into_iter()
+            .map(|entry| entry.get::<String, _>("TAG"))
+            .collect(),
+        tags_lock: row.get::<i64, _>("TAGS_LOCK") != 0,
+        isbn: row.get::<String, _>("ISBN"),
+        isbn_lock: row.get::<i64, _>("ISBN_LOCK") != 0,
+        links: link_rows
+            .into_iter()
+            .map(|entry| BookMetadataLink {
+                label: entry.get::<String, _>("LABEL"),
+                url: entry.get::<String, _>("URL"),
+            })
+            .collect(),
+        links_lock: row.get::<i64, _>("LINKS_LOCK") != 0,
+    }))
+}
+
+pub(super) async fn persist_book_metadata_for_refresh(
+    pool: &SqlitePool,
+    book_id: &str,
+    metadata: &BookMetadata,
+) -> Result<bool, String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin book metadata refresh tx: {error}"))?;
+
+    let exists = sqlx::query("SELECT 1 AS FOUND FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
+        .bind(book_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| format!("query book metadata existence for refresh: {error}"))?
+        .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .map_err(|error| format!("rollback book metadata refresh tx: {error}"))?;
+        return Ok(false);
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE BOOK_METADATA
+        SET TITLE = ?, TITLE_LOCK = ?, SUMMARY = ?, SUMMARY_LOCK = ?, NUMBER = ?,
+            NUMBER_LOCK = ?, NUMBER_SORT = ?, NUMBER_SORT_LOCK = ?, RELEASE_DATE = ?,
+            RELEASE_DATE_LOCK = ?, AUTHORS_LOCK = ?, TAGS_LOCK = ?, ISBN = ?, ISBN_LOCK = ?,
+            LINKS_LOCK = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+        WHERE BOOK_ID = ?
+        "#,
+    )
+    .bind(&metadata.title)
+    .bind(metadata.title_lock)
+    .bind(&metadata.summary)
+    .bind(metadata.summary_lock)
+    .bind(&metadata.number)
+    .bind(metadata.number_lock)
+    .bind(metadata.number_sort)
+    .bind(metadata.number_sort_lock)
+    .bind(metadata.release_date.as_deref())
+    .bind(metadata.release_date_lock)
+    .bind(metadata.authors_lock)
+    .bind(metadata.tags_lock)
+    .bind(&metadata.isbn)
+    .bind(metadata.isbn_lock)
+    .bind(metadata.links_lock)
+    .bind(book_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("update book metadata for refresh: {error}"))?;
+
+    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("touch book last modified after metadata refresh: {error}"))?;
+
+    sqlx::query("DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?")
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("delete existing book metadata authors for refresh: {error}"))?;
+    for author in &metadata.authors {
+        sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+            .bind(book_id)
+            .bind(&author.name)
+            .bind(&author.role)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("insert refreshed book metadata author: {error}"))?;
+    }
+
+    sqlx::query("DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?")
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("delete existing book metadata tags for refresh: {error}"))?;
+    for tag in &metadata.tags {
+        sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+            .bind(book_id)
+            .bind(tag)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("insert refreshed book metadata tag: {error}"))?;
+    }
+
+    sqlx::query("DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?")
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("delete existing book metadata links for refresh: {error}"))?;
+    for link in &metadata.links {
+        sqlx::query("INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) VALUES (?, ?, ?)")
+            .bind(book_id)
+            .bind(&link.label)
+            .bind(&link.url)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| format!("insert refreshed book metadata link: {error}"))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit book metadata refresh tx: {error}"))?;
+    Ok(true)
+}

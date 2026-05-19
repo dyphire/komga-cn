@@ -106,6 +106,7 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
     Ok((output.into_inner(), "image/jpeg".to_string(), width, height))
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) fn render_pdf_thumbnail(
     media: &BookMediaRecord,
     configured_max_edge: u32,
@@ -530,5 +531,14 @@ fn media_type_from_sidecar_path(path: &Path) -> &'static str {
         Some("gif") => "image/gif",
         Some("avif") => "image/avif",
         _ => "application/octet-stream",
+    }
+}
+
+pub(super) fn thumbnail_max_edge_from_setting(value: Option<&str>) -> u32 {
+    match value.unwrap_or("DEFAULT") {
+        "MEDIUM" => 600,
+        "LARGE" => 900,
+        "XLARGE" => 1200,
+        _ => 300,
     }
 }
