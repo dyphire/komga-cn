@@ -2,8 +2,23 @@ use std::collections::HashSet;
 
 use super::scan_sse::RuntimeSseRecord;
 
+/// Unified output of a complete library scan cycle.
+/// Contains everything the pipeline needs to decide follow-up tasks,
+/// without coupling to task-kind knowledge.
 #[derive(Clone, Debug)]
-pub(super) struct LibraryScanConfig {
+pub(crate) struct LibraryScanResult {
+    pub book_ids: Vec<String>,
+    pub series_rows: Vec<ScannedSeriesRow>,
+    pub sidecars: Vec<ScannedSidecarRow>,
+    pub changed_sidecar_urls: Vec<String>,
+    pub renumbered_book_ids: Vec<String>,
+    pub changed_series_ids: Vec<String>,
+    pub book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
+    pub should_empty_trash: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LibraryScanConfig {
     pub root: String,
     pub scan_cbx: bool,
     pub scan_pdf: bool,
@@ -26,15 +41,15 @@ pub(crate) struct ScannedLibrary {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ExistingScannedBookRow {
-    pub(super) book_id: String,
-    pub(super) series_id: String,
-    pub(super) file_last_modified_unix_seconds: i64,
+pub(crate) struct ExistingScannedBookRow {
+    pub(crate) book_id: String,
+    pub(crate) series_id: String,
+    pub(crate) file_last_modified_unix_seconds: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ExistingScannedSeriesRow {
-    pub(super) file_last_modified_unix_seconds: i64,
+pub(crate) struct ExistingScannedSeriesRow {
+    pub(crate) file_last_modified_unix_seconds: i64,
 }
 
 #[derive(Clone, Debug)]

@@ -11,11 +11,12 @@ use sqlx::{Row, SqlitePool};
 use tokio::time::Instant;
 
 use super::cleanup_tasks::{cleanup_empty_sets_rows, empty_trash_rows};
+use super::enqueue_sidecar_refresh_tasks;
 use super::media_helpers::media_queries::{
     load_books_for_extension_repair, load_books_requiring_analysis,
     load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
 };
-use super::{ExecutedLibraryScan, enqueue_sidecar_refresh_tasks, execute_scan_orchestration};
+use super::scanner_support::{LibraryScanResult, LibraryScanner};
 
 async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScanProfile>, String> {
     let rows = sqlx::query(
@@ -181,16 +182,16 @@ impl SqliteFilesystemLibraryScanPipeline {
     async fn collect_runtime_follow_up_tasks(
         &self,
         library_id: &str,
-        executed_scan: &ExecutedLibraryScan,
+        scan_result: &LibraryScanResult,
     ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
-        collect_follow_up_tasks(&self.task_read_pool, library_id, executed_scan).await
+        collect_follow_up_tasks(&self.task_read_pool, library_id, scan_result).await
     }
 }
 
 async fn collect_follow_up_tasks(
     pool: &SqlitePool,
     library_id: &str,
-    executed_scan: &ExecutedLibraryScan,
+    scan_result: &LibraryScanResult,
 ) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
     const DEFAULT_PRIORITY: i32 = 4;
     const LOW_PRIORITY: i32 = 2;
@@ -203,14 +204,14 @@ async fn collect_follow_up_tasks(
         .map_err(|error| {
             TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
         })?;
-    let analyzable_book_ids = load_books_requiring_analysis(pool, &executed_scan.scan.book_ids)
+    let analyzable_book_ids = load_books_requiring_analysis(pool, &scan_result.book_ids)
         .await
         .map_err(|error| {
             TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
         })?
         .into_iter()
         .collect::<HashSet<_>>();
-    for series in &executed_scan.scan.series_rows {
+    for series in &scan_result.series_rows {
         for book in &series.books {
             if analyzable_book_ids.contains(&book.book_id) {
                 follow_up_tasks.push(
@@ -302,7 +303,7 @@ async fn collect_follow_up_tasks(
         );
     }
 
-    let mut changed_series_ids = executed_scan.changed_series_ids.to_vec();
+    let mut changed_series_ids = scan_result.changed_series_ids.to_vec();
     changed_series_ids.sort();
     changed_series_ids.dedup();
     for series_id in changed_series_ids {
@@ -317,8 +318,7 @@ async fn collect_follow_up_tasks(
         );
     }
 
-    let book_series_ids = executed_scan
-        .scan
+    let book_series_ids = scan_result
         .series_rows
         .iter()
         .flat_map(|series| {
@@ -329,13 +329,13 @@ async fn collect_follow_up_tasks(
         })
         .collect::<HashMap<_, _>>();
     let mut book_metadata_capabilities = BTreeMap::<String, BTreeSet<String>>::new();
-    for refresh in &executed_scan.book_metadata_refreshes {
+    for refresh in &scan_result.book_metadata_refreshes {
         book_metadata_capabilities
             .entry(refresh.book_id.clone())
             .or_default()
             .extend(refresh.capabilities.iter().cloned());
     }
-    for book_id in &executed_scan.renumbered_book_ids {
+    for book_id in &scan_result.renumbered_book_ids {
         book_metadata_capabilities
             .entry(book_id.clone())
             .or_default();
@@ -359,8 +359,9 @@ async fn collect_follow_up_tasks(
 
     enqueue_sidecar_refresh_tasks(
         &mut follow_up_tasks,
-        &executed_scan.scan,
-        &executed_scan.changed_sidecar_urls,
+        &scan_result.series_rows,
+        &scan_result.sidecars,
+        &scan_result.changed_sidecar_urls,
         DEFAULT_PRIORITY,
     );
 
@@ -396,17 +397,16 @@ impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
         request: ScanOneLibrary,
     ) -> Result<ScanOneLibraryResult, TaskProcessingError> {
         let library_id = request.library_id;
-        let executed_scan =
-            execute_scan_orchestration(&self.task_write_pool, &library_id, request.deep_scan)
-                .await?;
+        let scanner = LibraryScanner::new(self.task_write_pool.clone());
+        let scan_result = scanner.execute(&library_id, request.deep_scan).await?;
 
-        if executed_scan.should_empty_trash {
+        if scan_result.should_empty_trash {
             self.empty_trash(&library_id).await?;
         }
         self.cleanup_empty_sets().await?;
 
         let follow_up_tasks = self
-            .collect_runtime_follow_up_tasks(&library_id, &executed_scan)
+            .collect_runtime_follow_up_tasks(&library_id, &scan_result)
             .await?;
 
         Ok(ScanOneLibraryResult::executed(library_id, follow_up_tasks))

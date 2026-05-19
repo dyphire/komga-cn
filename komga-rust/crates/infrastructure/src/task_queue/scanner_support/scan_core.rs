@@ -709,7 +709,7 @@ pub(crate) async fn scan_library(
     )
 }
 
-fn build_scanned_library(
+pub(crate) fn build_scanned_library(
     scan_config: LibraryScanConfig,
     existing_books_by_url: HashMap<String, ExistingScannedBookRow>,
     existing_series_by_url: HashMap<String, ExistingScannedSeriesRow>,

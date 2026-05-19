@@ -4,18 +4,21 @@ use komga_application::task_processing::{
     RefreshBookMetadataPayload, SeriesPayload, TaskKind, TaskQueueRecord, TaskRequest,
 };
 
-use super::scan_models::{ScannedLibrary, ScannedSidecarSource, ScannedSidecarType};
+use super::scan_models::{
+    ScannedSeriesRow, ScannedSidecarRow, ScannedSidecarSource, ScannedSidecarType,
+};
 
 pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
     tasks: &mut Vec<TaskQueueRecord>,
-    scanned: &ScannedLibrary,
+    series_rows: &[ScannedSeriesRow],
+    sidecars: &[ScannedSidecarRow],
     changed_sidecar_urls: &[String],
     priority: i32,
 ) {
     let changed_sidecar_urls = changed_sidecar_urls.iter().cloned().collect::<HashSet<_>>();
     let mut series_by_url = HashMap::new();
     let mut book_by_url = HashMap::new();
-    for series in &scanned.series_rows {
+    for series in series_rows {
         series_by_url.insert(series.series_url.clone(), series.series_id.clone());
         for book in &series.books {
             book_by_url.insert(book.book_url.clone(), book.book_id.clone());
@@ -27,12 +30,12 @@ pub(in crate::task_queue) fn enqueue_sidecar_refresh_tasks(
     let mut seen_books_metadata: HashSet<String> = HashSet::new();
     let mut seen_books_artwork: HashSet<String> = HashSet::new();
     let mut book_series_by_url = HashMap::new();
-    for series in &scanned.series_rows {
+    for series in series_rows {
         for book in &series.books {
             book_series_by_url.insert(book.book_url.clone(), series.series_id.clone());
         }
     }
-    for sidecar in &scanned.sidecars {
+    for sidecar in sidecars {
         if !changed_sidecar_urls.contains(&sidecar.url) {
             continue;
         }
