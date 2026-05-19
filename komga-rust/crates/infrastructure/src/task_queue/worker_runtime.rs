@@ -2,15 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sqlx::SqlitePool;
-
 use super::{TaskRuntimeConfig, TaskRuntimeContext};
 use komga_application::task_processing::{
-    LibraryScanPipeline, LibraryScanProfile, LibraryScanScheduleState, LibraryTaskBatch,
-    ScanSchedulingTrigger, TaskKind, TaskRequest,
+    LibraryScanPipeline, LibraryScanScheduleState, ScanSchedulingTrigger,
+    ScheduledLibraryScanBatch, TaskKind, TaskRequest,
 };
-use serde_json::Value;
-use sqlx::Row;
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
 use tokio::time::interval;
@@ -19,38 +15,6 @@ use tracing::{Instrument, Span, error, info};
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
-
-#[derive(Clone, Debug)]
-struct PersistedLibraryScanProfile {
-    library_id: String,
-    scan_startup: bool,
-    scan_interval: String,
-}
-
-async fn load_persisted_library_scan_profiles(
-    pool: &SqlitePool,
-) -> Result<Vec<PersistedLibraryScanProfile>, String> {
-    let rows = sqlx::query(
-        r#"SELECT
-            ID,
-            SCAN_STARTUP,
-            SCAN_INTERVAL
-        FROM LIBRARY
-        ORDER BY ID ASC"#,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| format!("query scan profiles: {error}"))?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| PersistedLibraryScanProfile {
-            library_id: row.get::<String, _>("ID"),
-            scan_startup: row.get::<bool, _>("SCAN_STARTUP"),
-            scan_interval: row.get::<String, _>("SCAN_INTERVAL"),
-        })
-        .collect::<Vec<_>>())
-}
 
 pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
@@ -273,28 +237,26 @@ async fn process_startup_library_scans_inner(
     )
     .await?;
     if startup_scan_batch.is_empty() {
-        let profiles = load_scan_profiles(
-            runtime.job().database().main_db().read_pool(),
-            "load startup library scan profiles for processing skip boundary",
-        )
-        .await?;
-
         log_runtime_bootstrap(
             STARTUP_LIBRARY_SCAN_PROCESSING_COMPONENT,
             "skipped",
             runtime,
-            RuntimeLifecycleFields::default().with_skip_reason(if profiles.is_empty() {
-                "no_libraries"
-            } else {
-                "no_startup_library_scans"
-            }),
+            RuntimeLifecycleFields::default().with_skip_reason(
+                if startup_scan_batch.configured_library_count == 0 {
+                    "no_libraries"
+                } else {
+                    "no_startup_library_scans"
+                },
+            ),
         );
         return Ok(0);
     }
 
     let task_queue = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     let startup_scan_task_count = startup_scan_batch.len();
-    task_queue.enqueue_batch(startup_scan_batch).await;
+    task_queue
+        .enqueue_batch(startup_scan_batch.into_task_batch())
+        .await;
     task_queue
         .process_available(&runtime.job())
         .await
@@ -854,11 +816,11 @@ async fn run_periodic_library_scan_iteration_inner(
         .map_err(|error| (error, Vec::new()))?;
     let due_tasks = schedule_periodic_library_scan_batch(runtime, last_run_by_library)
         .await
-        .and_then(periodic_library_scan_tasks)
-        .map_err(|error| (error, Vec::new()))?;
+        .map_err(|error| (error, Vec::new()))?
+        .into_scheduled_tasks();
     let due_libraries = due_tasks
         .iter()
-        .map(|(library_id, _)| library_id.clone())
+        .map(|scheduled| scheduled.library_id.clone())
         .collect::<Vec<_>>();
 
     if due_libraries.is_empty() {
@@ -874,12 +836,12 @@ async fn run_periodic_library_scan_iteration_inner(
             .with_enqueued(due_libraries.len()),
     );
 
-    for (library_id, task) in due_tasks {
+    for scheduled in due_tasks {
         {
             let queue = task_queue.lock().await;
-            queue.enqueue(task).await;
+            queue.enqueue(scheduled.task).await;
         }
-        if let Some(next_due) = last_run_by_library.get_mut(&library_id) {
+        if let Some(next_due) = last_run_by_library.get_mut(&scheduled.library_id) {
             *next_due = tokio::time::Instant::now();
         }
     }
@@ -898,46 +860,20 @@ async fn bootstrap_startup_library_scans_inner(
         return Ok(0);
     }
 
-    let profiles = load_scan_profiles(
-        runtime.job().database().main_db().read_pool(),
-        "load startup library scan profiles",
-    )
-    .await?;
-    if profiles.is_empty() {
-        return Ok(0);
-    }
-
     let startup_batch =
         schedule_startup_library_scan_batch(runtime, "schedule startup library scans").await?;
     let enqueued = startup_batch.len();
-    task_queue.enqueue_batch(startup_batch).await;
+    task_queue
+        .enqueue_batch(startup_batch.into_task_batch())
+        .await;
 
     Ok(enqueued)
-}
-
-async fn load_scan_profiles(
-    pool: &SqlitePool,
-    action: &str,
-) -> Result<Vec<LibraryScanProfile>, String> {
-    load_persisted_library_scan_profiles(pool)
-        .await
-        .map_err(|error| format!("{action}: {error}"))
-        .map(|profiles| {
-            profiles
-                .into_iter()
-                .map(|profile| LibraryScanProfile {
-                    library_id: profile.library_id,
-                    scan_startup: profile.scan_startup,
-                    scan_interval: profile.scan_interval,
-                })
-                .collect::<Vec<_>>()
-        })
 }
 
 async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
-) -> Result<LibraryTaskBatch, String> {
+) -> Result<ScheduledLibraryScanBatch, String> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Startup,
@@ -950,7 +886,7 @@ async fn schedule_startup_library_scan_batch(
 async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
-) -> Result<LibraryTaskBatch, String> {
+) -> Result<ScheduledLibraryScanBatch, String> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Tick,
@@ -973,36 +909,6 @@ async fn sync_periodic_library_scan_state(
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
         .map_err(|error| format!("build periodic library scan state: {error}"))
-}
-
-fn periodic_library_scan_tasks(
-    batch: LibraryTaskBatch,
-) -> Result<Vec<(String, TaskQueueRecord)>, String> {
-    batch
-        .records
-        .into_iter()
-        .map(|record| {
-            let library_id = periodic_scan_task_library_id(record.payload.as_deref())?;
-            Ok((library_id, record))
-        })
-        .collect()
-}
-
-fn periodic_scan_task_library_id(payload: Option<&str>) -> Result<String, String> {
-    let Some(payload) = payload else {
-        return Err("periodic library scan task requires serialized payload".to_string());
-    };
-    let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
-        format!("periodic library scan task payload must be valid JSON: {error}")
-    })?;
-
-    payload
-        .get("libraryId")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            "periodic library scan task payload field 'libraryId' must be a string".to_string()
-        })
 }
 
 fn single_value_or_empty(values: &[String]) -> &str {

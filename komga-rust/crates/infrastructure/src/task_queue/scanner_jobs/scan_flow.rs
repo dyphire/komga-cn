@@ -1,7 +1,4 @@
 use super::*;
-use komga_application::task_processing::{
-    LibraryScanPipeline, ScanOneLibrary, ScanOneLibraryResult,
-};
 
 pub(super) async fn try_execute(
     runtime: &JobRuntime<'_>,
@@ -20,60 +17,15 @@ async fn handle_scan_library(
     task: &TaskQueueRecord,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
-    let library_id = task
-        .payload
-        .as_deref()
-        .and_then(parse_scan_library_payload_library_id)
-        .or_else(|| task_target.map(strip_scan_library_deep_suffix));
-    let Some(library_id) = library_id else {
-        return Err(TaskExecutionError::invalid_task(
-            "ScanLibrary task must include a library id",
-        ));
-    };
-    let library_id = library_id.to_string();
-
-    let deep_scan = task
-        .payload
-        .as_deref()
-        .and_then(parse_scan_library_payload_deep)
-        .or_else(|| task_target.and_then(parse_scan_library_task_target_deep_scan))
-        .unwrap_or(false);
-    let result = if !runtime.filesystem().owns_filesystem_scan_output() {
-        ScanOneLibraryResult::skipped_external_owned(library_id)
-    } else {
-        let pipeline = SqliteFilesystemLibraryScanPipeline::for_runtime(runtime);
-        pipeline
-            .run(ScanOneLibrary::new(library_id, deep_scan))
-            .await
-            .map_err(|error| TaskExecutionError::runtime(error.to_string()))?
-    };
+    let pipeline = SqliteFilesystemLibraryScanPipeline::for_runtime(runtime);
+    let result = pipeline.execute_scan_task(task, task_target).await?;
     Ok(TaskExecutionOutcome::with_follow_up_tasks(
         result.follow_up_tasks,
     ))
 }
 
-fn parse_scan_library_payload_library_id(payload: &str) -> Option<String> {
-    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
-    payload.get("libraryId")?.as_str().map(str::to_string)
-}
-
-fn strip_scan_library_deep_suffix(task_target: &str) -> String {
-    task_target
-        .split_once("_DEEP_")
-        .map(|(id, _)| id)
-        .unwrap_or(task_target)
-        .to_string()
-}
-
-fn parse_scan_library_task_target_deep_scan(task_target: &str) -> Option<bool> {
-    task_target
-        .rsplit_once("_DEEP_")
-        .and_then(|(_, deep_scan)| deep_scan.parse::<bool>().ok())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use komga_application::task_processing::{BookPayload, LibraryPayload, TaskKind, TaskRequest};
 
     #[test]
@@ -164,45 +116,5 @@ mod tests {
                 r#"{"bookId":"book-1","groupId":"series-1","priority":12,"uniqueId":"RepairExtension_book-1"}"#
             ),
         );
-    }
-
-    #[test]
-    fn strip_scan_library_deep_suffix_supports_underscore_legacy_ids() {
-        assert_eq!(
-            strip_scan_library_deep_suffix("library-1_DEEP_true"),
-            "library-1".to_string()
-        );
-    }
-
-    #[test]
-    fn parse_scan_library_task_target_deep_scan_parses_underscore_suffix() {
-        assert_eq!(
-            parse_scan_library_task_target_deep_scan("library-1_DEEP_true"),
-            Some(true)
-        );
-        assert_eq!(
-            parse_scan_library_task_target_deep_scan("library-1_DEEP_false"),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn payload_deep_flag_remains_authoritative_over_legacy_task_target_suffix() {
-        let task = TaskQueueRecord::new("ScanLibrary_library-1_DEEP_true", 100, None)
-            .with_simple_type("ScanLibrary")
-            .with_payload(
-                r#"{"libraryId":"library-1","scanDeep":false,"priority":100,"groupId":null,"uniqueId":"ScanLibrary_library-1_DEEP_true"}"#,
-            );
-
-        let deep_scan = task
-            .payload
-            .as_deref()
-            .and_then(parse_scan_library_payload_deep)
-            .or_else(|| {
-                Some("library-1_DEEP_true").and_then(parse_scan_library_task_target_deep_scan)
-            })
-            .unwrap_or(false);
-
-        assert!(!deep_scan);
     }
 }

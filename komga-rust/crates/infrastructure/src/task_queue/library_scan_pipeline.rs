@@ -3,9 +3,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use super::JobRuntime;
 use komga_application::task_processing::{
     BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
-    LibraryScanScheduleState, LibraryTaskBatch, RefreshBookMetadataPayload, ScanOneLibrary,
-    ScanOneLibraryResult, ScanSchedulingTrigger, SeriesPayload, TaskKind, TaskProcessingError,
-    TaskQueueRecord, TaskRequest, TaskSchedule, normalize_library_scan_profiles,
+    LibraryScanScheduleState, RefreshBookMetadataPayload, ScanOneLibrary, ScanOneLibraryResult,
+    ScanSchedulingTrigger, ScheduledLibraryScanBatch, ScheduledLibraryScanTask, SeriesPayload,
+    TaskKind, TaskProcessingError, TaskQueueRecord, TaskRequest, TaskSchedule,
+    normalize_library_scan_profiles,
 };
 use sqlx::{Row, SqlitePool};
 use tokio::time::Instant;
@@ -44,6 +45,7 @@ async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScan
 #[derive(Clone, Debug)]
 pub struct SqliteFilesystemLibraryScanPipeline {
     owns_main_database: bool,
+    owns_filesystem_scan_output: bool,
     task_read_pool: SqlitePool,
     task_write_pool: SqlitePool,
 }
@@ -52,9 +54,25 @@ impl SqliteFilesystemLibraryScanPipeline {
     pub fn for_runtime(runtime: &JobRuntime<'_>) -> Self {
         Self {
             owns_main_database: runtime.database().owns_main_database(),
+            owns_filesystem_scan_output: runtime.filesystem().owns_filesystem_scan_output(),
             task_read_pool: runtime.database().read_pool().clone(),
             task_write_pool: runtime.database().write_pool().clone(),
         }
+    }
+
+    pub(crate) async fn execute_scan_task(
+        &self,
+        task: &TaskQueueRecord,
+        task_target: Option<&str>,
+    ) -> Result<ScanOneLibraryResult, TaskProcessingError> {
+        let request = resolve_scan_task_request(task, task_target)?;
+        if !self.owns_filesystem_scan_output {
+            return Ok(ScanOneLibraryResult::skipped_external_owned(
+                request.library_id,
+            ));
+        }
+
+        self.run(request).await
     }
 
     async fn load_profiles(
@@ -68,16 +86,20 @@ impl SqliteFilesystemLibraryScanPipeline {
             })
     }
 
-    fn emit_scan_tasks<I>(&self, tasks: I) -> LibraryTaskBatch
+    fn emit_scan_tasks<I>(
+        &self,
+        configured_library_count: usize,
+        tasks: I,
+    ) -> ScheduledLibraryScanBatch
     where
         I: IntoIterator<Item = (String, TaskSchedule)>,
     {
-        let records = tasks
+        let tasks = tasks
             .into_iter()
             .map(|(library_id, schedule)| {
                 let deep_scan = false;
                 let priority = schedule.scan_priority();
-                TaskRequest::with_payload(
+                let task = TaskRequest::with_payload(
                     TaskKind::ScanLibrary,
                     komga_application::task_processing::ScanLibraryPayload::new(
                         &library_id,
@@ -85,36 +107,39 @@ impl SqliteFilesystemLibraryScanPipeline {
                     ),
                 )
                 .priority(priority)
-                .into_queue_record_with_id(&format!("{library_id}_DEEP_{deep_scan}"))
+                .into_queue_record_with_id(&format!("{library_id}_DEEP_{deep_scan}"));
+                ScheduledLibraryScanTask::new(library_id, task)
             })
             .collect();
-        LibraryTaskBatch::new(records)
+        ScheduledLibraryScanBatch::new(configured_library_count, tasks)
     }
 
-    async fn schedule_startup(&self) -> Result<LibraryTaskBatch, TaskProcessingError> {
+    async fn schedule_startup(&self) -> Result<ScheduledLibraryScanBatch, TaskProcessingError> {
         let profiles =
             normalize_library_scan_profiles(&self.load_profiles().await?).map_err(|error| {
                 TaskProcessingError::runtime(format!(
                     "normalize startup library scan profiles: {error}"
                 ))
             })?;
+        let configured_library_count = profiles.len();
         let startup_libraries = profiles
             .into_iter()
             .filter(|profile| profile.scan_startup)
             .map(|profile| (profile.library_id, TaskSchedule::Startup));
-        Ok(self.emit_scan_tasks(startup_libraries))
+        Ok(self.emit_scan_tasks(configured_library_count, startup_libraries))
     }
 
     async fn schedule_tick(
         &self,
         state: &LibraryScanScheduleState,
-    ) -> Result<LibraryTaskBatch, TaskProcessingError> {
+    ) -> Result<ScheduledLibraryScanBatch, TaskProcessingError> {
         let profiles =
             normalize_library_scan_profiles(&self.load_profiles().await?).map_err(|error| {
                 TaskProcessingError::runtime(format!(
                     "normalize periodic library scan profiles: {error}"
                 ))
             })?;
+        let configured_library_count = profiles.len();
         let due_libraries = profiles.into_iter().filter_map(|profile| {
             if profile.scan_interval == LibraryScanInterval::Disabled {
                 return None;
@@ -129,7 +154,7 @@ impl SqliteFilesystemLibraryScanPipeline {
                 TaskSchedule::Interval(profile.scan_interval),
             ))
         });
-        Ok(self.emit_scan_tasks(due_libraries))
+        Ok(self.emit_scan_tasks(configured_library_count, due_libraries))
     }
 
     pub(crate) async fn sync_periodic_library_scan_state(
@@ -374,6 +399,7 @@ impl Default for SqliteFilesystemLibraryScanPipeline {
             .expect("lazy in-memory pool should not fail");
         Self {
             owns_main_database: true,
+            owns_filesystem_scan_output: true,
             task_read_pool: pool.clone(),
             task_write_pool: pool,
         }
@@ -385,7 +411,7 @@ impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
         &self,
         trigger: ScanSchedulingTrigger,
         state: &LibraryScanScheduleState,
-    ) -> Result<LibraryTaskBatch, TaskProcessingError> {
+    ) -> Result<ScheduledLibraryScanBatch, TaskProcessingError> {
         match trigger {
             ScanSchedulingTrigger::Startup => self.schedule_startup().await,
             ScanSchedulingTrigger::Tick => self.schedule_tick(state).await,
@@ -417,10 +443,71 @@ impl SqliteFilesystemLibraryScanPipeline {
     pub fn from_pools(write_pool: SqlitePool) -> Self {
         Self {
             owns_main_database: true,
+            owns_filesystem_scan_output: true,
             task_read_pool: write_pool.clone(),
             task_write_pool: write_pool,
         }
     }
+
+    #[cfg(test)]
+    fn with_filesystem_scan_output_ownership(mut self, owns_filesystem_scan_output: bool) -> Self {
+        self.owns_filesystem_scan_output = owns_filesystem_scan_output;
+        self
+    }
+}
+
+fn resolve_scan_task_request(
+    task: &TaskQueueRecord,
+    task_target: Option<&str>,
+) -> Result<ScanOneLibrary, TaskProcessingError> {
+    let payload = task.payload.as_deref().and_then(scan_task_payload_fields);
+    let library_id = payload
+        .as_ref()
+        .and_then(|fields| fields.library_id.clone())
+        .or_else(|| task_target.map(scan_task_legacy_target_library_id));
+    let Some(library_id) = library_id else {
+        return Err(TaskProcessingError::invalid_task(
+            "ScanLibrary task must include a library id",
+        ));
+    };
+
+    let deep_scan = payload
+        .and_then(|fields| fields.deep_scan)
+        .or_else(|| task_target.and_then(scan_task_legacy_target_deep_scan))
+        .unwrap_or(false);
+
+    Ok(ScanOneLibrary::new(library_id, deep_scan))
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ScanTaskPayloadFields {
+    library_id: Option<String>,
+    deep_scan: Option<bool>,
+}
+
+fn scan_task_payload_fields(payload: &str) -> Option<ScanTaskPayloadFields> {
+    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    Some(ScanTaskPayloadFields {
+        library_id: payload.get("libraryId")?.as_str().map(str::to_string),
+        deep_scan: payload
+            .get("scanDeep")
+            .or_else(|| payload.get("deep"))
+            .and_then(|value| value.as_bool()),
+    })
+}
+
+fn scan_task_legacy_target_library_id(task_target: &str) -> String {
+    task_target
+        .split_once("_DEEP_")
+        .map(|(id, _)| id)
+        .unwrap_or(task_target)
+        .to_string()
+}
+
+fn scan_task_legacy_target_deep_scan(task_target: &str) -> Option<bool> {
+    task_target
+        .rsplit_once("_DEEP_")
+        .and_then(|(_, deep_scan)| deep_scan.parse::<bool>().ok())
 }
 
 #[cfg(test)]
@@ -474,6 +561,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_scan_task_prefers_payload_and_skips_external_owned_output() {
+        let db_path = temp_db_path("library-scan-pipeline-task-resolution");
+        let root = std::env::temp_dir().join(format!(
+            "komga-rust-task-resolution-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("Series-A")).expect("scan root should be created");
+        std::fs::write(root.join("Series-A").join("Book-001.cbz"), b"book")
+            .expect("book fixture should be created");
+
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(root.to_string_lossy().to_string())
+            .execute(&pool)
+            .await
+            .expect("library row should be inserted");
+        pool.close().await;
+
+        let read_pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open for pipeline");
+        let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone())
+            .with_filesystem_scan_output_ownership(false);
+        let task = TaskQueueRecord::new("ScanLibrary_missing-library_DEEP_true", 900, None)
+            .with_simple_type("ScanLibrary")
+            .with_payload(
+                r#"{"libraryId":"library-1","scanDeep":false,"priority":900,"groupId":null,"uniqueId":"ScanLibrary_missing-library_DEEP_true"}"#,
+            );
+
+        let result = pipeline
+            .execute_scan_task(&task, Some("missing-library_DEEP_true"))
+            .await
+            .expect("external-owned scan task should be handled by pipeline");
+
+        assert_eq!(result.library_id, "library-1");
+        assert_eq!(
+            result.outcome,
+            komga_application::task_processing::ScanOneLibraryOutcome::SkippedExternalOwned,
+        );
+        assert!(result.follow_up_tasks.is_empty());
+
+        let persisted_books = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM BOOK")
+            .fetch_one(&read_pool)
+            .await
+            .expect("book count should be queryable");
+        assert_eq!(
+            persisted_books, 0,
+            "external-owned scan output must not persist scan-derived book rows",
+        );
+
+        read_pool.close().await;
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
     async fn schedule_startup_only_emits_startup_enabled_canonical_scan_tasks() {
         let db_path = temp_db_path("library-scan-pipeline-startup");
         seed_library_profiles(
@@ -495,8 +648,12 @@ mod tests {
                 &LibraryScanScheduleState::default(),
             )
             .await
-            .expect("startup scheduling should succeed")
-            .into_queue_records();
+            .expect("startup scheduling should succeed");
+
+        assert_eq!(scheduled.configured_library_count, 2);
+        assert_eq!(scheduled.tasks.len(), 1);
+        assert_eq!(scheduled.tasks[0].library_id, "library-1");
+        let scheduled = scheduled.into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
         assert_eq!(scheduled[0].id, "ScanLibrary_library-1_DEEP_false");
@@ -531,8 +688,12 @@ mod tests {
         let scheduled = pipeline
             .schedule(ScanSchedulingTrigger::Tick, &state)
             .await
-            .expect("periodic scheduling should succeed")
-            .into_queue_records();
+            .expect("periodic scheduling should succeed");
+
+        assert_eq!(scheduled.configured_library_count, 4);
+        assert_eq!(scheduled.tasks.len(), 1);
+        assert_eq!(scheduled.tasks[0].library_id, "library-due");
+        let scheduled = scheduled.into_queue_records();
 
         assert_eq!(scheduled.len(), 1);
         assert_eq!(scheduled[0].id, "ScanLibrary_library-due_DEEP_false");

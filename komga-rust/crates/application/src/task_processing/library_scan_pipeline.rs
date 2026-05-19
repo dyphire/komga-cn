@@ -23,6 +23,59 @@ impl LibraryScanScheduleState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledLibraryScanTask {
+    pub library_id: String,
+    pub task: TaskQueueRecord,
+}
+
+impl ScheduledLibraryScanTask {
+    pub fn new(library_id: impl Into<String>, task: TaskQueueRecord) -> Self {
+        Self {
+            library_id: library_id.into(),
+            task,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ScheduledLibraryScanBatch {
+    pub configured_library_count: usize,
+    pub tasks: Vec<ScheduledLibraryScanTask>,
+}
+
+impl ScheduledLibraryScanBatch {
+    pub fn new(configured_library_count: usize, tasks: Vec<ScheduledLibraryScanTask>) -> Self {
+        Self {
+            configured_library_count,
+            tasks,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
+
+    pub fn into_queue_records(self) -> Vec<TaskQueueRecord> {
+        self.tasks
+            .into_iter()
+            .map(|scheduled| scheduled.task)
+            .collect()
+    }
+
+    pub fn into_task_batch(self) -> LibraryTaskBatch {
+        LibraryTaskBatch::new(self.into_queue_records())
+    }
+
+    pub fn into_scheduled_tasks(self) -> Vec<ScheduledLibraryScanTask> {
+        self.tasks
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScanOneLibrary {
     pub library_id: String,
     pub deep_scan: bool,
@@ -74,7 +127,7 @@ pub trait LibraryScanPipeline {
         &self,
         trigger: ScanSchedulingTrigger,
         state: &LibraryScanScheduleState,
-    ) -> Result<LibraryTaskBatch, TaskProcessingError>;
+    ) -> Result<ScheduledLibraryScanBatch, TaskProcessingError>;
 
     async fn run(
         &self,

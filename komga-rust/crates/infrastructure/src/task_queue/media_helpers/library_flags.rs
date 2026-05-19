@@ -4,14 +4,6 @@ use super::media_queries::{
 };
 use super::*;
 
-pub(in crate::task_queue) fn parse_scan_library_payload_deep(payload: &str) -> Option<bool> {
-    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
-    payload
-        .get("scanDeep")
-        .or_else(|| payload.get("deep"))
-        .and_then(|value| value.as_bool())
-}
-
 pub(in crate::task_queue) struct LibraryHashingFlags {
     pub(in crate::task_queue) hash_files: bool,
     pub(in crate::task_queue) hash_pages: bool,

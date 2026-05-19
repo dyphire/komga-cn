@@ -12,7 +12,8 @@ pub use contracts::{
 };
 pub use library_scan_pipeline::{
     LibraryScanPipeline, LibraryScanScheduleState, ScanOneLibrary, ScanOneLibraryOutcome,
-    ScanOneLibraryResult, ScanSchedulingTrigger,
+    ScanOneLibraryResult, ScanSchedulingTrigger, ScheduledLibraryScanBatch,
+    ScheduledLibraryScanTask,
 };
 pub use protocol::{
     BookSeriesRef, LibraryTaskBatch, LibraryTaskCommand, OpaqueTask, PersistedTaskRowShape,
