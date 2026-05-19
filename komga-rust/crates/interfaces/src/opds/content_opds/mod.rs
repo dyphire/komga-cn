@@ -269,7 +269,7 @@ pub(crate) async fn opds_v2_book_page_route(
     media_responses::book_page_response(
         &app.reader,
         &app.content,
-        app.discovery_detail.as_ref(),
+        app.book_access.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -288,7 +288,7 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     media_responses::book_page_raw_response(
         &app.reader,
         &app.content,
-        app.discovery_detail.as_ref(),
+        app.book_access.as_ref(),
         &user,
         &headers,
         &book_id,

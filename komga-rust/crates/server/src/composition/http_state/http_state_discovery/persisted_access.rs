@@ -3,10 +3,7 @@ use super::*;
 
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::search::index_lifecycle::SearchQueryLifecycle;
-use komga_interfaces::state::{
-    DiscoveryAuthorService, DiscoveryBookFeedService, DiscoveryCollectionSearchService,
-    DiscoveryLibraryMappingService, DiscoveryReadlistSearchService,
-};
+use komga_interfaces::state::DiscoverySearchService;
 
 fn search_ids_or_empty(
     index_dir: &std::path::Path,
@@ -54,7 +51,7 @@ pub(super) struct RuntimePersistedDiscoveryAccess {
 }
 
 #[async_trait::async_trait]
-impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
+impl DiscoverySearchService for RuntimePersistedDiscoveryAccess {
     async fn load_author_names(
         &self,
         search: &str,
@@ -97,17 +94,11 @@ impl DiscoveryAuthorService for RuntimePersistedDiscoveryAccess {
             })
             .collect())
     }
-}
 
-#[async_trait::async_trait]
-impl DiscoveryLibraryMappingService for RuntimePersistedDiscoveryAccess {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
-}
 
-#[async_trait::async_trait]
-impl DiscoveryCollectionSearchService for RuntimePersistedDiscoveryAccess {
     async fn search_collection_ids(
         &self,
         query: &str,
@@ -121,10 +112,7 @@ impl DiscoveryCollectionSearchService for RuntimePersistedDiscoveryAccess {
             limit,
         ))
     }
-}
 
-#[async_trait::async_trait]
-impl DiscoveryReadlistSearchService for RuntimePersistedDiscoveryAccess {
     async fn search_readlist_scored_ids(
         &self,
         query: &str,
@@ -138,10 +126,7 @@ impl DiscoveryReadlistSearchService for RuntimePersistedDiscoveryAccess {
             limit,
         ))
     }
-}
 
-#[async_trait::async_trait]
-impl DiscoveryBookFeedService for RuntimePersistedDiscoveryAccess {
     async fn load_ondeck_books(
         &self,
         user_id: &str,
@@ -158,50 +143,10 @@ impl DiscoveryBookFeedService for RuntimePersistedDiscoveryAccess {
     }
 }
 
-pub(super) fn compose_discovery_author_service(
+pub(super) fn compose_discovery_search_service(
     db: DatabaseHandle,
     lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryAuthorService> {
-    Box::new(RuntimePersistedDiscoveryAccess {
-        db,
-        index_dir: lucene_data_directory,
-    })
-}
-
-pub(super) fn compose_discovery_library_mapping_service(
-    db: DatabaseHandle,
-    lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryLibraryMappingService> {
-    Box::new(RuntimePersistedDiscoveryAccess {
-        db,
-        index_dir: lucene_data_directory,
-    })
-}
-
-pub(super) fn compose_discovery_collection_search_service(
-    db: DatabaseHandle,
-    lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryCollectionSearchService> {
-    Box::new(RuntimePersistedDiscoveryAccess {
-        db,
-        index_dir: lucene_data_directory,
-    })
-}
-
-pub(super) fn compose_discovery_readlist_search_service(
-    db: DatabaseHandle,
-    lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryReadlistSearchService> {
-    Box::new(RuntimePersistedDiscoveryAccess {
-        db,
-        index_dir: lucene_data_directory,
-    })
-}
-
-pub(super) fn compose_discovery_book_feed_service(
-    db: DatabaseHandle,
-    lucene_data_directory: PathBuf,
-) -> Box<dyn DiscoveryBookFeedService> {
+) -> Box<dyn DiscoverySearchService> {
     Box::new(RuntimePersistedDiscoveryAccess {
         db,
         index_dir: lucene_data_directory,

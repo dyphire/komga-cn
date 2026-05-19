@@ -48,7 +48,7 @@ pub(super) async fn user_can_access_series_media(
     user: &AuthUser,
 ) -> Result<bool, String> {
     let Some(library_id) = app
-        .discovery_detail
+        .series_access
         .load_series_library_id(series_id)
         .await?
     else {
@@ -59,7 +59,7 @@ pub(super) async fn user_can_access_series_media(
     }
 
     let restriction_record = app
-        .discovery_detail
+        .series_access
         .load_series_restrictions(series_id)
         .await?;
     Ok(principal_allows_content(
@@ -85,7 +85,7 @@ pub(super) async fn visible_readlist_books_for_user(
     user: &AuthUser,
 ) -> Result<Vec<PersistedReadlistBookAccessRecord>, String> {
     let books = app
-        .discovery_detail
+        .readlist_access
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
     let mut visible_books = Vec::new();
@@ -126,7 +126,7 @@ pub(super) async fn visible_collection_series_ids_for_user(
     user: &AuthUser,
 ) -> Result<Vec<String>, String> {
     let series_ids = app
-        .discovery_detail
+        .collection_access
         .load_persisted_collection_series_ids(collection_id)
         .await?;
     let mut visible_series_ids = Vec::new();

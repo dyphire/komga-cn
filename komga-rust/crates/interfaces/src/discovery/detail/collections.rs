@@ -457,7 +457,7 @@ pub async fn collections(
 
     if let Some(search) = search.as_ref() {
         let ranked_ids: Vec<String> = match app
-            .discovery_collection_search
+            .discovery_search
             .search_collection_ids(search, search_limit)
             .await
         {

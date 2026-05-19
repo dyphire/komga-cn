@@ -173,7 +173,7 @@ pub async fn books_latest(
 
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.discovery_library_mapping.as_ref(),
+        app.discovery_search.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
@@ -230,7 +230,7 @@ pub async fn books_ondeck(
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.discovery_library_mapping.as_ref(),
+        app.discovery_search.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
@@ -251,7 +251,7 @@ pub async fn books_ondeck(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match app.discovery_book_feeds.load_ondeck_books(user_id).await {
+    match app.discovery_search.load_ondeck_books(user_id).await {
         Ok(entries) => {
             let filtered_entries =
                 if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {

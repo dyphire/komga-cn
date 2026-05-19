@@ -7,12 +7,11 @@ use std::collections::HashMap;
 pub struct DiscoveryState {
     pub(crate) discovery_auth: DiscoveryAuthState,
     pub(crate) identity: IdentityState,
-    pub(crate) discovery_authors: Arc<dyn DiscoveryAuthorService>,
-    pub(crate) discovery_library_mapping: Arc<dyn DiscoveryLibraryMappingService>,
-    pub(crate) discovery_collection_search: Arc<dyn DiscoveryCollectionSearchService>,
-    pub(crate) discovery_readlist_search: Arc<dyn DiscoveryReadlistSearchService>,
-    pub(crate) discovery_book_feeds: Arc<dyn DiscoveryBookFeedService>,
-    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub(crate) discovery_search: Arc<dyn DiscoverySearchService>,
+    pub(crate) book_access: Arc<dyn BookAccessService>,
+    pub(crate) series_access: Arc<dyn SeriesAccessService>,
+    pub(crate) collection_access: Arc<dyn CollectionAccessService>,
+    pub(crate) readlist_access: Arc<dyn ReadlistAccessService>,
     pub(crate) discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub(crate) discovery_facets: Arc<dyn DiscoveryFacetService>,
 }
@@ -22,12 +21,11 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
         Self {
             discovery_auth: app.discovery_auth.clone(),
             identity: IdentityState::from_ref(app),
-            discovery_authors: app.services.discovery_authors.clone(),
-            discovery_library_mapping: app.services.discovery_library_mapping.clone(),
-            discovery_collection_search: app.services.discovery_collection_search.clone(),
-            discovery_readlist_search: app.services.discovery_readlist_search.clone(),
-            discovery_book_feeds: app.services.discovery_book_feeds.clone(),
-            discovery_detail: app.services.discovery_detail.clone(),
+            discovery_search: app.services.discovery_search.clone(),
+            book_access: app.services.book_access.clone(),
+            series_access: app.services.series_access.clone(),
+            collection_access: app.services.collection_access.clone(),
+            readlist_access: app.services.readlist_access.clone(),
             discovery_browse: app.services.discovery_browse.clone(),
             discovery_facets: app.services.discovery_facets.clone(),
         }
@@ -35,7 +33,7 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
 }
 
 #[async_trait]
-pub trait DiscoveryAuthorService: Send + Sync {
+pub trait DiscoverySearchService: Send + Sync {
     async fn load_author_names(
         &self,
         search: &str,
@@ -52,30 +50,18 @@ pub trait DiscoveryAuthorService: Send + Sync {
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<&[String]>,
     ) -> Result<Vec<PersistedAuthorEntry>, String>;
-}
 
-#[async_trait]
-pub trait DiscoveryLibraryMappingService: Send + Sync {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
-}
 
-#[async_trait]
-pub trait DiscoveryCollectionSearchService: Send + Sync {
     async fn search_collection_ids(&self, query: &str, limit: usize)
     -> Result<Vec<String>, String>;
-}
 
-#[async_trait]
-pub trait DiscoveryReadlistSearchService: Send + Sync {
     async fn search_readlist_scored_ids(
         &self,
         query: &str,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String>;
-}
 
-#[async_trait]
-pub trait DiscoveryBookFeedService: Send + Sync {
     async fn load_ondeck_books(
         &self,
         user_id: &str,
@@ -333,7 +319,7 @@ pub struct SeriesSummaryRecord {
 }
 
 #[async_trait]
-pub trait DiscoveryDetailService: Send + Sync {
+pub trait BookAccessService: Send + Sync {
     async fn load_book_id_by_sorted_position(&self, index: usize)
     -> Result<Option<String>, String>;
 
@@ -354,22 +340,14 @@ pub trait DiscoveryDetailService: Send + Sync {
         direction: PersistedBookSiblingDirectionRecord,
     ) -> Result<Option<String>, String>;
 
-    async fn persisted_collections_exist(&self) -> Result<bool, String>;
-
-    async fn load_persisted_collections(
+    async fn load_persisted_book_authors(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+        book_id: &str,
+    ) -> Result<Vec<PersistedBookAuthorRecord>, String>;
+}
 
-    async fn load_persisted_collection_series_ids(
-        &self,
-        collection_id: &str,
-    ) -> Result<Vec<String>, String>;
-
-    async fn load_persisted_collection_detail(
-        &self,
-        collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
-
+#[async_trait]
+pub trait SeriesAccessService: Send + Sync {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
 
     async fn load_series_restrictions(
@@ -377,84 +355,15 @@ pub trait DiscoveryDetailService: Send + Sync {
         series_id: &str,
     ) -> Result<PersistedSeriesRestrictionRecord, String>;
 
-    async fn persist_collection_create(
+    async fn load_series_id_by_sorted_position(
         &self,
-        collection_id: &str,
-        name: &str,
-        ordered: bool,
-        series_ids: &[String],
-    ) -> Result<(), String>;
-
-    async fn persist_collection_update(
-        &self,
-        collection_id: &str,
-        name: &str,
-        ordered: bool,
-        series_ids: &[String],
-    ) -> Result<bool, String>;
-
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String>;
-
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
-
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
-
-    async fn load_persisted_readlists(
-        &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
-
-    async fn load_persisted_readlist_detail(
-        &self,
-        readlist_id: &str,
-    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String>;
-
-    async fn load_persisted_readlist_book_rows(
-        &self,
-        readlist_id: &str,
-    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
-
-    async fn load_comicrack_match_candidates(
-        &self,
-    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
-
-    async fn load_persisted_book_authors(
-        &self,
-        book_id: &str,
-    ) -> Result<Vec<PersistedBookAuthorRecord>, String>;
-
-    async fn persist_readlist_create(
-        &self,
-        readlist_id: &str,
-        name: &str,
-        summary: &str,
-        ordered: bool,
-        book_ids: &[String],
-    ) -> Result<(), String>;
-
-    async fn persist_readlist_update(
-        &self,
-        readlist_id: &str,
-        name: &str,
-        summary: &str,
-        ordered: bool,
-        book_ids: &[String],
-    ) -> Result<bool, String>;
-
-    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String>;
-
-    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String>;
-
-    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String>;
+        index: usize,
+    ) -> Result<Option<String>, String>;
 
     async fn load_persisted_series_resource(
         &self,
         series_id: &str,
     ) -> Result<Option<PersistedSeriesResourceRecord>, String>;
-
-    async fn load_series_id_by_sorted_position(
-        &self,
-        index: usize,
-    ) -> Result<Option<String>, String>;
 
     async fn load_persisted_series_detail(
         &self,
@@ -490,4 +399,90 @@ pub trait DiscoveryDetailService: Send + Sync {
         &self,
         series_id: &str,
     ) -> Result<(), String>;
+}
+
+#[async_trait]
+pub trait CollectionAccessService: Send + Sync {
+    async fn persisted_collections_exist(&self) -> Result<bool, String>;
+
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String>;
+
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+
+    async fn persist_collection_create(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<(), String>;
+
+    async fn persist_collection_update(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<bool, String>;
+
+    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String>;
+
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
+
+    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+}
+
+#[async_trait]
+pub trait ReadlistAccessService: Send + Sync {
+    async fn load_persisted_readlists(
+        &self,
+    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
+
+    async fn load_persisted_readlist_detail(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String>;
+
+    async fn load_persisted_readlist_book_rows(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
+
+    async fn load_comicrack_match_candidates(
+        &self,
+    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
+
+    async fn persist_readlist_create(
+        &self,
+        readlist_id: &str,
+        name: &str,
+        summary: &str,
+        ordered: bool,
+        book_ids: &[String],
+    ) -> Result<(), String>;
+
+    async fn persist_readlist_update(
+        &self,
+        readlist_id: &str,
+        name: &str,
+        summary: &str,
+        ordered: bool,
+        book_ids: &[String],
+    ) -> Result<bool, String>;
+
+    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String>;
+
+    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String>;
+
+    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String>;
 }

@@ -88,7 +88,7 @@ async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id
     }
 
     if matches!(
-        app.discovery_detail
+        app.book_access
             .load_persisted_book_resource(requested_book_id)
             .await,
         Ok(Some(_))
@@ -97,7 +97,7 @@ async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id
     }
 
     match app
-        .discovery_detail
+        .book_access
         .load_book_id_by_sorted_position(index)
         .await
     {
@@ -122,7 +122,7 @@ async fn resolve_series_id_for_persisted(
     }
 
     if matches!(
-        app.discovery_detail
+        app.series_access
             .load_persisted_series_resource(requested_series_id)
             .await,
         Ok(Some(_))
@@ -131,7 +131,7 @@ async fn resolve_series_id_for_persisted(
     }
 
     match app
-        .discovery_detail
+        .series_access
         .load_series_id_by_sorted_position(index)
         .await
     {

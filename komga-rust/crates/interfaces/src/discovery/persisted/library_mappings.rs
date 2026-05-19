@@ -1,4 +1,4 @@
-use crate::state::DiscoveryLibraryMappingService;
+use crate::state::DiscoverySearchService;
 
 fn push_unique(values: &mut Vec<String>, value: &str) {
     if !values.iter().any(|candidate| candidate == value) {
@@ -7,13 +7,13 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
 }
 
 pub async fn load_persisted_library_ids(
-    backend: &dyn DiscoveryLibraryMappingService,
+    backend: &dyn DiscoverySearchService,
 ) -> Result<Vec<String>, String> {
     backend.load_persisted_library_ids().await
 }
 
 pub async fn remap_requested_library_ids_for_persisted(
-    backend: &dyn DiscoveryLibraryMappingService,
+    backend: &dyn DiscoverySearchService,
     requested: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
     let requested = requested?;

@@ -103,7 +103,7 @@ pub async fn readlists(
                     // hidden higher-ranked readlists crowding visible matches out of Rust's
                     // pre-filtered result set.
                     let ranked_hits = match app
-                        .discovery_readlist_search
+                        .discovery_search
                         .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
                         .await
                     {

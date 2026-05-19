@@ -21,19 +21,19 @@ use komga_interfaces::discovery::persisted::models::{
 };
 use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
-    AuthDatabaseState, BookImportSseEvent, DiscoveryDetailService,
+    AuthDatabaseState, BookAccessService, BookImportSseEvent, CollectionAccessService,
     DiscoveryPersistedReadProgressRecord, DiscoveryPersistedReadlistBookRecord,
-    DiscoveryPersistedReadlistRecord as PersistedReadlistRecord, ExistingSeriesMetadataRecord,
+    DiscoveryPersistedReadlistRecord, ExistingSeriesMetadataRecord,
     HttpAppState, HttpServerRequestsState, HttpServices, IdentityService, LibraryCatalogService,
     OAuth2ClientConfig, OperationalBuildMetadata, OperationalRuntimeService,
     OperationalSettingsService, OperationalState, PersistedBookAuthorRecord,
     PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, ReadProgressState, RemoteCacheEntry, RuntimeProfile,
-    RuntimeState, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
-    SeriesSummaryRecord, ServerSettingsService, SseOperationalState, StartupTimingState,
-    TransientBooksStore,
+    PersistedSeriesRestrictionRecord, ReadProgressState, ReadlistAccessService, RemoteCacheEntry,
+    RuntimeProfile, RuntimeState, SeriesAccessService, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    ServerSettingsService, SseOperationalState, StartupTimingState, TransientBooksStore,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -65,42 +65,18 @@ pub fn compose_http_runtime(
     let operational_runtime_service: Arc<dyn OperationalRuntimeService> = Arc::new(
         http_state_operational_access::compose_operational_runtime_service(db.clone(), tasks_db),
     );
-    let discovery_detail_service: Arc<dyn DiscoveryDetailService> =
-        Arc::from(http_state_discovery::compose_discovery_detail_service(
-            db.clone(),
-            config.lucene_data_directory.clone(),
-        ));
-    let discovery_authors: Arc<dyn komga_interfaces::state::DiscoveryAuthorService> =
-        Arc::from(http_state_discovery::compose_discovery_author_service(
-            db.clone(),
-            config.lucene_data_directory.clone(),
-        ));
-    let discovery_library_mapping: Arc<
-        dyn komga_interfaces::state::DiscoveryLibraryMappingService,
-    > = Arc::from(
-        http_state_discovery::compose_discovery_library_mapping_service(
+    let discovery_detail_service = Arc::new(
+        http_state_discovery::compose_discovery_detail_service(
             db.clone(),
             config.lucene_data_directory.clone(),
         ),
     );
-    let discovery_collection_search: Arc<
-        dyn komga_interfaces::state::DiscoveryCollectionSearchService,
-    > = Arc::from(
-        http_state_discovery::compose_discovery_collection_search_service(
-            db.clone(),
-            config.lucene_data_directory.clone(),
-        ),
-    );
-    let discovery_readlist_search: Arc<
-        dyn komga_interfaces::state::DiscoveryReadlistSearchService,
-    > = Arc::from(
-        http_state_discovery::compose_discovery_readlist_search_service(
-            db.clone(),
-            config.lucene_data_directory.clone(),
-        ),
-    );
-    let discovery_book_feeds: Arc<dyn komga_interfaces::state::DiscoveryBookFeedService> =
-        Arc::from(http_state_discovery::compose_discovery_book_feed_service(
+    let book_access: Arc<dyn BookAccessService> = discovery_detail_service.clone();
+    let series_access: Arc<dyn SeriesAccessService> = discovery_detail_service.clone();
+    let collection_access: Arc<dyn CollectionAccessService> = discovery_detail_service.clone();
+    let readlist_access: Arc<dyn ReadlistAccessService> = discovery_detail_service;
+    let discovery_search: Arc<dyn komga_interfaces::state::DiscoverySearchService> =
+        Arc::from(http_state_discovery::compose_discovery_search_service(
             db.clone(),
             config.lucene_data_directory.clone(),
         ));
@@ -182,12 +158,11 @@ pub fn compose_http_runtime(
         operational_settings: operational_settings_service,
         opds_catalog: Arc::new(opds_catalog),
         opds_persisted: Arc::new(opds_persisted),
-        discovery_authors,
-        discovery_library_mapping,
-        discovery_collection_search,
-        discovery_readlist_search,
-        discovery_book_feeds,
-        discovery_detail: discovery_detail_service,
+        discovery_search,
+        book_access,
+        series_access,
+        collection_access,
+        readlist_access,
         discovery_browse,
         discovery_facets,
         media_reader: komga_infrastructure::media_reader::MediaReader::new(db.read_pool().clone()),

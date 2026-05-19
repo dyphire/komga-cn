@@ -104,7 +104,7 @@ pub(crate) async fn books_deprecated_get(
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
     let library_ids = remap_requested_library_ids_for_persisted(
-        app.discovery_library_mapping.as_ref(),
+        app.discovery_search.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await;

@@ -117,7 +117,10 @@ mod tests {
 
     use crate::state::{
         IdentityState, MediaAssetsState, TaskEngine, TaskQueueState,
-        tests::NoopDiscoveryDetailService,
+        tests::{
+            NoopBookAccessService, NoopCollectionAccessService, NoopReadlistAccessService,
+            NoopSeriesAccessService,
+        },
     };
 
     struct TestTaskEngine {
@@ -191,7 +194,10 @@ mod tests {
             task_queue: TaskQueueState {
                 engine: task_queue.clone(),
             },
-            discovery_detail: Arc::new(NoopDiscoveryDetailService),
+            book_access: Arc::new(NoopBookAccessService),
+            series_access: Arc::new(NoopSeriesAccessService),
+            collection_access: Arc::new(NoopCollectionAccessService),
+            readlist_access: Arc::new(NoopReadlistAccessService),
             reader: MediaReader::new(pool.clone()),
             content: ContentResolver,
             thumbnails: ThumbnailWriter::new(pool.clone()),

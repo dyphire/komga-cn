@@ -340,7 +340,7 @@ pub async fn books_duplicates(
     let unpaged = query_bool(query, "unpaged");
     let sort_modes = duplicate_books_sort_modes(query, unpaged);
 
-    match app.discovery_book_feeds.load_duplicate_books().await {
+    match app.discovery_search.load_duplicate_books().await {
         Ok(entries) => {
             let mut content = Vec::with_capacity(entries.len());
             for entry in entries {

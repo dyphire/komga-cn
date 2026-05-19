@@ -6,7 +6,8 @@ pub struct OpdsState {
     pub(crate) server_settings: Arc<dyn ServerSettingsService>,
     pub(crate) opds_catalog: Arc<dyn OpdsCatalogService>,
     pub(crate) opds_persisted: Arc<dyn OpdsPersistedService>,
-    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailService>,
+    pub(crate) book_access: Arc<dyn BookAccessService>,
+    pub(crate) series_access: Arc<dyn SeriesAccessService>,
     pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
     pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
 }
@@ -17,7 +18,8 @@ impl FromRef<Arc<HttpAppState>> for OpdsState {
             server_settings: app.services.server_settings.clone(),
             opds_catalog: app.services.opds_catalog.clone(),
             opds_persisted: app.services.opds_persisted.clone(),
-            discovery_detail: app.services.discovery_detail.clone(),
+            book_access: app.services.book_access.clone(),
+            series_access: app.services.series_access.clone(),
             reader: app.services.media_reader.clone(),
             content: app.services.content_resolver.clone(),
         }

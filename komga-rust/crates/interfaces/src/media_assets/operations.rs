@@ -20,7 +20,7 @@ pub async fn book_analyze(
     Path(book_id): Path<String>,
 ) -> Response {
     let Some(book) = (match app
-        .discovery_detail
+        .book_access
         .load_persisted_book_detail(&book_id, None)
         .await
     {
@@ -48,7 +48,7 @@ pub async fn book_metadata_refresh(
     Path(book_id): Path<String>,
 ) -> Response {
     let Some(book) = (match app
-        .discovery_detail
+        .book_access
         .load_persisted_book_detail(&book_id, None)
         .await
     {

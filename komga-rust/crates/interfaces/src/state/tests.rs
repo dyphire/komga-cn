@@ -3,9 +3,9 @@
 use super::*;
 
 #[derive(Default)]
-pub(crate) struct NoopDiscoveryDetailService;
+pub(crate) struct NoopBookAccessService;
 #[async_trait]
-impl DiscoveryDetailService for NoopDiscoveryDetailService {
+impl BookAccessService for NoopBookAccessService {
     async fn load_book_id_by_sorted_position(
         &self,
         index: usize,
@@ -32,26 +32,18 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
-    async fn persisted_collections_exist(&self) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_collections(
+    async fn load_persisted_book_authors(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        book_id: &str,
+    ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
         panic!("unused test service")
     }
-    async fn load_persisted_collection_series_ids(
-        &self,
-        collection_id: &str,
-    ) -> Result<Vec<String>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_collection_detail(
-        &self,
-        collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
-        panic!("unused test service")
-    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopSeriesAccessService;
+#[async_trait]
+impl SeriesAccessService for NoopSeriesAccessService {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
@@ -61,100 +53,16 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
     ) -> Result<PersistedSeriesRestrictionRecord, String> {
         panic!("unused test service")
     }
-    async fn persist_collection_create(
+    async fn load_series_id_by_sorted_position(
         &self,
-        collection_id: &str,
-        name: &str,
-        ordered: bool,
-        series_ids: &[String],
-    ) -> Result<(), String> {
-        panic!("unused test service")
-    }
-    async fn persist_collection_update(
-        &self,
-        collection_id: &str,
-        name: &str,
-        ordered: bool,
-        series_ids: &[String],
-    ) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_readlists(
-        &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_readlist_detail(
-        &self,
-        readlist_id: &str,
-    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_readlist_book_rows(
-        &self,
-        readlist_id: &str,
-    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn load_comicrack_match_candidates(
-        &self,
-    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn load_persisted_book_authors(
-        &self,
-        book_id: &str,
-    ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn persist_readlist_create(
-        &self,
-        readlist_id: &str,
-        name: &str,
-        summary: &str,
-        ordered: bool,
-        book_ids: &[String],
-    ) -> Result<(), String> {
-        panic!("unused test service")
-    }
-    async fn persist_readlist_update(
-        &self,
-        readlist_id: &str,
-        name: &str,
-        summary: &str,
-        ordered: bool,
-        book_ids: &[String],
-    ) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
-        panic!("unused test service")
-    }
-    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
+        index: usize,
+    ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_resource(
         &self,
         series_id: &str,
     ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
-        panic!("unused test service")
-    }
-    async fn load_series_id_by_sorted_position(
-        &self,
-        index: usize,
-    ) -> Result<Option<String>, String> {
         panic!("unused test service")
     }
     async fn load_persisted_series_detail(
@@ -198,6 +106,116 @@ impl DiscoveryDetailService for NoopDiscoveryDetailService {
         &self,
         series_id: &str,
     ) -> Result<(), String> {
+        panic!("unused test service")
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopCollectionAccessService;
+#[async_trait]
+impl CollectionAccessService for NoopCollectionAccessService {
+    async fn persisted_collections_exist(&self) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String> {
+        panic!("unused test service")
+    }
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn persist_collection_create(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<(), String> {
+        panic!("unused test service")
+    }
+    async fn persist_collection_update(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
+        panic!("unused test service")
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct NoopReadlistAccessService;
+#[async_trait]
+impl ReadlistAccessService for NoopReadlistAccessService {
+    async fn load_persisted_readlists(
+        &self,
+    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn load_persisted_readlist_detail(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn load_persisted_readlist_book_rows(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn load_comicrack_match_candidates(
+        &self,
+    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+        panic!("unused test service")
+    }
+    async fn persist_readlist_create(
+        &self,
+        readlist_id: &str,
+        name: &str,
+        summary: &str,
+        ordered: bool,
+        book_ids: &[String],
+    ) -> Result<(), String> {
+        panic!("unused test service")
+    }
+    async fn persist_readlist_update(
+        &self,
+        readlist_id: &str,
+        name: &str,
+        summary: &str,
+        ordered: bool,
+        book_ids: &[String],
+    ) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
+        panic!("unused test service")
+    }
+    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
         panic!("unused test service")
     }
 }

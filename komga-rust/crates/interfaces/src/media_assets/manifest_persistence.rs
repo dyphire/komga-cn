@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::DiscoveryDetailService;
+use crate::state::{BookAccessService, SeriesAccessService};
 use flate2::read::GzDecoder;
 use komga_application::media_assets::BookPageRecord;
 use komga_infrastructure::content_resolver::ContentResolver;
@@ -479,16 +479,17 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
 }
 
 async fn load_persisted_webpub_metadata_additions(
-    discovery_detail: &dyn DiscoveryDetailService,
+    book_access: &dyn BookAccessService,
+    series_access: &dyn SeriesAccessService,
     book_id: &str,
 ) -> Result<Option<(serde_json::Map<String, Value>, bool)>, String> {
-    let Some(book) = discovery_detail
+    let Some(book) = book_access
         .load_persisted_book_detail(book_id, None)
         .await?
     else {
         return Ok(None);
     };
-    let series = discovery_detail
+    let series = series_access
         .load_persisted_series_detail(&book.series_id)
         .await?;
 
@@ -681,10 +682,12 @@ fn extend_webpub_metadata_with_role_authors(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_persisted_book_manifest(
     reader: &MediaReader,
     content: &ContentResolver,
-    discovery_detail: &dyn DiscoveryDetailService,
+    book_access: &dyn BookAccessService,
+    series_access: &dyn SeriesAccessService,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -707,7 +710,7 @@ pub(crate) async fn build_persisted_book_manifest(
 
     let profile = manifest_profile_from_media_type(&media_type);
     let webpub_additions =
-        load_persisted_webpub_metadata_additions(discovery_detail, book_id).await?;
+        load_persisted_webpub_metadata_additions(book_access, series_access, book_id).await?;
     let epub_divina_compatible = webpub_additions
         .as_ref()
         .is_some_and(|(_, epub_divina_compatible)| *epub_divina_compatible);
