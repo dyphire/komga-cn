@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KoboStoreSyncMergeResult, KoboSyncPage, PersistedApiKey,
+    AuthOutcome, AuthUser, KoboLibrarySyncRequest, KoboLibrarySyncResponse, PersistedApiKey,
     PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
 use komga_application::library_catalog::{

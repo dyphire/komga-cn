@@ -7,10 +7,32 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use time::OffsetDateTime;
 
+use super::user_models::AuthUser;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KoboStoreSyncMergeResult {
     pub events: Vec<Value>,
     pub raw_sync_token: Option<String>,
+    pub should_continue: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboLibrarySyncRequest {
+    pub user: AuthUser,
+    pub current_api_key_id: Option<String>,
+    pub sync_token_raw: Option<String>,
+    pub store_sync_enabled: bool,
+    pub forwarded_headers: Vec<(String, String)>,
+    pub query: Option<String>,
+    pub base_url: String,
+    pub auth_token: String,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboLibrarySyncResponse {
+    pub events: Vec<Value>,
+    pub sync_token_payload: String,
     pub should_continue: bool,
 }
 

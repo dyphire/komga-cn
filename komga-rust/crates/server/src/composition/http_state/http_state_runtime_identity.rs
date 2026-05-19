@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, CreateAuthUserInput, KoboStoreSyncMergeResult, KoboSyncPage,
+    AuthOutcome, AuthUser, CreateAuthUserInput, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
     PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, ResolvedAuthToken,
     UpdateAuthUserInput, UpdateAuthUserResult,
 };
@@ -401,23 +401,13 @@ impl DeviceSyncService for RuntimeIdentityService {
         .map(|value| value.map(map_kobo_metadata_record))
     }
 
-    async fn load_kobo_sync_page(
+    async fn load_kobo_library_sync(
         &self,
-        user: &AuthUser,
-        user_id: &str,
-        current_api_key_id: Option<&str>,
-        ongoing_sync_point_id: Option<&str>,
-        last_successful_sync_point_id: Option<&str>,
-        limit: usize,
-    ) -> Result<KoboSyncPage, sqlx::Error> {
-        infrastructure_runtime_identity_access::load_kobo_sync_page(
+        request: KoboLibrarySyncRequest,
+    ) -> Result<KoboLibrarySyncResponse, sqlx::Error> {
+        infrastructure_runtime_identity_access::load_kobo_library_sync(
             self.db.write_pool(),
-            user,
-            user_id,
-            current_api_key_id,
-            ongoing_sync_point_id,
-            last_successful_sync_point_id,
-            limit,
+            request,
         )
         .await
     }
@@ -488,28 +478,6 @@ impl DeviceSyncService for RuntimeIdentityService {
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, sqlx::Error> {
         infrastructure_runtime_identity_access::persisted_book_exists(self.db.read_pool(), book_id)
             .await
-    }
-
-    async fn proxy_kobo_store_library_sync(
-        &self,
-        forwarded_headers: &[(String, String)],
-        query: Option<&str>,
-        raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, ()> {
-        infrastructure_runtime_identity_access::proxy_kobo_store_library_sync(
-            forwarded_headers,
-            query,
-            raw_sync_token,
-        )
-        .await
-    }
-
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), sqlx::Error> {
-        infrastructure_runtime_identity_access::remove_sync_point(
-            self.db.write_pool(),
-            sync_point_id,
-        )
-        .await
     }
 
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {

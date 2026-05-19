@@ -210,15 +210,10 @@ pub trait DeviceSyncService: Send + Sync {
         &self,
         book_id: &str,
     ) -> Result<Option<KoboMetadataRecord>, sqlx::Error>;
-    async fn load_kobo_sync_page(
+    async fn load_kobo_library_sync(
         &self,
-        user: &AuthUser,
-        user_id: &str,
-        current_api_key_id: Option<&str>,
-        ongoing_sync_point_id: Option<&str>,
-        last_successful_sync_point_id: Option<&str>,
-        limit: usize,
-    ) -> Result<KoboSyncPage, sqlx::Error>;
+        request: KoboLibrarySyncRequest,
+    ) -> Result<KoboLibrarySyncResponse, sqlx::Error>;
     async fn load_koreader_book_target(
         &self,
         book_hash: &str,
@@ -244,13 +239,6 @@ pub trait DeviceSyncService: Send + Sync {
         locator: Option<Value>,
     ) -> Result<(), String>;
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, sqlx::Error>;
-    async fn proxy_kobo_store_library_sync(
-        &self,
-        forwarded_headers: &[(String, String)],
-        query: Option<&str>,
-        raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, ()>;
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), sqlx::Error>;
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error>;
 }
 
@@ -609,25 +597,13 @@ impl DeviceSyncService for TestIdentityService {
     ) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
         Ok(None)
     }
-    async fn load_kobo_sync_page(
+    async fn load_kobo_library_sync(
         &self,
-        _user: &AuthUser,
-        _user_id: &str,
-        _current_api_key_id: Option<&str>,
-        _ongoing_sync_point_id: Option<&str>,
-        _last_successful_sync_point_id: Option<&str>,
-        _limit: usize,
-    ) -> Result<KoboSyncPage, sqlx::Error> {
-        Ok(KoboSyncPage {
-            to_sync_point_id: String::new(),
-            from_sync_point_id: None,
-            books_added: Vec::new(),
-            books_changed: Vec::new(),
-            books_removed: Vec::new(),
-            books_read_progress_changed: Vec::new(),
-            readlists_added: Vec::new(),
-            readlists_changed: Vec::new(),
-            readlists_removed: Vec::new(),
+        _request: KoboLibrarySyncRequest,
+    ) -> Result<KoboLibrarySyncResponse, sqlx::Error> {
+        Ok(KoboLibrarySyncResponse {
+            events: Vec::new(),
+            sync_token_payload: "{}".to_string(),
             should_continue: false,
         })
     }
@@ -672,21 +648,6 @@ impl DeviceSyncService for TestIdentityService {
     }
     async fn persisted_book_exists(&self, _book_id: &str) -> Result<bool, sqlx::Error> {
         Ok(false)
-    }
-    async fn proxy_kobo_store_library_sync(
-        &self,
-        _forwarded_headers: &[(String, String)],
-        _query: Option<&str>,
-        _raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, ()> {
-        Ok(KoboStoreSyncMergeResult {
-            events: vec![],
-            raw_sync_token: None,
-            should_continue: false,
-        })
-    }
-    async fn remove_sync_point(&self, _sync_point_id: &str) -> Result<(), sqlx::Error> {
-        Ok(())
     }
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {
         Err(sqlx::Error::PoolClosed)

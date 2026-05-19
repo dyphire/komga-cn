@@ -6,12 +6,8 @@ use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::CookieJar;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboSyncBookSnapshot,
-    KoboSyncReadProgressSnapshot, build_kobo_changed_entitlement_removed,
-    build_kobo_changed_product_metadata, build_kobo_changed_reading_state, build_kobo_changed_tag,
-    build_kobo_deleted_tag, build_kobo_new_entitlement, build_kobo_new_tag,
-    build_komga_sync_token_payload, decode_or_passthrough_sync_token, generated_kobo_token_triplet,
-    is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload, user_id,
+    AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest,
+    decode_or_passthrough_sync_token, generated_kobo_token_triplet, now_sync_marker, user_id,
 };
 use oauth2::{AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient};
 use reqwest::Client;

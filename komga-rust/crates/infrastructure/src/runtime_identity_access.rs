@@ -7,9 +7,7 @@ pub use crate::auth::device_auth::{
     load_thumbnail_by_id, persist_read_progress_with_locator, persisted_book_exists,
 };
 pub use crate::auth::device_auth_config::configured_api_key;
-pub use crate::auth::kobo_sync::{
-    load_kobo_sync_page, proxy_kobo_store_library_sync, remove_sync_point,
-};
+pub use crate::auth::kobo_sync::load_kobo_library_sync;
 pub use crate::auth::runtime_identity_access::{
     auth_token_resolution, auth_token_user, ensure_oauth_user, invalidate_remember_me_token,
     invalidate_session_token, invalidate_user_sessions, invalidate_user_sessions_with_runtime_key,
