@@ -2,6 +2,7 @@ use super::*;
 use crate::cache::format_http_date;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use komga_application::media_assets::BookPageRecord;
 use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
@@ -399,7 +400,7 @@ async fn resolve_book_page_bytes_does_not_use_whole_archive_for_non_image() {
         media_type: "application/vnd.comicbook+zip".to_string(),
         page_count: 12,
     };
-    let page = PersistedBookPageRow {
+    let page = BookPageRecord {
         number: 5,
         file_name: "page-005.jpg".to_string(),
         media_type: "image/jpeg".to_string(),
@@ -426,7 +427,7 @@ async fn resolve_book_page_bytes_allows_single_image_first_page() {
         media_type: "image/jpeg".to_string(),
         page_count: 1,
     };
-    let page = PersistedBookPageRow {
+    let page = BookPageRecord {
         number: 1,
         file_name: "missing-derived-page.jpg".to_string(),
         media_type: "image/jpeg".to_string(),
@@ -490,7 +491,7 @@ async fn resolve_book_page_bytes_extracts_zip_page_by_logical_index() {
         media_type: "application/vnd.comicbook+zip".to_string(),
         page_count: 2,
     };
-    let page = PersistedBookPageRow {
+    let page = BookPageRecord {
         number: 2,
         file_name: "not-present.jpg".to_string(),
         media_type: "image/jpeg".to_string(),

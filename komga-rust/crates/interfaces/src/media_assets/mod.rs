@@ -46,6 +46,7 @@ pub(crate) mod manifest_persistence;
 mod manifests;
 pub(crate) mod media_helpers;
 mod operations;
+pub(crate) mod page_resolution;
 mod pages;
 pub(crate) mod read_progress;
 pub(crate) mod thumbnails;
@@ -63,8 +64,7 @@ use self::http_helpers::{
 use self::import_internals::parse_books_import_payload;
 use self::manifest_persistence::build_persisted_book_manifest;
 use self::media_helpers::{
-    book_media_is_epub, book_media_is_pdf, book_media_is_single_image,
-    book_media_supports_page_api, content_type_from_filename,
+    book_media_is_epub, book_media_supports_page_api, content_type_from_filename,
 };
 #[cfg(test)]
 use self::media_helpers::{
@@ -72,7 +72,7 @@ use self::media_helpers::{
 };
 use self::types::{
     BooksImportEntry, BooksImportPayload, ImportCopyMode, ManifestBuildOutcome, ManifestProfile,
-    ManifestVariant, PersistedBookMedia, PersistedBookPageRow,
+    ManifestVariant, PersistedBookMedia,
 };
 
 async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id: &str) -> String {
@@ -143,13 +143,6 @@ async fn load_persisted_book_media_from_services(
     app.reader.book_media(book_id).await
 }
 
-async fn load_persisted_book_pages_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-) -> Result<Vec<komga_application::media_assets::BookPageRecord>, String> {
-    app.reader.book_pages(book_id).await
-}
-
 async fn load_book_progression_from_services(
     app: &MediaAssetsState,
     book_id: &str,
@@ -170,14 +163,6 @@ async fn persisted_readlist_exists_from_services(
     readlist_id: &str,
 ) -> Result<bool, String> {
     app.reader.readlist_exists(readlist_id).await
-}
-
-async fn load_persisted_book_page_row_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-    page_number: u64,
-) -> Result<Option<komga_application::media_assets::BookPageRecord>, String> {
-    app.reader.book_page(book_id, page_number).await
 }
 
 async fn load_persisted_readlist_thumbnails_from_services(
@@ -312,10 +297,6 @@ async fn read_media_file_bytes_from_services(
     app.content.read_media_file_bytes(path).await
 }
 
-async fn read_media_file_size_from_services(app: &MediaAssetsState, path: &FsPath) -> Option<i64> {
-    app.content.read_media_file_size(path).await
-}
-
 fn is_font_resource_from_services(app: &MediaAssetsState, resource_name: &str) -> bool {
     app.content.is_font_resource(resource_name)
 }
@@ -447,47 +428,6 @@ async fn load_epub_cover_bytes_from_services(
     app.content.epub_cover_bytes(media).await
 }
 
-async fn load_archive_page_row_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-    page_number: u64,
-) -> Option<komga_application::media_assets::BookPageRecord> {
-    app.content.archive_page_row(media, page_number).await
-}
-
-async fn load_archive_page_rows_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-) -> Option<Vec<komga_application::media_assets::BookPageRecord>> {
-    app.content.archive_page_rows(media).await
-}
-
-fn load_pdf_page_row_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-    page_number: u64,
-) -> Option<komga_application::media_assets::BookPageRecord> {
-    app.content.pdf_page_row(media, page_number)
-}
-
-fn load_generated_pdf_page_rows_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-) -> Vec<komga_application::media_assets::BookPageRecord> {
-    app.content.generated_pdf_page_rows(media)
-}
-
-async fn resolve_book_page_bytes_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-    page: &PersistedBookPageRow,
-    page_number: u64,
-) -> Option<Vec<u8>> {
-    app.content
-        .resolve_page_bytes(media, page, page_number)
-        .await
-}
-
 async fn load_selected_series_thumbnail_from_services(
     app: &MediaAssetsState,
     series_id: &str,
@@ -500,18 +440,6 @@ async fn load_series_book_number_sorts_from_services(
     series_id: &str,
 ) -> Result<Vec<(String, f64)>, String> {
     app.reader.series_book_number_sorts(series_id).await
-}
-
-async fn render_book_page_thumbnail_from_services(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-    page: &PersistedBookPageRow,
-    page_number: u64,
-    max_edge: u32,
-) -> Option<Vec<u8>> {
-    app.content
-        .render_page_thumbnail(media, page, page_number, max_edge)
-        .await
 }
 
 async fn process_task_side_effects(

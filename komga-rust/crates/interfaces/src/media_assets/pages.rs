@@ -1,5 +1,6 @@
 use super::*;
 use crate::identity_access::auth::Authenticated;
+use crate::media_assets::page_resolution;
 use crate::media_responses::{self, BookPageResponseOptions};
 use crate::opds::content_opds::OpdsV1Authenticated;
 use crate::state::MediaAssetsState;
@@ -101,73 +102,6 @@ fn page_number_does_not_exist_response() -> Response {
     json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist")
 }
 
-async fn single_image_page_row(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-    page_number: u64,
-) -> PersistedBookPageRow {
-    let (width, height) = read_media_image_dimensions(app, media.file_path.as_path())
-        .await
-        .map(|(width, height)| (Some(width), Some(height)))
-        .unwrap_or((None, None));
-    PersistedBookPageRow {
-        number: page_number,
-        file_name: media.file_name.clone(),
-        media_type: content_type_from_filename(&media.file_name, &media.media_type),
-        width,
-        height,
-        file_size: read_media_file_size_from_services(app, &media.file_path)
-            .await
-            .unwrap_or(0),
-    }
-}
-
-async fn single_image_page_record(
-    app: &MediaAssetsState,
-    media: &PersistedBookMedia,
-) -> BookPageRecord {
-    let page = single_image_page_row(app, media, 1).await;
-    BookPageRecord {
-        number: page.number,
-        file_name: page.file_name,
-        media_type: page.media_type,
-        width: page.width,
-        height: page.height,
-        file_size: page.file_size,
-    }
-}
-
-async fn load_page_row(
-    app: &MediaAssetsState,
-    book_id: &str,
-    media: &PersistedBookMedia,
-    page_number: u64,
-    allow_pdf_fallback: bool,
-) -> Result<Option<PersistedBookPageRow>, String> {
-    match load_persisted_book_page_row_from_services(app, book_id, page_number).await {
-        Ok(Some(row)) => Ok(Some(row)),
-        Ok(None) if book_media_is_single_image(media) && page_number == 1 => {
-            Ok(Some(single_image_page_row(app, media, page_number).await))
-        }
-        Ok(None) => {
-            if let Some(row) = load_archive_page_row_from_services(app, media, page_number).await {
-                return Ok(Some(row));
-            }
-            if allow_pdf_fallback {
-                return Ok(load_pdf_page_row_from_services(app, media, page_number));
-            }
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-async fn read_media_image_dimensions(app: &MediaAssetsState, path: &FsPath) -> Option<(i64, i64)> {
-    let bytes = read_media_file_bytes_from_services(app, path).await?;
-    let image = image::load_from_memory(&bytes).ok()?;
-    Some((i64::from(image.width()), i64::from(image.height())))
-}
-
 pub async fn book_page_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
@@ -190,15 +124,23 @@ pub async fn book_page_thumbnail(
             return StatusCode::NOT_FOUND.into_response();
         }
 
-        let page_row =
-            match load_page_row(&app, &resolved_book_id, &media, page_number as u64, true).await {
-                Ok(Some(row)) => row,
-                Ok(None) => return page_number_does_not_exist_response(),
-                Err(error) => return internal_error_response(error),
-            };
+        let page_row = match page_resolution::load_book_page_row(
+            &app.reader,
+            &app.content,
+            &resolved_book_id,
+            &media,
+            page_number as u64,
+            true,
+        )
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return page_number_does_not_exist_response(),
+            Err(error) => return internal_error_response(error),
+        };
 
-        if let Some(bytes) = render_book_page_thumbnail_from_services(
-            &app,
+        if let Some(bytes) = page_resolution::render_book_page_thumbnail(
+            &app.content,
             &media,
             &page_row,
             page_number as u64,
@@ -259,36 +201,13 @@ pub async fn book_pages(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let page_rows = match load_persisted_book_pages_from_services(&app, &resolved_book_id).await {
-        Ok(rows) => rows,
-        Err(error) => return internal_error_response(error),
-    };
-
-    if !page_rows.is_empty() {
-        let page_rows = if book_media_is_pdf(&media) {
-            map_kotlin_pdf_pages(page_rows)
-        } else {
-            page_rows
-        };
-        return page_rows_response(page_rows);
-    }
-
-    if let Some(archive_rows) = load_archive_page_rows_from_services(&app, &media).await
-        && !archive_rows.is_empty()
+    match page_resolution::list_book_page_rows(&app.reader, &app.content, &resolved_book_id, &media)
+        .await
     {
-        return page_rows_response(archive_rows);
+        Ok(Some(page_rows)) => page_rows_response(page_rows),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
     }
-
-    let generated_pdf_rows = load_generated_pdf_page_rows_from_services(&app, &media);
-    if !generated_pdf_rows.is_empty() {
-        return page_rows_response(generated_pdf_rows);
-    }
-
-    if !book_media_is_single_image(&media) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    page_rows_response(vec![single_image_page_record(&app, &media).await])
 }
 
 fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
@@ -321,38 +240,6 @@ fn page_row_payload(page: BookPageRecord) -> Value {
         "sizeBytes": size_bytes,
         "size": size,
     })
-}
-
-fn map_kotlin_pdf_pages(page_rows: Vec<BookPageRecord>) -> Vec<BookPageRecord> {
-    page_rows
-        .into_iter()
-        .map(|page| {
-            let (width, height) = scale_pdf_dimensions(page.width, page.height);
-            BookPageRecord {
-                media_type: "image/jpeg".to_string(),
-                width,
-                height,
-                ..page
-            }
-        })
-        .collect()
-}
-
-fn scale_pdf_dimensions(width: Option<i64>, height: Option<i64>) -> (Option<i64>, Option<i64>) {
-    const PDF_RESOLUTION: f64 = 3200.0;
-
-    let (Some(width), Some(height)) = (width, height) else {
-        return (None, None);
-    };
-    let min_edge = width.min(height);
-    if min_edge <= 0 {
-        return (Some(width), Some(height));
-    }
-
-    let scale = PDF_RESOLUTION / min_edge as f64;
-    let scaled_width = (width as f64 * scale).round().max(1.0) as i64;
-    let scaled_height = (height as f64 * scale).round().max(1.0) as i64;
-    (Some(scaled_width), Some(scaled_height))
 }
 
 pub async fn book_positions(

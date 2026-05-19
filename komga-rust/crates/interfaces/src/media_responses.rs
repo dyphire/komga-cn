@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -16,15 +14,15 @@ use crate::media_assets::http_helpers::{
     attachment_disposition, inline_disposition, internal_error_response,
 };
 use crate::media_assets::media_helpers::{
-    book_media_is_epub, book_media_is_pdf, book_media_is_single_image,
-    book_media_supports_page_api, content_type_from_filename,
+    book_media_is_epub, book_media_is_pdf, book_media_supports_page_api,
 };
+use crate::media_assets::page_resolution;
 use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
 use crate::state::{BookAccessService, ServerSettingsService};
-use komga_application::media_assets::{BookMediaRecord, BookPageRecord};
+use komga_application::media_assets::BookMediaRecord;
 use komga_infrastructure::content_resolver::ContentResolver;
 use komga_infrastructure::media_reader::MediaReader;
 
@@ -175,7 +173,7 @@ pub(crate) async fn book_page_response(
             return page_number_does_not_exist_response();
         }
 
-        let page_row = match load_page_row(
+        let page_row = match page_resolution::load_book_page_row(
             reader,
             content,
             &resolved_book_id,
@@ -195,7 +193,7 @@ pub(crate) async fn book_page_response(
             .await
         {
             let mut effective_bytes = bytes;
-            let content_type = page_row_media_type(&page_row, &media);
+            let content_type = page_resolution::page_row_media_type(&page_row, &media);
             let mut effective_content_type = content_type;
             if let Some(requested_convert) = requested_convert {
                 let target_content_type = match requested_convert {
@@ -438,93 +436,7 @@ async fn load_book_thumbnail_source_bytes(
             .map(|(bytes, _)| bytes);
     }
 
-    if book_media_is_pdf(media) {
-        let page_row = reader
-            .book_page(book_id, 1)
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| content.pdf_page_row(media, 1))?;
-        return content
-            .render_page_thumbnail(media, &page_row, 1, 300)
-            .await;
-    }
-
-    if book_media_is_single_image(media) {
-        return content.read_media_file_bytes(&media.file_path).await;
-    }
-
-    let page_row = if let Some(page_row) = reader.book_page(book_id, 1).await.ok().flatten() {
-        page_row
-    } else {
-        content.archive_page_row(media, 1).await?
-    };
-    let media_type = if page_row.media_type.is_empty() {
-        content_type_from_filename(&page_row.file_name, &media.media_type)
-    } else {
-        page_row.media_type.clone()
-    };
-    if !media_type.to_ascii_lowercase().starts_with("image/") {
-        return None;
-    }
-
-    content.resolve_page_bytes(media, &page_row, 1).await
-}
-
-async fn single_image_page_row(
-    content: &ContentResolver,
-    media: &BookMediaRecord,
-    page_number: u64,
-) -> BookPageRecord {
-    let (width, height) = read_media_image_dimensions(content, media.file_path.as_path())
-        .await
-        .map(|(width, height)| (Some(width), Some(height)))
-        .unwrap_or((None, None));
-    BookPageRecord {
-        number: page_number,
-        file_name: media.file_name.clone(),
-        media_type: content_type_from_filename(&media.file_name, &media.media_type),
-        width,
-        height,
-        file_size: content
-            .read_media_file_size(&media.file_path)
-            .await
-            .unwrap_or(0),
-    }
-}
-
-async fn load_page_row(
-    reader: &MediaReader,
-    content: &ContentResolver,
-    book_id: &str,
-    media: &BookMediaRecord,
-    page_number: u64,
-    allow_pdf_fallback: bool,
-) -> Result<Option<BookPageRecord>, String> {
-    match reader.book_page(book_id, page_number).await {
-        Ok(Some(row)) => Ok(Some(row)),
-        Ok(None) if book_media_is_single_image(media) && page_number == 1 => Ok(Some(
-            single_image_page_row(content, media, page_number).await,
-        )),
-        Ok(None) => {
-            if let Some(row) = content.archive_page_row(media, page_number).await {
-                return Ok(Some(row));
-            }
-            if allow_pdf_fallback {
-                return Ok(content.pdf_page_row(media, page_number));
-            }
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn page_row_media_type(page_row: &BookPageRecord, media: &BookMediaRecord) -> String {
-    if page_row.media_type.is_empty() {
-        content_type_from_filename(&page_row.file_name, &media.media_type)
-    } else {
-        page_row.media_type.clone()
-    }
+    page_resolution::load_book_thumbnail_page_source_bytes(reader, content, book_id, media).await
 }
 
 fn asset_ok_with_inline_disposition(
@@ -677,10 +589,4 @@ fn convert_page_image_bytes(
     };
     source.write_to(&mut output, target_format).ok()?;
     Some(output.into_inner())
-}
-
-async fn read_media_image_dimensions(content: &ContentResolver, path: &Path) -> Option<(i64, i64)> {
-    let bytes = content.read_media_file_bytes(path).await?;
-    let image = image::load_from_memory(&bytes).ok()?;
-    Some((i64::from(image.width()), i64::from(image.height())))
 }
