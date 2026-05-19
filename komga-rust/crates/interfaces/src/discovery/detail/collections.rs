@@ -32,7 +32,7 @@ pub async fn collection_series(
 ) -> Response {
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -364,7 +364,7 @@ pub async fn collections(
 
     let visible_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -391,7 +391,7 @@ pub async fn collections(
         match app
             .discovery_auth
             .resolve_query_context_with_persistence(
-                &*app.identity.service,
+                &app.identity,
                 &headers,
                 Some(&requested_library_ids),
             )
@@ -803,7 +803,7 @@ pub async fn collection_detail(
 ) -> Response {
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,

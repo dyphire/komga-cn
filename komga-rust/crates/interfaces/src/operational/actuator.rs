@@ -93,7 +93,7 @@ pub(crate) async fn actuator_health(
     let ping = ping_component();
     let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
 
-    let request_auth_user = resolved_request_auth_user(&*app.identity.service, &headers).await;
+    let request_auth_user = resolved_request_auth_user(&app.identity, &headers).await;
     if request_auth_user
         .as_ref()
         .is_none_or(|user| !user_is_admin(user))

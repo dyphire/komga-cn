@@ -21,11 +21,11 @@ use komga_interfaces::discovery::persisted::models::{
 };
 use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
-    AuthDatabaseState, BookAccessService, BookImportSseEvent, CollectionAccessService,
-    DiscoveryPersistedReadProgressRecord, DiscoveryPersistedReadlistBookRecord,
-    DiscoveryPersistedReadlistRecord, ExistingSeriesMetadataRecord,
-    HttpAppState, HttpServerRequestsState, HttpServices, IdentityService, LibraryCatalogService,
-    OAuth2ClientConfig, OperationalBuildMetadata, OperationalRuntimeService,
+    AuthDatabaseState, AuthTokenService, BookAccessService, BookImportSseEvent,
+    CollectionAccessService, DiscoveryPersistedReadProgressRecord,
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    ExistingSeriesMetadataRecord, HttpAppState, HttpServerRequestsState, HttpServices,
+    LibraryCatalogService, OAuth2ClientConfig, OperationalBuildMetadata, OperationalRuntimeService,
     OperationalSettingsService, OperationalState, PersistedBookAuthorRecord,
     PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
@@ -60,17 +60,15 @@ pub fn compose_http_runtime(
         tasks_db,
         task_engine,
     } = runtime;
-    let runtime_identity_service: Arc<dyn IdentityService> =
-        Arc::from(http_state_runtime_identity::compose_runtime_identity_service(db.clone()));
+    let identity = http_state_runtime_identity::compose_identity_services(db.clone());
     let operational_runtime_service: Arc<dyn OperationalRuntimeService> = Arc::new(
         http_state_operational_access::compose_operational_runtime_service(db.clone(), tasks_db),
     );
-    let discovery_detail_service = Arc::new(
-        http_state_discovery::compose_discovery_detail_service(
+    let discovery_detail_service =
+        Arc::new(http_state_discovery::compose_discovery_detail_service(
             db.clone(),
             config.lucene_data_directory.clone(),
-        ),
-    );
+        ));
     let book_access: Arc<dyn BookAccessService> = discovery_detail_service.clone();
     let series_access: Arc<dyn SeriesAccessService> = discovery_detail_service.clone();
     let collection_access: Arc<dyn CollectionAccessService> = discovery_detail_service.clone();
@@ -93,17 +91,18 @@ pub fn compose_http_runtime(
         Arc::new(http_state_operational_access::compose_operational_settings_service(db.clone()));
 
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
-    runtime_identity_service
+    identity
+        .auth_token
         .sync_remember_me_runtime_database_file(remember_me_runtime_key.as_str());
     preload_remember_me_runtime_settings(
         config,
         remember_me_runtime_key.as_str(),
-        runtime_identity_service.as_ref(),
+        identity.auth_token.as_ref(),
     );
     // The current registry still derives both token families from the same configured root,
     // but the HTTP state keeps separate runtime keys so session and remember-me semantics are explicit.
     let session_runtime_key = remember_me_runtime_key.clone();
-    runtime_identity_service.sync_session_runtime_settings(
+    identity.auth_token.sync_session_runtime_settings(
         session_runtime_key.as_str(),
         config.session_max_inactive_seconds,
     );
@@ -153,7 +152,11 @@ pub fn compose_http_runtime(
                 config.database_file.as_path(),
             ),
         ),
-        runtime_identity: runtime_identity_service,
+        auth_token: identity.auth_token,
+        user_management: identity.user_management,
+        api_key: identity.api_key,
+        auth_activity: identity.auth_activity,
+        device_sync: identity.device_sync,
         operational_runtime: operational_runtime_service,
         operational_settings: operational_settings_service,
         opds_catalog: Arc::new(opds_catalog),
@@ -212,14 +215,14 @@ fn runtime_identity_key(database_file: &Path) -> String {
 fn preload_remember_me_runtime_settings(
     config: &RuntimeConfig,
     remember_me_runtime_key: &str,
-    runtime_identity: &dyn IdentityService,
+    auth_token: &dyn AuthTokenService,
 ) {
     let (remember_me_key, remember_me_duration_days) =
         operational_settings_access::load_remember_me_runtime_settings(
             config.database_file.as_path(),
         )
         .expect("remember-me startup settings should load");
-    runtime_identity.sync_remember_me_runtime_settings(
+    auth_token.sync_remember_me_runtime_settings(
         remember_me_runtime_key,
         remember_me_key.as_str(),
         remember_me_duration_days,

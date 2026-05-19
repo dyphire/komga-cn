@@ -75,9 +75,12 @@ pub struct AuthenticationActivityWriteInput {
     pub user_agent: Option<String>,
 }
 
+/// Session/token lifecycle. Owns auth token resolution, session/remember-me
+/// token issuance and invalidation, OAuth2 authorization state, and runtime
+/// settings sync for tokens.
 #[allow(clippy::too_many_arguments)]
 #[async_trait]
-pub trait IdentityService: Send + Sync {
+pub trait AuthTokenService: Send + Sync {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser>;
     fn auth_token_resolution(&self, headers: &HeaderMap) -> Option<ResolvedAuthToken>;
     fn session_token_for_user_with_runtime_key(&self, user: &AuthUser, runtime_key: &str)
@@ -108,6 +111,12 @@ pub trait IdentityService: Send + Sync {
         session_token: &str,
         registration_id: &str,
     ) -> Option<String>;
+}
+
+/// User CRUD plus credential-verification flows that lookup persisted users
+/// from request payloads.
+#[async_trait]
+pub trait UserManagementService: Send + Sync {
     async fn persisted_basic_user(&self, headers: &HeaderMap) -> Option<AuthOutcome>;
     async fn persisted_api_key_user(&self, headers: &HeaderMap) -> Option<AuthOutcome>;
     async fn persisted_api_key_user_by_token(&self, api_key: &str) -> Option<AuthOutcome>;
@@ -121,6 +130,27 @@ pub trait IdentityService: Send + Sync {
         user_id: &str,
         password: &str,
     ) -> Option<bool>;
+    async fn ensure_oauth_user(
+        &self,
+        email: &str,
+        allow_create: bool,
+    ) -> Result<Option<AuthUser>, sqlx::Error>;
+    fn configured_api_key(&self) -> Option<String>;
+    async fn create_auth_user(
+        &self,
+        input: CreateAuthUserInput,
+    ) -> Result<Option<AuthUser>, sqlx::Error>;
+    async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, sqlx::Error>;
+    async fn update_auth_user(
+        &self,
+        target_user_id: &str,
+        patch: UpdateAuthUserInput,
+    ) -> Result<UpdateAuthUserResult, sqlx::Error>;
+}
+
+/// Per-user API key CRUD.
+#[async_trait]
+pub trait ApiKeyService: Send + Sync {
     async fn persisted_create_api_key(
         &self,
         user_id: &str,
@@ -130,6 +160,11 @@ pub trait IdentityService: Send + Sync {
     async fn persisted_list_api_keys(&self, user_id: &str) -> Option<Vec<PersistedApiKey>>;
     async fn persisted_delete_api_key_by_id(&self, user_id: &str, api_key_id: &str)
     -> Option<bool>;
+}
+
+/// Authentication activity audit log.
+#[async_trait]
+pub trait AuthActivityService: Send + Sync {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
@@ -151,12 +186,14 @@ pub trait IdentityService: Send + Sync {
         user: &AuthUser,
         input: AuthenticationActivityWriteInput,
     ) -> Option<()>;
-    async fn ensure_oauth_user(
-        &self,
-        email: &str,
-        allow_create: bool,
-    ) -> Result<Option<AuthUser>, sqlx::Error>;
-    fn configured_api_key(&self) -> Option<String>;
+}
+
+/// Device-side sync surfaces consumed by Kobo, KOReader and read-progress
+/// handlers. Owns book/media lookup, sync points and read progress
+/// persistence used by external reading devices.
+#[allow(clippy::too_many_arguments)]
+#[async_trait]
+pub trait DeviceSyncService: Send + Sync {
     async fn load_book_created_timestamp(
         &self,
         book_id: &str,
@@ -214,17 +251,55 @@ pub trait IdentityService: Send + Sync {
         raw_sync_token: &str,
     ) -> Result<KoboStoreSyncMergeResult, ()>;
     async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), sqlx::Error>;
-    async fn create_auth_user(
-        &self,
-        input: CreateAuthUserInput,
-    ) -> Result<Option<AuthUser>, sqlx::Error>;
-    async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, sqlx::Error>;
-    async fn update_auth_user(
-        &self,
-        target_user_id: &str,
-        patch: UpdateAuthUserInput,
-    ) -> Result<UpdateAuthUserResult, sqlx::Error>;
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error>;
+}
+
+#[derive(Clone)]
+pub struct IdentityState {
+    pub auth_token: Arc<dyn AuthTokenService>,
+    pub user_management: Arc<dyn UserManagementService>,
+    pub api_key: Arc<dyn ApiKeyService>,
+    pub auth_activity: Arc<dyn AuthActivityService>,
+    pub device_sync: Arc<dyn DeviceSyncService>,
+}
+
+#[derive(Clone)]
+pub struct IdentityAccessState {
+    pub(crate) discovery_auth: DiscoveryAuthState,
+    pub(crate) auth_db: AuthDatabaseState,
+    pub(crate) operational: OperationalState,
+    pub(crate) identity: IdentityState,
+    pub(crate) server_settings: Arc<dyn ServerSettingsService>,
+    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
+    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
+    pub(crate) progress: komga_infrastructure::progress_writer::ProgressWriter,
+}
+
+impl FromRef<Arc<HttpAppState>> for IdentityState {
+    fn from_ref(app: &Arc<HttpAppState>) -> Self {
+        Self {
+            auth_token: app.services.auth_token.clone(),
+            user_management: app.services.user_management.clone(),
+            api_key: app.services.api_key.clone(),
+            auth_activity: app.services.auth_activity.clone(),
+            device_sync: app.services.device_sync.clone(),
+        }
+    }
+}
+
+impl FromRef<Arc<HttpAppState>> for IdentityAccessState {
+    fn from_ref(app: &Arc<HttpAppState>) -> Self {
+        Self {
+            discovery_auth: app.discovery_auth.clone(),
+            auth_db: app.auth_db.clone(),
+            operational: app.operational.clone(),
+            identity: IdentityState::from_ref(app),
+            server_settings: app.services.server_settings.clone(),
+            reader: app.services.media_reader.clone(),
+            content: app.services.content_resolver.clone(),
+            progress: app.services.progress_writer.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -246,51 +321,18 @@ fn test_state() -> &'static Mutex<RuntimeIdentityAccessTestState> {
 
 #[cfg(test)]
 #[derive(Clone, Default)]
-struct TestIdentityService;
-
-#[derive(Clone)]
-pub struct IdentityState {
-    pub service: Arc<dyn IdentityService>,
-}
-
-#[derive(Clone)]
-pub struct IdentityAccessState {
-    pub(crate) discovery_auth: DiscoveryAuthState,
-    pub(crate) auth_db: AuthDatabaseState,
-    pub(crate) operational: OperationalState,
-    pub(crate) identity: IdentityState,
-    pub(crate) server_settings: Arc<dyn ServerSettingsService>,
-    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
-    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
-    pub(crate) progress: komga_infrastructure::progress_writer::ProgressWriter,
-}
-
-impl FromRef<Arc<HttpAppState>> for IdentityState {
-    fn from_ref(app: &Arc<HttpAppState>) -> Self {
-        Self {
-            service: app.services.runtime_identity.clone(),
-        }
-    }
-}
-
-impl FromRef<Arc<HttpAppState>> for IdentityAccessState {
-    fn from_ref(app: &Arc<HttpAppState>) -> Self {
-        Self {
-            discovery_auth: app.discovery_auth.clone(),
-            auth_db: app.auth_db.clone(),
-            operational: app.operational.clone(),
-            identity: IdentityState::from_ref(app),
-            server_settings: app.services.server_settings.clone(),
-            reader: app.services.media_reader.clone(),
-            content: app.services.content_resolver.clone(),
-            progress: app.services.progress_writer.clone(),
-        }
-    }
-}
+pub(crate) struct TestIdentityService;
 
 #[cfg(test)]
-pub(crate) fn default_test_identity_service() -> Arc<dyn IdentityService> {
-    Arc::new(TestIdentityService)
+pub(crate) fn default_test_identity_state() -> IdentityState {
+    let service = Arc::new(TestIdentityService);
+    IdentityState {
+        auth_token: service.clone(),
+        user_management: service.clone(),
+        api_key: service.clone(),
+        auth_activity: service.clone(),
+        device_sync: service,
+    }
 }
 
 #[cfg(test)]
@@ -308,7 +350,7 @@ pub(crate) fn seed_koreader_book_target(
 
 #[cfg(test)]
 #[async_trait::async_trait]
-impl IdentityService for TestIdentityService {
+impl AuthTokenService for TestIdentityService {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser> {
         self.auth_token_resolution(headers)
             .map(|resolved| resolved.user)
@@ -414,7 +456,11 @@ impl IdentityService for TestIdentityService {
                 registration_id.to_string(),
             ))
     }
+}
 
+#[cfg(test)]
+#[async_trait::async_trait]
+impl UserManagementService for TestIdentityService {
     async fn persisted_basic_user(&self, _headers: &HeaderMap) -> Option<AuthOutcome> {
         Some(AuthOutcome::Missing)
     }
@@ -440,6 +486,40 @@ impl IdentityService for TestIdentityService {
     ) -> Option<bool> {
         Some(false)
     }
+    async fn ensure_oauth_user(
+        &self,
+        _email: &str,
+        _allow_create: bool,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        Ok(None)
+    }
+    fn configured_api_key(&self) -> Option<String> {
+        None
+    }
+    async fn create_auth_user(
+        &self,
+        _input: CreateAuthUserInput,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        Ok(None)
+    }
+    async fn delete_auth_user(&self, _target_user_id: &str) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+    async fn update_auth_user(
+        &self,
+        _target_user_id: &str,
+        _patch: UpdateAuthUserInput,
+    ) -> Result<UpdateAuthUserResult, sqlx::Error> {
+        Ok(UpdateAuthUserResult {
+            updated: false,
+            expire_sessions: false,
+        })
+    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl ApiKeyService for TestIdentityService {
     async fn persisted_create_api_key(
         &self,
         _user_id: &str,
@@ -464,6 +544,11 @@ impl IdentityService for TestIdentityService {
     ) -> Option<bool> {
         Some(false)
     }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl AuthActivityService for TestIdentityService {
     async fn persisted_list_authentication_activity(
         &self,
         _user_id: Option<&str>,
@@ -495,16 +580,11 @@ impl IdentityService for TestIdentityService {
     ) -> Option<()> {
         Some(())
     }
-    async fn ensure_oauth_user(
-        &self,
-        _email: &str,
-        _allow_create: bool,
-    ) -> Result<Option<AuthUser>, sqlx::Error> {
-        Ok(None)
-    }
-    fn configured_api_key(&self) -> Option<String> {
-        None
-    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl DeviceSyncService for TestIdentityService {
     async fn load_book_created_timestamp(
         &self,
         _book_id: &str,
@@ -607,25 +687,6 @@ impl IdentityService for TestIdentityService {
     }
     async fn remove_sync_point(&self, _sync_point_id: &str) -> Result<(), sqlx::Error> {
         Ok(())
-    }
-    async fn create_auth_user(
-        &self,
-        _input: CreateAuthUserInput,
-    ) -> Result<Option<AuthUser>, sqlx::Error> {
-        Ok(None)
-    }
-    async fn delete_auth_user(&self, _target_user_id: &str) -> Result<bool, sqlx::Error> {
-        Ok(false)
-    }
-    async fn update_auth_user(
-        &self,
-        _target_user_id: &str,
-        _patch: UpdateAuthUserInput,
-    ) -> Result<UpdateAuthUserResult, sqlx::Error> {
-        Ok(UpdateAuthUserResult {
-            updated: false,
-            expire_sessions: false,
-        })
     }
     async fn open_auth_pool(&self) -> Result<SqlitePool, sqlx::Error> {
         Err(sqlx::Error::PoolClosed)

@@ -4,7 +4,7 @@ pub(super) use crate::identity_access::auth::{
 };
 
 pub(super) async fn record_successful_api_key_authentication_by_token(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
     user: &AuthUser,
@@ -30,7 +30,7 @@ pub(super) async fn record_successful_api_key_authentication_by_token(
 }
 
 pub(super) async fn api_key_metadata_by_token(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     api_key: &str,
 ) -> Option<(String, String)> {
     let mut metadata_headers = HeaderMap::new();

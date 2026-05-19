@@ -9,7 +9,7 @@ use crate::state::MediaAssetsState;
 use axum::extract::State;
 
 fn request_progress_token(
-    identity: &dyn crate::state::IdentityService,
+    identity: &crate::state::IdentityState,
     headers: &HeaderMap,
     user: &AuthUser,
 ) -> String {
@@ -93,7 +93,7 @@ pub async fn book_read_progress(
         Err(error) => return internal_error_response(error),
     };
 
-    let token = request_progress_token(&*app.identity.service, &headers, &user);
+    let token = request_progress_token(&app.identity, &headers, &user);
 
     let page_value = payload.get("page");
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
@@ -176,7 +176,7 @@ pub async fn book_read_progress_delete(
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
-    let token = request_progress_token(&*app.identity.service, &headers, &user);
+    let token = request_progress_token(&app.identity, &headers, &user);
     {
         let mut all_progress = app
             .read_progress

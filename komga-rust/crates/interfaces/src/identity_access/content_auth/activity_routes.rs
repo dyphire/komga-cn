@@ -9,7 +9,7 @@ pub(crate) async fn users_me_api_keys_create(
     app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -55,7 +55,7 @@ pub(crate) async fn users_me_api_keys_list(
     app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -91,7 +91,7 @@ pub(crate) async fn users_me_api_keys_delete(
     Path(api_key_id): Path<String>,
     app: &IdentityAccessState,
 ) -> Response {
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -110,7 +110,7 @@ pub(crate) async fn users_me_authentication_activity(
     app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -136,7 +136,7 @@ pub(crate) async fn users_authentication_activity(
     uri: Uri,
     app: &IdentityAccessState,
 ) -> Response {
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -159,7 +159,7 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
     uri: Uri,
     app: &IdentityAccessState,
 ) -> Response {
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };

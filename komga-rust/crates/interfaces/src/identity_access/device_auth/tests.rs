@@ -488,9 +488,9 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
 
 #[tokio::test]
 async fn kobo_ping_rejects_requests_without_valid_auth() {
-    let identity = default_test_identity_service();
+    let identity = default_test_identity_state();
     let response = kobo_ping_for_tests(
-        &*identity,
+        &identity,
         "invalid-token",
         RequestConnectionInfo::default(),
         HeaderMap::new(),

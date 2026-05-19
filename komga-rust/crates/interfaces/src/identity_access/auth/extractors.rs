@@ -51,8 +51,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let Some(user) = resolved_request_auth_user(&*identity.service, &parts.headers).await
-        else {
+        let Some(user) = resolved_request_auth_user(&identity, &parts.headers).await else {
             return Err(StatusCode::UNAUTHORIZED.into_response());
         };
         Ok(Self(user))

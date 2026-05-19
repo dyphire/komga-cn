@@ -9,7 +9,7 @@ use super::context::{
 use super::principal::{DiscoveryPrincipal, principal_from_user_payload};
 use super::utils::session_token_from_headers;
 use crate::identity_access::auth::{resolved_request_auth_user, user_payload_json};
-use crate::state::IdentityService;
+use crate::state::IdentityState;
 
 const DISCOVERY_PRINCIPAL_TTL_SECONDS: u64 = 30 * 60;
 const DISCOVERY_PRINCIPAL_CACHE_MAX_ENTRIES: usize = 1024;
@@ -121,7 +121,7 @@ impl DiscoveryAuthState {
 
     async fn request_principal(
         &self,
-        identity: &dyn IdentityService,
+        identity: &IdentityState,
         headers: &HeaderMap,
     ) -> Option<DiscoveryPrincipal> {
         let user = resolved_request_auth_user(identity, headers).await?;
@@ -137,7 +137,7 @@ impl DiscoveryAuthState {
 
     pub async fn resolve_query_context_with_persistence(
         &self,
-        identity: &dyn IdentityService,
+        identity: &IdentityState,
         headers: &HeaderMap,
         requested_library_ids: Option<&[String]>,
     ) -> Option<DiscoveryQueryContext> {
@@ -151,7 +151,7 @@ impl DiscoveryAuthState {
 
     pub async fn resolve_detail_query_context_with_persistence(
         &self,
-        identity: &dyn IdentityService,
+        identity: &IdentityState,
         headers: &HeaderMap,
         detail: &DetailResourceContext,
     ) -> Result<DiscoveryQueryContext, DetailAccessDenial> {

@@ -26,7 +26,7 @@ async fn load_thumbnail_by_id(
     thumbnail_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_thumbnail_by_id(thumbnail_id)
         .await
 }
@@ -36,7 +36,7 @@ async fn load_kobo_metadata_record(
     book_id: &str,
 ) -> Result<Option<crate::state::KoboMetadataRecord>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_kobo_metadata_record(book_id)
         .await
 }
@@ -47,7 +47,7 @@ async fn load_read_progress(
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_read_progress(book_id, user_id)
         .await
 }
@@ -56,7 +56,10 @@ async fn persisted_book_exists(
     app: &IdentityAccessState,
     book_id: &str,
 ) -> Result<bool, sqlx::Error> {
-    app.identity.service.persisted_book_exists(book_id).await
+    app.identity
+        .device_sync
+        .persisted_book_exists(book_id)
+        .await
 }
 
 async fn load_book_created_timestamp(
@@ -64,7 +67,7 @@ async fn load_book_created_timestamp(
     book_id: &str,
 ) -> Result<Option<String>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_book_created_timestamp(book_id)
         .await
 }
@@ -74,7 +77,7 @@ async fn load_book_last_epub_position_locator(
     book_id: &str,
 ) -> Result<Option<Value>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_book_last_epub_position_locator(book_id)
         .await
 }
@@ -89,7 +92,7 @@ async fn load_kobo_sync_page(
     limit: usize,
 ) -> Result<komga_application::identity_access::KoboSyncPage, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_kobo_sync_page(
             current_user,
             user_id,
@@ -108,7 +111,7 @@ async fn proxy_kobo_store_library_sync(
     raw_store_sync_token: &str,
 ) -> Result<komga_application::identity_access::KoboStoreSyncMergeResult, ()> {
     app.identity
-        .service
+        .device_sync
         .proxy_kobo_store_library_sync(
             &headers
                 .iter()
@@ -129,7 +132,10 @@ async fn remove_sync_point(
     app: &IdentityAccessState,
     sync_point_id: &str,
 ) -> Result<(), sqlx::Error> {
-    app.identity.service.remove_sync_point(sync_point_id).await
+    app.identity
+        .device_sync
+        .remove_sync_point(sync_point_id)
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -143,9 +149,7 @@ async fn kobo_book_thumbnail_response(
     width: &str,
     height: &str,
 ) -> Response {
-    if let Err(status) =
-        required_kobo_user(&*app.identity.service, auth_token, headers, remote_addr).await
-    {
+    if let Err(status) = required_kobo_user(&app.identity, auth_token, headers, remote_addr).await {
         return status.into_response();
     }
 
@@ -373,7 +377,7 @@ pub async fn kobo_library_sync(
     uri: axum::http::Uri,
 ) -> Response {
     let current_user = match required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -385,7 +389,7 @@ pub async fn kobo_library_sync(
     };
     let user_id_value = user_id(&current_user);
     let current_api_key_id = resolved_kobo_request_api_key_metadata(
-        &*app.identity.service,
+        &app.identity,
         &current_user,
         auth_token.as_str(),
         &headers,
@@ -513,7 +517,7 @@ pub async fn kobo_library_book_metadata(
     uri: axum::http::Uri,
 ) -> Response {
     if let Err(status) = required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -647,7 +651,7 @@ pub async fn kobo_library_book_state(
     uri: axum::http::Uri,
 ) -> Response {
     let current_user = match required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -708,7 +712,7 @@ pub async fn kobo_library_book_state_update(
     body: Bytes,
 ) -> Response {
     let current_user = match required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -818,7 +822,7 @@ pub async fn kobo_library_book_state_update(
     }
 
     let (device_id, device_name) = resolved_kobo_request_api_key_metadata(
-        &*app.identity.service,
+        &app.identity,
         &current_user,
         auth_token.as_str(),
         &headers,
@@ -893,7 +897,7 @@ pub async fn kobo_book_file_epub(
     Query(query): Query<KoboBookFileQuery>,
 ) -> Response {
     let current_user = match required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -1029,7 +1033,7 @@ pub async fn kobo_catch_all(
     body: Bytes,
 ) -> Response {
     if let Err(status) = required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),

@@ -100,7 +100,7 @@ async fn series_feed(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.identity.service,
+            &app.identity,
             &headers,
             requested_library_ids.as_deref(),
         )
@@ -166,7 +166,7 @@ pub async fn series_deprecated_get(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.identity.service,
+            &app.identity,
             &headers,
             requested_library_ids.as_deref(),
         )
@@ -210,7 +210,7 @@ pub async fn series_alphabetical_groups(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -246,7 +246,7 @@ pub async fn series_list(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(ctx) => ctx,

@@ -50,7 +50,6 @@ struct PersistedCollectionMembership {
     series_ids: Vec<String>,
 }
 
-
 async fn load_series_books_for_refresh(
     pool: &SqlitePool,
     series_id: &str,

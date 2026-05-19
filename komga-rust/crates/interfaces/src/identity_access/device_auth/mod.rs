@@ -28,9 +28,9 @@ use crate::identity_access::auth::{
 };
 use crate::request_urls::{request_base_url, request_base_url_with_port, request_context_path};
 #[cfg(test)]
-use crate::state::default_test_identity_service;
+use crate::state::default_test_identity_state;
 use crate::state::{
-    IdentityAccessState, IdentityService, KoreaderBookLookupError, KoreaderBookTarget,
+    IdentityAccessState, IdentityState, KoreaderBookLookupError, KoreaderBookTarget,
     PersistedReadProgressRecord,
 };
 
@@ -60,14 +60,15 @@ pub(crate) async fn load_koreader_book_target_for_tests(
     _database_file: &FsPath,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    default_test_identity_service()
+    default_test_identity_state()
+        .device_sync
         .load_koreader_book_target(book_hash)
         .await
 }
 
 #[cfg(test)]
 pub(crate) async fn kobo_ping_for_tests(
-    identity: &dyn crate::state::IdentityService,
+    identity: &crate::state::IdentityState,
     auth_token: &str,
     connection_info: RequestConnectionInfo,
     headers: HeaderMap,

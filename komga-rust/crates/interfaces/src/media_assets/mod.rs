@@ -96,11 +96,7 @@ async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id
         return requested_book_id.to_string();
     }
 
-    match app
-        .book_access
-        .load_book_id_by_sorted_position(index)
-        .await
-    {
+    match app.book_access.load_book_id_by_sorted_position(index).await {
         Ok(Some(book_id)) => book_id,
         _ => requested_book_id.to_string(),
     }

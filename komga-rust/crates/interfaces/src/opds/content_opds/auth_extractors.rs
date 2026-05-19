@@ -42,7 +42,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let Some(user) = resolved_auth_user(&*identity.service, &parts.headers) else {
+        let Some(user) = resolved_auth_user(&identity, &parts.headers) else {
             return Err(opds_v1_basic_unauthorized_response());
         };
         Ok(Self(user))
@@ -58,7 +58,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let Some(user) = resolved_auth_user(&*identity.service, &parts.headers) else {
+        let Some(user) = resolved_auth_user(&identity, &parts.headers) else {
             return Err(opds_catalog_unauthorized_response(&parts.headers));
         };
         Ok(Self(user))

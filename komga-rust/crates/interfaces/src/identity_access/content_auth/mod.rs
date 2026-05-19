@@ -28,7 +28,7 @@ use crate::identity_access::auth::{
     unauthorized_json_response, user_id, user_is_admin, user_payload_json,
 };
 use crate::operational::register_session_expired_event;
-use crate::state::{IdentityAccessState, IdentityService};
+use crate::state::{IdentityAccessState, IdentityState};
 use komga_application::identity_access::{
     AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
 };
@@ -44,7 +44,7 @@ use activity_routes::{
 use helpers::*;
 
 fn expire_user_sessions_for_runtime_key(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     user_id: &str,
     runtime_key: &str,
 ) {
@@ -54,7 +54,7 @@ fn expire_user_sessions_for_runtime_key(
 
 pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let auth_state = &app.discovery_auth;
     let uri = request.uri().clone();
     let headers = request.headers().clone();
@@ -211,10 +211,7 @@ pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Res
     }
 }
 
-pub(super) async fn login_set_cookie(
-    identity: &dyn IdentityService,
-    headers: HeaderMap,
-) -> Response {
+pub(super) async fn login_set_cookie(identity: &IdentityState, headers: HeaderMap) -> Response {
     if resolved_auth_user(identity, &headers).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -239,9 +236,7 @@ pub(super) async fn login_set_cookie(
 }
 
 pub(super) async fn users_list(app: &IdentityAccessState) -> Response {
-    let users = persisted_users(&*app.identity.service)
-        .await
-        .unwrap_or_default();
+    let users = persisted_users(&app.identity).await.unwrap_or_default();
 
     Json(users.iter().map(user_payload_json).collect::<Vec<_>>()).into_response()
 }
@@ -310,7 +305,7 @@ pub(super) async fn users_create(
 
     match app
         .identity
-        .service
+        .user_management
         .create_auth_user(CreateAuthUserInput {
             user_id: new_user_id,
             email: email.to_string(),
@@ -356,10 +351,15 @@ pub(super) async fn users_delete(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match app.identity.service.delete_auth_user(&target_user_id).await {
+    match app
+        .identity
+        .user_management
+        .delete_auth_user(&target_user_id)
+        .await
+    {
         Ok(true) => {
             expire_user_sessions_for_runtime_key(
-                &*app.identity.service,
+                &app.identity,
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -439,7 +439,7 @@ pub(super) async fn users_update(
 
     match app
         .identity
-        .service
+        .user_management
         .update_auth_user(
             &target_user_id,
             UpdateAuthUserInput {
@@ -466,7 +466,7 @@ pub(super) async fn users_update(
         Ok(result) => {
             if result.expire_sessions {
                 expire_user_sessions_for_runtime_key(
-                    &*app.identity.service,
+                    &app.identity,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -477,7 +477,7 @@ pub(super) async fn users_update(
     }
 }
 
-pub(super) async fn logout(identity: &dyn IdentityService, headers: HeaderMap) -> Response {
+pub(super) async fn logout(identity: &IdentityState, headers: HeaderMap) -> Response {
     if resolved_auth_user(identity, &headers).is_none() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -500,7 +500,7 @@ pub(super) async fn users_me_password(
     app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -527,7 +527,7 @@ pub(super) async fn users_by_id_password(
     app: &IdentityAccessState,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let identity = &*app.identity.service;
+    let identity = &app.identity;
     let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -674,12 +674,12 @@ pub(crate) async fn login_set_cookie_route(
     State(app): State<IdentityAccessState>,
     headers: HeaderMap,
 ) -> Response {
-    login_set_cookie(&*app.identity.service, headers).await
+    login_set_cookie(&app.identity, headers).await
 }
 
 pub(crate) async fn logout_route(
     State(app): State<IdentityAccessState>,
     headers: HeaderMap,
 ) -> Response {
-    logout(&*app.identity.service, headers).await
+    logout(&app.identity, headers).await
 }

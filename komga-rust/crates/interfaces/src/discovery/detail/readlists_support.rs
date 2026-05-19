@@ -99,9 +99,7 @@ pub async fn load_persisted_book_authors(
     app: &DiscoveryState,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    app.book_access
-        .load_persisted_book_authors(book_id)
-        .await
+    app.book_access.load_persisted_book_authors(book_id).await
 }
 
 pub(super) async fn load_persisted_readlist_detail(
@@ -551,7 +549,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
 ) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
     let auth_state = &app.discovery_auth;
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(&*app.identity.service, headers, None)
+        .resolve_query_context_with_persistence(&app.identity, headers, None)
         .await
     else {
         return Ok(None);
@@ -600,11 +598,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
             }),
         };
         let detail_query_context = match auth_state
-            .resolve_detail_query_context_with_persistence(
-                &*app.identity.service,
-                headers,
-                &detail_context,
-            )
+            .resolve_detail_query_context_with_persistence(&app.identity, headers, &detail_context)
             .await
         {
             Ok(context) => context,

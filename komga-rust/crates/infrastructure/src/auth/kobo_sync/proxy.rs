@@ -1,4 +1,6 @@
-use komga_application::identity_access::{KoboStoreSyncMergeResult, decode_or_passthrough_sync_token};
+use komga_application::identity_access::{
+    KoboStoreSyncMergeResult, decode_or_passthrough_sync_token,
+};
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
 

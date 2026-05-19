@@ -32,7 +32,7 @@ fn decoded_collection_id(query: &str) -> Option<String> {
 
 #[allow(clippy::result_large_err)]
 async fn resolve_query_context_or_unauthorized(
-    identity: &dyn crate::state::IdentityService,
+    identity: &crate::state::IdentityState,
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
     requested_library_ids: Option<&[String]>,
@@ -50,7 +50,7 @@ struct CollectionFacetScope {
 
 #[allow(clippy::result_large_err)]
 async fn resolve_collection_facet_scope(
-    identity: &dyn crate::state::IdentityService,
+    identity: &crate::state::IdentityState,
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
     query: &str,
@@ -82,7 +82,7 @@ pub async fn authors_names(
         .map(decode_query_component)
         .unwrap_or_default();
     let context = match resolve_query_context_or_unauthorized(
-        &*app.identity.service,
+        &app.identity,
         &app.discovery_auth,
         &headers,
         None,
@@ -110,7 +110,7 @@ pub async fn authors_roles(
 ) -> Response {
     let app = &app;
     let context = match resolve_query_context_or_unauthorized(
-        &*app.identity.service,
+        &app.identity,
         &app.discovery_auth,
         &headers,
         None,
@@ -150,7 +150,7 @@ pub(crate) async fn authors_deprecated_get(
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
     let context = match resolve_query_context_or_unauthorized(
-        &*app.identity.service,
+        &app.identity,
         &app.discovery_auth,
         &headers,
         library_id.as_ref().map(std::slice::from_ref),
@@ -226,7 +226,7 @@ pub async fn authors_v2(
         .max(1);
     let unpaged = query_bool(query, "unpaged");
     let context = match resolve_query_context_or_unauthorized(
-        &*app.identity.service,
+        &app.identity,
         &app.discovery_auth,
         &headers,
         (!library_ids.is_empty()).then_some(library_ids.as_slice()),
@@ -278,17 +278,13 @@ async fn collection_facet_handler(
     kind: FacetKind,
 ) -> Response {
     let query = uri.query().unwrap_or_default();
-    let scope = match resolve_collection_facet_scope(
-        &*app.identity.service,
-        &app.discovery_auth,
-        headers,
-        query,
-    )
-    .await
-    {
-        Ok(scope) => scope,
-        Err(response) => return response,
-    };
+    let scope =
+        match resolve_collection_facet_scope(&app.identity, &app.discovery_auth, headers, query)
+            .await
+        {
+            Ok(scope) => scope,
+            Err(response) => return response,
+        };
 
     let domain_context = to_domain_query_context(scope.context.clone());
     let facet_scope = FacetScope {

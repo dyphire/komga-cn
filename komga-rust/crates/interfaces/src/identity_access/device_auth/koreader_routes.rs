@@ -87,7 +87,7 @@ async fn load_koreader_book_target(
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
     app.identity
-        .service
+        .device_sync
         .load_koreader_book_target(book_hash)
         .await
 }
@@ -98,7 +98,7 @@ async fn load_read_progress(
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_read_progress(book_id, user_id)
         .await
 }
@@ -109,12 +109,8 @@ pub async fn koreader_user_create(
     headers: HeaderMap,
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
-    if let Err(status) = required_koreader_user(
-        &*app.identity.service,
-        &headers,
-        connection_info.remote_addr(),
-    )
-    .await
+    if let Err(status) =
+        required_koreader_user(&app.identity, &headers, connection_info.remote_addr()).await
     {
         return koreader_auth_failure(status, header_user_presented);
     }
@@ -141,13 +137,7 @@ pub async fn koreader_user_auth(
     headers: HeaderMap,
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
-    match required_koreader_user(
-        &*app.identity.service,
-        &headers,
-        connection_info.remote_addr(),
-    )
-    .await
-    {
+    match required_koreader_user(&app.identity, &headers, connection_info.remote_addr()).await {
         Ok(_) => {}
         Err(status) => return koreader_auth_failure(status, header_user_presented),
     }
@@ -170,16 +160,13 @@ pub async fn koreader_get_progress(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    let user_id_value = match required_koreader_user_id(
-        &*app.identity.service,
-        &headers,
-        connection_info.remote_addr(),
-    )
-    .await
-    {
-        Ok(user_id_value) => user_id_value,
-        Err(status) => return status.into_response(),
-    };
+    let user_id_value =
+        match required_koreader_user_id(&app.identity, &headers, connection_info.remote_addr())
+            .await
+        {
+            Ok(user_id_value) => user_id_value,
+            Err(status) => return status.into_response(),
+        };
 
     let target = match load_koreader_book_target(&app, &book_hash).await {
         Ok(Some(target)) => target,
@@ -323,16 +310,13 @@ pub async fn koreader_put_progress(
 ) -> Response {
     let header_user_presented = raw_koreader_header_user(&headers).is_some();
 
-    let user_id_value = match required_koreader_user_id(
-        &*app.identity.service,
-        &headers,
-        connection_info.remote_addr(),
-    )
-    .await
-    {
-        Ok(user_id_value) => user_id_value,
-        Err(status) => return koreader_auth_failure(status, header_user_presented),
-    };
+    let user_id_value =
+        match required_koreader_user_id(&app.identity, &headers, connection_info.remote_addr())
+            .await
+        {
+            Ok(user_id_value) => user_id_value,
+            Err(status) => return koreader_auth_failure(status, header_user_presented),
+        };
 
     let Ok(payload) = serde_json::from_slice::<KoreaderProgressPayload>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();

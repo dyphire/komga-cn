@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, StatusCode};
 use std::net::SocketAddr;
 
 pub(super) async fn required_kobo_user(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
@@ -41,7 +41,7 @@ pub(super) fn valid_kobo_path_token(token: &str) -> bool {
 }
 
 pub(super) async fn required_koreader_user(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
 ) -> Result<AuthUser, StatusCode> {
@@ -57,7 +57,7 @@ pub(super) async fn required_koreader_user(
 }
 
 pub(super) async fn required_koreader_user_id(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
 ) -> Result<String, StatusCode> {
@@ -67,7 +67,7 @@ pub(super) async fn required_koreader_user_id(
 }
 
 pub(super) async fn presented_koreader_api_key_user(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
 ) -> Result<Option<AuthUser>, StatusCode> {
@@ -92,7 +92,7 @@ pub(super) async fn presented_koreader_api_key_user(
 }
 
 fn session_user_with_role(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
     required_role: &str,
 ) -> Result<AuthUser, StatusCode> {

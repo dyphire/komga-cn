@@ -35,11 +35,7 @@ pub async fn series_detail(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,
@@ -72,7 +68,7 @@ pub async fn series_collections(
 
     let Some(context) = app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -94,11 +90,7 @@ pub async fn series_collections(
 
     match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(_) => match load_persisted_series_collections(app, &series_id).await {

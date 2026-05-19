@@ -4,12 +4,12 @@ use std::path::Path;
 
 use komga_application::media_assets::{BookMetadataAuthor, BookMetadataLink};
 
+use super::readlist::ComicInfoReadListEntry;
 use super::support::{
     canonicalize_string_set, compute_series_from_series_and_volume, dedupe_strings_preserve_order,
     extract_xml_tag, is_valid_calendar_date, normalize_comicinfo_age_rating, normalize_isbn13,
     normalize_optional_bcp47_language, split_comicinfo_list,
 };
-use super::readlist::ComicInfoReadListEntry;
 use super::{BookMetadataImportPatch, SeriesMetadataImportPatch};
 
 pub(super) fn extract_comicinfo_book_patch(xml: &str) -> BookMetadataImportPatch {

@@ -47,7 +47,7 @@ pub async fn oauth2_authorization(
     let session_token = existing_session_token
         .clone()
         .unwrap_or_else(issue_oauth2_session_token);
-    app.identity.service.store_oauth2_authorization_state(
+    app.identity.auth_token.store_oauth2_authorization_state(
         &state.remember_me_runtime_key,
         &session_token,
         &client.registration_id,
@@ -142,7 +142,7 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-    let Some(expected_state) = app.identity.service.take_oauth2_authorization_state(
+    let Some(expected_state) = app.identity.auth_token.take_oauth2_authorization_state(
         &auth_db.session_runtime_key,
         &session_token,
         &registration_id,
@@ -266,7 +266,7 @@ pub async fn oauth2_login_code(
     let allow_create = oauth2_account_creation_enabled(&app).await;
     let user = match app
         .identity
-        .service
+        .user_management
         .ensure_oauth_user(&email, allow_create)
         .await
     {
@@ -287,7 +287,7 @@ pub async fn oauth2_login_code(
 
     let source = format!("OAuth2:{client_name}");
     let _ = persisted_record_successful_authentication_activity(
-        &*app.identity.service,
+        &app.identity,
         &user,
         authentication_activity_write_input(
             &authentication_activity_headers_metadata_with_remote_addr(
@@ -302,7 +302,7 @@ pub async fn oauth2_login_code(
     .await;
 
     let session_token = session_token_for_user_with_runtime_key(
-        &*app.identity.service,
+        &app.identity,
         &user,
         auth_db.session_runtime_key.as_str(),
     );
@@ -630,7 +630,7 @@ async fn oauth2_login_error_response(
     let source = format!("OAuth2:{client_name}");
     let _ = app
         .identity
-        .service
+        .auth_activity
         .persisted_record_failed_authentication_activity(
             email,
             authentication_activity_write_input(

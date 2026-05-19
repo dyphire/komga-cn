@@ -59,11 +59,7 @@ pub async fn readlists(
 
     let requested_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            library_ids.as_deref(),
-        )
+        .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
         .await
     {
         Some(context) => context,
@@ -71,7 +67,7 @@ pub async fn readlists(
     };
     let visibility_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -551,7 +547,7 @@ pub async fn readlist_books(
     let Some(context) = app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.identity.service,
+            &app.identity,
             &headers,
             query.library_ids.as_deref(),
         )
@@ -590,7 +586,7 @@ pub async fn readlist_detail(
 ) -> Response {
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -697,7 +693,7 @@ async fn sibling_response(
     };
 
     let Some(context) = auth_state
-        .resolve_query_context_with_persistence(&*app.identity.service, headers, None)
+        .resolve_query_context_with_persistence(&app.identity, headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();

@@ -7,7 +7,7 @@ mod user;
 use axum::http::HeaderMap;
 
 use crate::access_log;
-use crate::state::IdentityService;
+use crate::state::IdentityState;
 
 pub use crate::state::AuthenticationActivityWriteInput;
 pub use extractors::{Admin, Authenticated, FileDownload};
@@ -47,15 +47,15 @@ fn record_resolved_auth_user(auth_user: Option<AuthUser>) -> Option<AuthUser> {
     auth_user
 }
 
-pub fn resolved_auth_user(identity: &dyn IdentityService, headers: &HeaderMap) -> Option<AuthUser> {
+pub fn resolved_auth_user(identity: &IdentityState, headers: &HeaderMap) -> Option<AuthUser> {
     resolved_auth_token(identity, headers).map(|resolved| resolved.user)
 }
 
 pub fn resolved_auth_token(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<komga_application::identity_access::ResolvedAuthToken> {
-    let resolved = identity.auth_token_resolution(headers);
+    let resolved = identity.auth_token.auth_token_resolution(headers);
     access_log::record_resolved_auth_user_id(
         resolved.as_ref().map(|resolved| user_id(&resolved.user)),
     );
@@ -63,7 +63,7 @@ pub fn resolved_auth_token(
 }
 
 pub async fn resolved_request_auth_user(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<AuthUser> {
     let auth_user = match persisted_api_key_user(identity, headers)
@@ -72,7 +72,7 @@ pub async fn resolved_request_auth_user(
     {
         AuthOutcome::Valid(user) => Some(*user),
         AuthOutcome::Invalid => None,
-        AuthOutcome::Missing => match identity.auth_token_user(headers) {
+        AuthOutcome::Missing => match identity.auth_token.auth_token_user(headers) {
             Some(user) => Some(user),
             None => match persisted_basic_user(identity, headers)
                 .await
@@ -88,46 +88,54 @@ pub async fn resolved_request_auth_user(
 }
 
 pub fn sync_remember_me_runtime_settings(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     runtime_key: &str,
     key: &str,
     duration_days: u64,
 ) {
-    identity.sync_remember_me_runtime_settings(runtime_key, key, duration_days)
+    identity
+        .auth_token
+        .sync_remember_me_runtime_settings(runtime_key, key, duration_days)
 }
 
-pub fn sync_remember_me_runtime_database_file(identity: &dyn IdentityService, runtime_key: &str) {
-    identity.sync_remember_me_runtime_database_file(runtime_key);
+pub fn sync_remember_me_runtime_database_file(identity: &IdentityState, runtime_key: &str) {
+    identity
+        .auth_token
+        .sync_remember_me_runtime_database_file(runtime_key);
 }
 
 pub fn sync_session_runtime_settings(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     runtime_key: &str,
     max_inactive_seconds: u64,
 ) {
-    identity.sync_session_runtime_settings(runtime_key, max_inactive_seconds);
+    identity
+        .auth_token
+        .sync_session_runtime_settings(runtime_key, max_inactive_seconds);
 }
 
-pub fn remember_me_max_age_seconds(identity: &dyn IdentityService, runtime_key: &str) -> u64 {
-    identity.remember_me_max_age_seconds(runtime_key)
+pub fn remember_me_max_age_seconds(identity: &IdentityState, runtime_key: &str) -> u64 {
+    identity.auth_token.remember_me_max_age_seconds(runtime_key)
 }
 
-pub fn invalidate_user_sessions(identity: &dyn IdentityService, user_id: &str) {
-    identity.invalidate_user_sessions(user_id);
+pub fn invalidate_user_sessions(identity: &IdentityState, user_id: &str) {
+    identity.auth_token.invalidate_user_sessions(user_id);
 }
 
 pub fn invalidate_user_sessions_for_runtime_key(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     user_id: &str,
     runtime_key: &str,
 ) {
-    identity.invalidate_user_sessions_with_runtime_key(user_id, runtime_key);
+    identity
+        .auth_token
+        .invalidate_user_sessions_with_runtime_key(user_id, runtime_key);
 }
 
-pub fn invalidate_session_token(identity: &dyn IdentityService, token: &str) {
-    identity.invalidate_session_token(token);
+pub fn invalidate_session_token(identity: &IdentityState, token: &str) {
+    identity.auth_token.invalidate_session_token(token);
 }
 
-pub fn invalidate_remember_me_token(identity: &dyn IdentityService, token: &str) {
-    identity.invalidate_remember_me_token(token);
+pub fn invalidate_remember_me_token(identity: &IdentityState, token: &str) {
+    identity.auth_token.invalidate_remember_me_token(token);
 }

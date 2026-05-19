@@ -87,8 +87,6 @@ pub fn infer_transient_comicinfo_provider_metadata(
     }
 }
 
-
-
 pub async fn refresh_book_metadata(
     pool: &SqlitePool,
     book_id: &str,
@@ -146,7 +144,8 @@ pub async fn refresh_book_metadata(
                     if import_comicinfo_readlist {
                         for readlist in extract_comicinfo_readlists(&xml) {
                             if let Some(readlist_id) =
-                                readlist::upsert_comicinfo_readlist(pool, &book_id, readlist).await?
+                                readlist::upsert_comicinfo_readlist(pool, &book_id, readlist)
+                                    .await?
                             {
                                 changed_readlist_ids.insert(readlist_id);
                             }
@@ -232,7 +231,6 @@ pub async fn refresh_book_metadata(
     Ok(outcome)
 }
 
-
 use patch::{BookMetadataImportPatch, SeriesMetadataImportPatch};
 
 fn comicinfo_provider_matches_capabilities(capabilities: &BTreeSet<String>) -> bool {
@@ -264,7 +262,6 @@ fn barcode_provider_matches_capabilities(capabilities: &BTreeSet<String>) -> boo
     capabilities.contains("ISBN")
 }
 
-
 async fn apply_book_metadata_import_patch(
     pool: &SqlitePool,
     book_id: &str,
@@ -290,7 +287,6 @@ use queries::{
     load_book_media_for_refresh, load_book_metadata_for_refresh, load_book_page_row_for_refresh,
     persist_book_metadata_for_refresh,
 };
-
 
 pub async fn refresh_series_metadata(pool: &SqlitePool, series_id: &str) -> Result<(), String> {
     let series_id = series_id.to_string();

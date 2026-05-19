@@ -27,7 +27,7 @@ pub async fn libraries_route(
 ) -> Response {
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(context) => context,
@@ -50,11 +50,7 @@ pub async fn library_detail_route(
 
     let context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,

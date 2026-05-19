@@ -30,7 +30,7 @@ pub(crate) async fn load_read_progress_from_services(
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
     app.identity
-        .service
+        .device_sync
         .load_read_progress(book_id, user_id)
         .await
 }

@@ -58,7 +58,7 @@ pub async fn books_list(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(ctx) => ctx,
@@ -133,7 +133,7 @@ pub(crate) async fn books_deprecated_get(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.identity.service,
+            &app.identity,
             &headers,
             auth_library_ids.as_deref(),
         )
@@ -194,11 +194,7 @@ pub async fn series_books_deprecated(
 
     if let Err(denial) = app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         return detail_access_denial_response(denial);
@@ -211,7 +207,7 @@ pub async fn series_books_deprecated(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&*app.identity.service, &headers, None)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
         Some(ctx) => ctx,

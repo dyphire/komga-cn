@@ -181,11 +181,7 @@ pub async fn books_latest(
 
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            library_ids.as_deref(),
-        )
+        .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
         .await
     {
         Some(context) => context,
@@ -237,11 +233,7 @@ pub async fn books_ondeck(
     .or(requested_library_ids);
     let context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            library_ids.as_deref(),
-        )
+        .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
         .await
     {
         Some(context) => context,

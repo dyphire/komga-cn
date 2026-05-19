@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn resolved_kobo_request_api_key_metadata(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     current_user: &AuthUser,
     auth_token: &str,
     headers: &HeaderMap,

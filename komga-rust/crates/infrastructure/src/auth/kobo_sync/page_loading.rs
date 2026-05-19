@@ -3,9 +3,9 @@ use sqlx::Sqlite;
 
 use super::exists::{has_incremental_remaining, has_initial_remaining};
 use super::queries::{
-    take_books_added, take_books_by_sync_point, take_books_changed, take_books_read_progress_changed,
-    take_books_removed, take_readlists_added, take_readlists_by_sync_point, take_readlists_changed,
-    take_readlists_removed,
+    take_books_added, take_books_by_sync_point, take_books_changed,
+    take_books_read_progress_changed, take_books_removed, take_readlists_added,
+    take_readlists_by_sync_point, take_readlists_changed, take_readlists_removed,
 };
 
 pub(super) async fn load_initial_sync_page(

@@ -116,7 +116,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::state::{
-        IdentityState, MediaAssetsState, TaskEngine, TaskQueueState,
+        MediaAssetsState, TaskEngine, TaskQueueState,
         tests::{
             NoopBookAccessService, NoopCollectionAccessService, NoopReadlistAccessService,
             NoopSeriesAccessService,
@@ -188,9 +188,7 @@ mod tests {
 
         MediaAssetsState {
             read_progress: crate::state::ReadProgressState::default(),
-            identity: IdentityState {
-                service: crate::state::default_test_identity_service(),
-            },
+            identity: crate::state::default_test_identity_state(),
             task_queue: TaskQueueState {
                 engine: task_queue.clone(),
             },

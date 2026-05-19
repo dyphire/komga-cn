@@ -11,7 +11,7 @@ pub async fn kobo_ping(
     headers: HeaderMap,
 ) -> Response {
     match kobo_path_user_status(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -31,7 +31,7 @@ pub async fn kobo_initialization(
     headers: HeaderMap,
 ) -> Response {
     if let Err(status) = required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -149,7 +149,7 @@ pub async fn kobo_auth_device(
     body: Bytes,
 ) -> Response {
     if let Err(status) = required_kobo_user(
-        &*app.identity.service,
+        &app.identity,
         auth_token.as_str(),
         &headers,
         connection_info.remote_addr(),
@@ -219,7 +219,7 @@ fn validated_kobo_auth_device_user_key(
 }
 
 async fn kobo_path_user_status(
-    identity: &dyn IdentityService,
+    identity: &IdentityState,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,

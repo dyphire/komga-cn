@@ -9,23 +9,39 @@ use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::runtime_identity_access as infrastructure_runtime_identity_access;
 use komga_interfaces::state::{
-    AuthenticationActivityWriteInput, IdentityService, KoboMetadataRecord, KoreaderBookLookupError,
-    KoreaderBookTarget, PersistedBookMediaFile, PersistedReadProgressRecord,
+    ApiKeyService, AuthActivityService, AuthTokenService, AuthenticationActivityWriteInput,
+    DeviceSyncService, KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget,
+    PersistedBookMediaFile, PersistedReadProgressRecord, UserManagementService,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
 
 #[derive(Clone)]
-pub(super) struct RuntimeIdentityService {
+pub(crate) struct RuntimeIdentityService {
     db: DatabaseHandle,
 }
 
-pub(super) fn compose_runtime_identity_service(db: DatabaseHandle) -> Box<dyn IdentityService> {
-    Box::new(RuntimeIdentityService { db })
+pub(super) struct IdentityServiceArcs {
+    pub auth_token: std::sync::Arc<dyn AuthTokenService>,
+    pub user_management: std::sync::Arc<dyn UserManagementService>,
+    pub api_key: std::sync::Arc<dyn ApiKeyService>,
+    pub auth_activity: std::sync::Arc<dyn AuthActivityService>,
+    pub device_sync: std::sync::Arc<dyn DeviceSyncService>,
+}
+
+pub(super) fn compose_identity_services(db: DatabaseHandle) -> IdentityServiceArcs {
+    let service = std::sync::Arc::new(RuntimeIdentityService { db });
+    IdentityServiceArcs {
+        auth_token: service.clone(),
+        user_management: service.clone(),
+        api_key: service.clone(),
+        auth_activity: service.clone(),
+        device_sync: service,
+    }
 }
 
 #[async_trait::async_trait]
-impl IdentityService for RuntimeIdentityService {
+impl AuthTokenService for RuntimeIdentityService {
     fn auth_token_user(&self, headers: &HeaderMap) -> Option<AuthUser> {
         infrastructure_runtime_identity_access::auth_token_user(headers)
     }
@@ -130,7 +146,10 @@ impl IdentityService for RuntimeIdentityService {
             registration_id,
         )
     }
+}
 
+#[async_trait::async_trait]
+impl UserManagementService for RuntimeIdentityService {
     async fn persisted_basic_user(&self, headers: &HeaderMap) -> Option<AuthOutcome> {
         infrastructure_runtime_identity_access::persisted_basic_user(headers, self.db.read_pool())
             .await
@@ -177,6 +196,54 @@ impl IdentityService for RuntimeIdentityService {
         .await
     }
 
+    async fn ensure_oauth_user(
+        &self,
+        email: &str,
+        allow_create: bool,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        infrastructure_runtime_identity_access::ensure_oauth_user(
+            self.db.write_pool(),
+            email,
+            allow_create,
+        )
+        .await
+    }
+
+    fn configured_api_key(&self) -> Option<String> {
+        infrastructure_runtime_identity_access::configured_api_key()
+    }
+
+    async fn create_auth_user(
+        &self,
+        input: CreateAuthUserInput,
+    ) -> Result<Option<AuthUser>, sqlx::Error> {
+        infrastructure_runtime_identity_access::create_auth_user(self.db.write_pool(), input).await
+    }
+
+    async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, sqlx::Error> {
+        infrastructure_runtime_identity_access::delete_auth_user(
+            self.db.write_pool(),
+            target_user_id,
+        )
+        .await
+    }
+
+    async fn update_auth_user(
+        &self,
+        target_user_id: &str,
+        patch: UpdateAuthUserInput,
+    ) -> Result<UpdateAuthUserResult, sqlx::Error> {
+        infrastructure_runtime_identity_access::update_auth_user(
+            self.db.write_pool(),
+            target_user_id,
+            patch,
+        )
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl ApiKeyService for RuntimeIdentityService {
     async fn persisted_create_api_key(
         &self,
         user_id: &str,
@@ -219,7 +286,10 @@ impl IdentityService for RuntimeIdentityService {
         )
         .await
     }
+}
 
+#[async_trait::async_trait]
+impl AuthActivityService for RuntimeIdentityService {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
@@ -284,24 +354,10 @@ impl IdentityService for RuntimeIdentityService {
         )
         .await
     }
+}
 
-    async fn ensure_oauth_user(
-        &self,
-        email: &str,
-        allow_create: bool,
-    ) -> Result<Option<AuthUser>, sqlx::Error> {
-        infrastructure_runtime_identity_access::ensure_oauth_user(
-            self.db.write_pool(),
-            email,
-            allow_create,
-        )
-        .await
-    }
-
-    fn configured_api_key(&self) -> Option<String> {
-        infrastructure_runtime_identity_access::configured_api_key()
-    }
-
+#[async_trait::async_trait]
+impl DeviceSyncService for RuntimeIdentityService {
     async fn load_book_created_timestamp(
         &self,
         book_id: &str,
@@ -452,34 +508,6 @@ impl IdentityService for RuntimeIdentityService {
         infrastructure_runtime_identity_access::remove_sync_point(
             self.db.write_pool(),
             sync_point_id,
-        )
-        .await
-    }
-
-    async fn create_auth_user(
-        &self,
-        input: CreateAuthUserInput,
-    ) -> Result<Option<AuthUser>, sqlx::Error> {
-        infrastructure_runtime_identity_access::create_auth_user(self.db.write_pool(), input).await
-    }
-
-    async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, sqlx::Error> {
-        infrastructure_runtime_identity_access::delete_auth_user(
-            self.db.write_pool(),
-            target_user_id,
-        )
-        .await
-    }
-
-    async fn update_auth_user(
-        &self,
-        target_user_id: &str,
-        patch: UpdateAuthUserInput,
-    ) -> Result<UpdateAuthUserResult, sqlx::Error> {
-        infrastructure_runtime_identity_access::update_auth_user(
-            self.db.write_pool(),
-            target_user_id,
-            patch,
         )
         .await
     }

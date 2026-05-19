@@ -7,7 +7,9 @@ use pdfium_render::prelude::*;
 use rxing::{BarcodeFormat, DecodeHints, helpers as rxing_helpers};
 use sqlx::SqlitePool;
 
-use crate::filesystem::media_access::page_content::{load_archive_page_row, resolve_book_page_bytes};
+use crate::filesystem::media_access::page_content::{
+    load_archive_page_row, resolve_book_page_bytes,
+};
 use crate::load_pdfium;
 
 use super::BookMetadataImportPatch;

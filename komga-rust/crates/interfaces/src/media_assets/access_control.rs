@@ -47,11 +47,7 @@ pub(super) async fn user_can_access_series_media(
     series_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    let Some(library_id) = app
-        .series_access
-        .load_series_library_id(series_id)
-        .await?
-    else {
+    let Some(library_id) = app.series_access.load_series_library_id(series_id).await? else {
         return Ok(false);
     };
     if !user_can_access_library(user, &library_id) {

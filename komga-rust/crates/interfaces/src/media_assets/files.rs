@@ -164,7 +164,7 @@ async fn book_protected_resource_response(
     resource_name: &str,
     opds_v2_unauthorized: bool,
 ) -> Response {
-    let Some(user) = resolved_request_auth_user(&*app.identity.service, headers).await else {
+    let Some(user) = resolved_request_auth_user(&app.identity, headers).await else {
         return if opds_v2_unauthorized {
             opds_catalog_unauthorized_response(headers)
         } else {

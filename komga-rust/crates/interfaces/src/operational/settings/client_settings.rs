@@ -14,7 +14,7 @@ pub(crate) async fn get_client_settings_global(
     State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
-    let include_unauthorized_only = resolved_auth_user(&*app.identity.service, &headers).is_none();
+    let include_unauthorized_only = resolved_auth_user(&app.identity, &headers).is_none();
     let settings = match app
         .operational_settings
         .load_client_settings_global(include_unauthorized_only)

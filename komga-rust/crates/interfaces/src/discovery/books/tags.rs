@@ -34,7 +34,7 @@ pub async fn book_tags(
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
-            &*app.identity.service,
+            &app.identity,
             &headers,
             if scoped_by_resource || library_ids.is_empty() {
                 None

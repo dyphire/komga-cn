@@ -26,11 +26,7 @@ pub async fn book_detail(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,
@@ -71,11 +67,7 @@ pub async fn book_sibling_previous(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,
@@ -122,11 +114,7 @@ pub async fn book_sibling_next(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,
@@ -173,11 +161,7 @@ pub async fn book_readlists(
 
     let detail_query_context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(
-            &*app.identity.service,
-            &headers,
-            &detail_context,
-        )
+        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
         .await
     {
         Ok(context) => context,
