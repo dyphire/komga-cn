@@ -5,6 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use komga_application::media_assets::{
     BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort,
     register_runtime_book_import_event,
@@ -29,6 +30,7 @@ impl FilesystemImportPort {
     }
 }
 
+#[async_trait]
 impl MediaImportPort for FilesystemImportPort {
     async fn import_book(
         &self,

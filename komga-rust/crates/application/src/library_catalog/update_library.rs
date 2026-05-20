@@ -121,9 +121,11 @@ fn find_books_to_convert_task_records(library_id: &str) -> Vec<TaskQueueRecord> 
 
 #[cfg(test)]
 mod tests {
-    use std::future::{Future, ready};
+    use std::future::Future;
     use std::pin::Pin;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    use async_trait::async_trait;
 
     use super::*;
     use crate::library_catalog::LibraryRecord;
@@ -135,75 +137,56 @@ mod tests {
         mismatched_extension_books: Vec<(String, String)>,
     }
 
+    #[async_trait]
     impl LibraryCatalogMutationPort for TestPort {
-        fn load_library(
-            &self,
-            _library_id: &str,
-        ) -> impl std::future::Future<Output = Result<Option<LibraryRecord>, String>> {
-            ready(Ok(self.library.clone()))
+        async fn load_library(&self, _library_id: &str) -> Result<Option<LibraryRecord>, String> {
+            Ok(self.library.clone())
         }
 
-        fn validate_library(
-            &self,
-            _library: &LibraryRecord,
-        ) -> impl std::future::Future<Output = Result<(), String>> {
-            ready(Ok(()))
+        async fn validate_library(&self, _library: &LibraryRecord) -> Result<(), String> {
+            Ok(())
         }
 
-        fn create_library(
-            &self,
-            _library: &LibraryRecord,
-        ) -> impl std::future::Future<Output = Result<(), String>> {
-            ready(Ok(()))
+        async fn create_library(&self, _library: &LibraryRecord) -> Result<(), String> {
+            Ok(())
         }
 
-        fn update_library(
-            &self,
-            _library: &LibraryRecord,
-        ) -> impl std::future::Future<Output = Result<bool, String>> {
-            ready(Ok(true))
+        async fn update_library(&self, _library: &LibraryRecord) -> Result<bool, String> {
+            Ok(true)
         }
 
-        fn delete_library(
-            &self,
-            _library_id: &str,
-        ) -> impl std::future::Future<Output = Result<bool, String>> {
-            ready(Ok(false))
+        async fn delete_library(&self, _library_id: &str) -> Result<bool, String> {
+            Ok(false)
         }
 
-        fn library_book_ids_with_empty_hash(
+        async fn library_book_ids_with_empty_hash(
             &self,
             _library_id: &str,
             koreader: bool,
-        ) -> impl std::future::Future<Output = Result<Vec<String>, String>> {
-            ready(Ok(if koreader {
+        ) -> Result<Vec<String>, String> {
+            Ok(if koreader {
                 self.empty_hash_koreader_book_ids.clone()
             } else {
                 self.empty_hash_book_ids.clone()
-            }))
+            })
         }
 
-        fn library_books_with_mismatched_extensions(
+        async fn library_books_with_mismatched_extensions(
             &self,
             _library_id: &str,
-        ) -> impl std::future::Future<Output = Result<Vec<(String, String)>, String>> {
-            ready(Ok(self.mismatched_extension_books.clone()))
+        ) -> Result<Vec<(String, String)>, String> {
+            Ok(self.mismatched_extension_books.clone())
         }
 
-        fn library_book_ids(
-            &self,
-            _library_id: &str,
-        ) -> impl std::future::Future<Output = Result<Option<Vec<String>>, String>> {
-            ready(Ok(None))
+        async fn library_book_ids(&self, _library_id: &str) -> Result<Option<Vec<String>>, String> {
+            Ok(None)
         }
 
-        fn library_series_and_book_ids(
+        async fn library_series_and_book_ids(
             &self,
             _library_id: &str,
-        ) -> impl std::future::Future<
-            Output = Result<Option<(Vec<String>, Vec<(String, String)>)>, String>,
-        > {
-            ready(Ok(None))
+        ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, String> {
+            Ok(None)
         }
     }
 

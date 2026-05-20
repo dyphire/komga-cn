@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use async_trait::async_trait;
+
 use super::JobRuntime;
 use komga_application::task_processing::{
     BookPayload, LibraryPayload, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
@@ -406,6 +408,7 @@ impl Default for SqliteFilesystemLibraryScanPipeline {
     }
 }
 
+#[async_trait]
 impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
     async fn schedule(
         &self,

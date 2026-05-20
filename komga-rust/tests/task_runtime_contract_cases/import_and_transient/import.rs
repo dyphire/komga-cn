@@ -1,4 +1,5 @@
 use super::*;
+use async_trait::async_trait;
 use komga_application::media_assets::{
     BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort, MediaImportService,
 };
@@ -46,6 +47,7 @@ struct RecordingImportPort {
     outcome: Option<ImportBookOutcome>,
 }
 
+#[async_trait]
 impl MediaImportPort for RecordingImportPort {
     async fn import_book(
         &self,

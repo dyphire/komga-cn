@@ -105,4 +105,5 @@ icu.workspace = true
 time.workspace = true
 http-body.workspace = true
 http-body-util = "0.1.3"
+async-trait.workspace = true
 komga-interfaces = { path = "crates/interfaces", features = ["allow-missing-webui-dist"] }

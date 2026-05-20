@@ -1,8 +1,8 @@
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -68,12 +68,13 @@ pub struct ImportBookOutcome {
     pub artwork_sidecar_imported: bool,
 }
 
-pub trait MediaImportPort {
-    fn import_book(
+#[async_trait]
+pub trait MediaImportPort: Send + Sync {
+    async fn import_book(
         &self,
         copy_mode: ImportCopyMode,
         book: BooksImportEntry,
-    ) -> impl Future<Output = Result<Option<ImportBookOutcome>, String>>;
+    ) -> Result<Option<ImportBookOutcome>, String>;
 }
 
 pub struct MediaImportService<P> {
@@ -313,6 +314,7 @@ mod tests {
         outcome: Option<ImportBookOutcome>,
     }
 
+    #[async_trait]
     impl MediaImportPort for StubImportPort {
         async fn import_book(
             &self,

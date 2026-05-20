@@ -1,4 +1,3 @@
-mod contracts;
 mod device_tokens;
 mod kobo_sync;
 mod mutation_models;
@@ -6,10 +5,6 @@ mod principal_resolution;
 mod session_tokens;
 mod user_models;
 
-pub use contracts::{
-    IdentityAccessError, IdentityAccessUseCases, IssueDeviceCodeCommand, SessionPrincipal,
-    SessionReadModelPort,
-};
 pub use device_tokens::{
     generated_kobo_api_token, generated_kobo_token_triplet, random_uuid_like, sanitize_identifier,
 };

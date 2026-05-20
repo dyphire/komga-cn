@@ -1,5 +1,4 @@
-use std::future::Future;
-
+use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use crate::task_processing::TaskQueueRecord;
@@ -32,53 +31,47 @@ pub struct LibraryTaskResult {
     pub task_records: Vec<TaskQueueRecord>,
 }
 
-pub trait LibraryCatalogReadPort {
-    fn list_libraries(
+#[async_trait]
+pub trait LibraryCatalogReadPort: Send + Sync {
+    async fn list_libraries(
         &self,
         context: &DiscoveryQueryContext,
-    ) -> impl Future<Output = Result<Vec<LibraryRecord>, DiscoveryError>>;
+    ) -> Result<Vec<LibraryRecord>, DiscoveryError>;
 
-    fn get_library(
+    async fn get_library(
         &self,
         context: &DiscoveryQueryContext,
         library_id: &str,
-    ) -> impl Future<Output = Result<Option<LibraryRecord>, DiscoveryError>>;
+    ) -> Result<Option<LibraryRecord>, DiscoveryError>;
 }
 
-pub trait LibraryCatalogMutationPort {
-    fn load_library(
-        &self,
-        library_id: &str,
-    ) -> impl Future<Output = Result<Option<LibraryRecord>, String>>;
+#[async_trait]
+pub trait LibraryCatalogMutationPort: Send + Sync {
+    async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String>;
 
-    fn validate_library(&self, library: &LibraryRecord)
-    -> impl Future<Output = Result<(), String>>;
+    async fn validate_library(&self, library: &LibraryRecord) -> Result<(), String>;
 
-    fn create_library(&self, library: &LibraryRecord) -> impl Future<Output = Result<(), String>>;
+    async fn create_library(&self, library: &LibraryRecord) -> Result<(), String>;
 
-    fn update_library(&self, library: &LibraryRecord)
-    -> impl Future<Output = Result<bool, String>>;
+    async fn update_library(&self, library: &LibraryRecord) -> Result<bool, String>;
 
-    fn delete_library(&self, library_id: &str) -> impl Future<Output = Result<bool, String>>;
+    async fn delete_library(&self, library_id: &str) -> Result<bool, String>;
 
-    fn library_book_ids_with_empty_hash(
+    async fn library_book_ids_with_empty_hash(
         &self,
         library_id: &str,
         koreader: bool,
-    ) -> impl Future<Output = Result<Vec<String>, String>>;
+    ) -> Result<Vec<String>, String>;
 
-    fn library_books_with_mismatched_extensions(
+    async fn library_books_with_mismatched_extensions(
         &self,
         library_id: &str,
-    ) -> impl Future<Output = Result<Vec<(String, String)>, String>>;
+    ) -> Result<Vec<(String, String)>, String>;
 
-    fn library_book_ids(
+    async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String>;
+
+    async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> impl Future<Output = Result<Option<Vec<String>>, String>>;
-
-    fn library_series_and_book_ids(
-        &self,
-        library_id: &str,
-    ) -> impl Future<Output = Result<LibrarySeriesAndBookIds, String>>;
+    ) -> Result<LibrarySeriesAndBookIds, String>;
 }
