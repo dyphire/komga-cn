@@ -327,7 +327,15 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
 #[tokio::test]
 async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
     let _guard = thumbnail_runtime_sse_guard().await;
+    let book_id = "book-thumbnail-delete-sse";
     let ctx = TestFixture::new("router-book-thumbnail-delete-sse").await;
+    seed_router_primary_series_cbz_book(
+        ctx.paths(),
+        book_id,
+        "book-thumbnail-delete-sse.cbz",
+        "Book Thumbnail Delete SSE",
+    )
+    .await;
 
     let auth_token = ctx.login_admin().await;
     let image_bytes = fixture_png_bytes();
@@ -339,7 +347,7 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/books/book-1/thumbnails")
+                .uri(format!("/api/v1/books/{book_id}/thumbnails"))
                 .header("x-auth-token", &auth_token)
                 .header(header::CONTENT_TYPE, content_type)
                 .body(Body::from(body))
@@ -361,7 +369,7 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri(format!("/api/v1/books/book-1/thumbnails/{thumbnail_id}"))
+                .uri(format!("/api/v1/books/{book_id}/thumbnails/{thumbnail_id}"))
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
                 .expect("book thumbnail delete sse request should build"),
@@ -377,7 +385,11 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
     );
     let thumbnail_event = events
         .iter()
-        .find(|event| event.name == "ThumbnailBookDeleted")
+        .find(|event| {
+            event.name == "ThumbnailBookDeleted"
+                && event.payload.get("bookId").and_then(Value::as_str) == Some(book_id)
+                && event.payload.get("seriesId").and_then(Value::as_str) == Some("series-1")
+        })
         .expect("book thumbnail delete should emit ThumbnailBookDeleted SSE");
     assert_eq!(
         thumbnail_event.payload.get("selected"),
@@ -385,7 +397,7 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
     );
     assert_eq!(
         thumbnail_event.payload.get("bookId"),
-        Some(&Value::String("book-1".to_string()))
+        Some(&Value::String(book_id.to_string()))
     );
     assert_eq!(
         thumbnail_event.payload.get("seriesId"),

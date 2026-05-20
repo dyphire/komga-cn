@@ -25,7 +25,7 @@ serde_json = "1.0.149"
 sha2 = "0.11.0"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "io-uring", "sync"] }
 tokio-stream = "0.1.17"
-sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "migrate"] }
+sqlx = { version = "0.9.0-alpha.1", features = ["sqlite", "runtime-tokio", "migrate"] }
 tracing = "0.1.41"
 http-body = "1.0.1"
 tracing-appender = "0.2.3"
@@ -41,7 +41,7 @@ tower-sessions = "0.15.0"
 oauth2 = "5.0.0"
 tantivy = "0.26.0"
 tar = "0.4.45"
-zip = "8.6.0"
+zip = "9.0.0-pre2"
 flate2 = "1.1.9"
 lopdf = "0.40.0"
 quick-xml = "0.40.1"
@@ -53,7 +53,7 @@ image = "0.25.8"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }
 language-tags = "0.3.2"
-rusqlite = "0.32.1"
+rusqlite = "0.37.0"
 pdfium-render = { version = "0.9.1", features = ["thread_safe"] }
 unrar = "0.5.8"
 unicode-normalization = "0.1.24"

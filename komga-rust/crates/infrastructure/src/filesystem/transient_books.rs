@@ -1,4 +1,5 @@
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use std::fs;
 use std::io::Read;
@@ -434,7 +435,10 @@ fn compute_transient_epub_page_count<R: Read + std::io::Seek>(
         let Ok(entry) = archive.by_index(index) else {
             continue;
         };
-        let normalized_name = normalize_transient_epub_zip_path(entry.name());
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        let normalized_name = normalize_transient_epub_zip_path(entry_name.as_ref());
         if !spine_paths.contains(normalized_name.as_str()) {
             continue;
         }
@@ -456,7 +460,11 @@ fn analyze_transient_zip_archive(
         let mut entry = archive
             .by_index(index)
             .map_err(|error| format!("read archive entry: {error}"))?;
-        let file_name = entry.name().trim().to_string();
+        let file_name = entry
+            .name()
+            .map_err(|error| format!("read archive entry name: {error}"))?
+            .trim()
+            .to_string();
         if file_name.is_empty() || file_name.ends_with('/') {
             continue;
         }
@@ -1051,7 +1059,7 @@ fn transient_xml_attribute_value(
     event.attributes().flatten().find_map(|attribute| {
         transient_xml_name_matches(attribute.key.as_ref(), attribute_name).then(|| {
             attribute
-                .unescape_value()
+                .normalized_value(XmlVersion::Implicit1_0)
                 .ok()
                 .map(|value| value.into_owned())
         })?

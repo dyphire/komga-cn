@@ -4,6 +4,7 @@ use komga_application::runtime_sse::register_runtime_sse_event;
 use crate::helpers::normalized_date_time;
 use crate::state::DiscoveryState;
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 
 pub struct PersistedReadlistWriteInput {
@@ -362,17 +363,17 @@ fn parse_comicrack_book(
     for attribute in event.attributes().flatten() {
         if xml_name_matches(attribute.key.as_ref(), b"Series") {
             series = attribute
-                .unescape_value()
+                .normalized_value(XmlVersion::Implicit1_0)
                 .ok()
                 .map(|value| value.into_owned());
         } else if xml_name_matches(attribute.key.as_ref(), b"Number") {
             number = attribute
-                .unescape_value()
+                .normalized_value(XmlVersion::Implicit1_0)
                 .ok()
                 .map(|value| value.into_owned());
         } else if xml_name_matches(attribute.key.as_ref(), b"Volume") {
             volume = attribute
-                .unescape_value()
+                .normalized_value(XmlVersion::Implicit1_0)
                 .ok()
                 .map(|value| value.into_owned());
         }

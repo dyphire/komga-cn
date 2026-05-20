@@ -263,7 +263,15 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
             continue;
         }
 
-        let entry_name = entry.name().to_string();
+        let entry_name = entry
+            .name()
+            .map_err(|error| {
+                TaskExecutionError::runtime(format!(
+                    "failed to read zip entry name index {index} for '{}': {error}",
+                    archive_path.display(),
+                ))
+            })?
+            .into_owned();
         let should_remove = if is_supported_page_image_file_name(&entry_name) {
             page_number += 1;
             delete_by_page_number

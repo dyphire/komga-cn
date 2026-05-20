@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{SqliteConnection, SqlitePool};
+use sqlx::{SqlStr, SqliteConnection, SqlitePool};
 
 mod embedded_migrations {
     include!(concat!(
@@ -87,7 +87,7 @@ pub async fn bootstrap_read_model_connection(
     connection: &mut SqliteConnection,
 ) -> Result<(), sqlx::Error> {
     for statement in READ_FIXTURE_SCHEMA_STATEMENTS {
-        sqlx::query(statement).execute(&mut *connection).await?;
+        sqlx::query(*statement).execute(&mut *connection).await?;
     }
     Ok(())
 }
@@ -124,7 +124,7 @@ fn build_migrator(migrations: &[EmbeddedMigration]) -> Migrator {
                         migration.version,
                         Cow::Borrowed(migration.description),
                         MigrationType::Simple,
-                        Cow::Borrowed(migration.sql),
+                        SqlStr::from_static(migration.sql),
                         false,
                     )
                 })
@@ -142,7 +142,7 @@ async fn bootstrap_or_migrate_schema(
 ) -> Result<(), sqlx::Error> {
     adopt_preexisting_schema(connection, migrator, required_schema, target).await?;
     migrator
-        .run_direct(connection)
+        .run_direct(None, connection)
         .await
         .map_err(map_migrate_error)?;
 
@@ -405,7 +405,9 @@ async fn repair_historyless_schema_prefix(
         if object.sql.is_empty() {
             return Ok(None);
         }
-        sqlx::query(&object.sql).execute(&mut *connection).await?;
+        sqlx::query(sqlx::AssertSqlSafe(object.sql.clone()))
+            .execute(&mut *connection)
+            .await?;
     }
 
     let repaired_inventory = comparable_schema_inventory(connection).await?;
@@ -564,12 +566,14 @@ async fn table_columns(
     table: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     let pragma = format!("PRAGMA table_info({table})");
-    let columns = sqlx::query_as::<_, (i64, String, String, i64, Option<String>, i64)>(&pragma)
-        .fetch_all(&mut *connection)
-        .await?
-        .into_iter()
-        .map(|(_, name, _, _, _, _)| name.to_ascii_lowercase())
-        .collect::<Vec<_>>();
+    let columns = sqlx::query_as::<_, (i64, String, String, i64, Option<String>, i64)>(
+        sqlx::AssertSqlSafe(pragma),
+    )
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|(_, name, _, _, _, _)| name.to_ascii_lowercase())
+    .collect::<Vec<_>>();
     Ok(columns)
 }
 

@@ -111,7 +111,10 @@ pub(in crate::task_queue) fn analyze_zip_media_pages(
             continue;
         }
 
-        let file_name = entry.name().to_string();
+        let file_name = entry
+            .name()
+            .map_err(|error| format!("read zip entry name at index {index}: {error}"))?
+            .into_owned();
         let include = if include_epub_resources {
             is_epub_page_resource_file_name(&file_name)
         } else {

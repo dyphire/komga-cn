@@ -66,10 +66,14 @@ impl SqlitePersistenceConnection<'_> {
     pub async fn execute(&mut self, statement: &str) -> Result<(), sqlx::Error> {
         match self {
             SqlitePersistenceConnection::Pool(pool) => {
-                sqlx::query(statement).execute(*pool).await?;
+                sqlx::query(sqlx::AssertSqlSafe(statement))
+                    .execute(*pool)
+                    .await?;
             }
             SqlitePersistenceConnection::Transaction(transaction) => {
-                sqlx::query(statement).execute(transaction.as_mut()).await?;
+                sqlx::query(sqlx::AssertSqlSafe(statement))
+                    .execute(transaction.as_mut())
+                    .await?;
             }
         }
         Ok(())
@@ -78,10 +82,12 @@ impl SqlitePersistenceConnection<'_> {
     pub async fn fetch_count(&mut self, statement: &str) -> Result<i64, sqlx::Error> {
         let row = match self {
             SqlitePersistenceConnection::Pool(pool) => {
-                sqlx::query(statement).fetch_one(*pool).await?
+                sqlx::query(sqlx::AssertSqlSafe(statement))
+                    .fetch_one(*pool)
+                    .await?
             }
             SqlitePersistenceConnection::Transaction(transaction) => {
-                sqlx::query(statement)
+                sqlx::query(sqlx::AssertSqlSafe(statement))
                     .fetch_one(transaction.as_mut())
                     .await?
             }

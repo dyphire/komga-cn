@@ -400,7 +400,7 @@ async fn delete_sync_point_children(
         "DELETE FROM SYNC_POINT_BOOK_REMOVED_SYNCED WHERE SYNC_POINT_ID = ?",
         "DELETE FROM SYNC_POINT_BOOK WHERE SYNC_POINT_ID = ?",
     ] {
-        sqlx::query(sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(sync_point_id)
             .execute(&mut **tx)
             .await?;

@@ -4,7 +4,7 @@ use komga_infrastructure::sqlite::connect_test_pool;
 use super::RuntimeDbPaths;
 
 async fn add_read_progress_column_if_missing(pool: &sqlx::SqlitePool, column: &str, sql: &str) {
-    match sqlx::query(sql).execute(pool).await {
+    match sqlx::query(sqlx::AssertSqlSafe(sql)).execute(pool).await {
         Ok(_) => {}
         Err(error)
             if error.to_string().contains("duplicate column name")

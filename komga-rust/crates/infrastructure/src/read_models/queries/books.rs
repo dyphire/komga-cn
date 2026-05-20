@@ -290,8 +290,8 @@ async fn list_books_sqlx_common(
     ))
 }
 
-fn apply_book_filter_tree_sqlx<'args>(
-    builder: &mut QueryBuilder<'args, Sqlite>,
+fn apply_book_filter_tree_sqlx(
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
     context: &DiscoveryQueryContext,
     allowed_library_ids: Option<&Vec<String>>,
@@ -336,9 +336,9 @@ fn condition_has_series_id(condition: &BookCondition) -> bool {
     }
 }
 
-fn apply_book_condition_sqlx<'args>(
+fn apply_book_condition_sqlx(
     condition: &BookCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match condition {
@@ -375,9 +375,9 @@ fn apply_book_condition_sqlx<'args>(
     }
 }
 
-fn apply_book_value_condition_sqlx<'args>(
+fn apply_book_value_condition_sqlx(
     value: &BookValueCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match value {
@@ -549,9 +549,9 @@ enum PatternKind {
     EndsWith,
 }
 
-fn append_readlist_condition_sqlx<'args>(
+fn append_readlist_condition_sqlx(
     condition: &InclusionCondition<komga_domain::common_ids::ReadListId>,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     let (include, ids) = match condition {
@@ -583,10 +583,10 @@ fn append_readlist_condition_sqlx<'args>(
     separated.push_unseparated("))");
 }
 
-fn append_string_condition_sqlx<'args>(
+fn append_string_condition_sqlx(
     column: &str,
     condition: &StringCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match condition {
@@ -631,10 +631,10 @@ fn append_string_condition_sqlx<'args>(
     }
 }
 
-fn append_string_excludes_sqlx<'args>(
+fn append_string_excludes_sqlx(
     column: &str,
     values: &[String],
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     for value in values {
@@ -642,11 +642,11 @@ fn append_string_excludes_sqlx<'args>(
     }
 }
 
-fn append_string_patterns_sqlx<'args>(
+fn append_string_patterns_sqlx(
     column: &str,
     values: &[String],
     kind: PatternKind,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     for value in values {
@@ -654,11 +654,11 @@ fn append_string_patterns_sqlx<'args>(
     }
 }
 
-fn append_string_pattern_excludes_sqlx<'args>(
+fn append_string_pattern_excludes_sqlx(
     column: &str,
     values: &[String],
     kind: PatternKind,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     for value in values {
@@ -667,11 +667,11 @@ fn append_string_pattern_excludes_sqlx<'args>(
     }
 }
 
-fn append_book_text_relation_condition_sqlx<'args>(
+fn append_book_text_relation_condition_sqlx(
     table: &str,
     value_column: &str,
     condition: &StringCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match condition {
@@ -784,13 +784,13 @@ fn append_book_text_relation_condition_sqlx<'args>(
     }
 }
 
-fn append_book_text_relation_values_sqlx<'args>(
+fn append_book_text_relation_values_sqlx(
     table: &str,
     value_column: &str,
     values: &[String],
     include: bool,
     pattern: Option<PatternKind>,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     if values.is_empty() {
@@ -834,10 +834,10 @@ fn append_book_text_relation_values_sqlx<'args>(
     }
 }
 
-fn append_number_condition_sqlx<'args>(
+fn append_number_condition_sqlx(
     column: &str,
     condition: &NumberCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match condition {
@@ -862,11 +862,11 @@ fn append_number_condition_sqlx<'args>(
     }
 }
 
-fn append_number_values_sqlx<'args>(
+fn append_number_values_sqlx(
     column: &str,
     values: &[String],
     include: bool,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     let parsed = values
@@ -969,10 +969,10 @@ fn collect_book_library_ids(condition: &BookCondition, out: &mut Vec<String>) {
     }
 }
 
-fn append_bool_sqlx_filter<'args>(
+fn append_bool_sqlx_filter(
     column: &str,
     value: bool,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     let prefix = format!("{column} = ");

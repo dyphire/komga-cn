@@ -287,7 +287,7 @@ SELECT ?, LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?"#,
         }
 
         for sql in DELETE_BOOK_DEPENDENCY_SQL {
-            sqlx::query(sql)
+            sqlx::query(*sql)
                 .bind(&matched_deleted_book_id)
                 .execute(pool)
                 .await
@@ -546,13 +546,15 @@ WHERE SERIES_ID = ?"#,
                 "SERIES_METADATA_TAG",
                 "SERIES_METADATA_SHARING",
             ] {
-                sqlx::query(&format!("DELETE FROM {table} WHERE SERIES_ID = ?"))
-                    .bind(&inserted.series_id)
-                    .execute(pool)
-                    .await
-                    .map_err(|error| {
-                        format!("failed to clear restored series metadata strings: {error}")
-                    })?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DELETE FROM {table} WHERE SERIES_ID = ?"
+                )))
+                .bind(&inserted.series_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to clear restored series metadata strings: {error}")
+                })?;
             }
             sqlx::query(
                 r#"INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE)
@@ -1487,7 +1489,7 @@ WHERE LIBRARY_ID = ?"#,
             for deleted_book_row in deleted_book_ids {
                 let deleted_book_id = deleted_book_row.get::<String, _>("ID");
                 for sql in DELETE_BOOK_DEPENDENCY_SQL {
-                    sqlx::query(sql)
+                    sqlx::query(*sql)
                         .bind(&deleted_book_id)
                         .execute(pool)
                         .await
@@ -1506,7 +1508,7 @@ WHERE LIBRARY_ID = ?"#,
                     format!("failed to delete restored legacy series BOOK rows: {error}")
                 })?;
             for sql in DELETE_SERIES_DEPENDENCY_SQL {
-                sqlx::query(sql)
+                sqlx::query(*sql)
                     .bind(&restored.deleted_series_id)
                     .execute(pool)
                     .await

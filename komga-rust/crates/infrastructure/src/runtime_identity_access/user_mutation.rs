@@ -132,7 +132,7 @@ pub async fn delete_auth_user(
             "DELETE FROM SYNC_POINT_READLIST_BOOK WHERE SYNC_POINT_ID = ?",
             "DELETE FROM SYNC_POINT_READLIST_REMOVED_SYNCED WHERE SYNC_POINT_ID = ?",
         ] {
-            sqlx::query(sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql))
                 .bind(sync_point_id)
                 .execute(&mut *tx)
                 .await?;
@@ -151,7 +151,7 @@ pub async fn delete_auth_user(
         "DELETE FROM READ_PROGRESS_SERIES WHERE USER_ID = ?",
         "DELETE FROM ANNOUNCEMENTS_READ WHERE USER_ID = ?",
     ] {
-        sqlx::query(sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(target_user_id)
             .execute(&mut *tx)
             .await?;

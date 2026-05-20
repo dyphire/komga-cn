@@ -632,37 +632,45 @@ async fn migrate_upgraded_book_identity(
         "BOOK_METADATA_TAG",
         "BOOK_METADATA_LINK",
     ] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE BOOK_ID = ?"))
-            .bind(new_book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("delete destination {table} rows before upgrade migration: {error}")
-            })?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE BOOK_ID = ?"
+        )))
+        .bind(new_book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            format!("delete destination {table} rows before upgrade migration: {error}")
+        })?;
 
-        sqlx::query(&format!("UPDATE {table} SET BOOK_ID = ? WHERE BOOK_ID = ?"))
-            .bind(new_book_id)
-            .bind(old_book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET BOOK_ID = ? WHERE BOOK_ID = ?"
+        )))
+        .bind(new_book_id)
+        .bind(old_book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
     }
 
     for table in ["MEDIA", "MEDIA_FILE", "MEDIA_PAGE", "READ_PROGRESS"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE BOOK_ID = ?"))
-            .bind(new_book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                format!("delete destination {table} rows before upgrade migration: {error}")
-            })?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE BOOK_ID = ?"
+        )))
+        .bind(new_book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            format!("delete destination {table} rows before upgrade migration: {error}")
+        })?;
 
-        sqlx::query(&format!("UPDATE {table} SET BOOK_ID = ? WHERE BOOK_ID = ?"))
-            .bind(new_book_id)
-            .bind(old_book_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET BOOK_ID = ? WHERE BOOK_ID = ?"
+        )))
+        .bind(new_book_id)
+        .bind(old_book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
     }
 
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'USER_UPLOADED'")

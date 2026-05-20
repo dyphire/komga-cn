@@ -48,7 +48,7 @@ pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> Result<(),
         })?;
 
     for sql in EMPTY_TRASH_BOOK_DEPENDENCY_SQL {
-        sqlx::query(sql)
+        sqlx::query(*sql)
             .bind(library_id)
             .execute(&mut *tx)
             .await
@@ -92,7 +92,7 @@ pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> Result<(),
     })?;
 
     for sql in EMPTY_TRASH_SERIES_DEPENDENCY_SQL {
-        sqlx::query(sql)
+        sqlx::query(*sql)
             .bind(library_id)
             .execute(&mut *tx)
             .await

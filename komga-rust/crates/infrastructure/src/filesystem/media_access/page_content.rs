@@ -265,7 +265,8 @@ async fn read_zip_archive_page_bytes(
     let mut archive = ZipArchive::new(file).ok()?;
     if !page.file_name.is_empty()
         && let Ok(mut entry) = archive.by_name(&page.file_name)
-        && is_supported_page_image_file_name(entry.name())
+        && let Ok(entry_name) = entry.name()
+        && is_supported_page_image_file_name(entry_name.as_ref())
     {
         let mut bytes = Vec::new();
         if entry.read_to_end(&mut bytes).is_ok() {
@@ -276,7 +277,8 @@ async fn read_zip_archive_page_bytes(
     let mut logical_index = 0usize;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).ok()?;
-        if !is_supported_page_image_file_name(entry.name()) {
+        let entry_name = entry.name().ok()?;
+        if !is_supported_page_image_file_name(entry_name.as_ref()) {
             continue;
         }
         if logical_index != target_index {
@@ -298,7 +300,7 @@ async fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookP
     let mut rows = Vec::new();
     for index in 0..archive.len() {
         let entry = archive.by_index(index).ok()?;
-        let file_name = entry.name().to_string();
+        let file_name = entry.name().ok()?.into_owned();
         if !is_supported_page_image_file_name(&file_name) {
             continue;
         }

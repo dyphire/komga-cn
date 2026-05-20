@@ -5,6 +5,7 @@ use flate2::write::GzEncoder;
 use komga_application::media_assets::BookPageRecord;
 use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use std::collections::HashMap;
 use std::fs;
@@ -156,7 +157,7 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"full-path") {
                         return attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| normalize_epub_resource_href("/", value.as_ref()));
                     }
@@ -194,17 +195,17 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"id") {
                             id = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         } else if xml_name_matches(attribute.key.as_ref(), b"href") {
                             href = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
                             media_type = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         }
@@ -223,7 +224,7 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"idref")
                             && let Some(idref) = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned())
                         {

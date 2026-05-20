@@ -16,8 +16,8 @@ pub(super) struct SqlxWhereState {
     pub(super) params: Vec<SqlValue>,
 }
 
-pub(super) fn query_filters_sqlx<'args>(
-    builder: &mut QueryBuilder<'args, Sqlite>,
+pub(super) fn query_filters_sqlx(
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
     library_column: &str,
     allowed_library_ids: Option<&Vec<String>>,
@@ -48,10 +48,10 @@ pub(super) fn query_filters_sqlx<'args>(
     }
 }
 
-pub(super) fn apply_restrictions_sqlx<'args>(
+pub(super) fn apply_restrictions_sqlx(
     series_alias: &str,
     restrictions: &QueryRestrictions,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     if !restrictions.labels_exclude.is_empty() {
@@ -107,10 +107,10 @@ pub(super) fn apply_restrictions_sqlx<'args>(
     }
 }
 
-pub(super) fn append_in_clause_sqlx<'args>(
+pub(super) fn append_in_clause_sqlx(
     column: &str,
     values: &[String],
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
@@ -125,19 +125,19 @@ pub(super) fn append_in_clause_sqlx<'args>(
     }
 }
 
-pub(super) fn append_clause_sqlx<'args>(
+pub(super) fn append_clause_sqlx(
     clause: &str,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
     builder.push(clause);
 }
 
-pub(super) fn append_bool_sqlx_filter<'args>(
+pub(super) fn append_bool_sqlx_filter(
     column: &str,
     value: bool,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
@@ -148,10 +148,10 @@ pub(super) fn append_bool_sqlx_filter<'args>(
     }
 }
 
-pub(super) fn append_like_clause_sqlx<'args>(
+pub(super) fn append_like_clause_sqlx(
     column: &str,
     pattern: &str,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
@@ -160,12 +160,12 @@ pub(super) fn append_like_clause_sqlx<'args>(
     state.params.push(SqlValue::Text(pattern.to_string()));
 }
 
-pub(super) fn append_subquery_exists_clause<'args>(
+pub(super) fn append_subquery_exists_clause(
     join_table: &str,
     fk_column: &str,
     value_column: &str,
     values: &[String],
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     if values.is_empty() {
@@ -189,11 +189,11 @@ pub(super) fn append_subquery_exists_clause<'args>(
     }
 }
 
-pub(super) fn append_comparison_sqlx<'args>(
+pub(super) fn append_comparison_sqlx(
     column: &str,
     op: &str,
     value: &str,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
@@ -202,10 +202,10 @@ pub(super) fn append_comparison_sqlx<'args>(
     state.params.push(SqlValue::Text(value.to_string()));
 }
 
-pub(super) fn append_not_in_clause_sqlx<'args>(
+pub(super) fn append_not_in_clause_sqlx(
     column: &str,
     value: &str,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     push_sqlx_clause_prefix(builder, state);
@@ -244,10 +244,7 @@ fn authorized_library_strings(authorized: &[LibraryId]) -> Vec<String> {
         .collect()
 }
 
-fn push_sqlx_clause_prefix<'args>(
-    builder: &mut QueryBuilder<'args, Sqlite>,
-    state: &mut SqlxWhereState,
-) {
+fn push_sqlx_clause_prefix(builder: &mut QueryBuilder<Sqlite>, state: &mut SqlxWhereState) {
     if state.has_where {
         builder.push(r#" AND "#);
     } else {
@@ -292,7 +289,7 @@ FROM series s"#,
         let actual_sql = query.sql();
 
         assert!(
-            actual_sql.ends_with(
+            actual_sql.as_str().ends_with(
                 r#"WHERE s.library_id IN (?,?) AND LOWER(s.title) LIKE ? AND NOT EXISTS (
     SELECT 1
     FROM series_labels ex
@@ -303,7 +300,8 @@ FROM series s"#,
     WHERE al.series_id = s.id
       AND LOWER(al.label) IN (?,?))"#
             ),
-            "unexpected sql: {actual_sql}",
+            "unexpected sql: {}",
+            actual_sql.as_str(),
         );
 
         assert_eq!(

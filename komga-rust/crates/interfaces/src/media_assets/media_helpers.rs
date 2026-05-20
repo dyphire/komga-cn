@@ -5,6 +5,8 @@ use std::collections::HashSet;
 #[cfg(test)]
 use quick_xml::Reader as XmlReader;
 #[cfg(test)]
+use quick_xml::XmlVersion;
+#[cfg(test)]
 use quick_xml::events::Event as XmlEvent;
 
 pub(crate) fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
@@ -127,17 +129,17 @@ pub(super) fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
                         property = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
                         content = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     }

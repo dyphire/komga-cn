@@ -254,7 +254,7 @@ pub async fn load_history_page(
     }
     sql.push_str(" LIMIT ? OFFSET ?");
 
-    let events = sqlx::query(&sql)
+    let events = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind((size.min(i64::MAX as u64)) as i64)
         .bind((offset.min(i64::MAX as u64)) as i64)
         .fetch_all(pool)
@@ -280,7 +280,7 @@ pub async fn load_history_page(
             WHERE ID IN ({placeholders})"#,
         );
 
-        let mut query = sqlx::query(&sql);
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
         for event in &events {
             query = query.bind(&event.id);
         }

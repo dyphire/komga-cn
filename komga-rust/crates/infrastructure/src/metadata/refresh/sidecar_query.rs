@@ -33,7 +33,7 @@ pub(super) async fn load_sidecar_url_for_parent(
         "#
     };
 
-    let row = sqlx::query(sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(parent_url)
         .fetch_optional(pool)
         .await

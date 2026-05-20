@@ -228,8 +228,8 @@ fn series_order_sql(ordering: SeriesOrdering) -> &'static str {
     }
 }
 
-fn apply_series_list_filters_sqlx<'args>(
-    builder: &mut QueryBuilder<'args, Sqlite>,
+fn apply_series_list_filters_sqlx(
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
     context: &DiscoveryQueryContext,
     query: &SeriesBrowseRequest,
@@ -251,9 +251,9 @@ fn apply_series_list_filters_sqlx<'args>(
     }
 }
 
-fn apply_series_condition_sqlx<'args>(
+fn apply_series_condition_sqlx(
     condition: &SeriesCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match condition {
@@ -288,9 +288,9 @@ fn apply_series_condition_sqlx<'args>(
     }
 }
 
-fn apply_series_value_condition_sqlx<'args>(
+fn apply_series_value_condition_sqlx(
     value: &SeriesValueCondition,
-    builder: &mut QueryBuilder<'args, Sqlite>,
+    builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
 ) {
     match value {

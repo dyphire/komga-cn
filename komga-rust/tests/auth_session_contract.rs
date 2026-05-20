@@ -297,7 +297,7 @@ async fn load_syncpoint_child_count(
     sync_point_id: &str,
 ) -> i64 {
     let sql = format!("SELECT COUNT(*) AS COUNT FROM {table} WHERE SYNC_POINT_ID = ?");
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(sync_point_id)
         .fetch_one(pool)
         .await

@@ -466,7 +466,7 @@ pub async fn load_books_with_missing_file_hash(
         "#
     };
 
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(library_id)
         .fetch_all(pool)
         .await

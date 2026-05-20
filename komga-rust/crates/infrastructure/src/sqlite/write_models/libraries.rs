@@ -84,7 +84,7 @@ pub async fn delete_persisted_library(
     }
 
     for sql in DELETE_LIBRARY_DEPENDENCY_SQL {
-        sqlx::query(sql).bind(library_id).execute(&mut *tx).await?;
+        sqlx::query(*sql).bind(library_id).execute(&mut *tx).await?;
     }
 
     let deleted = sqlx::query(r#"DELETE FROM LIBRARY WHERE ID = ?"#)

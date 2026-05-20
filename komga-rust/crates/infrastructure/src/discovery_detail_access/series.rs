@@ -507,16 +507,18 @@ async fn replace_series_metadata_strings(
     series_id: &str,
     values: &[String],
 ) -> Result<(), String> {
-    sqlx::query(&format!(r#"DELETE FROM {table} WHERE SERIES_ID = ?"#))
-        .bind(series_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|error| format!("clear {table} during series metadata update: {error}"))?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"DELETE FROM {table} WHERE SERIES_ID = ?"#
+    )))
+    .bind(series_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| format!("clear {table} during series metadata update: {error}"))?;
 
     for value in values {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"INSERT INTO {table} (SERIES_ID, {value_column}) VALUES (?, ?)"#
-        ))
+        )))
         .bind(series_id)
         .bind(value)
         .execute(&mut **tx)

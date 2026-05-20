@@ -4,6 +4,7 @@ use std::io::{Cursor, Read, Seek, Write};
 use std::path::Path;
 
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
@@ -90,7 +91,10 @@ fn load_zip_entry_by_normalized_name<R: Read + Seek>(
         let Ok(mut entry) = archive.by_index(index) else {
             continue;
         };
-        if entry.is_dir() || normalize_zip_path(entry.name()) != normalized_path {
+        let Ok(entry_name) = entry.name() else {
+            continue;
+        };
+        if entry.is_dir() || normalize_zip_path(entry_name.as_ref()) != normalized_path {
             continue;
         }
 
@@ -116,7 +120,10 @@ fn write_zip_archive_with_replacements<R: Read + Seek>(
             .by_index(index)
             .map_err(|error| format!("read epub zip entry #{index}: {error}"))?;
 
-        let entry_name = entry.name().to_string();
+        let entry_name = entry
+            .name()
+            .map_err(|error| format!("read epub zip entry #{index} name: {error}"))?
+            .into_owned();
         let normalized_name = normalize_zip_path(entry_name.as_str());
 
         let mut options = SimpleFileOptions::default().compression_method(entry.compression());
@@ -353,7 +360,7 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"full-path") {
                         return attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| normalize_zip_path(value.as_ref()));
                     }
@@ -386,17 +393,17 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"id") {
                             id = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.to_string());
                         } else if xml_name_matches(attribute.key.as_ref(), b"href") {
                             href = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.to_string());
                         } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
                             media_type = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.to_string());
                         }
@@ -416,7 +423,7 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"idref")
                             && let Some(idref) = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.to_string())
                         {
@@ -462,17 +469,17 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
                         property = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
                         content = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     }
@@ -513,17 +520,17 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
                         property = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
                         content = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.to_string());
                     }

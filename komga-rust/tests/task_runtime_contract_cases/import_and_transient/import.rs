@@ -32,7 +32,7 @@ async fn load_import_task_rows(
     let tasks_pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect(context);
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .fetch_all(&tasks_pool)
         .await
         .expect(context);

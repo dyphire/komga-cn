@@ -67,7 +67,7 @@ pub async fn persist_book_hash(
         "#
     };
 
-    sqlx::query(sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(hash)
         .bind(book_id)
         .execute(pool)

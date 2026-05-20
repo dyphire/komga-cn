@@ -617,6 +617,7 @@ async fn router_readlist_media_assets_return_only_visible_archive_entries() {
             zip.by_index(index)
                 .expect("zip entry should open")
                 .name()
+                .expect("zip entry name should decode")
                 .to_string()
         })
         .collect::<Vec<_>>();

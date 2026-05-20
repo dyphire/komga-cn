@@ -4,7 +4,7 @@ async fn count_query_rows(paths: &RuntimeDbPaths, sql: &str, bind: &str) -> i64 
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("count query db should open");
-    let count = sqlx::query(sql)
+    let count = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(bind)
         .fetch_one(&pool)
         .await
@@ -18,7 +18,7 @@ async fn load_task_rows(paths: &RuntimeDbPaths, sql: &str) -> Vec<sqlx::sqlite::
     let pool = connect_test_pool(paths.tasks_db.as_path(), 1)
         .await
         .expect("tasks db should open");
-    let rows = sqlx::query(sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .expect("task rows should be queryable");

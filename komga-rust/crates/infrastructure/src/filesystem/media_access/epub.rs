@@ -6,6 +6,7 @@ use std::path::Path;
 use flate2::read::GzDecoder;
 use komga_application::media_assets::{BookMediaRecord, book_media_is_epub};
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use serde_json::{Value, json};
 use zip::ZipArchive;
@@ -261,22 +262,22 @@ fn parse_epub_manifest_items(
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"id") {
                         id = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"href") {
                         href = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
                         media_type = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"properties") {
                         properties = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned())
                             .unwrap_or_default();
@@ -320,12 +321,12 @@ fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Option<String> {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
                         content = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     }
@@ -383,7 +384,7 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"full-path") {
                         return attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| normalize_epub_zip_path(value.as_ref()));
                     }
@@ -413,17 +414,17 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"id") {
                             id = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         } else if xml_name_matches(attribute.key.as_ref(), b"href") {
                             href = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
                             media_type = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned());
                         }
@@ -442,7 +443,7 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     for attribute in event.attributes().flatten() {
                         if xml_name_matches(attribute.key.as_ref(), b"idref")
                             && let Some(idref) = attribute
-                                .unescape_value()
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .ok()
                                 .map(|value| value.into_owned())
                         {
@@ -484,17 +485,17 @@ pub fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 for attribute in event.attributes().flatten() {
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
                         property = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
                         content = attribute
-                            .unescape_value()
+                            .normalized_value(XmlVersion::Implicit1_0)
                             .ok()
                             .map(|value| value.into_owned());
                     }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use komga_application::media_assets::BookMetadataAuthor;
 use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart as XmlBytesStart, Event as XmlEvent};
 
 use super::support::{
@@ -558,7 +559,7 @@ fn attribute_value(event: &XmlBytesStart<'_>, key: &[u8]) -> Option<String> {
         xml_name_matches_local(attribute.key.as_ref(), key)
             .then(|| {
                 attribute
-                    .unescape_value()
+                    .normalized_value(XmlVersion::Implicit1_0)
                     .ok()
                     .map(|value| value.into_owned())
             })

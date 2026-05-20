@@ -140,7 +140,7 @@ pub async fn load_page_hashes_unknown_page(
     }
     sql.push_str(r#" LIMIT ? OFFSET ?"#);
 
-    let content = sqlx::query(&sql)
+    let content = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind((size.min(i64::MAX as u64)) as i64)
         .bind((offset.min(i64::MAX as u64)) as i64)
         .fetch_all(pool)
@@ -200,7 +200,7 @@ pub async fn load_page_hash_matches_page(
     }
     sql.push_str(r#" LIMIT ? OFFSET ?"#);
 
-    let content = sqlx::query(&sql)
+    let content = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(page_hash)
         .bind(page_hash)
         .bind(page_hash)

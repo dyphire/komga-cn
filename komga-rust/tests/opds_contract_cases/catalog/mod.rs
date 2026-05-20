@@ -151,7 +151,7 @@ async fn clear_router_collections_and_readlists(paths: &RuntimeDbPaths) {
         "DELETE FROM READLIST_BOOK",
         "DELETE FROM READLIST",
     ] {
-        sqlx::query(sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .execute(&pool)
             .await
             .expect("collections/readlists should be deleted");

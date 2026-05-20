@@ -402,7 +402,7 @@ GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
          COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')"#,
         placeholder_list(ids.len())
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }
@@ -469,7 +469,7 @@ GROUP BY b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME),
          COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, ''), bm.RELEASE_DATE"#,
         placeholder_list(ids.len())
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }
@@ -519,7 +519,7 @@ FROM COLLECTION
 WHERE ID IN ({})"#,
         placeholder_list(ids.len())
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }
@@ -553,7 +553,7 @@ FROM READLIST
 WHERE ID IN ({})"#,
         placeholder_list(ids.len())
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }

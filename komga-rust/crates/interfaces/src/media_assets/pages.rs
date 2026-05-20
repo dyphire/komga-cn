@@ -206,7 +206,7 @@ pub async fn book_pages(
     {
         Ok(Some(page_rows)) => page_rows_response(page_rows),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
+        Err(error) => internal_error_response(error),
     }
 }
 

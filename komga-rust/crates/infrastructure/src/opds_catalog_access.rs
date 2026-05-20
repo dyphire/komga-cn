@@ -148,7 +148,7 @@ FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 WHERE {where_clause}"#,
     );
-    let mut count_query = sqlx::query(count_sql.as_str());
+    let mut count_query = sqlx::query(sqlx::AssertSqlSafe(count_sql));
     if let Some(id) = library_id {
         count_query = count_query.bind(id);
     }
@@ -177,7 +177,7 @@ ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
 LIMIT ?
 OFFSET ?"#,
     );
-    let mut rows_query = sqlx::query(rows_sql.as_str());
+    let mut rows_query = sqlx::query(sqlx::AssertSqlSafe(rows_sql));
     if let Some(id) = library_id {
         rows_query = rows_query.bind(id);
     }
@@ -598,7 +598,7 @@ ORDER BY b.CREATED_DATE DESC, b.ID DESC
 LIMIT ?
 OFFSET ?"#,
     );
-    let mut query = sqlx::query(sql.as_str());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     query = query.bind(user_id);
     query = query.bind(user_id);
     if let Some(id) = library_id {
@@ -698,7 +698,7 @@ ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID DESC
 LIMIT ?
 OFFSET ?"#,
     );
-    let mut query = sqlx::query(sql.as_str());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(id) = library_id {
         query = query.bind(id);
     }
@@ -816,7 +816,7 @@ ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
 LIMIT ?
 OFFSET ?"#,
     );
-    let mut query = sqlx::query(sql.as_str());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in &authorized_library_ids {
         query = query.bind(id);
     }
