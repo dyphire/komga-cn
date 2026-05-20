@@ -185,16 +185,19 @@ async fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Op
     }
 
     if matches!(extension.as_str(), "cbz" | "zip" | "epub") {
-        let file = tokio::fs::File::open(source_path)
-            .await
-            .ok()?
-            .into_std()
-            .await;
-        let mut archive = ZipArchive::new(file).ok()?;
-        let mut entry = archive.by_name(file_name).ok()?;
-        let mut bytes = Vec::new();
-        Read::read_to_end(&mut entry, &mut bytes).ok()?;
-        return Some(bytes);
+        let path = source_path.to_path_buf();
+        let file_name = file_name.to_string();
+        return tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+            let file = fs::File::open(&path).ok()?;
+            let mut archive = ZipArchive::new(file).ok()?;
+            let mut entry = archive.by_name(&file_name).ok()?;
+            let mut bytes = Vec::new();
+            Read::read_to_end(&mut entry, &mut bytes).ok()?;
+            Some(bytes)
+        })
+        .await
+        .ok()
+        .flatten();
     }
 
     if matches!(extension.as_str(), "cbr" | "rar") {

@@ -23,9 +23,16 @@ pub fn is_font_resource(resource_name: &str) -> bool {
 }
 
 pub async fn read_epub_resource_bytes(epub_path: &Path, resource_name: &str) -> Option<Vec<u8>> {
-    let file = open_sync_file(epub_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    read_zip_entry_bytes(&mut archive, resource_name)
+    let path = epub_path.to_path_buf();
+    let resource_name = resource_name.to_string();
+    tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        read_zip_entry_bytes(&mut archive, &resource_name)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
@@ -48,157 +55,170 @@ pub async fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<
     if !book_media_is_epub(media) {
         return None;
     }
+    let path = media.file_path.clone();
+    tokio::task::spawn_blocking(move || -> Option<Vec<Value>> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let container_xml =
+            read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+        let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+        let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
+        let spine_entries = parse_epub_spine_entries(&package_document, &rootfile_path);
+        if spine_entries.is_empty() {
+            return None;
+        }
+        let fixed_layout = parse_epub_fixed_layout(&package_document);
+        let mut resources = spine_entries
+            .into_iter()
+            .map(|entry| {
+                let bytes =
+                    read_zip_entry_bytes_normalized(&mut archive, &entry.href).unwrap_or_default();
+                let kobo_spans = if fixed_layout {
+                    vec![]
+                } else {
+                    parse_epub_kobo_spans(&bytes)
+                };
+                (entry, bytes, kobo_spans)
+            })
+            .collect::<Vec<_>>();
 
-    let file = open_sync_file(&media.file_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
-    let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
-    let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
-    let spine_entries = parse_epub_spine_entries(&package_document, &rootfile_path);
-    if spine_entries.is_empty() {
-        return None;
-    }
-    let fixed_layout = parse_epub_fixed_layout(&package_document);
-    let mut resources = spine_entries
-        .into_iter()
-        .map(|entry| {
-            let bytes =
-                read_zip_entry_bytes_normalized(&mut archive, &entry.href).unwrap_or_default();
-            let kobo_spans = if fixed_layout {
-                vec![]
-            } else {
-                parse_epub_kobo_spans(&bytes)
-            };
-            (entry, bytes, kobo_spans)
-        })
-        .collect::<Vec<_>>();
-
-    if !fixed_layout && resources.iter().all(|(_, _, spans)| spans.is_empty()) {
-        let converted_kobo_spans = load_kepub_converted_spans(
-            media,
-            resources
-                .iter()
-                .map(|(entry, _, _)| entry.clone())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        for (entry, _, spans) in &mut resources {
-            if let Some(converted) = converted_kobo_spans.get(&entry.href)
-                && !converted.is_empty()
-            {
-                *spans = converted.clone();
+        if !fixed_layout && resources.iter().all(|(_, _, spans)| spans.is_empty()) {
+            let converted_kobo_spans = load_kepub_converted_spans(
+                &path,
+                resources
+                    .iter()
+                    .map(|(entry, _, _)| entry.clone())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            );
+            for (entry, _, spans) in &mut resources {
+                if let Some(converted) = converted_kobo_spans.get(&entry.href)
+                    && !converted.is_empty()
+                {
+                    *spans = converted.clone();
+                }
             }
         }
-    }
 
-    let mut raw_positions = Vec::new();
-    for (entry, bytes, spans) in resources {
-        let position_count = if fixed_layout {
-            1usize
-        } else {
-            ((bytes.len() as f64 / 1024.0).ceil() as usize).max(1)
-        };
+        let mut raw_positions = Vec::new();
+        for (entry, bytes, spans) in resources {
+            let position_count = if fixed_layout {
+                1usize
+            } else {
+                ((bytes.len() as f64 / 1024.0).ceil() as usize).max(1)
+            };
 
-        for segment_index in 0..position_count {
-            let progression = if fixed_layout {
-                0.0
-            } else {
-                segment_index as f64 / position_count as f64
-            };
-            let kobo_span = if fixed_layout || position_count == 1 || segment_index == 0 {
-                Some("kobo.1.1".to_string())
-            } else {
-                closest_kobo_span(&spans, progression)
-            };
-            raw_positions.push((
-                entry.href.clone(),
-                entry.media_type.clone(),
-                progression,
-                kobo_span,
-            ));
+            for segment_index in 0..position_count {
+                let progression = if fixed_layout {
+                    0.0
+                } else {
+                    segment_index as f64 / position_count as f64
+                };
+                let kobo_span = if fixed_layout || position_count == 1 || segment_index == 0 {
+                    Some("kobo.1.1".to_string())
+                } else {
+                    closest_kobo_span(&spans, progression)
+                };
+                raw_positions.push((
+                    entry.href.clone(),
+                    entry.media_type.clone(),
+                    progression,
+                    kobo_span,
+                ));
+            }
         }
-    }
 
-    if raw_positions.is_empty() {
-        return None;
-    }
+        if raw_positions.is_empty() {
+            return None;
+        }
 
-    let total_positions = raw_positions.len() as f64;
-    Some(
-        raw_positions
-            .into_iter()
-            .enumerate()
-            .map(|(index, (href, media_type, progression, kobo_span))| {
-                let position = index + 1;
-                let mut locator = json!({
-                    "href": href,
-                    "type": media_type,
-                    "locations": {
-                        "position": position,
-                        "progression": progression,
-                        "totalProgression": position as f64 / total_positions,
-                    },
-                });
-                if let Some(kobo_span) = kobo_span
-                    && let Some(object) = locator.as_object_mut()
-                {
-                    object.insert("koboSpan".to_string(), Value::String(kobo_span));
-                }
-                locator
-            })
-            .collect(),
-    )
+        let total_positions = raw_positions.len() as f64;
+        Some(
+            raw_positions
+                .into_iter()
+                .enumerate()
+                .map(|(index, (href, media_type, progression, kobo_span))| {
+                    let position = index + 1;
+                    let mut locator = json!({
+                        "href": href,
+                        "type": media_type,
+                        "locations": {
+                            "position": position,
+                            "progression": progression,
+                            "totalProgression": position as f64 / total_positions,
+                        },
+                    });
+                    if let Some(kobo_span) = kobo_span
+                        && let Some(object) = locator.as_object_mut()
+                    {
+                        object.insert("koboSpan".to_string(), Value::String(kobo_span));
+                    }
+                    locator
+                })
+                .collect(),
+        )
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub async fn load_epub_cover_bytes(media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
     if !book_media_is_epub(media) {
         return None;
     }
+    let path = media.file_path.clone();
+    tokio::task::spawn_blocking(move || -> Option<(Vec<u8>, String)> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let container_xml =
+            read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+        let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+        let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
+        let manifest = parse_epub_manifest_items(&package_document, &rootfile_path);
+        let cover_item = manifest
+            .values()
+            .find(|item| {
+                item.properties
+                    .split_ascii_whitespace()
+                    .any(|property| property.eq_ignore_ascii_case("cover-image"))
+            })
+            .cloned()
+            .or_else(|| {
+                parse_epub_metadata_cover_id(&package_document)
+                    .and_then(|cover_id| manifest.get(&cover_id).cloned())
+            })
+            .or_else(|| {
+                manifest
+                    .values()
+                    .find(|item| item.id == "cover-image")
+                    .cloned()
+            })?;
 
-    let file = open_sync_file(&media.file_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
-    let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
-    let package_document = read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
-    let manifest = parse_epub_manifest_items(&package_document, &rootfile_path);
-    let cover_item = manifest
-        .values()
-        .find(|item| {
-            item.properties
-                .split_ascii_whitespace()
-                .any(|property| property.eq_ignore_ascii_case("cover-image"))
-        })
-        .cloned()
-        .or_else(|| {
-            parse_epub_metadata_cover_id(&package_document)
-                .and_then(|cover_id| manifest.get(&cover_id).cloned())
-        })
-        .or_else(|| {
-            manifest
-                .values()
-                .find(|item| item.id == "cover-image")
-                .cloned()
-        })?;
-
-    let bytes = read_zip_entry_bytes_normalized(&mut archive, &cover_item.href)?;
-    Some((bytes, cover_item.media_type))
+        let bytes = read_zip_entry_bytes_normalized(&mut archive, &cover_item.href)?;
+        Some((bytes, cover_item.media_type))
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub async fn load_epub_package_document(media: &BookMediaRecord) -> Option<Vec<u8>> {
     if !book_media_is_epub(media) {
         return None;
     }
-
-    let file = open_sync_file(&media.file_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    let container_xml = read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
-    let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
-
-    read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)
-}
-
-async fn open_sync_file(path: &Path) -> Option<File> {
-    Some(tokio::fs::File::open(path).await.ok()?.into_std().await)
+    let path = media.file_path.clone();
+    tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let container_xml =
+            read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+        let rootfile_path = parse_epub_rootfile_path(&container_xml)?;
+        read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn read_zip_entry_bytes<R: Read + Seek>(
@@ -348,10 +368,10 @@ fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Option<String> {
 }
 
 fn load_kepub_converted_spans(
-    media: &BookMediaRecord,
+    epub_path: &Path,
     spine_entries: &[EpubSpineEntry],
 ) -> HashMap<String, Vec<(String, f64)>> {
-    let converted_bytes = match komga_kepubify::convert_epub_file_to_bytes(&media.file_path) {
+    let converted_bytes = match komga_kepubify::convert_epub_file_to_bytes(epub_path) {
         Ok(bytes) => bytes,
         Err(_) => return HashMap::new(),
     };

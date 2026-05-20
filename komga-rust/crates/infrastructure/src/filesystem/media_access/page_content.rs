@@ -261,59 +261,72 @@ async fn read_zip_archive_page_bytes(
     if !book_media_is_zip_archive(media) || page_number == 0 {
         return None;
     }
-    let file = open_sync_file(&media.file_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    if !page.file_name.is_empty()
-        && let Ok(mut entry) = archive.by_name(&page.file_name)
-        && let Ok(entry_name) = entry.name()
-        && is_supported_page_image_file_name(entry_name.as_ref())
-    {
-        let mut bytes = Vec::new();
-        if entry.read_to_end(&mut bytes).is_ok() {
-            return Some(bytes);
+    let path = media.file_path.clone();
+    let page_file_name = page.file_name.clone();
+    tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        if !page_file_name.is_empty()
+            && let Ok(mut entry) = archive.by_name(&page_file_name)
+            && let Ok(entry_name) = entry.name()
+            && is_supported_page_image_file_name(entry_name.as_ref())
+        {
+            let mut bytes = Vec::new();
+            if entry.read_to_end(&mut bytes).is_ok() {
+                return Some(bytes);
+            }
         }
-    }
-    let target_index = usize::try_from(page_number.saturating_sub(1)).ok()?;
-    let mut logical_index = 0usize;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).ok()?;
-        let entry_name = entry.name().ok()?;
-        if !is_supported_page_image_file_name(entry_name.as_ref()) {
-            continue;
+        let target_index = usize::try_from(page_number.saturating_sub(1)).ok()?;
+        let mut logical_index = 0usize;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).ok()?;
+            let entry_name = entry.name().ok()?;
+            if !is_supported_page_image_file_name(entry_name.as_ref()) {
+                continue;
+            }
+            if logical_index != target_index {
+                logical_index += 1;
+                continue;
+            }
+            let mut bytes = Vec::new();
+            if entry.read_to_end(&mut bytes).is_ok() {
+                return Some(bytes);
+            }
+            return None;
         }
-        if logical_index != target_index {
-            logical_index += 1;
-            continue;
-        }
-        let mut bytes = Vec::new();
-        if entry.read_to_end(&mut bytes).is_ok() {
-            return Some(bytes);
-        }
-        return None;
-    }
-    None
+        None
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 async fn load_zip_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
-    let file = open_sync_file(&media.file_path).await?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    let mut rows = Vec::new();
-    for index in 0..archive.len() {
-        let entry = archive.by_index(index).ok()?;
-        let file_name = entry.name().ok()?.into_owned();
-        if !is_supported_page_image_file_name(&file_name) {
-            continue;
+    let path = media.file_path.clone();
+    tokio::task::spawn_blocking(move || -> Option<Vec<BookPageRecord>> {
+        let file = File::open(&path).ok()?;
+        let mut archive = ZipArchive::new(file).ok()?;
+        let mut rows = Vec::new();
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index).ok()?;
+            let file_name = entry.name().ok()?.into_owned();
+            if !is_supported_page_image_file_name(&file_name) {
+                continue;
+            }
+            rows.push(BookPageRecord {
+                number: (rows.len() as u64) + 1,
+                media_type: content_type_from_filename(&file_name, "image/jpeg"),
+                file_name,
+                width: None,
+                height: None,
+                file_size: entry.size().try_into().unwrap_or(i64::MAX),
+            });
         }
-        rows.push(BookPageRecord {
-            number: (rows.len() as u64) + 1,
-            media_type: content_type_from_filename(&file_name, "image/jpeg"),
-            file_name,
-            width: None,
-            height: None,
-            file_size: entry.size().try_into().unwrap_or(i64::MAX),
-        });
-    }
-    (!rows.is_empty()).then_some(rows)
+        (!rows.is_empty()).then_some(rows)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn load_rar_archive_page_rows(media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
@@ -368,8 +381,4 @@ pub async fn read_media_file_size(path: &Path) -> Option<i64> {
         .await
         .ok()
         .and_then(|value| i64::try_from(value.len()).ok())
-}
-
-async fn open_sync_file(path: &Path) -> Option<File> {
-    Some(tokio::fs::File::open(path).await.ok()?.into_std().await)
 }
