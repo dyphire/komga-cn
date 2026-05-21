@@ -127,7 +127,7 @@ impl SqliteDiscoveryBrowseService {
     }
 }
 
-fn search_ids_or_empty(
+pub(crate) fn search_ids_or_empty(
     index_dir: &std::path::Path,
     query: &str,
     entity_type: SearchEntityType,
@@ -142,7 +142,7 @@ fn search_ids_or_empty(
         .unwrap_or_default()
 }
 
-fn search_scored_ids_or_empty(
+pub(crate) fn search_scored_ids_or_empty(
     index_dir: &std::path::Path,
     query: &str,
     entity_type: SearchEntityType,

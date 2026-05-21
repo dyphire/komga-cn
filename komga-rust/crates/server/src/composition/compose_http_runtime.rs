@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
     BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
-    DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-    ReadlistPort, SeriesDetailPort,
+    DiscoverySearchService, ReadlistPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
 use komga_application::operational::OperationalMetricsPort;
@@ -15,9 +14,7 @@ use komga_infrastructure::content_resolver::ContentResolver;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
 use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
-use komga_infrastructure::discovery_persisted_access::{
-    authors, library_mappings, models, runtime_queries,
-};
+use komga_infrastructure::discovery_persisted_access::search::DiscoverySearchAccess;
 use komga_infrastructure::event_emitter_adapter::SseBookEventEmitter;
 use komga_infrastructure::filesystem::import::FilesystemImportPort;
 use komga_infrastructure::library_catalog::LibraryCatalogAccess;
@@ -29,10 +26,7 @@ use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
 use komga_infrastructure::operational_settings_access::{self, OperationalSettingsAccess};
 use komga_infrastructure::progress_writer::ProgressWriter;
 use komga_infrastructure::runtime_identity_access::IdentityAccess;
-use komga_infrastructure::search::index_dirs::{
-    register_discovery_index_dir, resolve_discovery_index_dir,
-};
-use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchQueryLifecycle};
+use komga_infrastructure::search::index_dirs::register_discovery_index_dir;
 use komga_infrastructure::search_sync_adapter::SearchSyncAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 use komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter;
@@ -73,7 +67,7 @@ pub fn compose_http_runtime(
     let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
     let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
     let discovery_search: Arc<dyn DiscoverySearchService> = Arc::new(
-        RuntimePersistedDiscoveryAccess::new(db.clone(), config.lucene_data_directory.clone()),
+        DiscoverySearchAccess::new(db.clone(), config.lucene_data_directory.clone()),
     );
     let discovery_browse_service = Arc::new(compose_discovery_browse_service(
         db.clone(),
@@ -274,151 +268,4 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
             scopes: client.scopes.clone(),
         })
         .collect()
-}
-
-// Discovery search service runtime adapter — kept here because its only purpose
-// is to wire infrastructure persisted-access modules into the
-// `DiscoverySearchService` trait that the interfaces layer depends on.
-fn search_ids_or_empty(
-    index_dir: &Path,
-    query: &str,
-    entity_type: SearchEntityType,
-    limit: usize,
-) -> Vec<String> {
-    let Ok(index) = SearchQueryLifecycle::bootstrap(index_dir) else {
-        return Vec::new();
-    };
-
-    index
-        .search_ids(query, entity_type, limit)
-        .unwrap_or_default()
-}
-
-fn search_scored_ids_or_empty(
-    index_dir: &Path,
-    query: &str,
-    entity_type: SearchEntityType,
-    limit: usize,
-) -> Vec<(f32, String)> {
-    let Ok(index) = SearchQueryLifecycle::bootstrap(index_dir) else {
-        return Vec::new();
-    };
-
-    index
-        .search_scored_ids(query, entity_type, limit)
-        .unwrap_or_default()
-}
-
-fn persisted_book_browse_entry(row: models::BookBrowseEntry) -> PersistedBookBrowseEntry {
-    PersistedBookBrowseEntry {
-        id: row.id,
-        library_id: row.library_id,
-        name: row.name,
-        title: row.title,
-    }
-}
-
-#[derive(Clone)]
-struct RuntimePersistedDiscoveryAccess {
-    db: DatabaseHandle,
-    index_dir: PathBuf,
-}
-
-impl RuntimePersistedDiscoveryAccess {
-    fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
-        Self { db, index_dir }
-    }
-}
-
-#[async_trait::async_trait]
-impl DiscoverySearchService for RuntimePersistedDiscoveryAccess {
-    async fn load_author_names(
-        &self,
-        search: &str,
-        authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String> {
-        authors::load_persisted_author_names(self.db.read_pool(), search, authorized_library_ids)
-            .await
-    }
-
-    async fn load_author_roles(
-        &self,
-        authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String> {
-        authors::load_persisted_author_roles(self.db.read_pool(), authorized_library_ids).await
-    }
-
-    async fn load_authors_by_scope(
-        &self,
-        scope: PersistedAuthorsScope,
-        authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<PersistedAuthorEntry>, String> {
-        let mapped_scope = match scope {
-            PersistedAuthorsScope::All => models::AuthorsScope::All,
-            PersistedAuthorsScope::Libraries(ids) => models::AuthorsScope::Libraries(ids),
-            PersistedAuthorsScope::Collection(id) => models::AuthorsScope::Collection(id),
-            PersistedAuthorsScope::Series(id) => models::AuthorsScope::Series(id),
-            PersistedAuthorsScope::ReadList(id) => models::AuthorsScope::ReadList(id),
-        };
-        let rows = authors::load_persisted_authors_by_scope(
-            self.db.read_pool(),
-            &mapped_scope,
-            authorized_library_ids,
-        )
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| PersistedAuthorEntry {
-                name: row.name,
-                role: row.role,
-            })
-            .collect())
-    }
-
-    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-        library_mappings::load_persisted_library_ids(self.db.read_pool()).await
-    }
-
-    async fn search_collection_ids(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
-        Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            query,
-            SearchEntityType::Collection,
-            limit,
-        ))
-    }
-
-    async fn search_readlist_scored_ids(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
-        Ok(search_scored_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            query,
-            SearchEntityType::ReadList,
-            limit,
-        ))
-    }
-
-    async fn load_ondeck_books(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        runtime_queries::load_persisted_ondeck_books(self.db.read_pool(), user_id)
-            .await
-            .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
-    }
-
-    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-        runtime_queries::load_persisted_duplicate_books(self.db.read_pool())
-            .await
-            .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
-    }
 }
