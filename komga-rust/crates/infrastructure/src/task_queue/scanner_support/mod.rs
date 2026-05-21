@@ -1,5 +1,8 @@
-mod scan_core;
+mod scan_diff;
+mod scan_discovery;
 mod scan_models;
+mod scan_persist;
+mod scan_restore;
 mod scan_sse;
 mod sidecars;
 
@@ -10,8 +13,9 @@ use sqlx::SqlitePool;
 
 use komga_application::task_processing::TaskProcessingError;
 
-use scan_core::{
-    library_empty_trash_after_scan, load_changed_sidecars, persist_scanned_library, scan_library,
+use scan_diff::scan_library;
+use scan_persist::{
+    library_empty_trash_after_scan, load_changed_sidecars, persist_scanned_library,
 };
 
 /// Owns the "scan a library" capability.
