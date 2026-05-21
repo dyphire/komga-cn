@@ -9,10 +9,11 @@ mod ports;
 mod thumbnail_operations;
 
 pub use file_import::{
-    BooksImportEntry, BooksImportPayload, ImportBookOutcome, ImportCopyMode, MediaImportPort,
-    MediaImportService, QueuedBookImportPayload, RuntimeBookImportEvent,
-    current_runtime_book_import_event_cursor, generate_prefixed_id,
-    pending_runtime_book_import_events, register_runtime_book_import_event,
+    BookImportSubmissionFailure, BookImportSubmissionFailureKind, BooksImportEntry,
+    BooksImportPayload, ImportBookOutcome, ImportCopyMode, MediaImportPort, MediaImportService,
+    QueuedBookImportPayload, RuntimeBookImportEvent, current_runtime_book_import_event_cursor,
+    generate_prefixed_id, parse_books_import_payload, pending_runtime_book_import_events,
+    register_runtime_book_import_event,
 };
 pub use manifest_builder::{
     ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,

@@ -6,7 +6,7 @@ use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use image::ImageFormat;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::cache::{
@@ -38,7 +38,6 @@ mod files;
 pub(crate) mod handlers;
 pub(crate) mod http_helpers;
 mod import;
-mod import_internals;
 mod manifests;
 pub(crate) mod media_helpers;
 mod operations;
@@ -57,7 +56,6 @@ use self::epub_positions::load_persisted_epub_positions;
 use self::http_helpers::{
     attachment_disposition, format_size_bytes, inline_disposition, internal_error_response,
 };
-use self::import_internals::parse_books_import_payload;
 use self::media_helpers::{
     book_media_is_epub, book_media_supports_page_api, content_type_from_filename,
 };
@@ -65,7 +63,7 @@ use self::media_helpers::{
 use self::media_helpers::{
     normalize_epub_resource_href, parse_epub_fixed_layout, parse_epub_kobo_spans,
 };
-use self::types::{BooksImportEntry, BooksImportPayload, ImportCopyMode, PersistedBookMedia};
+use self::types::PersistedBookMedia;
 
 async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id: &str) -> String {
     let Some(index) = requested_book_id

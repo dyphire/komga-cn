@@ -5,12 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::runtime_sse::{
     current_runtime_sse_event_cursor, pending_runtime_sse_events, register_runtime_sse_event,
 };
-use crate::task_processing::{TaskKind, TaskQueueRecord, TaskRequest};
+use crate::task_processing::{SubmitUrgency, TaskKind, TaskQueue, TaskQueueRecord, TaskRequest};
 
 static GENERATED_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -69,6 +69,20 @@ pub struct ImportBookOutcome {
     pub artwork_sidecar_imported: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BookImportSubmissionFailureKind {
+    CreateTask,
+    EnqueueTask,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BookImportSubmissionFailure {
+    pub kind: BookImportSubmissionFailureKind,
+    pub series_id: String,
+    pub source_file: String,
+    pub error: String,
+}
+
 #[async_trait]
 pub trait MediaImportPort: Send + Sync {
     async fn import_book(
@@ -110,6 +124,58 @@ impl MediaImportService {
                     .with_payload(task_payload))
             })
             .collect()
+    }
+
+    pub async fn submit_books_import(
+        &self,
+        payload: BooksImportPayload,
+        task_queue: &dyn TaskQueue,
+    ) -> Vec<BookImportSubmissionFailure> {
+        let mut failures = Vec::new();
+
+        for book in payload.books {
+            let source_file = book.source_file.display().to_string();
+            let series_id = book.series_id.clone();
+            let task_id_suffix = kotlin_import_book_task_id_suffix(&book);
+            let task_record = match self
+                .enqueue_books(
+                    BooksImportPayload {
+                        copy_mode: payload.copy_mode,
+                        books: vec![book],
+                    },
+                    &mut || task_id_suffix.clone(),
+                )
+                .and_then(|mut task_records| {
+                    task_records
+                        .pop()
+                        .ok_or_else(|| "import task generation returned no task".to_string())
+                }) {
+                Ok(task_record) => task_record,
+                Err(error) => {
+                    failures.push(BookImportSubmissionFailure {
+                        kind: BookImportSubmissionFailureKind::CreateTask,
+                        series_id,
+                        source_file,
+                        error,
+                    });
+                    continue;
+                }
+            };
+
+            if let Err(error) = task_queue
+                .enqueue_records(vec![task_record], SubmitUrgency::Immediate)
+                .await
+            {
+                failures.push(BookImportSubmissionFailure {
+                    kind: BookImportSubmissionFailureKind::EnqueueTask,
+                    series_id,
+                    source_file,
+                    error,
+                });
+            }
+        }
+
+        failures
     }
 
     pub async fn process_books_payload(
@@ -159,6 +225,75 @@ impl MediaImportService {
         )
         .await
     }
+}
+
+pub fn parse_books_import_payload(body: &Value) -> Result<BooksImportPayload, String> {
+    let body = body
+        .as_object()
+        .ok_or_else(|| "books import payload must be a JSON object".to_string())?;
+
+    let copy_mode = match body.get("copyMode").and_then(Value::as_str) {
+        Some("MOVE") => ImportCopyMode::Move,
+        Some("COPY") => ImportCopyMode::Copy,
+        Some("HARDLINK") => ImportCopyMode::Hardlink,
+        Some(_) => {
+            return Err("copyMode must be one of MOVE, COPY, HARDLINK".to_string());
+        }
+        None => {
+            return Err("copyMode is required".to_string());
+        }
+    };
+
+    let books = match body.get("books") {
+        Some(books) => books
+            .as_array()
+            .ok_or_else(|| "books must be an array".to_string())?
+            .iter()
+            .map(|entry| {
+                let entry = entry
+                    .as_object()
+                    .ok_or_else(|| "books entries must be objects".to_string())?;
+
+                let source_file = entry
+                    .get("sourceFile")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "books[].sourceFile must be a string".to_string())?;
+                let series_id = entry
+                    .get("seriesId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "books[].seriesId must be a string".to_string())?;
+                if source_file.trim().is_empty() || series_id.trim().is_empty() {
+                    return Err(
+                        "books[].sourceFile and books[].seriesId must not be blank".to_string()
+                    );
+                }
+
+                let destination_name = entry
+                    .get("destinationName")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+
+                let upgrade_book_id = entry
+                    .get("upgradeBookId")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+
+                Ok(BooksImportEntry {
+                    source_file: PathBuf::from(source_file),
+                    series_id: series_id.to_string(),
+                    destination_name,
+                    upgrade_book_id,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        None => Vec::new(),
+    };
+
+    Ok(BooksImportPayload { copy_mode, books })
+}
+
+fn kotlin_import_book_task_id_suffix(book: &BooksImportEntry) -> String {
+    format!("{}_{}", book.series_id, book.source_file.display())
 }
 
 fn import_follow_up_analyze_task(
@@ -321,6 +456,110 @@ mod tests {
         ) -> Result<Option<ImportBookOutcome>, String> {
             Ok(self.outcome.clone())
         }
+    }
+
+    struct RecordingTaskQueue {
+        persisted_ids: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl crate::task_processing::TaskQueue for RecordingTaskQueue {
+        async fn enqueue(&self, _kind: TaskKind, _target_id: &str) {}
+
+        async fn enqueue_request(&self, _request: TaskRequest) {}
+
+        async fn enqueue_batch(&self, _batch: crate::task_processing::LibraryTaskBatch) {}
+
+        async fn enqueue_records(
+            &self,
+            records: Vec<TaskQueueRecord>,
+            urgency: crate::task_processing::SubmitUrgency,
+        ) -> Result<(), String> {
+            assert_eq!(urgency, crate::task_processing::SubmitUrgency::Immediate);
+            let task_record = records.into_iter().next().expect("task should exist");
+            if task_record.id == "ImportBook_series-1_/tmp/book-a.cbz" {
+                Err("first enqueue failed".to_string())
+            } else {
+                self.persisted_ids.lock().unwrap().push(task_record.id);
+                Ok(())
+            }
+        }
+
+        async fn status(&self) -> crate::task_processing::QueueStatus {
+            crate::task_processing::QueueStatus::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_books_import_keeps_later_books_when_earlier_enqueue_fails() {
+        let service = MediaImportService::new(Arc::new(StubImportPort { outcome: None }));
+        let queue = RecordingTaskQueue {
+            persisted_ids: std::sync::Mutex::new(Vec::new()),
+        };
+
+        let failures = service
+            .submit_books_import(
+                BooksImportPayload {
+                    copy_mode: ImportCopyMode::Copy,
+                    books: vec![
+                        BooksImportEntry {
+                            source_file: PathBuf::from("/tmp/book-a.cbz"),
+                            series_id: "series-1".to_string(),
+                            destination_name: None,
+                            upgrade_book_id: None,
+                        },
+                        BooksImportEntry {
+                            source_file: PathBuf::from("/tmp/book-b.cbz"),
+                            series_id: "series-2".to_string(),
+                            destination_name: None,
+                            upgrade_book_id: None,
+                        },
+                    ],
+                },
+                &queue,
+            )
+            .await;
+
+        assert_eq!(
+            queue.persisted_ids.lock().unwrap().clone(),
+            vec!["ImportBook_series-2_/tmp/book-b.cbz".to_string()]
+        );
+        assert_eq!(
+            failures,
+            vec![BookImportSubmissionFailure {
+                kind: BookImportSubmissionFailureKind::EnqueueTask,
+                series_id: "series-1".to_string(),
+                source_file: "/tmp/book-a.cbz".to_string(),
+                error: "first enqueue failed".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_books_import_payload_accepts_http_camel_case_fields() {
+        let payload = parse_books_import_payload(&serde_json::json!({
+            "copyMode": "COPY",
+            "books": [{
+                "sourceFile": "/tmp/book-a.cbz",
+                "seriesId": "series-1",
+                "destinationName": "Book A",
+                "upgradeBookId": "book-1"
+            }]
+        }))
+        .expect("http import payload should parse");
+
+        assert_eq!(
+            payload,
+            BooksImportPayload {
+                copy_mode: ImportCopyMode::Copy,
+                books: vec![BooksImportEntry {
+                    source_file: PathBuf::from("/tmp/book-a.cbz"),
+                    series_id: "series-1".to_string(),
+                    destination_name: Some("Book A".to_string()),
+                    upgrade_book_id: Some("book-1".to_string()),
+                }]
+            }
+        );
     }
 
     #[test]
