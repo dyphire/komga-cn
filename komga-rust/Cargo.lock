@@ -2415,6 +2415,7 @@ dependencies = [
  "async-trait",
  "base64",
  "flate2",
+ "icu",
  "komga-domain",
  "regex",
  "serde",

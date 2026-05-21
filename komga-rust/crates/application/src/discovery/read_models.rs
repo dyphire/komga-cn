@@ -115,6 +115,12 @@ pub struct BookReadModel {
 pub struct ReadListReadModel {
     pub id: String,
     pub name: String,
+    pub summary: String,
+    pub ordered: bool,
+    pub book_ids: Vec<String>,
+    pub created_date: String,
+    pub last_modified_date: String,
+    pub filtered: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

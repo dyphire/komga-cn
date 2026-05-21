@@ -756,45 +756,6 @@ pub fn decode_query_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-#[derive(Clone, Copy)]
-pub enum ReadListsSort {
-    NameAsc,
-    NameDesc,
-    CreatedDateAsc,
-    CreatedDateDesc,
-    LastModifiedDateAsc,
-    LastModifiedDateDesc,
-    SearchOrName,
-}
-
-pub fn parse_readlists_sort(value: &str) -> ReadListsSort {
-    let mut parts = value.splitn(2, ',');
-    let field = parts.next().unwrap_or_default().trim();
-    let direction = parts.next().unwrap_or("asc").trim();
-
-    if field.eq_ignore_ascii_case("name") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::NameDesc
-        } else {
-            ReadListsSort::NameAsc
-        }
-    } else if field.eq_ignore_ascii_case("createdDate") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::CreatedDateDesc
-        } else {
-            ReadListsSort::CreatedDateAsc
-        }
-    } else if field.eq_ignore_ascii_case("lastModifiedDate") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::LastModifiedDateDesc
-        } else {
-            ReadListsSort::LastModifiedDateAsc
-        }
-    } else {
-        ReadListsSort::SearchOrName
-    }
-}
-
 pub(super) fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
     let content = page
         .content

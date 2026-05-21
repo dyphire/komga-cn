@@ -3,7 +3,6 @@ use axum::body::Bytes;
 use axum::extract::Path;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::normalize_readlists_search;
 use komga_domain::discovery::PageEnvelope;
 use serde_json::{Map, Value, json};
 
@@ -14,7 +13,7 @@ use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::helpers::{
     api_file_path, detail_access_denial_response, mark_runtime_owned, normalized_date_time,
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
-    query_values, restricted_book_url,
+    query_values, restricted_book_url, to_domain_query_context,
 };
 use crate::state::DiscoveryState;
 use crate::state::{
@@ -22,7 +21,7 @@ use crate::state::{
     PersistedSeriesDetailRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
     SeriesMetadataUpdateRecord,
 };
-use komga_application::discovery::{BookMetadataAuthorReadModel, BookReadModel};
+use komga_application::discovery::{BookMetadataAuthorReadModel, BookReadModel, ReadListReadModel};
 
 mod books_detail;
 mod books_persistence;
@@ -62,10 +61,10 @@ pub use readlists::{
     readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update, readlists,
 };
 pub use readlists_support::{
-    PersistedReadlistBooksQuery, ReadListsSort, decode_query_component, delete_persisted_readlist,
+    PersistedReadlistBooksQuery, decode_query_component, delete_persisted_readlist,
     delete_readlist_search_document, match_comicrack_readlist, parse_comicrack_readlist,
-    parse_persisted_readlist_books_query, parse_readlists_sort, persist_readlist_create,
-    persist_readlist_update, upsert_readlist_search_document,
+    parse_persisted_readlist_books_query, persist_readlist_create, persist_readlist_update,
+    upsert_readlist_search_document,
 };
 use readlists_support::{
     load_persisted_readlist_detail, load_persisted_readlists,
@@ -80,18 +79,6 @@ pub use series_persistence::{
 use series_persistence::{load_persisted_series_collections, load_persisted_series_detail};
 
 pub(super) type BookDetailReadModel = BookReadModel;
-
-#[derive(Clone)]
-pub(super) struct ReadListReadModel {
-    id: String,
-    name: String,
-    summary: String,
-    ordered: bool,
-    book_ids: Vec<String>,
-    created_date: String,
-    last_modified_date: String,
-    filtered: bool,
-}
 
 #[derive(Clone)]
 pub(super) struct CollectionReadModel {

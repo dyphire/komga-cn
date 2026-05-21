@@ -7,15 +7,8 @@ use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
 use axum::extract::State;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
 
 pub async fn readlists(
     State(app): State<DiscoveryState>,
@@ -23,43 +16,16 @@ pub async fn readlists(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let query_string = uri.query().unwrap_or_default();
-    let page = query_value(query_string, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query_string, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let unpaged = query_bool(query_string, "unpaged");
-    let library_ids = {
-        let values = query_values(query_string, "library_id")
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then_some(values)
-    };
-    let search_values = query_values(query_string, "search")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-    let search = normalize_readlists_search(match search_values.as_slice() {
-        [] => None,
-        [single] => Some(single.clone()),
-        _ => Some(search_values.join(",")),
-    });
-    let sort = query_values(query_string, "sort")
-        .into_iter()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let requested_sort = sort.first().cloned();
+    let query =
+        komga_application::discovery::resolve_readlists_query(uri.query().unwrap_or_default());
 
     let requested_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
+        .resolve_query_context_with_persistence(
+            &app.identity,
+            &headers,
+            query.library_ids.as_deref(),
+        )
         .await
     {
         Some(context) => context,
@@ -74,228 +40,26 @@ pub async fn readlists(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let mut content =
-        match load_persisted_readlists(&app, requested_context.authorized_library_ids.as_deref())
-            .await
-        {
-            Ok(readlists) => readlists,
-            Err(error) => return internal_error_response(error),
-        };
-    let search_ranks = match search.as_deref() {
-        Some(search_term) => {
-            let search_groups = search_term
-                .split(',')
-                .map(str::trim)
-                .filter(|group| !group.is_empty())
-                .collect::<Vec<_>>();
-            if search_groups.is_empty() {
-                None
-            } else {
-                let mut next_rank = 0_usize;
-                let mut search_ranks = HashMap::new();
-                for search_group in search_groups {
-                    // Kotlin takes a bounded Lucene hit window first and filters for
-                    // visibility afterward. Keeping the same fixed candidate window avoids
-                    // hidden higher-ranked readlists crowding visible matches out of Rust's
-                    // pre-filtered result set.
-                    let ranked_hits = match app
-                        .discovery_search
-                        .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
-                        .await
-                    {
-                        Ok(hits) => hits,
-                        Err(error) => return internal_error_response(error),
-                    };
-                    for (_score, id) in ranked_hits {
-                        if let std::collections::hash_map::Entry::Vacant(entry) =
-                            search_ranks.entry(id)
-                        {
-                            entry.insert(next_rank);
-                            next_rank += 1;
-                        }
-                    }
-                }
-                Some(search_ranks)
-            }
-        }
-        None => None,
-    };
-
-    if let Some(search_ranks) = search_ranks.as_ref() {
-        content.retain(|readlist| search_ranks.contains_key(readlist.id.as_str()));
-    }
-
-    let list_query = PersistedReadlistBooksQuery {
-        page: 0,
-        size: 20,
-        unpaged: false,
-        library_ids: None,
-        deleted: None,
-        tags: Vec::new(),
-        read_statuses: Vec::new(),
-        media_statuses: Vec::new(),
-        authors: Vec::new(),
-    };
-    let requested_library_query =
-        library_ids
-            .clone()
-            .map(|library_ids| PersistedReadlistBooksQuery {
-                page: 0,
-                size: 20,
-                unpaged: false,
-                library_ids: Some(library_ids),
-                deleted: None,
-                tags: Vec::new(),
-                read_statuses: Vec::new(),
-                media_statuses: Vec::new(),
-                authors: Vec::new(),
-            });
-
-    let mut visible_content = Vec::with_capacity(content.len());
-    for readlist in content {
-        let Some(mut visible_readlist) = (match load_persisted_readlist_detail(
-            &app,
-            &readlist.id,
-            visibility_context.authorized_library_ids.as_deref(),
+    let service = komga_application::discovery::ReadlistListService::new(
+        app.readlist.as_ref(),
+        app.book_detail.as_ref(),
+        app.discovery_search.as_ref(),
+    );
+    let page = match service
+        .list_readlists(
+            &to_domain_query_context(requested_context),
+            &to_domain_query_context(visibility_context),
+            query,
         )
         .await
-        {
-            Ok(readlist) => readlist,
-            Err(error) => return internal_error_response(error),
-        }) else {
-            continue;
-        };
-
-        if let Some(requested_library_query) = requested_library_query.as_ref() {
-            let Some(requested_library_books) = (match load_visible_persisted_readlist_books(
-                &app,
-                &headers,
-                &readlist.id,
-                requested_library_query,
-            )
-            .await
-            {
-                Ok(books) => books,
-                Err(error) => return internal_error_response(error),
-            }) else {
-                continue;
-            };
-
-            if requested_library_books.is_empty() {
-                continue;
-            }
-        }
-
-        let Some(visible_books) =
-            (match load_visible_persisted_readlist_books(&app, &headers, &readlist.id, &list_query)
-                .await
-            {
-                Ok(books) => books,
-                Err(error) => return internal_error_response(error),
-            })
-        else {
-            continue;
-        };
-
-        let visible_book_ids = visible_books
-            .into_iter()
-            .map(|book| book.id)
-            .collect::<Vec<_>>();
-        if visible_book_ids.is_empty() {
-            if visible_readlist.book_ids.is_empty() && !visible_readlist.filtered {
-                visible_content.push(visible_readlist);
-            }
-            continue;
-        }
-
-        visible_readlist.filtered =
-            visible_readlist.filtered || visible_readlist.book_ids != visible_book_ids;
-        visible_readlist.book_ids = visible_book_ids;
-        visible_content.push(visible_readlist);
-    }
-    content = visible_content;
-
-    match requested_sort
-        .as_deref()
-        .map(parse_readlists_sort)
-        .unwrap_or(ReadListsSort::SearchOrName)
     {
-        ReadListsSort::NameAsc => {
-            sort_readlists_by_name(&mut content, false);
-        }
-        ReadListsSort::NameDesc => {
-            sort_readlists_by_name(&mut content, true);
-        }
-        ReadListsSort::CreatedDateAsc => {
-            content.sort_by(|left, right| left.created_date.cmp(&right.created_date));
-        }
-        ReadListsSort::CreatedDateDesc => {
-            content.sort_by(|left, right| right.created_date.cmp(&left.created_date));
-        }
-        ReadListsSort::LastModifiedDateAsc => {
-            content.sort_by(|left, right| left.last_modified_date.cmp(&right.last_modified_date));
-        }
-        ReadListsSort::LastModifiedDateDesc => {
-            content.sort_by(|left, right| right.last_modified_date.cmp(&left.last_modified_date));
-        }
-        ReadListsSort::SearchOrName => {
-            if let Some(search_ranks) = search_ranks.as_ref() {
-                content.sort_by_key(|readlist| {
-                    search_ranks
-                        .get(readlist.id.as_str())
-                        .copied()
-                        .unwrap_or(usize::MAX)
-                });
-            } else {
-                sort_readlists_by_name(&mut content, false);
-            }
-        }
-    }
-
-    let total_elements = content.len();
-    let page_size = if unpaged {
-        total_elements.max(20)
-    } else {
-        size.max(1)
+        Ok(page) => page,
+        Err(error) => return internal_error_response(error),
     };
-    let page_number = if unpaged { 0 } else { page };
-    let page_content = if unpaged {
-        content
-    } else {
-        let offset = page.saturating_mul(page_size);
-        if offset >= total_elements {
-            vec![]
-        } else {
-            content
-                .into_iter()
-                .skip(offset)
-                .take(page_size)
-                .collect::<Vec<_>>()
-        }
-    };
-    let page = PageEnvelope::from_slice(page_content, page_number, page_size, total_elements);
 
     let mut response = Json(readlists_page_payload(page)).into_response();
     mark_runtime_owned(&mut response);
     response
-}
-
-fn sort_readlists_by_name(content: &mut [ReadListReadModel], descending: bool) {
-    let collator = readlists_unicode_collator();
-    content.sort_by(|left, right| {
-        if descending {
-            collator.compare(right.name.as_str(), left.name.as_str())
-        } else {
-            collator.compare(left.name.as_str(), right.name.as_str())
-        }
-    });
-}
-
-fn readlists_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for readlists sorting should construct")
 }
 
 pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: Bytes) -> Response {
