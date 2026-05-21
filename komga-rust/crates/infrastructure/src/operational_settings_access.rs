@@ -5,10 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 use komga_application::operational::{
-    ClaimInitialAdminUserResult as AppClaimResult, OperationalSettingsPort,
-    PersistedServerSettings, ServerSettingsPort, TransientBookAnalysis as AppTransientBookAnalysis,
+    AnnouncementPort, ClaimInitialAdminUserResult as AppClaimResult, ClaimPort, ClientSettingsPort,
+    FilesystemBrowsePort, FontPort, HistoryPort, PageHashPort, PersistedServerSettings,
+    ServerSettingsPort, SyncpointPort, TransientBookAnalysis as AppTransientBookAnalysis,
     TransientBookFileMetadata as AppTransientBookFileMetadata,
-    TransientBookPage as AppTransientBookPage,
+    TransientBookPage as AppTransientBookPage, TransientBookPort,
 };
 
 use crate::announcements_access;
@@ -47,7 +48,7 @@ impl OperationalSettingsAccess {
 }
 
 #[async_trait::async_trait]
-impl OperationalSettingsPort for OperationalSettingsAccess {
+impl AnnouncementPort for OperationalSettingsAccess {
     async fn load_announcement_read_ids(&self, user_id: &str) -> Result<Vec<String>, String> {
         announcements_access::load_announcement_read_ids(self.db.read_pool(), user_id)
             .await
@@ -59,7 +60,10 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
             .await
             .map_err(|e| e.to_string())
     }
+}
 
+#[async_trait::async_trait]
+impl ClaimPort for OperationalSettingsAccess {
     async fn load_claim_status(&self) -> Result<bool, String> {
         claims_access::load_claim_status(self.db.read_pool())
             .await
@@ -90,7 +94,10 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
             ClaimInitialAdminUserResult::AlreadyClaimed => AppClaimResult::AlreadyClaimed,
         })
     }
+}
 
+#[async_trait::async_trait]
+impl ClientSettingsPort for OperationalSettingsAccess {
     async fn load_client_settings_global(
         &self,
         allow_unauthorized_only: bool,
@@ -140,11 +147,15 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
             .await
             .map_err(|e| e.to_string())
     }
+}
 
+impl FilesystemBrowsePort for OperationalSettingsAccess {
     fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
         browser::list_directory_entries(path, directories_only)
     }
+}
 
+impl FontPort for OperationalSettingsAccess {
     fn list_font_families(&self, path: &Path) -> Vec<String> {
         fonts::list_font_families(path)
     }
@@ -156,7 +167,10 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
     fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
         fonts::load_font_file(path, family, file)
     }
+}
 
+#[async_trait::async_trait]
+impl SyncpointPort for OperationalSettingsAccess {
     async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), String> {
         delete_syncpoints_by_user(self.db.write_pool(), user_id)
             .await
@@ -172,7 +186,10 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
             .await
             .map_err(|e| e.to_string())
     }
+}
 
+#[async_trait::async_trait]
+impl HistoryPort for OperationalSettingsAccess {
     async fn load_history_page(
         &self,
         page: u64,
@@ -183,14 +200,17 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
             .await
             .map_err(|e| e.to_string())
     }
+}
 
+#[async_trait::async_trait]
+impl PageHashPort for OperationalSettingsAccess {
     async fn load_page_hash_matches_page(
         &self,
         page_hash: &str,
         page: u64,
         size: u64,
         sorts: &[String],
-    ) -> Result<Value, String> {
+    ) -> Result<serde_json::Value, String> {
         page_hashes_access::load_page_hash_matches_page(
             self.db.read_pool(),
             page_hash,
@@ -231,7 +251,7 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
         size: u64,
         actions: &[String],
         sorts: &[String],
-    ) -> Result<Value, String> {
+    ) -> Result<serde_json::Value, String> {
         page_hashes_access::load_page_hashes_page(self.db.read_pool(), page, size, actions, sorts)
             .await
             .map_err(|e| e.to_string())
@@ -242,7 +262,7 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
         page: u64,
         size: u64,
         sorts: &[String],
-    ) -> Result<Value, String> {
+    ) -> Result<serde_json::Value, String> {
         page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), page, size, sorts)
             .await
             .map_err(|e| e.to_string())
@@ -273,7 +293,10 @@ impl OperationalSettingsPort for OperationalSettingsAccess {
         .await
         .map_err(|e| e.to_string())
     }
+}
 
+#[async_trait::async_trait]
+impl TransientBookPort for OperationalSettingsAccess {
     fn analyze_transient_book(&self, path: &str) -> AppTransientBookAnalysis {
         let result = transient_books::analyze_transient_book(path);
         AppTransientBookAnalysis {

@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, CollectionThumbnailRecord, EntityThumbnailBinary,
-    EntityThumbnailRecord, MediaReaderPort, PersistedMediaFileRecord, ReadlistThumbnailRecord,
-    SeriesThumbnailRecord,
+    BookMediaPort, BookMediaRecord, BookPageRecord, CollectionThumbnailRecord, ContentAccessPort,
+    EntityExistencePort, EntityThumbnailBinary, EntityThumbnailRecord, PersistedMediaFileRecord,
+    ReadProgressReadPort, ReadlistThumbnailRecord, SeriesRelationPort, SeriesThumbnailRecord,
+    ThumbnailReadPort,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -27,9 +28,7 @@ impl MediaReader {
 }
 
 #[async_trait]
-impl MediaReaderPort for MediaReader {
-    // --- Book media ---
-
+impl BookMediaPort for MediaReader {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
         db_queries::load_persisted_book_media(&self.read_pool, book_id).await
     }
@@ -77,9 +76,10 @@ impl MediaReaderPort for MediaReader {
     ) -> Result<Option<(String, Vec<u8>)>, String> {
         db_queries::load_persisted_epub_extension_blob(&self.read_pool, book_id).await
     }
+}
 
-    // --- Series/book relations ---
-
+#[async_trait]
+impl SeriesRelationPort for MediaReader {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
         db_queries::load_series_book_ids(&self.read_pool, series_id).await
     }
@@ -94,15 +94,12 @@ impl MediaReaderPort for MediaReader {
     async fn series_oneshot(&self, series_id: &str) -> Result<Option<bool>, String> {
         db_queries::load_persisted_series_oneshot(&self.read_pool, series_id).await
     }
+}
 
-    // --- Existence checks ---
-
+#[async_trait]
+impl EntityExistencePort for MediaReader {
     async fn book_exists(&self, book_id: &str) -> Result<bool, String> {
         db_queries::persisted_book_exists(&self.read_pool, book_id).await
-    }
-
-    async fn book_ids(&self) -> Result<Vec<String>, String> {
-        db_queries::persisted_book_ids(&self.read_pool).await
     }
 
     async fn series_exists(&self, series_id: &str) -> Result<bool, String> {
@@ -116,9 +113,10 @@ impl MediaReaderPort for MediaReader {
     async fn collection_exists(&self, collection_id: &str) -> Result<bool, String> {
         metadata::persisted_collection_exists(&self.read_pool, collection_id).await
     }
+}
 
-    // --- Restrictions / archive entries / manifest ---
-
+#[async_trait]
+impl ContentAccessPort for MediaReader {
     async fn book_restrictions(
         &self,
         book_id: &str,
@@ -150,9 +148,10 @@ impl MediaReaderPort for MediaReader {
     async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String> {
         metadata::load_persisted_readlist_name(&self.read_pool, readlist_id).await
     }
+}
 
-    // --- Thumbnails (read) ---
-
+#[async_trait]
+impl ThumbnailReadPort for MediaReader {
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
@@ -205,9 +204,10 @@ impl MediaReaderPort for MediaReader {
     ) -> Result<Vec<CollectionThumbnailRecord>, String> {
         metadata::load_persisted_collection_thumbnails(&self.read_pool, collection_id).await
     }
+}
 
-    // --- Read progress (reads) ---
-
+#[async_trait]
+impl ReadProgressReadPort for MediaReader {
     async fn book_progression(
         &self,
         book_id: &str,
@@ -235,15 +235,5 @@ impl MediaReaderPort for MediaReader {
 
     async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
         metadata::load_book_page_count(&self.read_pool, book_id).await
-    }
-
-    // --- ID resolution helpers ---
-
-    async fn resolve_series_id(&self, requested_id: &str) -> String {
-        db_queries::resolve_series_id_for_persisted(&self.read_pool, requested_id).await
-    }
-
-    async fn resolve_book_id(&self, requested_id: &str) -> String {
-        db_queries::resolve_book_id_for_persisted(&self.read_pool, requested_id).await
     }
 }

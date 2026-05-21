@@ -24,7 +24,11 @@ pub use page_retrieval::{
     book_media_is_zip_archive, book_media_supports_page_api, book_media_supports_page_image,
     content_type_from_filename, is_supported_page_image_file_name,
 };
-pub use ports::{ContentResolverPort, MediaReaderPort, ProgressWriterPort, ThumbnailWriterPort};
+pub use ports::{
+    BookMediaPort, ContentAccessPort, ContentResolverPort, EntityExistencePort, MediaReaderPort,
+    ProgressWriterPort, ReadProgressReadPort, SeriesRelationPort, ThumbnailReadPort,
+    ThumbnailWriterPort,
+};
 pub use thumbnail_operations::{
     CollectionThumbnailRecord, EntityThumbnailBinary, EntityThumbnailRecord,
     ReadlistThumbnailRecord, SeriesThumbnailRecord,

@@ -186,139 +186,135 @@ pub trait ContentResolverPort: Send + Sync {
     fn normalize_epub_resource_href(&self, rootfile_path: &str, href: &str) -> String;
 }
 
-/// Direct read access to media assets backed by persistence.
+/// Read access to book media metadata.
 #[async_trait]
-pub trait MediaReaderPort: Send + Sync {
-    // --- Book media ---
-
+pub trait BookMediaPort: Send + Sync {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
-
     async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
-
     async fn media_file_records(
         &self,
         book_id: &str,
     ) -> Result<Vec<PersistedMediaFileRecord>, String>;
-
     async fn book_media_is_ready(&self, book_id: &str) -> Result<bool, String>;
-
     async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String>;
-
     async fn book_page(
         &self,
         book_id: &str,
         page_number: u64,
     ) -> Result<Option<BookPageRecord>, String>;
-
     async fn epub_extension_blob(&self, book_id: &str)
     -> Result<Option<(String, Vec<u8>)>, String>;
+}
 
-    // --- Series/book relations ---
-
+/// Read access to series/book relationship data.
+#[async_trait]
+pub trait SeriesRelationPort: Send + Sync {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
-
     async fn series_book_number_sorts(&self, series_id: &str)
     -> Result<Vec<(String, f64)>, String>;
-
     async fn series_oneshot(&self, series_id: &str) -> Result<Option<bool>, String>;
+}
 
-    // --- Existence checks ---
-
+/// Existence checks for entities.
+#[async_trait]
+pub trait EntityExistencePort: Send + Sync {
     async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
-
-    async fn book_ids(&self) -> Result<Vec<String>, String>;
-
     async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
-
     async fn readlist_exists(&self, readlist_id: &str) -> Result<bool, String>;
-
     async fn collection_exists(&self, collection_id: &str) -> Result<bool, String>;
+}
 
-    // --- Restrictions / archive entries / manifest ---
-
+/// Access control and content manifest queries.
+#[async_trait]
+pub trait ContentAccessPort: Send + Sync {
     async fn book_restrictions(
         &self,
         book_id: &str,
     ) -> Result<Option<(Option<u16>, Vec<String>)>, String>;
-
     async fn readlist_archive_entries(
         &self,
         readlist_id: &str,
     ) -> Result<Vec<(String, PathBuf)>, String>;
-
     async fn series_archive_entries(
         &self,
         series_id: &str,
     ) -> Result<Option<(String, String, Vec<(String, PathBuf)>)>, String>;
-
     async fn manifest_book(
         &self,
         book_id: &str,
     ) -> Result<Option<(String, String, String)>, String>;
-
     async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String>;
+}
 
-    // --- Thumbnails (read) ---
-
+/// Read access to thumbnails across all entity types.
+#[async_trait]
+pub trait ThumbnailReadPort: Send + Sync {
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
     ) -> Result<Option<EntityThumbnailBinary>, String>;
-
     async fn book_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
     ) -> Result<Option<EntityThumbnailBinary>, String>;
-
     async fn book_thumbnails(&self, book_id: &str) -> Result<Vec<EntityThumbnailRecord>, String>;
-
     async fn selected_series_thumbnail(
         &self,
         series_id: &str,
     ) -> Result<Option<EntityThumbnailBinary>, String>;
-
     async fn series_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
     ) -> Result<Option<EntityThumbnailBinary>, String>;
-
     async fn series_thumbnails(
         &self,
         series_id: &str,
     ) -> Result<Vec<SeriesThumbnailRecord>, String>;
-
     async fn readlist_thumbnails(
         &self,
         readlist_id: &str,
     ) -> Result<Vec<ReadlistThumbnailRecord>, String>;
-
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionThumbnailRecord>, String>;
+}
 
-    // --- Read progress (reads) ---
-
+/// Read access to reading progress data.
+#[async_trait]
+pub trait ReadProgressReadPort: Send + Sync {
     async fn book_progression(&self, book_id: &str, user_id: &str)
     -> Result<Option<Value>, String>;
-
     async fn series_tachiyomi_progress(
         &self,
         series_id: &str,
         user_id: &str,
     ) -> Result<Option<Value>, String>;
-
     async fn readlist_tachiyomi_counters(
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
     ) -> Result<(u64, u64, u64, u64, u64), String>;
-
     async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+}
 
-    // --- ID resolution helpers ---
+/// Supertrait aggregating all media reader sub-ports for backward compatibility.
+pub trait MediaReaderPort:
+    BookMediaPort
+    + SeriesRelationPort
+    + EntityExistencePort
+    + ContentAccessPort
+    + ThumbnailReadPort
+    + ReadProgressReadPort
+{
+}
 
-    async fn resolve_series_id(&self, requested_id: &str) -> String;
-
-    async fn resolve_book_id(&self, requested_id: &str) -> String;
+impl<T> MediaReaderPort for T where
+    T: BookMediaPort
+        + SeriesRelationPort
+        + EntityExistencePort
+        + ContentAccessPort
+        + ThumbnailReadPort
+        + ReadProgressReadPort
+{
 }
