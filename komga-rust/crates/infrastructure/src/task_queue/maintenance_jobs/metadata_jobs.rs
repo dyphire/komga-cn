@@ -4,35 +4,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-pub(super) async fn try_execute(
-    runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    match task.simple_type.as_str() {
-        "RefreshBookMetadata" => {
-            Some(execute_refresh_book_metadata(runtime, task, task_target).await)
-        }
-        "RefreshSeriesMetadata" => {
-            Some(execute_refresh_series_metadata(runtime, task, task_target).await)
-        }
-        "AggregateSeriesMetadata" => {
-            Some(execute_aggregate_series_metadata(runtime, task_target).await)
-        }
-        "RefreshBookLocalArtwork" => {
-            Some(execute_refresh_book_local_artwork(runtime, task_target).await)
-        }
-        "GenerateBookThumbnail" => {
-            Some(execute_generate_book_thumbnail(runtime, task_target).await)
-        }
-        "RefreshSeriesLocalArtwork" => {
-            Some(execute_refresh_series_local_artwork(runtime, task_target).await)
-        }
-        _ => None,
-    }
-}
-
-async fn execute_refresh_book_metadata(
+pub(in crate::task_queue) async fn execute_refresh_book_metadata(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -61,7 +33,7 @@ async fn execute_refresh_book_metadata(
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
-async fn execute_refresh_series_metadata(
+pub(in crate::task_queue) async fn execute_refresh_series_metadata(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -83,7 +55,7 @@ async fn execute_refresh_series_metadata(
     ]))
 }
 
-async fn execute_aggregate_series_metadata(
+pub(in crate::task_queue) async fn execute_aggregate_series_metadata(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -97,7 +69,7 @@ async fn execute_aggregate_series_metadata(
         .map(|()| TaskExecutionOutcome::completed())
 }
 
-async fn execute_refresh_book_local_artwork(
+pub(in crate::task_queue) async fn execute_refresh_book_local_artwork(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -111,7 +83,7 @@ async fn execute_refresh_book_local_artwork(
         .map(|()| TaskExecutionOutcome::completed())
 }
 
-async fn execute_generate_book_thumbnail(
+pub(in crate::task_queue) async fn execute_generate_book_thumbnail(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -125,7 +97,7 @@ async fn execute_generate_book_thumbnail(
         .map(|()| TaskExecutionOutcome::completed())
 }
 
-async fn execute_refresh_series_local_artwork(
+pub(in crate::task_queue) async fn execute_refresh_series_local_artwork(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {

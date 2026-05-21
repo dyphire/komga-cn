@@ -1,27 +1,7 @@
 use super::*;
 use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
-pub(super) async fn try_execute(
-    runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    match task.simple_type.as_str() {
-        "HashBookPages" => Some(execute_hash_book_pages(runtime, task_target).await),
-        "HashBook" => Some(execute_hash_book(runtime, task_target, false).await),
-        "HashBookKoreader" => Some(execute_hash_book(runtime, task_target, true).await),
-        "FindBooksWithMissingPageHash" => {
-            Some(execute_find_books_with_missing_page_hash(runtime, task, task_target).await)
-        }
-        "FindDuplicatePagesToDelete" => {
-            Some(execute_find_duplicate_pages_to_delete(runtime, task, task_target).await)
-        }
-        "RemoveHashedPages" => Some(execute_remove_hashed_pages(runtime, task, task_target).await),
-        _ => None,
-    }
-}
-
-async fn execute_hash_book_pages(
+pub(in crate::task_queue) async fn execute_hash_book_pages(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -39,7 +19,7 @@ async fn execute_hash_book_pages(
         .map(|()| TaskExecutionOutcome::completed())
 }
 
-async fn execute_hash_book(
+pub(in crate::task_queue) async fn execute_hash_book(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
     koreader: bool,
@@ -60,7 +40,7 @@ async fn execute_hash_book(
     Ok(TaskExecutionOutcome::completed())
 }
 
-async fn execute_find_books_with_missing_page_hash(
+pub(in crate::task_queue) async fn execute_find_books_with_missing_page_hash(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -92,7 +72,7 @@ async fn execute_find_books_with_missing_page_hash(
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
-async fn execute_find_duplicate_pages_to_delete(
+pub(in crate::task_queue) async fn execute_find_duplicate_pages_to_delete(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -130,7 +110,7 @@ async fn execute_find_duplicate_pages_to_delete(
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
-async fn execute_remove_hashed_pages(
+pub(in crate::task_queue) async fn execute_remove_hashed_pages(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -237,15 +217,14 @@ mod tests {
         scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
-        task_target: Option<&str>,
+        _task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(&runtime.job(), task, task_target).await {
-            Some(Ok(outcome)) => {
+        match super::super::task_executor::execute_task(&runtime.job(), task).await {
+            Ok(outcome) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))
             }
-            Some(Err(error)) => Some(Err(error)),
-            None => None,
+            Err(error) => Some(Err(error)),
         }
     }
 

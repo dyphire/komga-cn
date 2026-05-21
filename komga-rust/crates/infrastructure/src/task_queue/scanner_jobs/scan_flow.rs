@@ -1,18 +1,6 @@
 use super::*;
 
-pub(super) async fn try_execute(
-    runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    if task.simple_type != "ScanLibrary" {
-        return None;
-    }
-
-    Some(handle_scan_library(runtime, task, task_target).await)
-}
-
-async fn handle_scan_library(
+pub(in crate::task_queue) async fn execute_scan_library(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,

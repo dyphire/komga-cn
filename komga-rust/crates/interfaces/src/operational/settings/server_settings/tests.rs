@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
+use komga_application::operational::ServerSettingsPort;
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,

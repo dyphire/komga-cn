@@ -291,45 +291,17 @@ fn upgrade_index_payload(record: &PersistedTaskStoreRecord) -> Option<String> {
 fn compatibility_payload(kind: TaskKind, record: &PersistedTaskStoreRecord) -> Option<String> {
     match kind {
         TaskKind::ScanLibrary => scan_library_payload(record),
-        TaskKind::EmptyTrash => target_payload(record, "EmptyTrash", "libraryId"),
-        TaskKind::AnalyzeBook => target_payload(record, "AnalyzeBook", "bookId"),
         TaskKind::ImportBook => import_book_payload(record),
-        TaskKind::FindBooksWithMissingPageHash => {
-            target_payload(record, "FindBooksWithMissingPageHash", "libraryId")
-        }
-        TaskKind::FindDuplicatePagesToDelete => {
-            target_payload(record, "FindDuplicatePagesToDelete", "libraryId")
-        }
+        TaskKind::RefreshBookMetadata => refresh_book_metadata_payload(record),
         TaskKind::FindBookThumbnailsToRegenerate => {
             find_book_thumbnails_to_regenerate_payload(record)
         }
-        TaskKind::RefreshBookMetadata => refresh_book_metadata_payload(record),
-        TaskKind::RefreshBookLocalArtwork => {
-            target_payload(record, "RefreshBookLocalArtwork", "bookId")
-        }
-        TaskKind::RefreshSeriesMetadata => {
-            target_payload(record, "RefreshSeriesMetadata", "seriesId")
-        }
-        TaskKind::AggregateSeriesMetadata => {
-            target_payload(record, "AggregateSeriesMetadata", "seriesId")
-        }
-        TaskKind::RefreshSeriesLocalArtwork => {
-            target_payload(record, "RefreshSeriesLocalArtwork", "seriesId")
-        }
-        TaskKind::RepairExtension => target_payload(record, "RepairExtension", "bookId"),
-        TaskKind::GenerateBookThumbnail => {
-            target_payload(record, "GenerateBookThumbnail", "bookId")
-        }
-        TaskKind::HashBook => target_payload(record, "HashBook", "bookId"),
-        TaskKind::HashBookKoreader => target_payload(record, "HashBookKoreader", "bookId"),
-        TaskKind::HashBookPages => target_payload(record, "HashBookPages", "bookId"),
         TaskKind::RebuildIndex => rebuild_index_payload(record),
         TaskKind::UpgradeIndex => upgrade_index_payload(record),
         TaskKind::RemoveHashedPages => None,
-        TaskKind::DeleteBook => target_payload(record, "DeleteBook", "bookId"),
-        TaskKind::DeleteSeries => target_payload(record, "DeleteSeries", "seriesId"),
-        TaskKind::FindBooksToConvert => target_payload(record, "FindBooksToConvert", "libraryId"),
-        TaskKind::ConvertBook => target_payload(record, "ConvertBook", "bookId"),
+        _ => kind
+            .compat_target_key()
+            .and_then(|key| target_payload(record, kind.simple_type(), key)),
     }
 }
 

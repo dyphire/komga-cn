@@ -7,6 +7,7 @@ pub struct TaskTypeMetadata {
     pub simple_type: &'static str,
     pub persisted_class_name: &'static str,
     pub default_priority: i32,
+    pub compat_target_key: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +29,9 @@ macro_rules! define_task_registry {
             $variant:ident => {
                 simple_type: $simple_type:expr,
                 persisted_class: $persisted_class:expr,
-                default_priority: $priority:expr $(,)?
+                default_priority: $priority:expr,
+                target: $target:tt,
+                compat_key: $compat_key:expr $(,)?
             }
         ),* $(,)?
     ) => {
@@ -42,6 +45,7 @@ macro_rules! define_task_registry {
                 simple_type: $simple_type,
                 persisted_class_name: $persisted_class,
                 default_priority: $priority,
+                compat_target_key: $compat_key,
             }),*
         ];
 
@@ -68,6 +72,10 @@ macro_rules! define_task_registry {
                 self.definition().simple_type
             }
 
+            pub const fn compat_target_key(self) -> Option<&'static str> {
+                self.definition().compat_target_key
+            }
+
             pub fn all() -> &'static [TaskKind] {
                 &[
                     $(Self::$variant),*
@@ -76,42 +84,7 @@ macro_rules! define_task_registry {
 
             pub fn request_for(self, target_id: impl Into<String>) -> TaskQueueRecord {
                 let target = target_id.into();
-                match self {
-                    Self::AnalyzeBook
-                    | Self::HashBook
-                    | Self::HashBookKoreader
-                    | Self::HashBookPages
-                    | Self::GenerateBookThumbnail
-                    | Self::RepairExtension
-                    | Self::RefreshBookMetadata
-                    | Self::RefreshBookLocalArtwork
-                    | Self::DeleteBook
-                    | Self::ConvertBook => {
-                        TaskRequest::with_payload(self, BookPayload::new(target)).into_queue_record()
-                    }
-                    Self::RefreshSeriesMetadata
-                    | Self::AggregateSeriesMetadata
-                    | Self::RefreshSeriesLocalArtwork
-                    | Self::DeleteSeries => {
-                        TaskRequest::with_payload(self, SeriesPayload::new(target)).into_queue_record()
-                    }
-                    Self::ScanLibrary => {
-                        TaskRequest::with_payload(self, ScanLibraryPayload::new(target, false)).into_queue_record()
-                    }
-                    Self::EmptyTrash
-                    | Self::FindBooksToConvert
-                    | Self::FindDuplicatePagesToDelete
-                    | Self::FindBooksWithMissingPageHash
-                    | Self::FindBookThumbnailsToRegenerate
-                    | Self::RebuildIndex
-                    | Self::UpgradeIndex
-                    | Self::RemoveHashedPages => {
-                        TaskRequest::new(self).into_queue_record_with_id(&target)
-                    }
-                    Self::ImportBook => {
-                        TaskRequest::new(self).into_queue_record()
-                    }
-                }
+                define_task_registry!(@request_for_body self target; $($variant => $target),*)
             }
         }
 
@@ -127,6 +100,41 @@ macro_rules! define_task_registry {
             }
         }
     };
+
+    // Generate the entire request_for match body
+    (@request_for_body $self:ident $target:ident; $($variant:ident => $ttype:tt),*) => {
+        match $self {
+            $(TaskKind::$variant => define_task_registry!(@request_for_expr $self $target $ttype)),*
+        }
+    };
+
+    // request_for expression generators
+    (@request_for_expr $self:ident $target:ident Book) => {
+        TaskRequest::with_payload($self, BookPayload::new($target)).into_queue_record()
+    };
+    (@request_for_expr $self:ident $target:ident Series) => {
+        TaskRequest::with_payload($self, SeriesPayload::new($target)).into_queue_record()
+    };
+    (@request_for_expr $self:ident $target:ident Library) => {
+        TaskRequest::with_payload($self, LibraryPayload::new($target)).into_queue_record()
+    };
+    (@request_for_expr $self:ident $target:ident TargetId) => {
+        TaskRequest::new($self).into_queue_record_with_id(&$target)
+    };
+    (@request_for_expr $self:ident $target:ident Custom) => {
+        request_for_custom($self, $target)
+    };
+}
+
+fn request_for_custom(kind: TaskKind, target: String) -> TaskQueueRecord {
+    match kind {
+        TaskKind::ScanLibrary => {
+            TaskRequest::with_payload(kind, ScanLibraryPayload::new(target, false))
+                .into_queue_record()
+        }
+        TaskKind::ImportBook => TaskRequest::new(kind).into_queue_record(),
+        _ => unreachable!(),
+    }
 }
 
 define_task_registry! {
@@ -134,121 +142,169 @@ define_task_registry! {
         simple_type: "ScanLibrary",
         persisted_class: "org.gotson.komga.application.tasks.Task$ScanLibrary",
         default_priority: 4,
+        target: Custom,
+        compat_key: None,
     },
     AnalyzeBook => {
         simple_type: "AnalyzeBook",
         persisted_class: "org.gotson.komga.application.tasks.Task$AnalyzeBook",
         default_priority: 6,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     EmptyTrash => {
         simple_type: "EmptyTrash",
         persisted_class: "org.gotson.komga.application.tasks.Task$EmptyTrash",
         default_priority: 6,
+        target: TargetId,
+        compat_key: Some("libraryId"),
     },
     ImportBook => {
         simple_type: "ImportBook",
         persisted_class: "org.gotson.komga.application.tasks.Task$ImportBook",
         default_priority: 4,
+        target: Custom,
+        compat_key: None,
     },
     FindBooksWithMissingPageHash => {
         simple_type: "FindBooksWithMissingPageHash",
         persisted_class: "org.gotson.komga.application.tasks.Task$FindBooksWithMissingPageHash",
         default_priority: 0,
+        target: TargetId,
+        compat_key: Some("libraryId"),
     },
     FindDuplicatePagesToDelete => {
         simple_type: "FindDuplicatePagesToDelete",
         persisted_class: "org.gotson.komga.application.tasks.Task$FindDuplicatePagesToDelete",
         default_priority: 0,
+        target: TargetId,
+        compat_key: Some("libraryId"),
     },
     FindBookThumbnailsToRegenerate => {
         simple_type: "FindBookThumbnailsToRegenerate",
         persisted_class: "org.gotson.komga.application.tasks.Task$FindBookThumbnailsToRegenerate",
         default_priority: 0,
+        target: TargetId,
+        compat_key: None,
     },
     RefreshBookMetadata => {
         simple_type: "RefreshBookMetadata",
         persisted_class: "org.gotson.komga.application.tasks.Task$RefreshBookMetadata",
         default_priority: 6,
+        target: Book,
+        compat_key: None,
     },
     RefreshBookLocalArtwork => {
         simple_type: "RefreshBookLocalArtwork",
         persisted_class: "org.gotson.komga.application.tasks.Task$RefreshBookLocalArtwork",
         default_priority: 6,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     RefreshSeriesLocalArtwork => {
         simple_type: "RefreshSeriesLocalArtwork",
         persisted_class: "org.gotson.komga.application.tasks.Task$RefreshSeriesLocalArtwork",
         default_priority: 6,
+        target: Series,
+        compat_key: Some("seriesId"),
     },
     RefreshSeriesMetadata => {
         simple_type: "RefreshSeriesMetadata",
         persisted_class: "org.gotson.komga.application.tasks.Task$RefreshSeriesMetadata",
         default_priority: 6,
+        target: Series,
+        compat_key: Some("seriesId"),
     },
     AggregateSeriesMetadata => {
         simple_type: "AggregateSeriesMetadata",
         persisted_class: "org.gotson.komga.application.tasks.Task$AggregateSeriesMetadata",
         default_priority: 6,
+        target: Series,
+        compat_key: Some("seriesId"),
     },
     RepairExtension => {
         simple_type: "RepairExtension",
         persisted_class: "org.gotson.komga.application.tasks.Task$RepairExtension",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     GenerateBookThumbnail => {
         simple_type: "GenerateBookThumbnail",
         persisted_class: "org.gotson.komga.application.tasks.Task$GenerateBookThumbnail",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     HashBook => {
         simple_type: "HashBook",
         persisted_class: "org.gotson.komga.application.tasks.Task$HashBook",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     HashBookKoreader => {
         simple_type: "HashBookKoreader",
         persisted_class: "org.gotson.komga.application.tasks.Task$HashBookKoreader",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     HashBookPages => {
         simple_type: "HashBookPages",
         persisted_class: "org.gotson.komga.application.tasks.Task$HashBookPages",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     RebuildIndex => {
         simple_type: "RebuildIndex",
         persisted_class: "org.gotson.komga.application.tasks.Task$RebuildIndex",
         default_priority: 2,
+        target: TargetId,
+        compat_key: None,
     },
     UpgradeIndex => {
         simple_type: "UpgradeIndex",
         persisted_class: "org.gotson.komga.application.tasks.Task$UpgradeIndex",
         default_priority: 2,
+        target: TargetId,
+        compat_key: None,
     },
     RemoveHashedPages => {
         simple_type: "RemoveHashedPages",
         persisted_class: "org.gotson.komga.application.tasks.Task$RemoveHashedPages",
         default_priority: 4,
+        target: TargetId,
+        compat_key: None,
     },
     DeleteBook => {
         simple_type: "DeleteBook",
         persisted_class: "org.gotson.komga.application.tasks.Task$DeleteBook",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
     DeleteSeries => {
         simple_type: "DeleteSeries",
         persisted_class: "org.gotson.komga.application.tasks.Task$DeleteSeries",
         default_priority: 4,
+        target: Series,
+        compat_key: Some("seriesId"),
     },
     FindBooksToConvert => {
         simple_type: "FindBooksToConvert",
         persisted_class: "org.gotson.komga.application.tasks.Task$FindBooksToConvert",
         default_priority: 0,
+        target: TargetId,
+        compat_key: Some("libraryId"),
     },
     ConvertBook => {
         simple_type: "ConvertBook",
         persisted_class: "org.gotson.komga.application.tasks.Task$ConvertBook",
         default_priority: 4,
+        target: Book,
+        compat_key: Some("bookId"),
     },
 }
 

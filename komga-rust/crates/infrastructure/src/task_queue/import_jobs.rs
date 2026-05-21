@@ -6,18 +6,13 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub(super) async fn try_execute(
+pub(in crate::task_queue) async fn execute_import_book(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    match task.simple_type.as_str() {
-        "ImportBook" => Some(
-            process_import_book_task(runtime, task)
-                .await
-                .map(TaskExecutionOutcome::with_follow_up_tasks),
-        ),
-        _ => None,
-    }
+) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+    process_import_book_task(runtime, task)
+        .await
+        .map(TaskExecutionOutcome::with_follow_up_tasks)
 }
 
 async fn process_import_book_task(

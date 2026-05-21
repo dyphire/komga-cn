@@ -15,23 +15,7 @@ fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
     }
 }
 
-pub(super) async fn try_execute(
-    runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    match task.simple_type.as_str() {
-        "AnalyzeBook" => Some(execute_analyze_book(runtime, task, task_target).await),
-        "RebuildIndex" => Some(execute_rebuild_index(runtime, task).await),
-        "UpgradeIndex" => Some(Ok(TaskExecutionOutcome::completed())),
-        "FindBookThumbnailsToRegenerate" => {
-            Some(execute_find_book_thumbnails_to_regenerate(runtime, task).await)
-        }
-        _ => None,
-    }
-}
-
-async fn execute_analyze_book(
+pub(in crate::task_queue) async fn execute_analyze_book(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -64,7 +48,7 @@ async fn execute_analyze_book(
     Ok(TaskExecutionOutcome::completed())
 }
 
-async fn execute_rebuild_index(
+pub(in crate::task_queue) async fn execute_rebuild_index(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -74,7 +58,7 @@ async fn execute_rebuild_index(
     Ok(TaskExecutionOutcome::completed())
 }
 
-async fn execute_find_book_thumbnails_to_regenerate(
+pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -239,15 +223,14 @@ mod tests {
         scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
-        task_target: Option<&str>,
+        _task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(&runtime.job(), task, task_target).await {
-            Some(Ok(outcome)) => {
+        match crate::task_queue::task_executor::execute_task(&runtime.job(), task).await {
+            Ok(outcome) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))
             }
-            Some(Err(error)) => Some(Err(error)),
-            None => None,
+            Err(error) => Some(Err(error)),
         }
     }
 

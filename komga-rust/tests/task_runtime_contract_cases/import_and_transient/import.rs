@@ -376,7 +376,7 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     let import_row = rows.pop().expect("queued import task row should exist");
 
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let follow_up_tasks = MediaImportService::new(RecordingImportPort {
+    let follow_up_tasks = MediaImportService::new(Arc::new(RecordingImportPort {
         calls: calls.clone(),
         outcome: Some(ImportBookOutcome {
             library_id: "library-1".to_string(),
@@ -384,7 +384,7 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
             sidecar_imported: false,
             artwork_sidecar_imported: false,
         }),
-    })
+    }))
     .process_queued_book_payload(
         &import_row.get::<String, _>("PAYLOAD"),
         import_row.get::<i64, _>("PRIORITY") as i32,

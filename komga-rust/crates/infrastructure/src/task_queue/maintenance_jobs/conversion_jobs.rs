@@ -1,22 +1,7 @@
 use super::*;
 use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
-pub(super) async fn try_execute(
-    runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Option<Result<TaskExecutionOutcome, TaskExecutionError>> {
-    match task.simple_type.as_str() {
-        "RepairExtension" => Some(execute_repair_extension(runtime, task_target).await),
-        "FindBooksToConvert" => {
-            Some(execute_find_books_to_convert(runtime, task, task_target).await)
-        }
-        "ConvertBook" => Some(execute_convert_book(runtime, task_target).await),
-        _ => None,
-    }
-}
-
-async fn execute_repair_extension(
+pub(in crate::task_queue) async fn execute_repair_extension(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -34,7 +19,7 @@ async fn execute_repair_extension(
     Ok(TaskExecutionOutcome::completed())
 }
 
-async fn execute_find_books_to_convert(
+pub(in crate::task_queue) async fn execute_find_books_to_convert(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
@@ -62,7 +47,7 @@ async fn execute_find_books_to_convert(
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
-async fn execute_convert_book(
+pub(in crate::task_queue) async fn execute_convert_book(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
 ) -> Result<TaskExecutionOutcome, TaskExecutionError> {
@@ -128,15 +113,14 @@ mod tests {
         scheduler: &TaskQueueScheduler,
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
-        task_target: Option<&str>,
+        _task_target: Option<&str>,
     ) -> Option<Result<(), TaskExecutionError>> {
-        match try_execute(&runtime.job(), task, task_target).await {
-            Some(Ok(outcome)) => {
+        match super::super::task_executor::execute_task(&runtime.job(), task).await {
+            Ok(outcome) => {
                 outcome.enqueue_into(scheduler).await;
                 Some(Ok(()))
             }
-            Some(Err(error)) => Some(Err(error)),
-            None => None,
+            Err(error) => Some(Err(error)),
         }
     }
 

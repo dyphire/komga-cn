@@ -93,9 +93,10 @@ pub fn load_sqlite_pool_snapshots(paths: &[PathBuf]) -> Vec<SqlitePoolSnapshot> 
 
 pub async fn load_task_execution_values(pool: &SqlitePool) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT TASK_TYPE, COUNT(*) AS COUNT
-FROM TASK_EXECUTION
-GROUP BY TASK_TYPE"#,
+        r#"SELECT SIMPLE_TYPE, CAST(COUNT(*) AS REAL) AS VALUE
+FROM TASK
+GROUP BY SIMPLE_TYPE
+ORDER BY SIMPLE_TYPE"#,
     )
     .fetch_all(pool)
     .await
@@ -105,8 +106,8 @@ GROUP BY TASK_TYPE"#,
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("TASK_TYPE"),
-                row.get::<i64, _>("COUNT") as f64,
+                row.get::<String, _>("SIMPLE_TYPE"),
+                row.get::<f64, _>("VALUE"),
             )
         })
         .collect())
@@ -247,13 +248,14 @@ FROM READLIST"#,
 
 pub async fn load_task_failure_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
-        r#"SELECT COUNT(*) AS COUNT
-FROM TASK_EXECUTION
-WHERE STATUS = 'FAILED'"#,
+        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
+FROM HISTORICAL_EVENT
+WHERE TYPE LIKE '%TASK%'
+AND TYPE LIKE '%FAIL%'"#,
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query task failure count: {error}"))?;
 
-    Ok(row.get::<i64, _>("COUNT") as f64)
+    Ok(row.map(|r| r.get::<f64, _>("VALUE")).unwrap_or(0.0))
 }
