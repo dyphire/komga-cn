@@ -1,6 +1,6 @@
-use super::*;
+use super::models::BookPosterRow;
 
-pub(crate) fn media_profile_for_media_type(media_type: &str) -> &'static str {
+pub fn media_profile_for_media_type(media_type: &str) -> &'static str {
     match media_type {
         "application/zip"
         | "application/x-rar-compressed"
@@ -12,25 +12,25 @@ pub(crate) fn media_profile_for_media_type(media_type: &str) -> &'static str {
     }
 }
 
-pub(crate) fn series_matches_read_status(
-    row: &PersistedSeriesSummary,
+pub fn series_matches_read_status(
+    books_count: u64,
     read_progress: Option<(i64, i64)>,
     status: &str,
 ) -> bool {
     match status.to_ascii_lowercase().as_str() {
         "unread" => read_progress.is_none(),
         "read" => read_progress
-            .map(|(read_count, _)| read_count.max(0) as u64 == row.books_count)
+            .map(|(read_count, _)| read_count.max(0) as u64 == books_count)
             .unwrap_or(false),
         "in_progress" | "inprogress" => read_progress
-            .map(|(read_count, _)| read_count.max(0) as u64 != row.books_count)
+            .map(|(read_count, _)| read_count.max(0) as u64 != books_count)
             .unwrap_or(false),
         _ => false,
     }
 }
 
-pub(crate) fn poster_matches(
-    poster: &PersistedBookPosterSummary,
+pub fn poster_matches(
+    poster: &BookPosterRow,
     poster_types: Option<&Vec<String>>,
     poster_selected: Option<bool>,
 ) -> bool {
@@ -47,7 +47,7 @@ pub(crate) fn poster_matches(
     type_matches && selected_matches
 }
 
-pub(crate) fn normalized_author_filter_value(name: &str, role: &str) -> String {
+pub fn normalized_author_filter_value(name: &str, role: &str) -> String {
     if role.is_empty() {
         name.to_ascii_lowercase()
     } else {
@@ -55,23 +55,23 @@ pub(crate) fn normalized_author_filter_value(name: &str, role: &str) -> String {
     }
 }
 
-pub(crate) fn author_matches_filter_value(author: &str, expected: &[String]) -> bool {
+pub fn author_matches_filter_value(author: &str, expected: &[String]) -> bool {
     let normalized = author.to_ascii_lowercase();
     expected
         .iter()
         .any(|value| author_value_matches(&normalized, value))
 }
 
-pub(crate) fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> bool {
+pub fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> bool {
     author_matches_filter_value(&normalized_author_filter_value(name, role), expected)
 }
 
-pub(crate) fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
+pub fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
     let normalized = author.to_ascii_lowercase();
-    expected.iter().any(|value| normalized.contains(value))
+    expected.iter().any(|value| normalized.contains(value.as_str()))
 }
 
-pub(crate) fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {
+pub fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {
     author_contains_filter_value(&normalized_author_filter_value(name, role), expected)
 }
 
@@ -87,7 +87,7 @@ fn split_author_components(value: &str) -> (&str, Option<&str>) {
     (value, None)
 }
 
-pub(crate) fn author_value_matches(author: &str, expected: &str) -> bool {
+pub fn author_value_matches(author: &str, expected: &str) -> bool {
     if expected.contains("::") || expected.contains(',') {
         let (expected_name, expected_role) = split_author_components(expected);
         let (author_name, author_role) = split_author_components(author);

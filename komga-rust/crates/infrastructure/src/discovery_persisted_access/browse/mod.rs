@@ -21,12 +21,9 @@ use crate::search::index_lifecycle::{SearchEntityType, SearchQueryLifecycle};
 
 mod books_queries;
 mod common_helpers;
-mod helpers;
 mod models;
 mod series_queries;
 
-use common_helpers::*;
-use helpers::*;
 use models::{
     BooksFilterCriteria, PersistedBookPosterSummary, PersistedBookSummary,
     PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedReadProgressSummary,
@@ -116,25 +113,6 @@ trait PersistedDiscoveryBrowseDataSource: Send + Sync {
         query: &str,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String>;
-}
-
-async fn load_collection_memberships(
-    backend: &dyn PersistedDiscoveryBrowseDataSource,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    backend.load_collection_memberships().await
-}
-
-async fn load_collection_ordering(
-    backend: &dyn PersistedDiscoveryBrowseDataSource,
-    collection_id: &str,
-) -> Result<HashMap<String, i64>, String> {
-    backend.load_collection_ordering(collection_id).await
-}
-
-async fn load_readlist_memberships(
-    backend: &dyn PersistedDiscoveryBrowseDataSource,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    backend.load_readlist_memberships().await
 }
 
 #[derive(Clone)]

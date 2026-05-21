@@ -30,6 +30,7 @@ pub enum StringCondition {
     Contains(InclusionCondition<String>),
     StartsWith(InclusionCondition<String>),
     EndsWith(InclusionCondition<String>),
+    Regex(Vec<String>),
     IsEmpty,
     IsNotEmpty,
 }

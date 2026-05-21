@@ -1,5 +1,6 @@
 mod books;
 mod browse;
+pub mod browse_engine;
 mod detail_port;
 mod index_maintenance;
 mod read_models;

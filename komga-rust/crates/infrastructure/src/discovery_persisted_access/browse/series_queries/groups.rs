@@ -1,3 +1,4 @@
+use super::common_helpers::first_group_key;
 use super::models::SeriesFilterCriteria;
 use super::*;
 use komga_domain::discovery::SeriesCondition;

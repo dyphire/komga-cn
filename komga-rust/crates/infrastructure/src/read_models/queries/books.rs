@@ -628,6 +628,7 @@ fn append_string_condition_sqlx(
                 state,
             );
         }
+        StringCondition::Regex(_) => {}
     }
 }
 
@@ -781,6 +782,7 @@ fn append_book_text_relation_condition_sqlx(
                 state,
             );
         }
+        StringCondition::Regex(_) => {}
     }
 }
 

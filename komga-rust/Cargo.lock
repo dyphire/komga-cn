@@ -2415,6 +2415,7 @@ dependencies = [
  "async-trait",
  "base64",
  "komga-domain",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
