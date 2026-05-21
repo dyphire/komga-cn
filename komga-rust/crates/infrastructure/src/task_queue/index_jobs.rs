@@ -162,7 +162,7 @@ mod tests {
         default_read_max_connections,
     };
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
-    use crate::task_queue::test_support::RuntimeTestFixture;
+    use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
     use crate::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
     use image::{ImageBuffer, Rgba};
     use sqlx::{Row, SqlitePool};
@@ -219,23 +219,6 @@ mod tests {
             .await
             .expect("index-jobs fixture db should bootstrap main schema");
         context.pool().clone()
-    }
-
-    async fn execute_and_enqueue(
-        scheduler: &TaskQueueScheduler,
-        runtime: &TaskRuntimeContext,
-        task: &TaskQueueRecord,
-        _task_target: Option<&str>,
-    ) -> Option<Result<(), TaskProcessingError>> {
-        match crate::task_queue::task_executor::execute_task(&runtime.job(), task).await {
-            Ok(outcome) => {
-                for task in outcome.follow_up_tasks() {
-                    scheduler.enqueue(task).await;
-                }
-                Some(Ok(()))
-            }
-            Err(error) => Some(Err(error)),
-        }
     }
 
     async fn insert_library(
@@ -430,7 +413,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task, None).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -508,7 +491,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
             .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task, None).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let mut generated = Vec::new();
@@ -544,7 +527,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
@@ -620,7 +603,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         assert_eq!(
@@ -753,7 +736,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)
@@ -968,7 +951,7 @@ mod tests {
         let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
             .with_simple_type("AnalyzeBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(database_file.as_path(), 1)

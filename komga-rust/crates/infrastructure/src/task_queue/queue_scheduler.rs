@@ -1,6 +1,7 @@
 use super::*;
 use komga_application::task_processing::{
-    LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin, TaskRequest,
+    LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskExecutionFinalizationPort, TaskKind,
+    TaskQueue, TaskQueueAdmin, TaskRequest,
 };
 use tokio::sync::{Mutex, Notify};
 use tracing::{error, info};
@@ -346,6 +347,22 @@ impl TaskQueueScheduler {
         error_message: Option<&str>,
     ) {
         self.log_task_event(event_name, task, outcome, error_message);
+    }
+}
+
+#[async_trait::async_trait]
+impl TaskExecutionFinalizationPort for TaskQueueScheduler {
+    async fn enqueue_follow_up_task(&self, task: TaskQueueRecord) {
+        self.enqueue(task).await;
+    }
+
+    async fn complete_task(&self, task_id: &str) {
+        self.complete(task_id).await;
+    }
+
+    async fn fail_task(&self, task: &TaskQueueRecord, error: &TaskProcessingError) {
+        let error_message = error.to_string();
+        self.fail_claimed_task(task, error_message.as_str()).await;
     }
 }
 

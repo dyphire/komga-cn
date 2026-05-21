@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use async_trait::async_trait;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibraryScanInterval {
     Disabled,
@@ -121,6 +123,34 @@ impl TaskExecutionOutcome {
 pub struct TaskExecutionResult {
     pub task: TaskQueueRecord,
     pub outcome: Result<TaskExecutionOutcome, TaskProcessingError>,
+}
+
+#[async_trait]
+pub trait TaskExecutionFinalizationPort: Sync {
+    async fn enqueue_follow_up_task(&self, task: TaskQueueRecord);
+
+    async fn complete_task(&self, task_id: &str);
+
+    async fn fail_task(&self, task: &TaskQueueRecord, error: &TaskProcessingError);
+}
+
+pub async fn finalize_task_execution(
+    port: &dyn TaskExecutionFinalizationPort,
+    task_result: TaskExecutionResult,
+) -> Result<(), TaskProcessingError> {
+    match task_result.outcome {
+        Ok(outcome) => {
+            for task in outcome.follow_up_tasks() {
+                port.enqueue_follow_up_task(task).await;
+            }
+            port.complete_task(&task_result.task.id).await;
+            Ok(())
+        }
+        Err(error) => {
+            port.fail_task(&task_result.task, &error).await;
+            Err(error)
+        }
+    }
 }
 
 /// Execution hook for processing claimed tasks. Used internally by the orchestrator.
@@ -294,5 +324,93 @@ impl TaskQueueOrchestrator {
 
     fn take_next(&mut self) -> Option<TaskQueueRecord> {
         self.take_available(&self.consumer_owner.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingFinalizationPort {
+        events: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl TaskExecutionFinalizationPort for RecordingFinalizationPort {
+        async fn enqueue_follow_up_task(&self, task: TaskQueueRecord) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("enqueue:{}", task.id));
+        }
+
+        async fn complete_task(&self, task_id: &str) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("complete:{task_id}"));
+        }
+
+        async fn fail_task(&self, task: &TaskQueueRecord, error: &TaskProcessingError) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("fail:{}:{}", task.id, error.message));
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_task_execution_enqueues_follow_ups_before_completing_claimed_task() {
+        let port = RecordingFinalizationPort::default();
+        let task = TaskQueueRecord::new("ImportBook_book-1", 100, None);
+        let first_follow_up = TaskQueueRecord::new("AnalyzeBook_book-1", 101, None);
+        let second_follow_up = TaskQueueRecord::new("RefreshBookMetadata_book-1", 4, None);
+
+        finalize_task_execution(
+            &port,
+            TaskExecutionResult {
+                task,
+                outcome: Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
+                    first_follow_up,
+                    second_follow_up,
+                ])),
+            },
+        )
+        .await
+        .expect("successful task finalization should complete");
+
+        assert_eq!(
+            port.events.lock().unwrap().as_slice(),
+            [
+                "enqueue:AnalyzeBook_book-1",
+                "enqueue:RefreshBookMetadata_book-1",
+                "complete:ImportBook_book-1",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_task_execution_marks_failed_task_without_enqueuing_follow_ups() {
+        let port = RecordingFinalizationPort::default();
+        let task = TaskQueueRecord::new("ImportBook_book-1", 100, None);
+        let error = TaskProcessingError::runtime("import failed");
+
+        let result = finalize_task_execution(
+            &port,
+            TaskExecutionResult {
+                task,
+                outcome: Err(error.clone()),
+            },
+        )
+        .await;
+
+        assert_eq!(result, Err(error));
+        assert_eq!(
+            port.events.lock().unwrap().as_slice(),
+            ["fail:ImportBook_book-1:import failed"]
+        );
     }
 }

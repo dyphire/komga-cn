@@ -2,6 +2,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
+use komga_application::task_processing::{
+    TaskExecutionResult, TaskProcessingError, TaskQueueRecord, finalize_task_execution,
+};
 use sqlx::SqlitePool;
 
 use crate::database_handle::DatabaseHandle;
@@ -118,4 +121,22 @@ fn unique_temp_path(prefix: &str) -> PathBuf {
             .expect("clock should be after unix epoch")
             .as_nanos()
     ))
+}
+
+pub(crate) async fn execute_and_enqueue(
+    scheduler: &super::queue_scheduler::TaskQueueScheduler,
+    runtime: &TaskRuntimeContext,
+    task: &TaskQueueRecord,
+) -> Option<Result<(), TaskProcessingError>> {
+    let outcome = super::task_executor::execute_task(&runtime.job(), task).await;
+    Some(
+        finalize_task_execution(
+            scheduler,
+            TaskExecutionResult {
+                task: task.clone(),
+                outcome,
+            },
+        )
+        .await,
+    )
 }

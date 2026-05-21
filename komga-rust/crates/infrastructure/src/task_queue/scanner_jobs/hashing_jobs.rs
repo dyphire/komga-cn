@@ -168,7 +168,7 @@ mod tests {
     use crate::sqlite::connect_test_pool;
     use crate::task_queue::TaskRuntimeContext;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
-    use crate::task_queue::test_support::RuntimeTestFixture;
+    use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
     use serde_json::json;
     use sqlx::{Row, SqlitePool};
     use std::io::Write;
@@ -211,23 +211,6 @@ mod tests {
         .execute(pool)
         .await
         .expect("series row should be inserted for hashing fixture");
-    }
-
-    async fn execute_and_enqueue(
-        scheduler: &TaskQueueScheduler,
-        runtime: &TaskRuntimeContext,
-        task: &TaskQueueRecord,
-        _task_target: Option<&str>,
-    ) -> Option<Result<(), TaskProcessingError>> {
-        match super::super::task_executor::execute_task(&runtime.job(), task).await {
-            Ok(outcome) => {
-                for task in outcome.follow_up_tasks() {
-                    scheduler.enqueue(task).await;
-                }
-                Some(Ok(()))
-            }
-            Err(error) => Some(Err(error)),
-        }
     }
 
     async fn create_remove_hashed_pages_failure_fixture(
@@ -377,8 +360,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
-        let result =
-            execute_and_enqueue(&scheduler, &runtime, &finder_task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -465,8 +447,7 @@ mod tests {
         let finder_task = TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 3, None)
             .with_simple_type("FindBooksWithMissingPageHash");
 
-        let result =
-            execute_and_enqueue(&scheduler, &runtime, &finder_task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
             scheduler
@@ -626,7 +607,7 @@ mod tests {
             .with_simple_type("RemoveHashedPages")
             .with_payload(payload);
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let generated = scheduler
@@ -724,7 +705,7 @@ mod tests {
         )
         .await;
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages missing-file should fail");
         };
@@ -753,7 +734,7 @@ mod tests {
         )
         .await;
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages unsupported-media should fail");
         };
@@ -780,7 +761,7 @@ mod tests {
             TaskQueueScheduler::for_runtime(runtime.clone(), "remove-hashed-pages-not-ready-test")
                 .await;
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("book-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         let Some(Err(error)) = result else {
             panic!("remove-hashed-pages not-ready should fail");
         };

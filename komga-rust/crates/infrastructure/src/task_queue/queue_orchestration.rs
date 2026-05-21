@@ -1,4 +1,6 @@
-use komga_application::task_processing::{TaskExecutionResult, TaskProcessingError};
+use komga_application::task_processing::{
+    TaskExecutionResult, TaskProcessingError, finalize_task_execution,
+};
 
 use super::JobRuntime;
 use super::queue_scheduler::TaskQueueScheduler;
@@ -58,21 +60,7 @@ pub(super) async fn finalize_task_result(
     task_result: TaskExecutionResult,
     processed: &mut usize,
 ) -> Result<(), TaskProcessingError> {
-    match task_result.outcome {
-        Ok(outcome) => {
-            for task in outcome.follow_up_tasks() {
-                scheduler.enqueue(task).await;
-            }
-            scheduler.complete(&task_result.task.id).await;
-            *processed += 1;
-            Ok(())
-        }
-        Err(error) => {
-            let error_message = error.to_string();
-            scheduler
-                .fail_claimed_task(&task_result.task, error_message.as_str())
-                .await;
-            Err(error)
-        }
-    }
+    finalize_task_execution(scheduler, task_result).await?;
+    *processed += 1;
+    Ok(())
 }

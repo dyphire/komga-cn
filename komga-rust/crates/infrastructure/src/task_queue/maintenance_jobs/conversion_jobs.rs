@@ -69,7 +69,7 @@ mod tests {
     use super::*;
     use crate::sqlite::connect_test_pool;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
-    use crate::task_queue::test_support::RuntimeTestFixture;
+    use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
     use sqlx::{Row, SqlitePool};
 
     fn archive_fixture_path(file_name: &str) -> std::path::PathBuf {
@@ -107,23 +107,6 @@ mod tests {
         .execute(pool)
         .await
         .expect("series row should be inserted for conversion fixture");
-    }
-
-    async fn execute_and_enqueue(
-        scheduler: &TaskQueueScheduler,
-        runtime: &TaskRuntimeContext,
-        task: &TaskQueueRecord,
-        _task_target: Option<&str>,
-    ) -> Option<Result<(), TaskProcessingError>> {
-        match super::super::task_executor::execute_task(&runtime.job(), task).await {
-            Ok(outcome) => {
-                for task in outcome.follow_up_tasks() {
-                    scheduler.enqueue(task).await;
-                }
-                Some(Ok(()))
-            }
-            Err(error) => Some(Err(error)),
-        }
     }
 
     #[tokio::test]
@@ -185,7 +168,7 @@ mod tests {
         )
         .with_simple_type("FindBooksToConvert");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
         assert_eq!(
             scheduler
@@ -287,7 +270,7 @@ mod tests {
         )
         .with_simple_type("FindBooksToConvert");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some("library-1")).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
             scheduler.count_by_simple_type().await.is_empty(),
@@ -379,7 +362,7 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -469,10 +452,10 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let first = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let first = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(first, Some(Err(_))));
 
-        let second = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let second = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(second, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
@@ -599,7 +582,7 @@ mod tests {
         )
         .with_simple_type("ConvertBook");
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let destination_path = fixture.library_root.join("books/book-1.cbz");
@@ -794,7 +777,7 @@ mod tests {
             .to_string(),
         );
 
-        let result = execute_and_enqueue(&scheduler, &runtime, &task, Some(book_id)).await;
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
