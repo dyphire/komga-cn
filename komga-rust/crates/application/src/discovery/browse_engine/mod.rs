@@ -22,12 +22,11 @@ pub fn filter_and_paginate_books(
         rows.retain(|row| allowed_ids.iter().any(|id| id == &row.library_id));
     }
 
-    if let Some(restrictions) = context.restrictions.as_ref() {
-        if let (Some(age), Some(AgeRestrictionKind::Exclude)) =
+    if let Some(restrictions) = context.restrictions.as_ref()
+        && let (Some(age), Some(AgeRestrictionKind::Exclude)) =
             (restrictions.age, restrictions.age_restriction)
-        {
-            rows.retain(|row| row.age_rating.map(|r| r < age).unwrap_or(true));
-        }
+    {
+        rows.retain(|row| row.age_rating.map(|r| r < age).unwrap_or(true));
     }
 
     if let Some(condition) = query.condition.as_ref() {
@@ -98,7 +97,7 @@ pub fn book_condition_needs_readlist_memberships(condition: &BookCondition) -> b
         BookCondition::Composite(composite) => composite
             .conditions
             .iter()
-            .any(|c| book_condition_needs_readlist_memberships(c)),
+            .any(book_condition_needs_readlist_memberships),
         _ => false,
     }
 }
@@ -107,7 +106,7 @@ pub fn book_condition_needs_posters(condition: &BookCondition) -> bool {
     match condition {
         BookCondition::Value(BookValueCondition::Poster(_)) => true,
         BookCondition::Composite(composite) => {
-            composite.conditions.iter().any(|c| book_condition_needs_posters(c))
+            composite.conditions.iter().any(book_condition_needs_posters)
         }
         _ => false,
     }
@@ -142,7 +141,7 @@ pub fn series_condition_needs_collection_memberships(condition: &SeriesCondition
         SeriesCondition::Composite(composite) => composite
             .conditions
             .iter()
-            .any(|c| series_condition_needs_collection_memberships(c)),
+            .any(series_condition_needs_collection_memberships),
         _ => false,
     }
 }
@@ -164,7 +163,7 @@ pub fn series_condition_needs_read_progress(condition: &SeriesCondition) -> bool
         SeriesCondition::Composite(composite) => composite
             .conditions
             .iter()
-            .any(|c| series_condition_needs_read_progress(c)),
+            .any(series_condition_needs_read_progress),
         _ => false,
     }
 }
@@ -175,7 +174,7 @@ pub fn series_condition_needs_total_book_counts(condition: &SeriesCondition) -> 
         SeriesCondition::Composite(composite) => composite
             .conditions
             .iter()
-            .any(|c| series_condition_needs_total_book_counts(c)),
+            .any(series_condition_needs_total_book_counts),
         _ => false,
     }
 }

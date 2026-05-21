@@ -1,20 +1,14 @@
 use sqlx::{Row, SqlitePool};
 
+use super::common;
+
 pub use komga_application::discovery::{
     DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
     PersistedBookAuthorRecord, PersistedComicrackMatchCandidateRecord,
 };
 
 pub async fn persisted_readlists_exist(pool: &SqlitePool) -> Result<bool, String> {
-    let row = sqlx::query(
-        r#"SELECT 1 AS FOUND
-FROM READLIST
-LIMIT 1"#,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| format!("query persisted readlists existence: {error}"))?;
-    Ok(row.is_some())
+    common::table_has_rows(pool, "READLIST", "persisted readlists").await
 }
 
 pub async fn load_persisted_readlists(
@@ -173,9 +167,16 @@ VALUES (?, ?, ?, ?, ?)"#,
     .await
     .map_err(|error| format!("insert persisted readlist: {error}"))?;
 
-    replace_readlist_books(&mut tx, readlist_id, book_ids)
-        .await
-        .map_err(|error| format!("insert persisted readlist books: {error}"))?;
+    common::replace_ordered_children(
+        &mut tx,
+        "READLIST_BOOK",
+        "READLIST_ID",
+        "BOOK_ID",
+        readlist_id,
+        book_ids,
+    )
+    .await
+    .map_err(|error| format!("insert persisted readlist books: {error}"))?;
 
     tx.commit()
         .await
@@ -221,9 +222,16 @@ WHERE ID = ?"#,
         return Ok(false);
     }
 
-    replace_readlist_books(&mut tx, readlist_id, book_ids)
-        .await
-        .map_err(|error| format!("replace persisted readlist books: {error}"))?;
+    common::replace_ordered_children(
+        &mut tx,
+        "READLIST_BOOK",
+        "READLIST_ID",
+        "BOOK_ID",
+        readlist_id,
+        book_ids,
+    )
+    .await
+    .map_err(|error| format!("replace persisted readlist books: {error}"))?;
 
     tx.commit()
         .await
@@ -235,80 +243,14 @@ pub async fn delete_persisted_readlist(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin readlist delete tx: {error}"))?;
-
-    sqlx::query(
-        r#"DELETE
-FROM THUMBNAIL_READLIST
-WHERE READLIST_ID = ?"#,
+    common::delete_parent_with_children(
+        pool,
+        "THUMBNAIL_READLIST",
+        "READLIST_BOOK",
+        "READLIST",
+        "READLIST_ID",
+        readlist_id,
+        "readlist",
     )
-    .bind(readlist_id)
-    .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete persisted readlist thumbnails: {error}"))?;
-    sqlx::query(
-        r#"DELETE
-FROM READLIST_BOOK
-WHERE READLIST_ID = ?"#,
-    )
-    .bind(readlist_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("delete persisted readlist books: {error}"))?;
-
-    let deleted = sqlx::query(
-        r#"DELETE
-FROM READLIST
-WHERE ID = ?"#,
-    )
-    .bind(readlist_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("delete persisted readlist: {error}"))?
-    .rows_affected()
-        > 0;
-
-    if !deleted {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback readlist delete tx: {error}"))?;
-        return Ok(false);
-    }
-
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit readlist delete tx: {error}"))?;
-    Ok(true)
-}
-
-async fn replace_readlist_books(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    readlist_id: &str,
-    book_ids: &[String],
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"DELETE
-FROM READLIST_BOOK
-WHERE READLIST_ID = ?"#,
-    )
-    .bind(readlist_id)
-    .execute(&mut **tx)
-    .await?;
-
-    for (index, book_id) in book_ids.iter().enumerate() {
-        sqlx::query(
-            r#"INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER)
-VALUES (?, ?, ?)"#,
-        )
-        .bind(readlist_id)
-        .bind(book_id)
-        .bind(index as i64)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
 }

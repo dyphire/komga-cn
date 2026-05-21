@@ -1,19 +1,13 @@
 use sqlx::{Row, SqlitePool};
 
+use super::common;
+
 pub use komga_application::discovery::{
     PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
 
 pub async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
-    let row = sqlx::query(
-        r#"SELECT 1 AS FOUND
-FROM COLLECTION
-LIMIT 1"#,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| format!("query persisted collections existence: {error}"))?;
-    Ok(row.is_some())
+    common::table_has_rows(pool, "COLLECTION", "persisted collections").await
 }
 
 pub async fn load_persisted_collections(
@@ -163,9 +157,16 @@ VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
     .await
     .map_err(|error| format!("insert persisted collection: {error}"))?;
 
-    replace_collection_series(&mut tx, collection_id, series_ids)
-        .await
-        .map_err(|error| format!("insert persisted collection series: {error}"))?;
+    common::replace_ordered_children(
+        &mut tx,
+        "COLLECTION_SERIES",
+        "COLLECTION_ID",
+        "SERIES_ID",
+        collection_id,
+        series_ids,
+    )
+    .await
+    .map_err(|error| format!("insert persisted collection series: {error}"))?;
 
     tx.commit()
         .await
@@ -208,9 +209,16 @@ WHERE ID = ?"#,
         return Ok(false);
     }
 
-    replace_collection_series(&mut tx, collection_id, series_ids)
-        .await
-        .map_err(|error| format!("replace persisted collection series: {error}"))?;
+    common::replace_ordered_children(
+        &mut tx,
+        "COLLECTION_SERIES",
+        "COLLECTION_ID",
+        "SERIES_ID",
+        collection_id,
+        series_ids,
+    )
+    .await
+    .map_err(|error| format!("replace persisted collection series: {error}"))?;
 
     tx.commit()
         .await
@@ -222,81 +230,14 @@ pub async fn delete_persisted_collection(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<bool, String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin collection delete tx: {error}"))?;
-
-    sqlx::query(
-        r#"DELETE
-FROM THUMBNAIL_COLLECTION
-WHERE COLLECTION_ID = ?"#,
+    common::delete_parent_with_children(
+        pool,
+        "THUMBNAIL_COLLECTION",
+        "COLLECTION_SERIES",
+        "COLLECTION",
+        "COLLECTION_ID",
+        collection_id,
+        "collection",
     )
-    .bind(collection_id)
-    .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete persisted collection thumbnails: {error}"))?;
-
-    sqlx::query(
-        r#"DELETE
-FROM COLLECTION_SERIES
-WHERE COLLECTION_ID = ?"#,
-    )
-    .bind(collection_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("delete persisted collection series: {error}"))?;
-
-    let deleted = sqlx::query(
-        r#"DELETE
-FROM COLLECTION
-WHERE ID = ?"#,
-    )
-    .bind(collection_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("delete persisted collection: {error}"))?
-    .rows_affected()
-        > 0;
-
-    if !deleted {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback collection delete tx: {error}"))?;
-        return Ok(false);
-    }
-
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit collection delete tx: {error}"))?;
-    Ok(true)
-}
-
-async fn replace_collection_series(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    collection_id: &str,
-    series_ids: &[String],
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"DELETE
-FROM COLLECTION_SERIES
-WHERE COLLECTION_ID = ?"#,
-    )
-    .bind(collection_id)
-    .execute(&mut **tx)
-    .await?;
-
-    for (index, series_id) in series_ids.iter().enumerate() {
-        sqlx::query(
-            r#"INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER)
-VALUES (?, ?, ?)"#,
-        )
-        .bind(collection_id)
-        .bind(series_id)
-        .bind(index as i64)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
 }

@@ -612,7 +612,6 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
         let persisted_query = PersistedBooksBrowseQuery::from_filters(
             BooksFilterCriteria {
                 library_ids: request.library_ids,
-                ..BooksFilterCriteria::default()
             },
             None,
             request.page.page,
