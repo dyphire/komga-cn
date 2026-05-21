@@ -73,6 +73,10 @@ pub fn filter_and_paginate_series(
         }
     }
 
+    if !condition_contains_deleted(query.condition.as_ref()) {
+        rows.retain(|row| !row.deleted);
+    }
+
     if let Some(condition) = query.condition.as_ref() {
         rows.retain(|row| series_condition::evaluate(row, condition, &eval_ctx));
     }
@@ -141,6 +145,17 @@ pub fn series_condition_needs_collection_memberships(condition: &SeriesCondition
             .any(|c| series_condition_needs_collection_memberships(c)),
         _ => false,
     }
+}
+
+fn condition_contains_deleted(condition: Option<&SeriesCondition>) -> bool {
+    fn visit(condition: &SeriesCondition) -> bool {
+        match condition {
+            SeriesCondition::Value(SeriesValueCondition::Deleted(_)) => true,
+            SeriesCondition::Composite(composite) => composite.conditions.iter().any(visit),
+            _ => false,
+        }
+    }
+    condition.is_some_and(visit)
 }
 
 pub fn series_condition_needs_read_progress(condition: &SeriesCondition) -> bool {
