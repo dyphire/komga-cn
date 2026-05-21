@@ -226,11 +226,7 @@ pub(crate) async fn update_server_settings(
     }
 
     if let Some(value) = task_pool_size_change
-        && let Err(error) = app
-            .task_queue
-            .engine
-            .apply_task_pool_size(value as usize)
-            .await
+        && let Err(error) = app.task_queue.queue.apply_pool_size(value as usize).await
     {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,

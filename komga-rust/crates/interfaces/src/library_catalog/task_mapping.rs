@@ -1,7 +1,9 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use komga_application::task_processing::TaskQueueRecord as ApplicationTaskQueueRecord;
+use komga_application::task_processing::{
+    SubmitUrgency, TaskQueueRecord as ApplicationTaskQueueRecord,
+};
 use serde_json::json;
 
 use crate::helpers::mark_runtime_owned;
@@ -21,8 +23,8 @@ pub(super) async fn enqueue_task_records_with_status(
 ) -> Response {
     if let Err(error) = app
         .task_queue
-        .engine
-        .enqueue_task_records(task_records, true)
+        .queue
+        .enqueue_records(task_records, SubmitUrgency::Immediate)
         .await
     {
         return (

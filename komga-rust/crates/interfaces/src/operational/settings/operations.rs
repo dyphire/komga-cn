@@ -104,7 +104,7 @@ pub(crate) async fn get_oauth2_providers(State(app): State<OperationalApiState>)
 }
 
 pub(crate) async fn delete_tasks(State(app): State<OperationalApiState>, _: Admin) -> Response {
-    let deleted = app.task_queue.engine.clear_unowned_tasks().await;
+    let deleted = app.task_queue.queue.clear_unowned_tasks().await;
 
     Json(json!(deleted)).into_response()
 }

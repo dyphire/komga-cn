@@ -11,7 +11,8 @@ use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
 use komga_application::task_processing::{
-    LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
+    LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
+    TaskQueueRecord, TaskRequest,
 };
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 
@@ -36,7 +37,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskEngine {
+        Arc::new(FakeTaskQueue {
             apply: {
                 let apply_count = apply_count.clone();
                 let applied_value = applied_value.clone();
@@ -83,7 +84,7 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskEngine {
+        Arc::new(FakeTaskQueue {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -131,7 +132,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskEngine {
+        Arc::new(FakeTaskQueue {
             apply: {
                 let apply_count = apply_count.clone();
                 move |_value| {
@@ -158,7 +159,7 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
+        Arc::new(FakeTaskQueue { apply: |_| Ok(()) }),
         store,
     ));
     let response =
@@ -196,7 +197,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
         state,
-        Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
+        Arc::new(FakeTaskQueue { apply: |_| Ok(()) }),
         store,
     ));
     let response =
@@ -221,12 +222,12 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
     cleanup_fixture(fixture_root);
 }
 
-struct FakeTaskEngine<F> {
+struct FakeTaskQueue<F> {
     apply: F,
 }
 
 #[async_trait]
-impl<F> TaskEnqueuer for FakeTaskEngine<F>
+impl<F> TaskQueue for FakeTaskQueue<F>
 where
     F: Fn(usize) -> Result<(), String> + Send + Sync,
 {
@@ -235,31 +236,31 @@ where
     async fn enqueue_request(&self, _request: TaskRequest) {}
 
     async fn enqueue_batch(&self, _batch: LibraryTaskBatch) {}
-}
 
-#[async_trait]
-impl<F> TaskEngine for FakeTaskEngine<F>
-where
-    F: Fn(usize) -> Result<(), String> + Send + Sync,
-{
+    async fn enqueue_records(
+        &self,
+        _records: Vec<TaskQueueRecord>,
+        _urgency: SubmitUrgency,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     async fn status(&self) -> QueueStatus {
         QueueStatus::default()
     }
+}
 
+#[async_trait]
+impl<F> TaskQueueAdmin for FakeTaskQueue<F>
+where
+    F: Fn(usize) -> Result<(), String> + Send + Sync,
+{
     async fn clear_unowned_tasks(&self) -> usize {
         0
     }
 
-    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
+    async fn apply_pool_size(&self, value: usize) -> Result<(), String> {
         (self.apply)(value)
-    }
-
-    async fn enqueue_task_records(
-        &self,
-        _task_records: Vec<komga_application::task_processing::TaskQueueRecord>,
-        _urgent: bool,
-    ) -> Result<(), String> {
-        Ok(())
     }
 
     fn wakeup(&self) {}
@@ -283,13 +284,13 @@ fn cleanup_fixture(root: PathBuf) {
 
 fn test_app_state(
     operational: OperationalState,
-    task_queue: Arc<dyn TaskEngine>,
+    task_queue: Arc<dyn TaskQueueAdmin>,
     server_settings: Arc<ServerSettingsStore>,
 ) -> ServerSettingsState {
     ServerSettingsState {
         runtime: operational.runtime,
         server_settings,
-        task_queue: TaskQueueState { engine: task_queue },
+        task_queue: TaskQueueState { queue: task_queue },
     }
 }
 

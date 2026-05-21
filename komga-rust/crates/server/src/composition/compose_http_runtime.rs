@@ -100,7 +100,7 @@ pub fn compose_http_runtime(
         session_runtime_key,
         remember_me_runtime_key: remember_me_runtime_key.clone(),
     };
-    let task_engine_arc: Arc<dyn komga_application::task_processing::TaskEngine> =
+    let task_engine_arc: Arc<dyn komga_application::task_processing::TaskQueueAdmin> =
         Arc::from(task_engine);
     let metadata_writer = Arc::new(MetadataWriter::new(
         Box::new(SqliteBookMetadataPort::new(

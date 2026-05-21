@@ -179,7 +179,6 @@ mod tests {
     use crate::task_queue::test_support::RuntimeTestFixture;
     use crate::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
     use image::{ImageBuffer, Rgba};
-    use komga_application::task_processing::TaskQueueAdminPort;
     use sqlx::{Row, SqlitePool};
     use std::fs::File;
     use std::io::Write;

@@ -4,7 +4,7 @@ use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService
 #[derive(Clone)]
 pub struct HttpServices {
     pub library_catalog: Arc<komga_infrastructure::library_catalog::LibraryCatalogAccess>,
-    pub task_queue: Arc<dyn TaskEngine>,
+    pub task_queue: Arc<dyn TaskQueueAdmin>,
     pub server_settings:
         Arc<komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore>,
     pub identity: IdentityState,

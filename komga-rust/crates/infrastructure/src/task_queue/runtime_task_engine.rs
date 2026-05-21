@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use komga_application::task_processing::{
-    LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskQueueRecord, TaskRequest,
+    LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
+    TaskQueueRecord, TaskRequest,
 };
 use tokio::sync::{Mutex, Notify};
 
@@ -29,51 +30,51 @@ impl RuntimeTaskEngine {
 }
 
 #[async_trait::async_trait]
-impl TaskEnqueuer for RuntimeTaskEngine {
+impl TaskQueue for RuntimeTaskEngine {
     async fn enqueue(&self, kind: TaskKind, target_id: &str) {
         let scheduler = self.scheduler.lock().await;
-        TaskEnqueuer::enqueue(&*scheduler, kind, target_id).await;
+        TaskQueue::enqueue(&*scheduler, kind, target_id).await;
     }
 
     async fn enqueue_request(&self, request: TaskRequest) {
         let scheduler = self.scheduler.lock().await;
-        TaskEnqueuer::enqueue_request(&*scheduler, request).await;
+        TaskQueue::enqueue_request(&*scheduler, request).await;
     }
 
     async fn enqueue_batch(&self, batch: LibraryTaskBatch) {
         let scheduler = self.scheduler.lock().await;
-        TaskEnqueuer::enqueue_batch(&*scheduler, batch).await;
+        TaskQueue::enqueue_batch(&*scheduler, batch).await;
+    }
+
+    async fn enqueue_records(
+        &self,
+        records: Vec<TaskQueueRecord>,
+        urgency: SubmitUrgency,
+    ) -> Result<(), String> {
+        let scheduler = self.scheduler.lock().await;
+        TaskQueue::enqueue_records(&*scheduler, records, SubmitUrgency::Normal).await?;
+        if urgency == SubmitUrgency::Immediate {
+            self.wakeup.notify_one();
+        }
+        Ok(())
+    }
+
+    async fn status(&self) -> QueueStatus {
+        let scheduler = self.scheduler.lock().await;
+        TaskQueue::status(&*scheduler).await
     }
 }
 
 #[async_trait::async_trait]
-impl TaskEngine for RuntimeTaskEngine {
-    async fn status(&self) -> QueueStatus {
-        let scheduler = self.scheduler.lock().await;
-        TaskEngine::status(&*scheduler).await
-    }
-
+impl TaskQueueAdmin for RuntimeTaskEngine {
     async fn clear_unowned_tasks(&self) -> usize {
         let scheduler = self.scheduler.lock().await;
-        TaskEngine::clear_unowned_tasks(&*scheduler).await
+        TaskQueueAdmin::clear_unowned_tasks(&*scheduler).await
     }
 
-    async fn apply_task_pool_size(&self, value: usize) -> Result<(), String> {
+    async fn apply_pool_size(&self, value: usize) -> Result<(), String> {
         self.execution_pool.resize(value);
         self.wakeup.notify_one();
-        Ok(())
-    }
-
-    async fn enqueue_task_records(
-        &self,
-        task_records: Vec<TaskQueueRecord>,
-        urgent: bool,
-    ) -> Result<(), String> {
-        let scheduler = self.scheduler.lock().await;
-        TaskEngine::enqueue_task_records(&*scheduler, task_records, false).await?;
-        if urgent {
-            self.wakeup.notify_one();
-        }
         Ok(())
     }
 
@@ -89,7 +90,7 @@ mod tests {
     use crate::sqlite::{connect_task_pool, connect_task_write_pool, default_read_max_connections};
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::{TaskExecutionPoolHandle, TaskRuntimeContext};
-    use komga_application::task_processing::TaskEngine;
+    use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -146,8 +147,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enqueue_task_records_respects_urgent_wakeup_policy() {
-        for (urgent, timeout_ms, should_notify) in [(true, 100_u64, true), (false, 25_u64, false)] {
+    async fn enqueue_records_respects_urgent_wakeup_policy() {
+        for (urgency, timeout_ms, should_notify) in [
+            (SubmitUrgency::Immediate, 100_u64, true),
+            (SubmitUrgency::Normal, 25_u64, false),
+        ] {
             let runtime = test_task_runtime_context().await;
             let task_execution_pool =
                 TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
@@ -155,14 +159,14 @@ mod tests {
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
             let task_wakeup = Arc::new(tokio::sync::Notify::new());
-            let engine: Box<dyn TaskEngine> = Box::new(RuntimeTaskEngine::new(
+            let engine: Box<dyn TaskQueueAdmin> = Box::new(RuntimeTaskEngine::new(
                 task_queue.clone(),
                 task_execution_pool,
                 task_wakeup.clone(),
             ));
 
             engine
-                .enqueue_task_records(vec![scan_library_task()], urgent)
+                .enqueue_records(vec![scan_library_task()], urgency)
                 .await
                 .expect("task enqueue should succeed");
 
@@ -172,30 +176,34 @@ mod tests {
                     .is_ok();
             assert_eq!(
                 notified, should_notify,
-                "urgent={urgent} should control background worker wakeup"
+                "urgency={urgency:?} should control background worker wakeup"
             );
 
             let queued_tasks = task_queue.lock().await.count_by_simple_type().await;
-            assert_eq!(queued_tasks.get("ScanLibrary"), Some(&1), "urgent={urgent}");
+            assert_eq!(
+                queued_tasks.get("ScanLibrary"),
+                Some(&1),
+                "urgency={urgency:?}"
+            );
         }
     }
 
     #[tokio::test]
-    async fn apply_task_pool_size_resizes_execution_pool_and_wakes_scheduler() {
+    async fn apply_pool_size_resizes_execution_pool_and_wakes_scheduler() {
         let runtime = test_task_runtime_context().await;
         let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
         let task_queue = Arc::new(Mutex::new(
             TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
         ));
         let task_wakeup = Arc::new(tokio::sync::Notify::new());
-        let engine: Box<dyn TaskEngine> = Box::new(RuntimeTaskEngine::new(
+        let engine: Box<dyn TaskQueueAdmin> = Box::new(RuntimeTaskEngine::new(
             task_queue,
             task_execution_pool.clone(),
             task_wakeup.clone(),
         ));
 
         engine
-            .apply_task_pool_size(3)
+            .apply_pool_size(3)
             .await
             .expect("task pool resize should succeed");
 

@@ -2,22 +2,24 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use komga_application::media_assets::metadata_writer::TaskEnqueuePort;
-use komga_application::task_processing::{TaskEngine, TaskQueueRecord};
+use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin, TaskQueueRecord};
 
 #[derive(Clone)]
 pub struct TaskEnqueueAdapter {
-    engine: Arc<dyn TaskEngine>,
+    queue: Arc<dyn TaskQueueAdmin>,
 }
 
 impl TaskEnqueueAdapter {
-    pub fn new(engine: Arc<dyn TaskEngine>) -> Self {
-        Self { engine }
+    pub fn new(queue: Arc<dyn TaskQueueAdmin>) -> Self {
+        Self { queue }
     }
 }
 
 #[async_trait]
 impl TaskEnqueuePort for TaskEnqueueAdapter {
     async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String> {
-        self.engine.enqueue_task_records(records, true).await
+        self.queue
+            .enqueue_records(records, SubmitUrgency::Immediate)
+            .await
     }
 }

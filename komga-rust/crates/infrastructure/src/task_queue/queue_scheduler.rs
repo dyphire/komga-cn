@@ -1,14 +1,13 @@
 use super::*;
 use komga_application::task_processing::{
-    LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskQueueAdminPort,
-    TaskRequest,
+    LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin, TaskRequest,
 };
 use tokio::sync::{Mutex, Notify};
 use tracing::{error, info};
 
 #[derive(Debug)]
 pub(super) struct SchedulerInner {
-    pub(crate) admin: TaskQueueAdmin,
+    pub(crate) admin: TaskQueueOrchestrator,
     admin_loaded: bool,
     persisted_store: Option<SqliteTaskQueueStore>,
 }
@@ -382,7 +381,7 @@ impl TaskQueueScheduler {
 }
 
 #[async_trait::async_trait]
-impl TaskEnqueuer for TaskQueueScheduler {
+impl TaskQueue for TaskQueueScheduler {
     async fn enqueue(&self, kind: TaskKind, target_id: &str) {
         let record = kind.request_for(target_id);
         TaskQueueScheduler::enqueue(self, record).await;
@@ -398,34 +397,34 @@ impl TaskEnqueuer for TaskQueueScheduler {
             TaskQueueScheduler::enqueue(self, record).await;
         }
     }
-}
 
-#[async_trait::async_trait]
-impl TaskEngine for TaskQueueScheduler {
+    async fn enqueue_records(
+        &self,
+        records: Vec<TaskQueueRecord>,
+        urgency: SubmitUrgency,
+    ) -> Result<(), String> {
+        for record in records {
+            TaskQueueScheduler::enqueue(self, record).await;
+        }
+        if urgency == SubmitUrgency::Immediate {
+            self.wakeup.notify_one();
+        }
+        Ok(())
+    }
+
     async fn status(&self) -> QueueStatus {
         let counts = TaskQueueScheduler::count_by_simple_type(self).await;
         QueueStatus { counts }
     }
+}
 
+#[async_trait::async_trait]
+impl TaskQueueAdmin for TaskQueueScheduler {
     async fn clear_unowned_tasks(&self) -> usize {
         TaskQueueScheduler::clear_unowned(self).await
     }
 
-    async fn apply_task_pool_size(&self, _value: usize) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn enqueue_task_records(
-        &self,
-        task_records: Vec<TaskQueueRecord>,
-        urgent: bool,
-    ) -> Result<(), String> {
-        for record in task_records {
-            TaskQueueScheduler::enqueue(self, record).await;
-        }
-        if urgent {
-            self.wakeup.notify_one();
-        }
+    async fn apply_pool_size(&self, _value: usize) -> Result<(), String> {
         Ok(())
     }
 
@@ -434,7 +433,7 @@ impl TaskEngine for TaskQueueScheduler {
     }
 }
 
-async fn load_admin_from_store(store: &SqliteTaskQueueStore) -> TaskQueueAdmin {
+async fn load_admin_from_store(store: &SqliteTaskQueueStore) -> TaskQueueOrchestrator {
     let mut admin = TaskQueueOrchestrator::new("runtime-store", true);
     for record in store.load_records().await {
         let owner = record.owner.clone();

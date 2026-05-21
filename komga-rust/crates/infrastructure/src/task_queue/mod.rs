@@ -49,7 +49,6 @@ use scanner_support::*;
 pub use execution_pool::TaskExecutionPoolHandle;
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
 pub use runtime_task_engine::RuntimeTaskEngine;
-pub type TaskQueueAdmin = TaskQueueOrchestrator;
 
 type TaskExecutionError = TaskProcessingError;
 

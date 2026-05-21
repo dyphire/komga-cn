@@ -3,13 +3,13 @@ use axum::extract::FromRef;
 
 #[derive(Clone)]
 pub struct TaskQueueState {
-    pub engine: Arc<dyn TaskEngine>,
+    pub queue: Arc<dyn TaskQueueAdmin>,
 }
 
 impl FromRef<Arc<HttpAppState>> for TaskQueueState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            engine: app.services.task_queue.clone(),
+            queue: app.services.task_queue.clone(),
         }
     }
 }

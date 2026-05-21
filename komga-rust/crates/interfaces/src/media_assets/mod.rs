@@ -451,8 +451,11 @@ async fn process_task_side_effects(
     task_records: Vec<TaskQueueRecord>,
 ) -> Result<(), String> {
     app.task_queue
-        .engine
-        .enqueue_task_records(task_records, true)
+        .queue
+        .enqueue_records(
+            task_records,
+            komga_application::task_processing::SubmitUrgency::Immediate,
+        )
         .await
 }
 

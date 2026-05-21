@@ -189,7 +189,6 @@ mod tests {
     use crate::task_queue::TaskRuntimeContext;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::RuntimeTestFixture;
-    use komga_application::task_processing::TaskQueueAdminPort;
     use serde_json::json;
     use sqlx::{Row, SqlitePool};
     use std::io::Write;

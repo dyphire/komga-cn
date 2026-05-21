@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-pub use komga_application::task_processing::TaskEngine;
+pub use komga_application::task_processing::{TaskQueue, TaskQueueAdmin};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::watch;

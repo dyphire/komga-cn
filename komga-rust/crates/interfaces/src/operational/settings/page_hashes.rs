@@ -291,8 +291,11 @@ pub(crate) async fn post_page_hash_delete_all(
 
     match app
         .task_queue
-        .engine
-        .enqueue_task_records(task_records, true)
+        .queue
+        .enqueue_records(
+            task_records,
+            komga_application::task_processing::SubmitUrgency::Immediate,
+        )
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
@@ -335,8 +338,11 @@ pub(crate) async fn post_page_hash_delete_match(
 
     match app
         .task_queue
-        .engine
-        .enqueue_task_records(vec![task_record], true)
+        .queue
+        .enqueue_records(
+            vec![task_record],
+            komga_application::task_processing::SubmitUrgency::Immediate,
+        )
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),

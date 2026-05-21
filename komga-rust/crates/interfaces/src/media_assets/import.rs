@@ -52,8 +52,11 @@ async fn enqueue_books_best_effort(payload: BooksImportPayload, app: &MediaAsset
             Ok(task_record) => {
                 if let Err(err) = app
                     .task_queue
-                    .engine
-                    .enqueue_task_records(vec![interface_task_record(task_record)], true)
+                    .queue
+                    .enqueue_records(
+                        vec![interface_task_record(task_record)],
+                        komga_application::task_processing::SubmitUrgency::Immediate,
+                    )
                     .await
                 {
                     error!(
@@ -115,14 +118,14 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::state::{MediaAssetsState, TaskEngine, TaskQueueState};
+    use crate::state::{MediaAssetsState, TaskQueueAdmin, TaskQueueState};
 
-    struct TestTaskEngine {
+    struct TestTaskQueue {
         persisted_ids: Arc<tokio::sync::Mutex<Vec<String>>>,
     }
 
     #[async_trait::async_trait]
-    impl komga_application::task_processing::TaskEnqueuer for TestTaskEngine {
+    impl komga_application::task_processing::TaskQueue for TestTaskQueue {
         async fn enqueue(
             &self,
             _kind: komga_application::task_processing::TaskKind,
@@ -138,28 +141,13 @@ mod tests {
             _batch: komga_application::task_processing::LibraryTaskBatch,
         ) {
         }
-    }
 
-    #[async_trait::async_trait]
-    impl TaskEngine for TestTaskEngine {
-        async fn status(&self) -> komga_application::task_processing::QueueStatus {
-            komga_application::task_processing::QueueStatus::default()
-        }
-
-        async fn clear_unowned_tasks(&self) -> usize {
-            0
-        }
-
-        async fn apply_task_pool_size(&self, _value: usize) -> Result<(), String> {
-            Ok(())
-        }
-
-        async fn enqueue_task_records(
+        async fn enqueue_records(
             &self,
-            task_records: Vec<komga_application::task_processing::TaskQueueRecord>,
-            _urgent: bool,
+            records: Vec<komga_application::task_processing::TaskQueueRecord>,
+            _urgency: komga_application::task_processing::SubmitUrgency,
         ) -> Result<(), String> {
-            let task_record = task_records.into_iter().next().expect("task should exist");
+            let task_record = records.into_iter().next().expect("task should exist");
             if task_record.id == "ImportBook_series-1_/tmp/book-a.cbz" {
                 Err("first enqueue failed".to_string())
             } else {
@@ -168,10 +156,25 @@ mod tests {
             }
         }
 
+        async fn status(&self) -> komga_application::task_processing::QueueStatus {
+            komga_application::task_processing::QueueStatus::default()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TaskQueueAdmin for TestTaskQueue {
+        async fn clear_unowned_tasks(&self) -> usize {
+            0
+        }
+
+        async fn apply_pool_size(&self, _value: usize) -> Result<(), String> {
+            Ok(())
+        }
+
         fn wakeup(&self) {}
     }
 
-    async fn test_media_state(task_queue: Arc<dyn TaskEngine>) -> MediaAssetsState {
+    async fn test_media_state(task_queue: Arc<dyn TaskQueueAdmin>) -> MediaAssetsState {
         use komga_infrastructure::content_resolver::ContentResolver;
         use komga_infrastructure::database_handle::DatabaseHandle;
         use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
@@ -187,7 +190,7 @@ mod tests {
             read_progress: crate::state::ReadProgressState::default(),
             identity: crate::state::tests::test_identity_state().await,
             task_queue: TaskQueueState {
-                engine: task_queue.clone(),
+                queue: task_queue.clone(),
             },
             discovery_detail: Arc::new(DiscoveryDetailAccess::new(handle, PathBuf::new())),
             reader: MediaReader::new(pool.clone()),
@@ -228,7 +231,7 @@ mod tests {
             ],
         };
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let media_state = test_media_state(Arc::new(TestTaskEngine {
+        let media_state = test_media_state(Arc::new(TestTaskQueue {
             persisted_ids: persisted_ids.clone(),
         }))
         .await;

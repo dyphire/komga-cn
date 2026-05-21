@@ -1,6 +1,6 @@
 use axum::Extension;
 use axum::Router;
-use komga_application::task_processing::TaskEngine;
+use komga_application::task_processing::TaskQueueAdmin;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
@@ -39,7 +39,7 @@ pub(crate) struct TaskRouterParts {
 pub(crate) struct HttpRuntimeParts {
     pub(crate) main_db: DatabaseHandle,
     pub(crate) tasks_db: DatabaseHandle,
-    pub(crate) task_engine: Box<dyn TaskEngine>,
+    pub(crate) task_engine: Box<dyn TaskQueueAdmin>,
 }
 
 pub(crate) struct RouterRuntimeLifecycle {
