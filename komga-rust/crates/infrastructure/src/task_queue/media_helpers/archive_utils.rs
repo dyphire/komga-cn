@@ -5,9 +5,9 @@ use std::path::Path;
 pub(in crate::task_queue) fn normalize_library_relative_url(
     library_root: &PathBuf,
     absolute_path: &Path,
-) -> Result<String, TaskExecutionError> {
+) -> Result<String, TaskProcessingError> {
     let relative = absolute_path.strip_prefix(library_root).map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to derive relative path '{}' from library root '{}': {error}",
             absolute_path.display(),
             library_root.display(),
@@ -18,13 +18,13 @@ pub(in crate::task_queue) fn normalize_library_relative_url(
 
 pub(in crate::task_queue) fn load_rar_entries_for_conversion(
     source_path: &Path,
-) -> Result<Vec<(String, Vec<u8>)>, TaskExecutionError> {
+) -> Result<Vec<(String, Vec<u8>)>, TaskProcessingError> {
     let mut entries = Vec::new();
-    for entry in list_rar_entries(source_path).map_err(TaskExecutionError::runtime)? {
+    for entry in list_rar_entries(source_path).map_err(TaskProcessingError::runtime)? {
         let bytes = read_rar_entry_bytes(source_path, &entry.file_name)
-            .map_err(TaskExecutionError::runtime)?
+            .map_err(TaskProcessingError::runtime)?
             .ok_or_else(|| {
-                TaskExecutionError::runtime(format!(
+                TaskProcessingError::runtime(format!(
                     "rar entry '{}' was not found in '{}'",
                     entry.file_name,
                     source_path.display()
@@ -38,7 +38,7 @@ pub(in crate::task_queue) fn load_rar_entries_for_conversion(
 
 pub(in crate::task_queue) fn build_stored_zip_archive(
     entries: Vec<(String, Vec<u8>)>,
-) -> Result<Vec<u8>, TaskExecutionError> {
+) -> Result<Vec<u8>, TaskProcessingError> {
     let mut payload = Vec::new();
     let mut central_directory = Vec::new();
     let mut entries_count: usize = 0;
@@ -46,13 +46,13 @@ pub(in crate::task_queue) fn build_stored_zip_archive(
     for (file_name, bytes) in entries {
         let file_name_bytes = file_name.as_bytes();
         let name_len = u16::try_from(file_name_bytes.len()).map_err(|_| {
-            TaskExecutionError::runtime(format!("zip entry name too long: {file_name}"))
+            TaskProcessingError::runtime(format!("zip entry name too long: {file_name}"))
         })?;
         let size = u32::try_from(bytes.len()).map_err(|_| {
-            TaskExecutionError::runtime(format!("zip entry too large: {file_name}"))
+            TaskProcessingError::runtime(format!("zip entry too large: {file_name}"))
         })?;
         let local_header_offset = u32::try_from(payload.len()).map_err(|_| {
-            TaskExecutionError::runtime("zip archive too large for classic zip format")
+            TaskProcessingError::runtime("zip archive too large for classic zip format")
         })?;
         let crc32 = crc32_ieee(&bytes);
 
@@ -91,13 +91,14 @@ pub(in crate::task_queue) fn build_stored_zip_archive(
         entries_count += 1;
     }
 
-    let central_directory_offset = u32::try_from(payload.len())
-        .map_err(|_| TaskExecutionError::runtime("zip archive too large for classic zip format"))?;
+    let central_directory_offset = u32::try_from(payload.len()).map_err(|_| {
+        TaskProcessingError::runtime("zip archive too large for classic zip format")
+    })?;
     let central_directory_size = u32::try_from(central_directory.len()).map_err(|_| {
-        TaskExecutionError::runtime("zip central directory too large for classic zip format")
+        TaskProcessingError::runtime("zip central directory too large for classic zip format")
     })?;
     let entries_count = u16::try_from(entries_count)
-        .map_err(|_| TaskExecutionError::runtime("too many zip entries for classic zip format"))?;
+        .map_err(|_| TaskProcessingError::runtime("too many zip entries for classic zip format"))?;
 
     payload.extend_from_slice(&central_directory);
     push_u32_le(&mut payload, 0x0605_4b50);

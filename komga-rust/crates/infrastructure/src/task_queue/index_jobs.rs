@@ -1,9 +1,11 @@
-use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::operational_settings_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
 use crate::task_queue::JobRuntime;
 use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
+use komga_application::task_processing::{
+    TaskExecutionOutcome, TaskProcessingError, TaskQueueRecord,
+};
 use serde_json::Value;
 
 fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
@@ -19,9 +21,9 @@ pub(in crate::task_queue) async fn execute_analyze_book(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "AnalyzeBook task must include a book id",
         ));
     };
@@ -51,7 +53,7 @@ pub(in crate::task_queue) async fn execute_analyze_book(
 pub(in crate::task_queue) async fn execute_rebuild_index(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let entity_types = parse_rebuild_index_entities(task.payload.as_deref())?;
     super::index_tasks::rebuild_index(runtime, entity_types.as_deref()).await?;
 
@@ -61,7 +63,7 @@ pub(in crate::task_queue) async fn execute_rebuild_index(
 pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
     let book_ids = if for_bigger_result_only {
         let settings_store =
@@ -69,7 +71,7 @@ pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
         let settings = load_server_settings(&settings_store)
             .await
             .map_err(|error| {
-                TaskExecutionError::runtime(format!(
+                TaskProcessingError::runtime(format!(
                     "load server settings for thumbnail finder failed: {error}"
                 ))
             })?;
@@ -91,12 +93,12 @@ pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
 
 fn parse_rebuild_index_entities(
     payload: Option<&str>,
-) -> Result<Option<Vec<SearchEntityType>>, TaskExecutionError> {
+) -> Result<Option<Vec<SearchEntityType>>, TaskProcessingError> {
     let Some(payload) = payload else {
         return Ok(None);
     };
     let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
-        TaskExecutionError::runtime(format!("RebuildIndex payload must be valid JSON: {error}"))
+        TaskProcessingError::runtime(format!("RebuildIndex payload must be valid JSON: {error}"))
     })?;
     let Some(entities) = payload.get("entities") else {
         return Ok(None);
@@ -105,13 +107,13 @@ fn parse_rebuild_index_entities(
         return Ok(None);
     }
     let entity_values = entities.as_array().ok_or_else(|| {
-        TaskExecutionError::invalid_task("RebuildIndex payload field 'entities' must be an array")
+        TaskProcessingError::invalid_task("RebuildIndex payload field 'entities' must be an array")
     })?;
 
     let mut parsed = Vec::new();
     for entity in entity_values {
         let entity_type = parse_rebuild_index_entity(entity).ok_or_else(|| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "RebuildIndex payload contains unsupported entity selector: {entity}"
             ))
         })?;
@@ -224,10 +226,12 @@ mod tests {
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
         _task_target: Option<&str>,
-    ) -> Option<Result<(), TaskExecutionError>> {
+    ) -> Option<Result<(), TaskProcessingError>> {
         match crate::task_queue::task_executor::execute_task(&runtime.job(), task).await {
             Ok(outcome) => {
-                outcome.enqueue_into(scheduler).await;
+                for task in outcome.follow_up_tasks() {
+                    scheduler.enqueue(task).await;
+                }
                 Some(Ok(()))
             }
             Err(error) => Some(Err(error)),

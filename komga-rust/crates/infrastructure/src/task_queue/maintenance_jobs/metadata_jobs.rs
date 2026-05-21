@@ -8,9 +8,9 @@ pub(in crate::task_queue) async fn execute_refresh_book_metadata(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RefreshBookMetadata task must include a book id",
         ));
     };
@@ -37,9 +37,9 @@ pub(in crate::task_queue) async fn execute_refresh_series_metadata(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(series_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RefreshSeriesMetadata task must include a series id",
         ));
     };
@@ -58,9 +58,9 @@ pub(in crate::task_queue) async fn execute_refresh_series_metadata(
 pub(in crate::task_queue) async fn execute_aggregate_series_metadata(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(series_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "AggregateSeriesMetadata task must include a series id",
         ));
     };
@@ -72,9 +72,9 @@ pub(in crate::task_queue) async fn execute_aggregate_series_metadata(
 pub(in crate::task_queue) async fn execute_refresh_book_local_artwork(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RefreshBookLocalArtwork task must include a book id",
         ));
     };
@@ -86,9 +86,9 @@ pub(in crate::task_queue) async fn execute_refresh_book_local_artwork(
 pub(in crate::task_queue) async fn execute_generate_book_thumbnail(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "GenerateBookThumbnail task must include a book id",
         ));
     };
@@ -100,9 +100,9 @@ pub(in crate::task_queue) async fn execute_generate_book_thumbnail(
 pub(in crate::task_queue) async fn execute_refresh_series_local_artwork(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(series_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RefreshSeriesLocalArtwork task must include a series id",
         ));
     };

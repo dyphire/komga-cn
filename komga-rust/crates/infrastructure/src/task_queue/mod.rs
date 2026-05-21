@@ -7,7 +7,9 @@ use crate::search::runtime_tasks::{
     AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
     rebuild_index_from_database_for_entities,
 };
-use komga_application::task_processing::{TaskProcessingError, TaskQueueOrchestrator};
+use komga_application::task_processing::{
+    TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError, TaskQueueOrchestrator,
+};
 
 mod runtime_context;
 use queue_core::SqliteTaskQueueStore;
@@ -30,6 +32,7 @@ mod maintenance_jobs;
 pub(crate) mod media_helpers;
 mod metadata_tasks;
 mod queue_core;
+mod queue_orchestration;
 pub mod queue_scheduler;
 mod runtime_task_engine;
 mod scanner_jobs;
@@ -49,32 +52,3 @@ use scanner_support::*;
 pub use execution_pool::TaskExecutionPoolHandle;
 pub use komga_application::task_processing::{LibraryScanInterval, TaskQueueRecord};
 pub use runtime_task_engine::RuntimeTaskEngine;
-
-type TaskExecutionError = TaskProcessingError;
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct TaskExecutionOutcome {
-    follow_up_tasks: Vec<TaskQueueRecord>,
-}
-
-impl TaskExecutionOutcome {
-    fn completed() -> Self {
-        Self::default()
-    }
-
-    fn with_follow_up_tasks(follow_up_tasks: Vec<TaskQueueRecord>) -> Self {
-        Self { follow_up_tasks }
-    }
-
-    async fn enqueue_into(self, scheduler: &TaskQueueScheduler) {
-        for task in self.follow_up_tasks {
-            scheduler.enqueue(task).await;
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct TaskExecutionResult {
-    task: TaskQueueRecord,
-    outcome: Result<TaskExecutionOutcome, TaskExecutionError>,
-}

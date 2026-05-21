@@ -1,13 +1,15 @@
-use komga_application::task_processing::{TaskKind, TaskQueueRecord};
+use komga_application::task_processing::{
+    TaskExecutionOutcome, TaskKind, TaskProcessingError, TaskQueueRecord,
+};
 
-use super::{JobRuntime, TaskExecutionError, TaskExecutionOutcome};
+use super::JobRuntime;
 
 pub(crate) async fn execute(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
     kind: TaskKind,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     match kind {
         TaskKind::ScanLibrary => {
             super::scanner_jobs::execute_scan_library(runtime, task, task_target).await

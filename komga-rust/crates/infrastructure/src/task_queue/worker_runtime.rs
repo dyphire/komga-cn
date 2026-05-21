@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::{TaskRuntimeConfig, TaskRuntimeContext};
 use komga_application::task_processing::{
     LibraryScanPipeline, LibraryScanScheduleState, ScanSchedulingTrigger,
-    ScheduledLibraryScanBatch, TaskKind, TaskRequest,
+    ScheduledLibraryScanBatch, TaskKind, TaskProcessingError, TaskRequest,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
@@ -14,7 +14,7 @@ use tracing::{Instrument, Span, error, info};
 
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
-use super::{TaskExecutionError, TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
+use super::{TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
 
 pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
@@ -257,8 +257,7 @@ async fn process_startup_library_scans_inner(
     task_queue
         .enqueue_batch(startup_scan_batch.into_task_batch())
         .await;
-    task_queue
-        .process_available(&runtime.job())
+    super::queue_orchestration::process_available_serial(&task_queue, &runtime.job())
         .await
         .map_err(|error| error.to_string())?;
     Ok(startup_scan_task_count)
@@ -510,11 +509,11 @@ async fn process_shared_task_queue(
     task_execution_pool: &TaskExecutionPoolHandle,
     runtime: &TaskRuntimeContext,
     result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
-) -> Result<usize, TaskExecutionError> {
+) -> Result<usize, TaskProcessingError> {
     let mut processed = 0usize;
     let mut logged_start = false;
     let mut in_flight = 0usize;
-    let mut first_error: Option<TaskExecutionError> = None;
+    let mut first_error: Option<TaskProcessingError> = None;
     loop {
         if first_error.is_none() {
             let claimed = match claim_tasks_up_to_capacity(
@@ -553,7 +552,7 @@ async fn process_shared_task_queue(
         }
 
         let Some(task_result) = result_rx.recv().await else {
-            let error = TaskExecutionError::runtime("task execution pool result channel closed");
+            let error = TaskProcessingError::runtime("task execution pool result channel closed");
             let error_message = error.to_string();
             let task_queue = task_queue.lock().await;
             task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
@@ -563,9 +562,12 @@ async fn process_shared_task_queue(
 
         let finalize_result = {
             let task_queue = task_queue.lock().await;
-            task_queue
-                .finalize_task_result(task_result, &mut processed)
-                .await
+            super::queue_orchestration::finalize_task_result(
+                &task_queue,
+                task_result,
+                &mut processed,
+            )
+            .await
         };
         if let Err(error) = finalize_result
             && first_error.is_none()
@@ -580,7 +582,7 @@ async fn claim_tasks_up_to_capacity(
     task_execution_pool: &TaskExecutionPoolHandle,
     runtime: &TaskRuntimeContext,
     in_flight: &mut usize,
-) -> Result<usize, TaskExecutionError> {
+) -> Result<usize, TaskProcessingError> {
     let mut claimed = 0usize;
     while *in_flight < task_execution_pool.desired_size() {
         let task = {
@@ -596,7 +598,7 @@ async fn claim_tasks_up_to_capacity(
             task_queue
                 .fail_claimed_task(&task, error_message.as_str())
                 .await;
-            return Err(TaskExecutionError::runtime(error_message));
+            return Err(TaskProcessingError::runtime(error_message));
         }
 
         {
@@ -1169,7 +1171,7 @@ mod tests {
                             .await
                             .expect("fake task release signal should remain open");
                     }
-                    Ok(crate::task_queue::TaskExecutionOutcome::completed())
+                    Ok(komga_application::task_processing::TaskExecutionOutcome::completed())
                 }
             }
         });

@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
+use komga_domain::discovery::compare_book_names;
 use sqlx::{Row, SqlitePool};
 
 use crate::persisted_paths::resolve_stored_path;
 use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
-use crate::task_queue::cleanup_tasks::compare_book_names_kotlin_like;
 
 use super::scan_models::*;
 use super::scan_restore::{try_restore_deleted_books, try_restore_deleted_series};
@@ -639,7 +639,7 @@ ORDER BY b.ID ASC"#,
             })
             .collect::<Vec<_>>();
         books.sort_by(|left, right| {
-            compare_book_names_kotlin_like(&left.book_name, &right.book_name)
+            compare_book_names(&left.book_name, &right.book_name)
                 .then_with(|| left.book_id.cmp(&right.book_id))
         });
 

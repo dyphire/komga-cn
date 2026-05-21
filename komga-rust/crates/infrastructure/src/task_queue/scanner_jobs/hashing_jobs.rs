@@ -4,13 +4,13 @@ use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 pub(in crate::task_queue) async fn execute_hash_book_pages(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "HashBookPages task must include a book id",
         ));
     };
@@ -23,14 +23,14 @@ pub(in crate::task_queue) async fn execute_hash_book(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
     koreader: bool,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let task_name = if koreader {
         "HashBookKoreader"
     } else {
         "HashBook"
     };
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(&format!(
+        return Err(TaskProcessingError::invalid_task(&format!(
             "{task_name} task must include a book id",
         )));
     };
@@ -44,13 +44,13 @@ pub(in crate::task_queue) async fn execute_find_books_with_missing_page_hash(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
     let Some(library_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "FindBooksWithMissingPageHash task must include a library id",
         ));
     };
@@ -76,13 +76,13 @@ pub(in crate::task_queue) async fn execute_find_duplicate_pages_to_delete(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
     let Some(library_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "FindDuplicatePagesToDelete task must include a library id",
         ));
     };
@@ -96,7 +96,7 @@ pub(in crate::task_queue) async fn execute_find_duplicate_pages_to_delete(
             priority,
         ))
         .map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to serialize RemoveHashedPages payload: {error}",
             ))
         })?;
@@ -114,35 +114,35 @@ pub(in crate::task_queue) async fn execute_remove_hashed_pages(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RemoveHashedPages task must include a book id",
         ));
     };
     let Some(payload) = task.payload.as_deref() else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RemoveHashedPages task requires serialized payload",
         ));
     };
     let parsed = serde_json::from_str::<super::super::RemoveHashedPagesPayload>(payload).map_err(
         |error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to parse RemoveHashedPages payload: {error}",
             ))
         },
     )?;
     if parsed.book_id != book_id {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RemoveHashedPages payload book id must match task id",
         ));
     }
     if parsed.unique_id != task.id {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "RemoveHashedPages payload unique id must match task id",
         ));
     }
@@ -218,10 +218,12 @@ mod tests {
         runtime: &TaskRuntimeContext,
         task: &TaskQueueRecord,
         _task_target: Option<&str>,
-    ) -> Option<Result<(), TaskExecutionError>> {
+    ) -> Option<Result<(), TaskProcessingError>> {
         match super::super::task_executor::execute_task(&runtime.job(), task).await {
             Ok(outcome) => {
-                outcome.enqueue_into(scheduler).await;
+                for task in outcome.follow_up_tasks() {
+                    scheduler.enqueue(task).await;
+                }
                 Some(Ok(()))
             }
             Err(error) => Some(Err(error)),

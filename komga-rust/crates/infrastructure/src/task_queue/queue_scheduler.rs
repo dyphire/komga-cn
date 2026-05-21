@@ -147,6 +147,20 @@ impl TaskQueueScheduler {
         disowned
     }
 
+    pub(super) async fn disown_all_and_collect_owned(&self) -> Vec<TaskQueueRecord> {
+        let mut inner = self.inner.lock().await;
+        self.ensure_admin_loaded(&mut inner).await;
+        let owned_tasks = self.current_owned_tasks_from_inner(&inner);
+        inner.admin.disown_all();
+        if let Some(store) = &inner.persisted_store {
+            store.disown_all().await;
+        }
+        for task in &owned_tasks {
+            self.log_task_event_with_inner(&inner, "task_disown", task, "disowned", None);
+        }
+        owned_tasks
+    }
+
     pub async fn clear_unowned(&self) -> usize {
         let mut inner = self.inner.lock().await;
         if inner.persisted_store.is_some() {
@@ -170,54 +184,30 @@ impl TaskQueueScheduler {
         inner.admin.count_by_simple_type()
     }
 
+    pub fn consumes_queue(&self) -> bool {
+        self.consumes_queue
+    }
+
     pub async fn process_available(
         &self,
         runtime: &JobRuntime<'_>,
-    ) -> Result<usize, TaskExecutionError> {
-        if !self.consumes_queue {
-            return Ok(0);
-        }
-
-        let mut processed = 0usize;
-        let mut logged_start = false;
-        loop {
-            let Some(task) = self.take_next().await else {
-                if logged_start {
-                    self.log_process_available("completed", processed, None);
-                }
-                return Ok(processed);
-            };
-            if !logged_start {
-                self.log_process_available("started", processed, None);
-                logged_start = true;
-            }
-
-            self.log_task_start(&task);
-            let outcome = task_executor::execute_task(runtime, &task).await;
-            if let Err(error) = self
-                .finalize_task_result(TaskExecutionResult { task, outcome }, &mut processed)
-                .await
-            {
-                let error_message = error.to_string();
-                self.log_process_available("failed", processed, Some(error_message.as_str()));
-                return Err(error);
-            }
-        }
+    ) -> Result<usize, TaskProcessingError> {
+        super::queue_orchestration::process_available_serial(self, runtime).await
     }
 
     pub async fn recover_and_process(
         &self,
         runtime: &JobRuntime<'_>,
-    ) -> Result<usize, TaskExecutionError> {
-        let mut inner = self.inner.lock().await;
-        self.ensure_admin_loaded(&mut inner).await;
-        let recovered_tasks = self.current_owned_tasks_from_inner(&inner);
-        drop(inner);
-        self.disown_all().await;
-        for task in &recovered_tasks {
-            self.log_task_event("task_recover", task, "recovered", None);
-        }
-        self.process_available(runtime).await
+    ) -> Result<usize, TaskProcessingError> {
+        super::queue_orchestration::recover_and_process(self, runtime).await
+    }
+
+    pub async fn finalize_task_result(
+        &self,
+        task_result: TaskExecutionResult,
+        processed: &mut usize,
+    ) -> Result<(), TaskProcessingError> {
+        super::queue_orchestration::finalize_task_result(self, task_result, processed).await
     }
 
     pub(super) async fn fail_claimed_task(&self, task: &TaskQueueRecord, error_message: &str) {
@@ -245,27 +235,6 @@ impl TaskQueueScheduler {
                 "failed",
                 Some(error_message),
             );
-        }
-    }
-
-    pub(super) async fn finalize_task_result(
-        &self,
-        task_result: TaskExecutionResult,
-        processed: &mut usize,
-    ) -> Result<(), TaskExecutionError> {
-        match task_result.outcome {
-            Ok(outcome) => {
-                outcome.enqueue_into(self).await;
-                self.complete(&task_result.task.id).await;
-                *processed += 1;
-                Ok(())
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                self.fail_claimed_task(&task_result.task, error_message.as_str())
-                    .await;
-                Err(error)
-            }
         }
     }
 

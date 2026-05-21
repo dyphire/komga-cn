@@ -4,7 +4,7 @@ use crate::search::index_lifecycle::SearchEntityType;
 pub(in crate::task_queue) async fn rebuild_index(
     runtime: &JobRuntime<'_>,
     entity_types: Option<&[SearchEntityType]>,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     if !runtime.search().owns_search_index() {
         return Ok(());
     }
@@ -16,5 +16,5 @@ pub(in crate::task_queue) async fn rebuild_index(
         entity_types,
     )
     .await
-    .map_err(TaskExecutionError::runtime)
+    .map_err(TaskProcessingError::runtime)
 }

@@ -1,7 +1,9 @@
 use super::TaskRuntimeContext;
-use super::{TaskExecutionError, TaskExecutionOutcome, TaskExecutionResult, TaskQueueRecord};
 use crate::task_queue::task_executor;
 use futures_util::future::BoxFuture;
+use komga_application::task_processing::{
+    TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError, TaskQueueRecord,
+};
 #[cfg(test)]
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -15,7 +17,7 @@ type TaskExecutor = Arc<
     dyn Fn(
             TaskRuntimeContext,
             TaskQueueRecord,
-        ) -> BoxFuture<'static, Result<TaskExecutionOutcome, TaskExecutionError>>
+        ) -> BoxFuture<'static, Result<TaskExecutionOutcome, TaskProcessingError>>
         + Send
         + Sync,
 >;
@@ -66,7 +68,7 @@ impl TaskExecutionPoolHandle {
     pub(crate) fn new_for_test<F, Fut>(task_pool_size: usize, execute_task: F) -> Self
     where
         F: Fn(TaskRuntimeContext, TaskQueueRecord) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<TaskExecutionOutcome, TaskExecutionError>> + Send + 'static,
+        Fut: Future<Output = Result<TaskExecutionOutcome, TaskProcessingError>> + Send + 'static,
     {
         Self::new_with_executor(
             task_pool_size,
@@ -198,7 +200,7 @@ impl TaskExecutionPoolInner {
                         runtime.block_on((self.executor)(job.runtime, job.task))
                     }))
                     .unwrap_or_else(|panic_payload| {
-                        Err(TaskExecutionError::runtime(format!(
+                        Err(TaskProcessingError::runtime(format!(
                             "task execution worker panicked while processing {}: {}",
                             task.id,
                             panic_payload_message(&panic_payload),

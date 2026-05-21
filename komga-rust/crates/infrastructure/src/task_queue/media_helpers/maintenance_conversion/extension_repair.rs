@@ -39,13 +39,13 @@ fn mark_extension_repair_skipped(cache_key: &str) {
 pub(in crate::task_queue) async fn repair_extension(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     let database_file = runtime.database().main_db().database_file().to_path_buf();
     let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
 
     let Some(row) = load_book_for_extension_repair(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
@@ -91,7 +91,7 @@ pub(in crate::task_queue) async fn repair_extension(
 
     let destination_path = source_path.with_extension(correct_extension);
     if fs::metadata(&destination_path).await.is_ok() {
-        return Err(TaskExecutionError::runtime(format!(
+        return Err(TaskProcessingError::runtime(format!(
             "failed to repair extension for '{book_id}': destination already exists '{}'",
             destination_path.display(),
         )));
@@ -100,7 +100,7 @@ pub(in crate::task_queue) async fn repair_extension(
     fs::rename(&source_path, &destination_path)
         .await
         .map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to rename book file for extension repair '{}' -> '{}': {error}",
                 source_path.display(),
                 destination_path.display(),
@@ -108,7 +108,7 @@ pub(in crate::task_queue) async fn repair_extension(
         })?;
 
     let destination_metadata = fs::metadata(&destination_path).await.map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to load repaired file metadata '{}' for '{}': {error}",
             destination_path.display(),
             book_id,
@@ -129,7 +129,7 @@ pub(in crate::task_queue) async fn repair_extension(
         file_size,
     )
     .await
-    .map_err(TaskExecutionError::runtime);
+    .map_err(TaskProcessingError::runtime);
 
     if let Err(error) = repair_result {
         let _ = fs::rename(&destination_path, &source_path).await;

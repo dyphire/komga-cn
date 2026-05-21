@@ -14,7 +14,7 @@ use crate::search::runtime_tasks::sync_entity_delete_from_index;
 pub(super) async fn delete_book_task(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(());
     }
@@ -34,11 +34,11 @@ pub(super) async fn delete_book_task(
 async fn load_book_delete_target(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<Option<(String, bool)>, TaskExecutionError> {
+) -> Result<Option<(String, bool)>, TaskProcessingError> {
     Ok(
         load_book_delete_decision(runtime.database().read_pool(), book_id)
             .await
-            .map_err(TaskExecutionError::runtime)?
+            .map_err(TaskProcessingError::runtime)?
             .map(|target| (target.series_id, target.oneshot)),
     )
 }
@@ -68,16 +68,16 @@ fn emit_series_changed_after_file_delete(series_id: &str, library_id: &str) {
     );
 }
 
-async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), TaskExecutionError> {
+async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), TaskProcessingError> {
     let Some(context) = load_book_delete_sse_context(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
     let Some(work) = load_book_delete_work(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
@@ -98,7 +98,7 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
 
     soft_delete_book_rows(runtime.database().write_pool(), book_id, &work.series_id)
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
 
     if runtime.search().owns_search_index() {
         sync_entity_delete_from_index(
@@ -108,7 +108,7 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
             book_id,
         )
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
     }
 
     emit_book_changed_after_file_delete(book_id, &context.series_id, &context.library_id);
@@ -116,7 +116,7 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
     Ok(())
 }
 
-async fn remove_empty_parent_directory(target_path: &Path) -> Result<(), TaskExecutionError> {
+async fn remove_empty_parent_directory(target_path: &Path) -> Result<(), TaskProcessingError> {
     let Some(parent_directory) = target_path.parent() else {
         return Ok(());
     };
@@ -162,12 +162,12 @@ async fn empty_parent_directory_cleanup_prerequisites_met(
     directory_delete_prerequisites_met(parent_directory).await
 }
 
-async fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskExecutionError> {
+async fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskProcessingError> {
     if fs::metadata(target_directory).await.is_err() {
         return Ok(());
     }
     let mut entries = fs::read_dir(target_directory).await.map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to list directory {} before deletion: {error}",
             target_directory.display()
         ))
@@ -176,7 +176,7 @@ async fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskExecu
         .next_entry()
         .await
         .map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to read directory {} before deletion: {error}",
                 target_directory.display()
             ))
@@ -215,7 +215,7 @@ async fn directory_delete_prerequisites_met(target_directory: &Path) -> bool {
 
 async fn remove_sidecar_thumbnail_files<T: AsRef<Path>>(
     sidecar_thumbnail_paths: &[T],
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     for sidecar_thumbnail_path in sidecar_thumbnail_paths {
         let sidecar_thumbnail_path = sidecar_thumbnail_path.as_ref();
         if deletion_prerequisites_met(sidecar_thumbnail_path).await {
@@ -228,20 +228,20 @@ async fn remove_sidecar_thumbnail_files<T: AsRef<Path>>(
 pub(super) async fn delete_series(
     runtime: &JobRuntime<'_>,
     series_id: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
     let Some(context) = load_series_delete_sse_context(runtime.database().read_pool(), series_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
     let work = load_series_delete_work(runtime.database().read_pool(), series_id)
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
 
     let Some(series_path) = work.series_path.clone() else {
         return Ok(());
@@ -265,11 +265,11 @@ pub(super) async fn delete_series(
 
     soft_delete_series_book_rows(runtime.database().write_pool(), series_id)
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
 
     soft_delete_series_rows(runtime.database().write_pool(), series_id)
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
 
     if runtime.search().owns_search_index() {
         for book_id in &work.book_ids {
@@ -280,7 +280,7 @@ pub(super) async fn delete_series(
                 book_id,
             )
             .await
-            .map_err(TaskExecutionError::runtime)?;
+            .map_err(TaskProcessingError::runtime)?;
         }
         sync_entity_delete_from_index(
             runtime.database().read_pool(),
@@ -289,7 +289,7 @@ pub(super) async fn delete_series(
             series_id,
         )
         .await
-        .map_err(TaskExecutionError::runtime)?;
+        .map_err(TaskProcessingError::runtime)?;
     }
 
     emit_series_changed_after_file_delete(series_id, &context.library_id);
@@ -300,22 +300,22 @@ pub(super) async fn delete_series(
 async fn delete_file_if_exists(
     target_path: &Path,
     target_kind: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     match fs::remove_file(target_path).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(TaskExecutionError::runtime(format!(
+        Err(error) => Err(TaskProcessingError::runtime(format!(
             "failed to delete {target_kind} {}: {error}",
             target_path.display()
         ))),
     }
 }
 
-async fn delete_directory_if_exists(target_path: &Path) -> Result<(), TaskExecutionError> {
+async fn delete_directory_if_exists(target_path: &Path) -> Result<(), TaskProcessingError> {
     match fs::remove_dir(target_path).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(TaskExecutionError::runtime(format!(
+        Err(error) => Err(TaskProcessingError::runtime(format!(
             "failed to delete directory {}: {error}",
             target_path.display()
         ))),

@@ -14,10 +14,10 @@ use tokio::fs;
 pub(in crate::task_queue) async fn hash_book_pages(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     let Some(library_id) = load_book_library_id(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
@@ -28,21 +28,21 @@ pub(in crate::task_queue) async fn hash_book_pages(
 
     persist_book_page_hashes_from_media_content(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn hash_book(
     runtime: &JobRuntime<'_>,
     book_id: &str,
     koreader: bool,
-) -> Result<(), TaskExecutionError> {
+) -> Result<(), TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(());
     }
 
     let Some(state) = load_book_hash_runtime_state(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
@@ -73,13 +73,13 @@ pub(in crate::task_queue) async fn hash_book(
 
     let Some(file_path) = load_book_file_path(runtime.database().read_pool(), book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(());
     };
 
     let bytes = fs::read(&file_path).await.map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to read book file for hash task '{}': {error}",
             file_path.display(),
         ))
@@ -95,43 +95,43 @@ pub(in crate::task_queue) async fn hash_book(
 
     persist_book_hash(runtime.database().write_pool(), book_id, &hash, koreader)
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_for_thumbnail_regeneration(
     runtime: &JobRuntime<'_>,
-) -> Result<Vec<String>, TaskExecutionError> {
+) -> Result<Vec<String>, TaskProcessingError> {
     load_persisted_non_deleted_book_ids(runtime.database().read_pool())
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_with_undersized_generated_thumbnails(
     runtime: &JobRuntime<'_>,
     max_edge: i64,
-) -> Result<Vec<String>, TaskExecutionError> {
+) -> Result<Vec<String>, TaskProcessingError> {
     load_books_with_undersized_generated_thumbnails(runtime.database().read_pool(), max_edge)
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_books_with_missing_page_hash(
     runtime: &JobRuntime<'_>,
     library_id: Option<&str>,
-) -> Result<Vec<String>, TaskExecutionError> {
+) -> Result<Vec<String>, TaskProcessingError> {
     load_persisted_books_with_missing_page_hash(runtime.database().read_pool(), library_id)
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn find_duplicate_pages_to_delete(
     runtime: &JobRuntime<'_>,
     library_id: &str,
-) -> Result<HashMap<String, Vec<HashedPageToDelete>>, TaskExecutionError> {
+) -> Result<HashMap<String, Vec<HashedPageToDelete>>, TaskProcessingError> {
     let persisted =
         load_persisted_duplicate_pages_to_delete(runtime.database().read_pool(), library_id)
             .await
-            .map_err(TaskExecutionError::runtime)?;
+            .map_err(TaskProcessingError::runtime)?;
 
     Ok(persisted
         .into_iter()

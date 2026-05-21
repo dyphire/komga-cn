@@ -1,7 +1,9 @@
 use super::JobRuntime;
-use super::{TaskExecutionError, TaskExecutionOutcome, TaskQueueRecord};
 use crate::filesystem::import::FilesystemImportPort;
 use komga_application::media_assets::MediaImportService;
+use komga_application::task_processing::{
+    TaskExecutionOutcome, TaskProcessingError, TaskQueueRecord,
+};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 pub(in crate::task_queue) async fn execute_import_book(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     process_import_book_task(runtime, task)
         .await
         .map(TaskExecutionOutcome::with_follow_up_tasks)
@@ -18,7 +20,7 @@ pub(in crate::task_queue) async fn execute_import_book(
 async fn process_import_book_task(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
-) -> Result<Vec<TaskQueueRecord>, TaskExecutionError> {
+) -> Result<Vec<TaskQueueRecord>, TaskProcessingError> {
     process_import_task(
         runtime,
         task,
@@ -37,7 +39,7 @@ async fn process_import_task<F, Fut>(
     task: &TaskQueueRecord,
     missing_payload_message: &'static str,
     process: F,
-) -> Result<Vec<TaskQueueRecord>, TaskExecutionError>
+) -> Result<Vec<TaskQueueRecord>, TaskProcessingError>
 where
     F: FnOnce(MediaImportService, String, i32) -> Fut,
     Fut: Future<Output = Result<Vec<TaskQueueRecord>, String>>,
@@ -52,18 +54,18 @@ where
         MediaImportService::new(Arc::new(FilesystemImportPort::new(database_file.as_path())));
     process(service, payload, priority)
         .await
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 fn prepare_import_task(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     missing_payload_message: &str,
-) -> Result<Option<(PathBuf, String, i32)>, TaskExecutionError> {
+) -> Result<Option<(PathBuf, String, i32)>, TaskProcessingError> {
     let payload = task
         .payload
         .clone()
-        .ok_or_else(|| TaskExecutionError::invalid_task(missing_payload_message))?;
+        .ok_or_else(|| TaskProcessingError::invalid_task(missing_payload_message))?;
     if !runtime.database().owns_main_database() {
         return Ok(None);
     }

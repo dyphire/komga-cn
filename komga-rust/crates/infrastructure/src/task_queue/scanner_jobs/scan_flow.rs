@@ -4,7 +4,7 @@ pub(in crate::task_queue) async fn execute_scan_library(
     runtime: &JobRuntime<'_>,
     task: &TaskQueueRecord,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let pipeline = SqliteFilesystemLibraryScanPipeline::for_runtime(runtime);
     let result = pipeline.execute_scan_task(task, task_target).await?;
     Ok(TaskExecutionOutcome::with_follow_up_tasks(

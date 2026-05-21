@@ -2447,6 +2447,9 @@ dependencies = [
 [[package]]
 name = "komga-domain"
 version = "0.1.0"
+dependencies = [
+ "unicode-normalization",
+]
 
 [[package]]
 name = "komga-infrastructure"

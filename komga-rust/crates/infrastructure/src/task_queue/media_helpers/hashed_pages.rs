@@ -61,7 +61,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     runtime: &JobRuntime<'_>,
     book_id: &str,
     pages: &[HashedPageToDelete],
-) -> Result<bool, TaskExecutionError> {
+) -> Result<bool, TaskProcessingError> {
     if pages.is_empty() {
         return Ok(false);
     }
@@ -72,7 +72,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     };
 
     if !source.file_path.exists() {
-        return Err(TaskExecutionError::runtime(format!(
+        return Err(TaskProcessingError::runtime(format!(
             "file not found for hashed-page removal '{}': {}",
             book_id,
             source.file_path.display(),
@@ -80,7 +80,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     }
 
     let metadata = fs::metadata(&source.file_path).map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to read source metadata for hashed-page removal '{}' ('{}'): {error}",
             book_id,
             source.file_path.display(),
@@ -88,14 +88,14 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     })?;
 
     if !source.media_type.eq_ignore_ascii_case("application/zip") {
-        return Err(TaskExecutionError::runtime(format!(
+        return Err(TaskProcessingError::runtime(format!(
             "unsupported media type for hashed-page removal '{}': {}",
             book_id, source.media_type,
         )));
     }
 
     if !source.media_status.eq_ignore_ascii_case("READY") {
-        return Err(TaskExecutionError::runtime(format!(
+        return Err(TaskProcessingError::runtime(format!(
             "media not ready for hashed-page removal '{}': {}",
             book_id, source.media_status,
         )));
@@ -152,7 +152,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         file_size,
     )
     .await
-    .map_err(TaskExecutionError::runtime)?;
+    .map_err(TaskProcessingError::runtime)?;
 
     super::index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
@@ -164,7 +164,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         &removed_page_events,
     )
     .await
-    .map_err(TaskExecutionError::runtime)?;
+    .map_err(TaskProcessingError::runtime)?;
 
     Ok(removed_pages.iter().any(|page| page.page_number == 1))
 }
@@ -172,11 +172,11 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
 pub(in crate::task_queue) async fn load_book_archive_source(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<Option<BookArchiveSource>, TaskExecutionError> {
+) -> Result<Option<BookArchiveSource>, TaskProcessingError> {
     Ok(
         load_persisted_book_archive_source(runtime.database().read_pool(), book_id)
             .await
-            .map_err(TaskExecutionError::runtime)?
+            .map_err(TaskProcessingError::runtime)?
             .map(|source| BookArchiveSource {
                 file_path: source.file_path,
                 series_id: source.series_id,
@@ -190,7 +190,7 @@ pub(in crate::task_queue) async fn load_book_archive_source(
 async fn load_book_hashed_pages(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
+) -> Result<Vec<HashedPageToDelete>, TaskProcessingError> {
     load_persisted_book_hashed_pages(runtime.database().read_pool(), book_id)
         .await
         .map(|pages| {
@@ -205,7 +205,7 @@ async fn load_book_hashed_pages(
                 })
                 .collect()
         })
-        .map_err(TaskExecutionError::runtime)
+        .map_err(TaskProcessingError::runtime)
 }
 
 fn matching_hashed_pages_to_remove(
@@ -229,15 +229,15 @@ fn matching_hashed_pages_to_remove(
 pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
     archive_path: &PathBuf,
     pages_to_delete: &[HashedPageToDelete],
-) -> Result<Vec<HashedPageToDelete>, TaskExecutionError> {
+) -> Result<Vec<HashedPageToDelete>, TaskProcessingError> {
     let source_file = fs::File::open(archive_path).map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to open archive '{}' for page deletion: {error}",
             archive_path.display(),
         ))
     })?;
     let mut archive = ZipArchive::new(source_file).map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to read zip archive '{}' for page deletion: {error}",
             archive_path.display(),
         ))
@@ -254,7 +254,7 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to read zip entry index {index} for '{}': {error}",
                 archive_path.display(),
             ))
@@ -266,7 +266,7 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
         let entry_name = entry
             .name()
             .map_err(|error| {
-                TaskExecutionError::runtime(format!(
+                TaskProcessingError::runtime(format!(
                     "failed to read zip entry name index {index} for '{}': {error}",
                     archive_path.display(),
                 ))
@@ -292,7 +292,7 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
 
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to read zip entry '{}' bytes for '{}': {error}",
                 entry_name,
                 archive_path.display(),
@@ -313,7 +313,7 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
     }
 
     if kept_entries.is_empty() {
-        return Err(TaskExecutionError::runtime(format!(
+        return Err(TaskProcessingError::runtime(format!(
             "refused to rewrite '{}' with zero entries after page deletion",
             archive_path.display(),
         )));
@@ -322,14 +322,14 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
     let rewritten = build_stored_zip_archive(kept_entries)?;
     let temp_path = archive_path.with_extension("komga-page-removal.tmp");
     fs::write(&temp_path, rewritten).map_err(|error| {
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to write temporary rewritten archive '{}': {error}",
             temp_path.display(),
         ))
     })?;
     fs::rename(&temp_path, archive_path).map_err(|error| {
         let _ = fs::remove_file(&temp_path);
-        TaskExecutionError::runtime(format!(
+        TaskProcessingError::runtime(format!(
             "failed to replace archive '{}' with rewritten file '{}': {error}",
             archive_path.display(),
             temp_path.display(),

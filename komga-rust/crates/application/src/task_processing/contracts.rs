@@ -98,6 +98,31 @@ impl std::fmt::Display for TaskProcessingError {
 
 impl std::error::Error for TaskProcessingError {}
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TaskExecutionOutcome {
+    follow_up_tasks: Vec<TaskQueueRecord>,
+}
+
+impl TaskExecutionOutcome {
+    pub fn completed() -> Self {
+        Self::default()
+    }
+
+    pub fn with_follow_up_tasks(follow_up_tasks: Vec<TaskQueueRecord>) -> Self {
+        Self { follow_up_tasks }
+    }
+
+    pub fn follow_up_tasks(self) -> Vec<TaskQueueRecord> {
+        self.follow_up_tasks
+    }
+}
+
+#[derive(Debug)]
+pub struct TaskExecutionResult {
+    pub task: TaskQueueRecord,
+    pub outcome: Result<TaskExecutionOutcome, TaskProcessingError>,
+}
+
 /// Execution hook for processing claimed tasks. Used internally by the orchestrator.
 pub trait TaskQueueExecutionPort {
     fn execute_claimed_task(&mut self, task: &TaskQueueRecord) -> Result<(), TaskProcessingError>;

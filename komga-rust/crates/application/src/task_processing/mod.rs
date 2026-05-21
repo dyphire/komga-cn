@@ -6,7 +6,8 @@ mod task_engine;
 mod task_registry;
 
 pub use contracts::{
-    LibraryScanInterval, TaskProcessingError, TaskQueueOrchestrator, TaskQueueRecord,
+    LibraryScanInterval, TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError,
+    TaskQueueOrchestrator, TaskQueueRecord,
 };
 pub use library_scan_pipeline::{
     LibraryScanPipeline, LibraryScanScheduleState, ScanOneLibrary, ScanOneLibraryOutcome,

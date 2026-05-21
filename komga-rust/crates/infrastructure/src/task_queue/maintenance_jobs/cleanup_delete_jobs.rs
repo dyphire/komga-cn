@@ -3,9 +3,9 @@ use super::*;
 pub(in crate::task_queue) async fn execute_empty_trash(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(library_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "EmptyTrash task must include a library id",
         ));
     };
@@ -17,9 +17,9 @@ pub(in crate::task_queue) async fn execute_empty_trash(
 pub(in crate::task_queue) async fn execute_delete_book(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(book_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "DeleteBook task must include a book id",
         ));
     };
@@ -31,9 +31,9 @@ pub(in crate::task_queue) async fn execute_delete_book(
 pub(in crate::task_queue) async fn execute_delete_series(
     runtime: &JobRuntime<'_>,
     task_target: Option<&str>,
-) -> Result<TaskExecutionOutcome, TaskExecutionError> {
+) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let Some(series_id) = task_target else {
-        return Err(TaskExecutionError::invalid_task(
+        return Err(TaskProcessingError::invalid_task(
             "DeleteSeries task must include a series id",
         ));
     };

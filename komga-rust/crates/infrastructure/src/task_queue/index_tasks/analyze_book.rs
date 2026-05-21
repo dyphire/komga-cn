@@ -11,7 +11,7 @@ pub(in crate::task_queue) struct AnalyzeBookOutcome {
 pub(in crate::task_queue) async fn analyze_book(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-) -> Result<AnalyzeBookOutcome, TaskExecutionError> {
+) -> Result<AnalyzeBookOutcome, TaskProcessingError> {
     let book_id = book_id.to_string();
     if !runtime.database().owns_main_database() {
         return Ok(AnalyzeBookOutcome {
@@ -22,7 +22,7 @@ pub(in crate::task_queue) async fn analyze_book(
 
     let Some(input) = analyze_book_input(runtime.database().read_pool(), &book_id)
         .await
-        .map_err(TaskExecutionError::runtime)?
+        .map_err(TaskProcessingError::runtime)?
     else {
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
@@ -33,7 +33,7 @@ pub(in crate::task_queue) async fn analyze_book(
     let file_path = resolve_library_item_path(&input.root, &input.url);
     let analysis =
         analyze_book_media_file(&file_path, input.analyze_dimensions).map_err(|error| {
-            TaskExecutionError::runtime(format!(
+            TaskProcessingError::runtime(format!(
                 "failed to analyze media file for '{book_id}' ('{}'): {error}",
                 file_path.display(),
             ))
@@ -65,7 +65,7 @@ pub(in crate::task_queue) async fn analyze_book(
         runtime.search().owns_search_index(),
     )
     .await
-    .map_err(TaskExecutionError::runtime)?;
+    .map_err(TaskProcessingError::runtime)?;
 
     adjust_analyzed_book_read_progress(
         runtime.database().write_pool(),
@@ -76,7 +76,7 @@ pub(in crate::task_queue) async fn analyze_book(
         current_page_count,
     )
     .await
-    .map_err(TaskExecutionError::runtime)?;
+    .map_err(TaskProcessingError::runtime)?;
 
     Ok(AnalyzeBookOutcome {
         series_id: input.series_id,
