@@ -23,25 +23,3 @@ pub(super) struct BooksImportEntry {
     pub(super) destination_name: Option<String>,
     pub(super) upgrade_book_id: Option<String>,
 }
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ManifestProfile {
-    Epub,
-    Pdf,
-    Divina,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum ManifestVariant {
-    Default,
-    Epub,
-    Pdf,
-    Divina,
-}
-
-pub(crate) enum ManifestBuildOutcome {
-    Found(&'static str, Value),
-    BadRequest(String),
-    NotFound,
-    Forbidden,
-}

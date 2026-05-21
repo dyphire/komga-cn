@@ -37,6 +37,27 @@ pub fn app_absolute_url(headers: &HeaderMap, path: &str) -> String {
     format!("{base_url}{prefix}{path}")
 }
 
+pub fn absolutize_json_hrefs(headers: &HeaderMap, value: &mut Value) {
+    match value {
+        Value::Array(entries) => {
+            for entry in entries {
+                absolutize_json_hrefs(headers, entry);
+            }
+        }
+        Value::Object(entries) => {
+            if let Some(Value::String(href)) = entries.get_mut("href")
+                && href.starts_with('/')
+            {
+                *href = app_absolute_url(headers, href);
+            }
+            for entry in entries.values_mut() {
+                absolutize_json_hrefs(headers, entry);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn request_base_url(headers: &HeaderMap) -> String {
     request_base_url_with_port(headers, None)
 }

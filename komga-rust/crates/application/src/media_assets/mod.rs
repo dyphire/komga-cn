@@ -1,4 +1,5 @@
 mod file_import;
+mod manifest_builder;
 mod metadata_update;
 pub mod metadata_writer;
 pub mod operations;
@@ -12,6 +13,9 @@ pub use file_import::{
     MediaImportService, QueuedBookImportPayload, RuntimeBookImportEvent,
     current_runtime_book_import_event_cursor, generate_prefixed_id,
     pending_runtime_book_import_events, register_runtime_book_import_event,
+};
+pub use manifest_builder::{
+    ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,
 };
 pub use metadata_update::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataPort,

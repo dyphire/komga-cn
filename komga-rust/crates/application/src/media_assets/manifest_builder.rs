@@ -1,16 +1,129 @@
-use super::*;
 use flate2::read::GzDecoder;
-use komga_application::discovery::{BookDetailPort, BookMetadataAuthorReadModel, SeriesDetailPort};
-use komga_application::media_assets::{
-    BookPageRecord, ContentResolverPort, MediaReaderPort, PersistedMediaFileRecord,
+use komga_domain::discovery::{
+    AgeRestrictionKind as DomainAgeRestrictionKind, QueryRestrictions,
+    content_allowed_by_restrictions,
 };
+use serde_json::{Value, json};
 use std::io::Read;
+
+use crate::discovery::{BookDetailPort, BookMetadataAuthorReadModel, SeriesDetailPort};
+use crate::identity_access::{AuthUser, user_shared_all_libraries, user_shared_library_ids};
+use crate::media_assets::{
+    BookMediaRecord, BookPageRecord, ContentResolverPort, MediaReaderPort, PersistedMediaFileRecord,
+};
 
 const EPUB_PROFILE_URL: &str = "https://readium.org/webpub-manifest/profiles/epub";
 const PDF_PROFILE_URL: &str = "https://readium.org/webpub-manifest/profiles/pdf";
 const DIVINA_PROFILE_URL: &str = "https://readium.org/webpub-manifest/profiles/divina";
 
-pub(super) fn manifest_profile_from_media_type(media_type: &str) -> ManifestProfile {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManifestProfile {
+    Epub,
+    Pdf,
+    Divina,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ManifestVariant {
+    Default,
+    Epub,
+    Pdf,
+    Divina,
+}
+
+pub struct PersistedManifest {
+    pub content_type: &'static str,
+    pub payload: Value,
+    pub series_id: Option<String>,
+}
+
+pub enum ManifestBuildOutcome {
+    Found(PersistedManifest),
+    BadRequest(String),
+    NotFound,
+    Forbidden,
+}
+
+struct ManifestUserContext {
+    allowed_library_ids: Option<Vec<String>>,
+    age: Option<u16>,
+    age_restriction: Option<ManifestAgeRestrictionKind>,
+    labels_allow: Vec<String>,
+    labels_exclude: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum ManifestAgeRestrictionKind {
+    AllowOnly,
+    Exclude,
+}
+
+struct WebpubMetadataAdditions {
+    metadata: serde_json::Map<String, Value>,
+    epub_divina_compatible: bool,
+    series_id: String,
+}
+
+impl ManifestUserContext {
+    fn from_auth_user(user: &AuthUser) -> Self {
+        let allowed_library_ids = if user_shared_all_libraries(user) {
+            None
+        } else {
+            Some(user_shared_library_ids(user).to_vec())
+        };
+        let age = user
+            .age_restriction
+            .as_ref()
+            .and_then(|restriction| u16::try_from(restriction.age).ok());
+        let age_restriction =
+            user.age_restriction.as_ref().and_then(|restriction| {
+                match restriction.restriction.trim().to_ascii_uppercase().as_str() {
+                    "ALLOW_ONLY" => Some(ManifestAgeRestrictionKind::AllowOnly),
+                    "EXCLUDE" => Some(ManifestAgeRestrictionKind::Exclude),
+                    _ => None,
+                }
+            });
+
+        Self {
+            allowed_library_ids,
+            age,
+            age_restriction,
+            labels_allow: normalized_labels(&user.labels_allow),
+            labels_exclude: normalized_labels(&user.labels_exclude),
+        }
+    }
+
+    fn can_access_library(&self, library_id: &str) -> bool {
+        match &self.allowed_library_ids {
+            None => true,
+            Some(ids) => ids.iter().any(|id| id == library_id),
+        }
+    }
+
+    fn content_allowed(&self, age_rating: Option<u16>, sharing_labels: &[String]) -> bool {
+        let restrictions = QueryRestrictions {
+            age: self.age,
+            age_restriction: self.age_restriction.map(|kind| match kind {
+                ManifestAgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
+                ManifestAgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
+            }),
+            labels_allow: self.labels_allow.clone(),
+            labels_exclude: self.labels_exclude.clone(),
+        };
+        content_allowed_by_restrictions(&restrictions, age_rating, sharing_labels)
+    }
+}
+
+fn normalized_labels(labels: &[String]) -> Vec<String> {
+    labels
+        .iter()
+        .map(|label| label.trim())
+        .filter(|label| !label.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
+fn manifest_profile_from_media_type(media_type: &str) -> ManifestProfile {
     if media_type == "application/epub+zip" {
         ManifestProfile::Epub
     } else if media_type == "application/pdf" {
@@ -20,10 +133,7 @@ pub(super) fn manifest_profile_from_media_type(media_type: &str) -> ManifestProf
     }
 }
 
-pub(super) fn manifest_content_type(
-    variant: ManifestVariant,
-    profile: ManifestProfile,
-) -> &'static str {
+fn manifest_content_type(variant: ManifestVariant, profile: ManifestProfile) -> &'static str {
     match variant {
         ManifestVariant::Divina => "application/divina+json",
         ManifestVariant::Default => match profile {
@@ -34,7 +144,7 @@ pub(super) fn manifest_content_type(
     }
 }
 
-pub(super) fn manifest_variant_matches_profile(
+fn manifest_variant_matches_profile(
     variant: ManifestVariant,
     profile: ManifestProfile,
     epub_divina_compatible: bool,
@@ -76,8 +186,7 @@ fn effective_manifest_variant(
     }
 }
 
-pub(super) fn persisted_manifest_payload(
-    headers: &HeaderMap,
+fn persisted_manifest_payload(
     book_id: &str,
     title: &str,
     media_type: &str,
@@ -92,19 +201,19 @@ pub(super) fn persisted_manifest_payload(
         "links": [
             {
                 "rel": "self",
-                "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/manifest").as_str()),
+                "href": api_manifest_path(book_id),
                 "type": manifest_type,
             },
             {
                 "rel": "http://opds-spec.org/acquisition",
-                "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/file").as_str()),
+                "href": api_file_path(book_id),
                 "type": media_type,
             }
         ],
         "readingOrder": reading_order,
         "resources": [
             {
-                "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/thumbnail").as_str()),
+                "href": api_thumbnail_path(book_id),
                 "type": "image/jpeg",
             }
         ],
@@ -112,6 +221,41 @@ pub(super) fn persisted_manifest_payload(
         "landmarks": [],
         "pageList": [],
     })
+}
+
+fn api_manifest_path(book_id: &str) -> String {
+    format!("/api/v1/books/{book_id}/manifest")
+}
+
+fn api_file_path(book_id: &str) -> String {
+    format!("/api/v1/books/{book_id}/file")
+}
+
+fn api_thumbnail_path(book_id: &str) -> String {
+    format!("/api/v1/books/{book_id}/thumbnail")
+}
+
+fn api_divina_manifest_path(book_id: &str) -> String {
+    format!("/api/v1/books/{book_id}/manifest/divina")
+}
+
+fn api_resource_path(book_id: &str, file_name: &str) -> String {
+    format!(
+        "/api/v1/books/{book_id}/resource/{}",
+        file_name.trim_start_matches('/')
+    )
+}
+
+fn api_raw_page_path(book_id: &str, page: u64) -> String {
+    format!("/api/v1/books/{book_id}/pages/{page}/raw")
+}
+
+fn api_page_path(book_id: &str, page: u64) -> String {
+    format!("/api/v1/books/{book_id}/pages/{page}?contentNegotiation=false")
+}
+
+fn api_page_jpeg_path(book_id: &str, page: u64) -> String {
+    format!("/api/v1/books/{book_id}/pages/{page}?contentNegotiation=false&convert=jpeg")
 }
 
 fn profile_conforms_to(profile: ManifestProfile) -> &'static str {
@@ -123,18 +267,17 @@ fn profile_conforms_to(profile: ManifestProfile) -> &'static str {
 }
 
 fn manifest_extra_links(
-    headers: &HeaderMap,
     book_id: &str,
     profile: ManifestProfile,
     epub_divina_compatible: bool,
 ) -> Vec<Value> {
     match profile {
         ManifestProfile::Pdf => vec![json!({
-            "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/manifest/divina").as_str()),
+            "href": api_divina_manifest_path(book_id),
             "type": "application/divina+json",
         })],
         ManifestProfile::Epub if epub_divina_compatible => vec![json!({
-            "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/manifest/divina").as_str()),
+            "href": api_divina_manifest_path(book_id),
             "type": "application/divina+json",
         })],
         ManifestProfile::Epub | ManifestProfile::Divina => Vec::new(),
@@ -161,12 +304,11 @@ fn enrich_manifest_metadata(
 
 fn append_manifest_extra_links(
     payload: &mut Value,
-    headers: &HeaderMap,
     book_id: &str,
     profile: ManifestProfile,
     epub_divina_compatible: bool,
 ) {
-    let extra_links = manifest_extra_links(headers, book_id, profile, epub_divina_compatible);
+    let extra_links = manifest_extra_links(book_id, profile, epub_divina_compatible);
     if extra_links.is_empty() {
         return;
     }
@@ -175,15 +317,8 @@ fn append_manifest_extra_links(
     }
 }
 
-fn epub_resource_href(headers: &HeaderMap, book_id: &str, file_name: &str) -> String {
-    app_absolute_url(
-        headers,
-        format!(
-            "/api/v1/books/{book_id}/resource/{}",
-            file_name.trim_start_matches('/')
-        )
-        .as_str(),
-    )
+fn epub_resource_href(book_id: &str, file_name: &str) -> String {
+    api_resource_path(book_id, file_name)
 }
 
 fn decode_epub_extension_payload(blob: &[u8]) -> Result<Value, String> {
@@ -196,9 +331,9 @@ fn decode_epub_extension_payload(blob: &[u8]) -> Result<Value, String> {
         .map_err(|error| format!("parse epub extension blob json: {error}"))
 }
 
-fn epub_link(entry: &PersistedMediaFileRecord, headers: &HeaderMap, book_id: &str) -> Value {
+fn epub_link(entry: &PersistedMediaFileRecord, book_id: &str) -> Value {
     json!({
-        "href": epub_resource_href(headers, book_id, entry.file_name.as_str()),
+        "href": epub_resource_href(book_id, entry.file_name.as_str()),
         "type": entry.media_type,
     })
 }
@@ -210,11 +345,11 @@ fn epub_sub_type_matches(entry: &PersistedMediaFileRecord, expected: &str) -> bo
         .is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
-fn epub_nav_href(headers: &HeaderMap, book_id: &str, href: &str) -> String {
+fn epub_nav_href(book_id: &str, href: &str) -> String {
     let (path, fragment) = href
         .split_once('#')
         .map_or((href, None), |(path, fragment)| (path, Some(fragment)));
-    let mut absolute = epub_resource_href(headers, book_id, path);
+    let mut absolute = epub_resource_href(book_id, path);
     if let Some(fragment) = fragment
         && !fragment.is_empty()
     {
@@ -224,7 +359,7 @@ fn epub_nav_href(headers: &HeaderMap, book_id: &str, href: &str) -> String {
     absolute
 }
 
-fn epub_nav_link(headers: &HeaderMap, book_id: &str, entry: &Value) -> Value {
+fn epub_nav_link(book_id: &str, entry: &Value) -> Value {
     let mut link = serde_json::Map::new();
     if let Some(title) = entry.get("title").cloned() {
         link.insert("title".to_string(), title);
@@ -232,7 +367,7 @@ fn epub_nav_link(headers: &HeaderMap, book_id: &str, entry: &Value) -> Value {
     if let Some(href) = entry.get("href").and_then(Value::as_str) {
         link.insert(
             "href".to_string(),
-            Value::String(epub_nav_href(headers, book_id, href)),
+            Value::String(epub_nav_href(book_id, href)),
         );
     }
     let children = entry
@@ -241,7 +376,7 @@ fn epub_nav_link(headers: &HeaderMap, book_id: &str, entry: &Value) -> Value {
         .map(|children| {
             children
                 .iter()
-                .map(|child| epub_nav_link(headers, book_id, child))
+                .map(|child| epub_nav_link(book_id, child))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -254,7 +389,6 @@ fn epub_nav_link(headers: &HeaderMap, book_id: &str, entry: &Value) -> Value {
 fn epub_nav_links(
     extension_payload: Option<&Value>,
     field_name: &str,
-    headers: &HeaderMap,
     book_id: &str,
 ) -> Vec<Value> {
     extension_payload
@@ -263,7 +397,7 @@ fn epub_nav_links(
         .map(|entries| {
             entries
                 .iter()
-                .map(|entry| epub_nav_link(headers, book_id, entry))
+                .map(|entry| epub_nav_link(book_id, entry))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
@@ -271,7 +405,6 @@ fn epub_nav_links(
 
 #[allow(clippy::too_many_arguments)]
 fn persisted_epub_manifest_payload(
-    headers: &HeaderMap,
     book_id: &str,
     title: &str,
     media_type: &str,
@@ -283,7 +416,7 @@ fn persisted_epub_manifest_payload(
     let reading_order = media_files
         .iter()
         .filter(|entry| epub_sub_type_matches(entry, "EPUB_PAGE"))
-        .map(|entry| epub_link(entry, headers, book_id))
+        .map(|entry| epub_link(entry, book_id))
         .collect::<Vec<_>>();
     let extension_payload = extension_blob
         .map(decode_epub_extension_payload)
@@ -291,17 +424,16 @@ fn persisted_epub_manifest_payload(
     let resources = media_files
         .iter()
         .filter(|entry| epub_sub_type_matches(entry, "EPUB_ASSET"))
-        .map(|entry| epub_link(entry, headers, book_id))
+        .map(|entry| epub_link(entry, book_id))
         .collect::<Vec<_>>();
 
     let mut payload = persisted_manifest_payload(
-        headers,
         book_id,
         title,
         media_type,
         manifest_content_type(ManifestVariant::Epub, ManifestProfile::Epub),
         if reading_order.is_empty() {
-            vec![default_reading_order_entry(headers, book_id, media_type)]
+            vec![default_reading_order_entry(book_id, media_type)]
         } else {
             reading_order
         },
@@ -329,19 +461,13 @@ fn persisted_epub_manifest_payload(
     if let Some(payload_map) = payload.as_object_mut() {
         payload_map.insert(
             "toc".to_string(),
-            Value::Array(epub_nav_links(
-                extension_payload.as_ref(),
-                "toc",
-                headers,
-                book_id,
-            )),
+            Value::Array(epub_nav_links(extension_payload.as_ref(), "toc", book_id)),
         );
         payload_map.insert(
             "landmarks".to_string(),
             Value::Array(epub_nav_links(
                 extension_payload.as_ref(),
                 "landmarks",
-                headers,
                 book_id,
             )),
         );
@@ -350,7 +476,6 @@ fn persisted_epub_manifest_payload(
             Value::Array(epub_nav_links(
                 extension_payload.as_ref(),
                 "pageList",
-                headers,
                 book_id,
             )),
         );
@@ -358,7 +483,6 @@ fn persisted_epub_manifest_payload(
 
     append_manifest_extra_links(
         &mut payload,
-        headers,
         book_id,
         ManifestProfile::Epub,
         epub_divina_compatible,
@@ -371,9 +495,8 @@ fn persisted_epub_manifest_payload(
 async fn build_manifest_reading_order(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
-    headers: &HeaderMap,
     book_id: &str,
-    media: &PersistedBookMedia,
+    media: &BookMediaRecord,
     media_type: &str,
     variant: ManifestVariant,
     profile: ManifestProfile,
@@ -382,7 +505,7 @@ async fn build_manifest_reading_order(
         (ManifestVariant::Pdf, ManifestProfile::Pdf) => (1..=media.page_count.max(1))
             .map(|page| {
                 json!({
-                    "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/pages/{page}/raw").as_str()),
+                    "href": api_raw_page_path(book_id, page),
                     "type": "application/pdf",
                 })
             })
@@ -392,29 +515,27 @@ async fn build_manifest_reading_order(
             let persisted_rows = reader.book_pages(book_id).await?;
             let effective_rows = if !persisted_rows.is_empty() {
                 reading_order_entries(
-                    headers,
                     book_id,
                     persisted_rows,
                     (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
                 )
             } else if let Some(archive_rows) = content.archive_page_rows(media).await {
-                reading_order_entries(headers, book_id, archive_rows, None)
+                reading_order_entries(book_id, archive_rows, None)
             } else {
-                reading_order_entries(headers, book_id, content.generated_pdf_page_rows(media), None)
+                reading_order_entries(book_id, content.generated_pdf_page_rows(media), None)
             };
 
             if effective_rows.is_empty() {
-                vec![default_reading_order_entry(headers, book_id, media_type)]
+                vec![default_reading_order_entry(book_id, media_type)]
             } else {
                 effective_rows
             }
         }
-        _ => vec![default_reading_order_entry(headers, book_id, media_type)],
+        _ => vec![default_reading_order_entry(book_id, media_type)],
     })
 }
 
 fn reading_order_entries(
-    headers: &HeaderMap,
     book_id: &str,
     page_rows: Vec<BookPageRecord>,
     media_type_override: Option<&str>,
@@ -428,21 +549,20 @@ fn reading_order_entries(
             let mut entry = serde_json::Map::from_iter([
                 (
                     "href".to_string(),
-                    Value::String(app_absolute_url(
-                        headers,
-                        format!(
-                            "/api/v1/books/{book_id}/pages/{}?contentNegotiation=false",
-                            page.number
-                        )
-                        .as_str(),
-                    )),
+                    Value::String(api_page_path(book_id, page.number)),
                 ),
                 (
                     "type".to_string(),
                     Value::String(effective_media_type.to_string()),
                 ),
-                ("width".to_string(), page.width.map_or(Value::Null, Value::from)),
-                ("height".to_string(), page.height.map_or(Value::Null, Value::from)),
+                (
+                    "width".to_string(),
+                    page.width.map_or(Value::Null, Value::from),
+                ),
+                (
+                    "height".to_string(),
+                    page.height.map_or(Value::Null, Value::from),
+                ),
             ]);
 
             if effective_media_type.starts_with("image/")
@@ -451,14 +571,7 @@ fn reading_order_entries(
                 entry.insert(
                     "alternate".to_string(),
                     Value::Array(vec![json!({
-                        "href": app_absolute_url(
-                            headers,
-                            format!(
-                                "/api/v1/books/{book_id}/pages/{}?contentNegotiation=false&convert=jpeg",
-                                page.number
-                            )
-                            .as_str(),
-                        ),
+                        "href": api_page_jpeg_path(book_id, page.number),
                         "type": "image/jpeg",
                         "width": page.width,
                         "height": page.height,
@@ -471,9 +584,9 @@ fn reading_order_entries(
         .collect()
 }
 
-fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &str) -> Value {
+fn default_reading_order_entry(book_id: &str, media_type: &str) -> Value {
     json!({
-        "href": app_absolute_url(headers, format!("/api/v1/books/{book_id}/pages/1?contentNegotiation=false").as_str()),
+        "href": api_page_path(book_id, 1),
         "type": media_type,
     })
 }
@@ -482,13 +595,14 @@ async fn load_persisted_webpub_metadata_additions(
     book_detail: &dyn BookDetailPort,
     series_detail: &dyn SeriesDetailPort,
     book_id: &str,
-) -> Result<Option<(serde_json::Map<String, Value>, bool)>, String> {
+) -> Result<Option<WebpubMetadataAdditions>, String> {
     let Some(book) = book_detail
         .load_persisted_book_detail(book_id, None)
         .await?
     else {
         return Ok(None);
     };
+    let series_id = book.series_id.clone();
     let series = series_detail
         .load_persisted_series_detail(&book.series_id)
         .await?;
@@ -567,7 +681,11 @@ async fn load_persisted_webpub_metadata_additions(
         }
     }
 
-    Ok(Some((metadata, book.media_epub_divina_compatible)))
+    Ok(Some(WebpubMetadataAdditions {
+        metadata,
+        epub_divina_compatible: book.media_epub_divina_compatible,
+        series_id,
+    }))
 }
 
 fn webpub_reading_progression(reading_direction: &str) -> Option<&'static str> {
@@ -648,14 +766,12 @@ fn extend_webpub_metadata_with_role_authors(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn build_persisted_book_manifest(
+pub async fn build_persisted_book_manifest(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     book_detail: &dyn BookDetailPort,
     series_detail: &dyn SeriesDetailPort,
     user: &AuthUser,
-    headers: &HeaderMap,
     book_id: &str,
     variant: ManifestVariant,
 ) -> Result<ManifestBuildOutcome, String> {
@@ -663,14 +779,20 @@ pub(crate) async fn build_persisted_book_manifest(
         return Ok(ManifestBuildOutcome::NotFound);
     };
 
-    if !user_can_access_library(user, &library_id) {
+    let user = ManifestUserContext::from_auth_user(user);
+    if !user.can_access_library(&library_id) {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
     let Some(media) = reader.book_media(book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };
-    if !user_can_access_book_media(reader, book_id, user, &media).await {
+    if !user.can_access_library(&media.library_id) {
+        return Ok(ManifestBuildOutcome::Forbidden);
+    }
+    if let Some((age_rating, labels)) = reader.book_restrictions(book_id).await?
+        && !user.content_allowed(age_rating, &labels)
+    {
         return Ok(ManifestBuildOutcome::Forbidden);
     }
 
@@ -679,7 +801,7 @@ pub(crate) async fn build_persisted_book_manifest(
         load_persisted_webpub_metadata_additions(book_detail, series_detail, book_id).await?;
     let epub_divina_compatible = webpub_additions
         .as_ref()
-        .is_some_and(|(_, epub_divina_compatible)| *epub_divina_compatible);
+        .is_some_and(|additions| additions.epub_divina_compatible);
     if !manifest_variant_matches_profile(variant, profile, epub_divina_compatible) {
         if matches!(
             variant,
@@ -702,25 +824,26 @@ pub(crate) async fn build_persisted_book_manifest(
         let media_files = reader.media_file_records(book_id).await?;
         let extension_blob = reader.epub_extension_blob(book_id).await?;
         let payload = persisted_epub_manifest_payload(
-            headers,
             book_id,
             &title,
             &media_type,
             media_files.as_slice(),
             extension_blob.as_ref().map(|(_, blob)| blob.as_slice()),
-            webpub_additions.as_ref().map(|(metadata, _)| metadata),
+            webpub_additions
+                .as_ref()
+                .map(|additions| &additions.metadata),
             epub_divina_compatible,
         )?;
-        return Ok(ManifestBuildOutcome::Found(
-            manifest_content_type(effective_variant, effective_profile),
+        return Ok(ManifestBuildOutcome::Found(PersistedManifest {
+            content_type: manifest_content_type(effective_variant, effective_profile),
             payload,
-        ));
+            series_id: webpub_additions.map(|additions| additions.series_id),
+        }));
     }
 
     let reading_order = build_manifest_reading_order(
         reader,
         content,
-        headers,
         book_id,
         &media,
         &media_type,
@@ -730,7 +853,6 @@ pub(crate) async fn build_persisted_book_manifest(
     .await?;
 
     let mut payload = persisted_manifest_payload(
-        headers,
         book_id,
         &title,
         &media_type,
@@ -743,19 +865,81 @@ pub(crate) async fn build_persisted_book_manifest(
     ) {
         enrich_manifest_metadata(
             &mut payload,
-            webpub_additions.as_ref().map(|(metadata, _)| metadata),
+            webpub_additions
+                .as_ref()
+                .map(|additions| &additions.metadata),
             effective_profile,
         );
     }
     append_manifest_extra_links(
         &mut payload,
-        headers,
         book_id,
         effective_profile,
         epub_divina_compatible,
     );
-    Ok(ManifestBuildOutcome::Found(
-        manifest_content_type(effective_variant, effective_profile),
+    Ok(ManifestBuildOutcome::Found(PersistedManifest {
+        content_type: manifest_content_type(effective_variant, effective_profile),
         payload,
-    ))
+        series_id: webpub_additions.map(|additions| additions.series_id),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity_access::{AuthUser, AuthUserAgeRestriction};
+
+    #[test]
+    fn persisted_manifest_payload_uses_root_relative_api_hrefs() {
+        let payload = persisted_manifest_payload(
+            "book-1",
+            "Book One",
+            "application/pdf",
+            "application/webpub+json",
+            vec![default_reading_order_entry("book-1", "application/pdf")],
+        );
+
+        assert_eq!(
+            payload["links"][0]["href"],
+            json!("/api/v1/books/book-1/manifest")
+        );
+        assert_eq!(
+            payload["links"][1]["href"],
+            json!("/api/v1/books/book-1/file")
+        );
+        assert_eq!(
+            payload["resources"][0]["href"],
+            json!("/api/v1/books/book-1/thumbnail")
+        );
+        assert_eq!(
+            payload["readingOrder"][0]["href"],
+            json!("/api/v1/books/book-1/pages/1?contentNegotiation=false")
+        );
+    }
+
+    #[test]
+    fn manifest_user_context_enforces_library_and_content_restrictions() {
+        let user = AuthUser {
+            id: "user-1".to_string(),
+            email: "user@example.org".to_string(),
+            password: String::new(),
+            roles: Vec::new(),
+            shared_all_libraries: false,
+            shared_library_ids: vec!["library-1".to_string()],
+            labels_allow: Vec::new(),
+            labels_exclude: vec!["blocked".to_string()],
+            age_restriction: Some(AuthUserAgeRestriction {
+                age: 16,
+                restriction: "EXCLUDE".to_string(),
+            }),
+        };
+
+        let context = ManifestUserContext::from_auth_user(&user);
+
+        assert!(context.can_access_library("library-1"));
+        assert!(!context.can_access_library("library-2"));
+        assert!(context.content_allowed(Some(12), &[]));
+        assert!(!context.content_allowed(Some(18), &[]));
+        assert!(!context.content_allowed(None, &["Blocked".to_string()]));
+    }
 }

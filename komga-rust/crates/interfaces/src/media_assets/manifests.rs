@@ -1,7 +1,11 @@
 use super::*;
 use crate::identity_access::auth::Authenticated;
+use crate::request_urls::absolutize_json_hrefs;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
+use komga_application::media_assets::{
+    ManifestBuildOutcome, ManifestVariant, build_persisted_book_manifest,
+};
 
 pub async fn book_manifest(
     State(app): State<MediaAssetsState>,
@@ -9,31 +13,7 @@ pub async fn book_manifest(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    match build_persisted_book_manifest(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        app.series_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        ManifestVariant::Default,
-    )
-    .await
-    {
-        Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            Json(payload),
-        )
-            .into_response(),
-        Ok(ManifestBuildOutcome::BadRequest(message)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
-        }
-        Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
-        Err(error) => internal_error_response(error),
-    }
+    book_manifest_variant(app, user, headers, book_id, ManifestVariant::Default).await
 }
 
 pub async fn book_manifest_epub(
@@ -42,31 +22,7 @@ pub async fn book_manifest_epub(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    match build_persisted_book_manifest(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        app.series_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        ManifestVariant::Epub,
-    )
-    .await
-    {
-        Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            Json(payload),
-        )
-            .into_response(),
-        Ok(ManifestBuildOutcome::BadRequest(message)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
-        }
-        Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
-        Err(error) => internal_error_response(error),
-    }
+    book_manifest_variant(app, user, headers, book_id, ManifestVariant::Epub).await
 }
 
 pub async fn book_manifest_pdf(
@@ -75,31 +31,7 @@ pub async fn book_manifest_pdf(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    match build_persisted_book_manifest(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        app.series_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        ManifestVariant::Pdf,
-    )
-    .await
-    {
-        Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            Json(payload),
-        )
-            .into_response(),
-        Ok(ManifestBuildOutcome::BadRequest(message)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
-        }
-        Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
-        Err(error) => internal_error_response(error),
-    }
+    book_manifest_variant(app, user, headers, book_id, ManifestVariant::Pdf).await
 }
 
 pub async fn book_manifest_divina(
@@ -108,24 +40,36 @@ pub async fn book_manifest_divina(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
+    book_manifest_variant(app, user, headers, book_id, ManifestVariant::Divina).await
+}
+
+async fn book_manifest_variant(
+    app: MediaAssetsState,
+    user: AuthUser,
+    headers: HeaderMap,
+    book_id: String,
+    variant: ManifestVariant,
+) -> Response {
     match build_persisted_book_manifest(
         app.reader.as_ref(),
         app.content.as_ref(),
         app.book_detail.as_ref(),
         app.series_detail.as_ref(),
         &user,
-        &headers,
         &book_id,
-        ManifestVariant::Divina,
+        variant,
     )
     .await
     {
-        Ok(ManifestBuildOutcome::Found(content_type, payload)) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, content_type)],
-            Json(payload),
-        )
-            .into_response(),
+        Ok(ManifestBuildOutcome::Found(mut manifest)) => {
+            absolutize_json_hrefs(&headers, &mut manifest.payload);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, manifest.content_type)],
+                Json(manifest.payload),
+            )
+                .into_response()
+        }
         Ok(ManifestBuildOutcome::BadRequest(message)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
         }

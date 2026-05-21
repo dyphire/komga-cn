@@ -2,11 +2,12 @@ use crate::identity_access::auth::AuthUser;
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use komga_application::media_assets::{
+    ManifestBuildOutcome, ManifestVariant, build_persisted_book_manifest,
+};
 use serde_json::{Value, json};
 
-use crate::media_assets::manifest_persistence::build_persisted_book_manifest;
-use crate::media_assets::types::{ManifestBuildOutcome, ManifestVariant};
-use crate::request_urls::app_absolute_url;
+use crate::request_urls::{absolutize_json_hrefs, app_absolute_url};
 use crate::state::OpdsState;
 
 const OPDS_MANIFEST_CONTENT_TYPE: &str = "application/opds-publication+json";
@@ -50,25 +51,22 @@ async fn opds_manifest_variant(
         app.book_detail.as_ref(),
         app.series_detail.as_ref(),
         user,
-        &headers,
         book_id,
         variant,
     )
     .await
     {
-        Ok(ManifestBuildOutcome::Found(_, mut payload)) => {
-            let series_id = app
-                .book_detail
-                .load_persisted_book_detail(book_id, None)
-                .await
-                .ok()
-                .flatten()
-                .map(|book| book.series_id);
-            adapt_manifest_payload_to_opds(&mut payload, &headers, book_id, series_id.as_deref());
+        Ok(ManifestBuildOutcome::Found(mut manifest)) => {
+            adapt_manifest_payload_to_opds(
+                &mut manifest.payload,
+                &headers,
+                book_id,
+                manifest.series_id.as_deref(),
+            );
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, OPDS_MANIFEST_CONTENT_TYPE)],
-                Json(payload),
+                Json(manifest.payload),
             )
                 .into_response()
         }
@@ -102,6 +100,7 @@ fn adapt_manifest_payload_to_opds(
     series_id: Option<&str>,
 ) {
     rewrite_api_hrefs_to_opds(payload);
+    absolutize_json_hrefs(headers, payload);
     add_series_links_to_belongs_to(payload, headers, series_id);
     add_auth_properties_to_manifest_links(payload, headers);
     add_auth_properties_to_thumbnail_resources(payload, headers);
