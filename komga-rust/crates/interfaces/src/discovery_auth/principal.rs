@@ -1,6 +1,11 @@
 use serde_json::Value;
 
-use super::utils::{intersection, normalized_labels, normalized_sharing_labels};
+use komga_domain::discovery::{
+    AgeRestrictionKind as DomainAgeRestrictionKind, QueryRestrictions as DomainRestrictions,
+    content_allowed_by_restrictions,
+};
+
+use super::utils::{intersection, normalized_labels};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgeRestrictionKind {
@@ -64,57 +69,17 @@ impl DiscoveryPrincipal {
     }
 
     pub fn is_content_allowed(&self, age_rating: Option<u32>, sharing_labels: &[String]) -> bool {
-        let labels = normalized_sharing_labels(sharing_labels);
-
-        let age_allowed =
-            if self.restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
-                self.restrictions
-                    .age
-                    .map(|age_limit| age_rating.is_some_and(|age| age <= u32::from(age_limit)))
-            } else {
-                None
-            };
-
-        let label_allowed = if self.restrictions.labels_allow.is_empty() {
-            None
-        } else {
-            Some(
-                self.restrictions
-                    .labels_allow
-                    .iter()
-                    .any(|candidate| labels.contains(candidate)),
-            )
+        let domain_restrictions = DomainRestrictions {
+            age: self.restrictions.age,
+            age_restriction: self.restrictions.age_restriction.map(|kind| match kind {
+                AgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
+                AgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
+            }),
+            labels_allow: self.restrictions.labels_allow.clone(),
+            labels_exclude: self.restrictions.labels_exclude.clone(),
         };
-
-        let allowed = match (age_allowed, label_allowed) {
-            (None, label_allowed) => label_allowed != Some(false),
-            (age_allowed, None) => age_allowed != Some(false),
-            (age_allowed, label_allowed) => {
-                age_allowed != Some(false) || label_allowed != Some(false)
-            }
-        };
-        if !allowed {
-            return false;
-        }
-
-        let age_denied = if self.restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
-            self.restrictions
-                .age
-                .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= u32::from(age_limit)))
-        } else {
-            false
-        };
-
-        let label_denied = if self.restrictions.labels_exclude.is_empty() {
-            false
-        } else {
-            self.restrictions
-                .labels_exclude
-                .iter()
-                .any(|candidate| labels.contains(candidate))
-        };
-
-        !age_denied && !label_denied
+        let age_u16 = age_rating.and_then(|age| u16::try_from(age).ok());
+        content_allowed_by_restrictions(&domain_restrictions, age_u16, sharing_labels)
     }
 }
 

@@ -43,7 +43,7 @@ pub(crate) async fn load_persisted_series_page(
         let ranked_candidates = backend
             .search_series_scored_ids(search, total_count.max(1))
             .await?;
-// PLACEHOLDER_LOAD_CONTINUE
+        // PLACEHOLDER_LOAD_CONTINUE
         let candidate_ids: Vec<String> =
             ranked_candidates.iter().map(|(_, id)| id.clone()).collect();
         if !candidate_ids.is_empty() {
@@ -105,7 +105,8 @@ pub(crate) async fn load_persisted_series_page(
     };
 
     // Build evaluation context
-    let eval_ctx = build_series_eval_context(backend, context, query.condition.as_ref(), read_dates).await?;
+    let eval_ctx =
+        build_series_eval_context(backend, context, query.condition.as_ref(), read_dates).await?;
 
     // Map to engine types
     let rows: Vec<SeriesRow> = series.into_iter().map(to_series_row).collect();
@@ -116,16 +117,24 @@ pub(crate) async fn load_persisted_series_page(
         page: query.page,
         size: query.size,
         unpaged: query.unpaged,
-        sort_modes: query.sort_modes.iter().filter_map(to_series_sort_mode).collect(),
+        sort_modes: query
+            .sort_modes
+            .iter()
+            .filter_map(to_series_sort_mode)
+            .collect(),
         relevance_ranks,
         collection_order,
     };
 
-    let page = browse_engine::filter_and_paginate_series(rows, &browse_ctx, engine_query, eval_ctx)?;
+    let page =
+        browse_engine::filter_and_paginate_series(rows, &browse_ctx, engine_query, eval_ctx)?;
 
     // Enrich read progress counts on the paginated result
-    let mut content: Vec<PersistedSeriesSummary> =
-        page.content.into_iter().map(series_row_to_persisted).collect();
+    let mut content: Vec<PersistedSeriesSummary> = page
+        .content
+        .into_iter()
+        .map(series_row_to_persisted)
+        .collect();
 
     if let Some(user_id) = context.user_id.as_deref() {
         let read_progress = backend.load_series_read_progress_counts(user_id).await?;
@@ -185,7 +194,12 @@ async fn build_series_eval_context(
                 for days in offsets {
                     cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
                 }
-                (collection_memberships, read_progress, total_book_counts, cutoffs)
+                (
+                    collection_memberships,
+                    read_progress,
+                    total_book_counts,
+                    cutoffs,
+                )
             }
             None => (None, None, None, HashMap::new()),
         };

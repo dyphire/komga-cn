@@ -9,18 +9,15 @@ use super::helpers::{
 };
 use super::models::{BookEvaluationContext, BookRow};
 use super::text_matching::{
-    any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
-    normalized_text_matches, TextMatchMode,
+    TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
+    normalized_text_matches,
 };
 
 pub fn evaluate(row: &BookRow, condition: &BookCondition, ctx: &BookEvaluationContext) -> bool {
     match condition {
         BookCondition::Value(value) => evaluate_value(row, value, ctx),
         BookCondition::Composite(composite) => match composite.operator {
-            FilterOperator::All => composite
-                .conditions
-                .iter()
-                .all(|c| evaluate(row, c, ctx)),
+            FilterOperator::All => composite.conditions.iter().all(|c| evaluate(row, c, ctx)),
             FilterOperator::Any => {
                 composite.conditions.is_empty()
                     || composite.conditions.iter().any(|c| evaluate(row, c, ctx))
@@ -29,7 +26,11 @@ pub fn evaluate(row: &BookRow, condition: &BookCondition, ctx: &BookEvaluationCo
     }
 }
 
-fn evaluate_value(row: &BookRow, condition: &BookValueCondition, ctx: &BookEvaluationContext) -> bool {
+fn evaluate_value(
+    row: &BookRow,
+    condition: &BookValueCondition,
+    ctx: &BookEvaluationContext,
+) -> bool {
     match condition {
         BookValueCondition::LibraryId(inc) => {
             matches_string_inclusion(row.library_id.as_str(), inc, |id| id.as_str())
@@ -72,9 +73,11 @@ fn evaluate_value(row: &BookRow, condition: &BookValueCondition, ctx: &BookEvalu
         BookValueCondition::NumberSort(condition) => {
             matches_number_condition(row.metadata_number_sort, condition)
         }
-        BookValueCondition::ReleaseDate(condition) => {
-            matches_date_condition(row.metadata_release_date.as_deref(), condition, &ctx.release_date_cutoffs)
-        }
+        BookValueCondition::ReleaseDate(condition) => matches_date_condition(
+            row.metadata_release_date.as_deref(),
+            condition,
+            &ctx.release_date_cutoffs,
+        ),
     }
 }
 
@@ -185,28 +188,60 @@ fn matches_string_condition(actual: &str, condition: &StringCondition) -> bool {
 fn matches_string_list_condition(values: &[String], condition: &StringCondition) -> bool {
     match condition {
         StringCondition::Exact(InclusionCondition::Include(expected)) => {
-            any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::Exact)
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Exact,
+            )
         }
         StringCondition::Exact(InclusionCondition::Exclude(expected)) => {
-            !any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::Exact)
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Exact,
+            )
         }
         StringCondition::Contains(InclusionCondition::Include(expected)) => {
-            any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::Contains)
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Contains,
+            )
         }
         StringCondition::Contains(InclusionCondition::Exclude(expected)) => {
-            !any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::Contains)
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::Contains,
+            )
         }
         StringCondition::StartsWith(InclusionCondition::Include(expected)) => {
-            any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::StartsWith)
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::StartsWith,
+            )
         }
         StringCondition::StartsWith(InclusionCondition::Exclude(expected)) => {
-            !any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::StartsWith)
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::StartsWith,
+            )
         }
         StringCondition::EndsWith(InclusionCondition::Include(expected)) => {
-            any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::EndsWith)
+            any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::EndsWith,
+            )
         }
         StringCondition::EndsWith(InclusionCondition::Exclude(expected)) => {
-            !any_normalized_text_matches(values.iter().map(String::as_str), expected, TextMatchMode::EndsWith)
+            !any_normalized_text_matches(
+                values.iter().map(String::as_str),
+                expected,
+                TextMatchMode::EndsWith,
+            )
         }
         StringCondition::Regex(patterns) => values.iter().any(|value| {
             let normalized = value.to_ascii_lowercase();
@@ -243,7 +278,9 @@ fn matches_author_condition(row: &BookRow, condition: &StringCondition) -> bool 
             .any(|author| author_matches_filter(&author.name, &author.role, values)),
         StringCondition::IsEmpty => row.metadata_authors.is_empty(),
         StringCondition::IsNotEmpty => !row.metadata_authors.is_empty(),
-        StringCondition::StartsWith(_) | StringCondition::EndsWith(_) | StringCondition::Regex(_) => false,
+        StringCondition::StartsWith(_)
+        | StringCondition::EndsWith(_)
+        | StringCondition::Regex(_) => false,
     }
 }
 
@@ -262,7 +299,11 @@ fn matches_poster_condition(
                 conditions.iter().any(|condition| {
                     poster_matches(
                         poster,
-                        condition.thumbnail_type.as_ref().map(|v| vec![v.clone()]).as_ref(),
+                        condition
+                            .thumbnail_type
+                            .as_ref()
+                            .map(|v| vec![v.clone()])
+                            .as_ref(),
                         condition.selected,
                     )
                 })
@@ -274,7 +315,11 @@ fn matches_poster_condition(
                     conditions.iter().any(|condition| {
                         poster_matches(
                             poster,
-                            condition.thumbnail_type.as_ref().map(|v| vec![v.clone()]).as_ref(),
+                            condition
+                                .thumbnail_type
+                                .as_ref()
+                                .map(|v| vec![v.clone()])
+                                .as_ref(),
                             condition.selected,
                         )
                     })

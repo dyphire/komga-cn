@@ -2,7 +2,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_domain::discovery::PageEnvelope;
+use komga_domain::discovery::{
+    PageEnvelope, QueryRestrictions as DomainRestrictions, content_allowed_by_restrictions,
+};
 use serde_json::{Value, json};
 
 use crate::discovery_auth::context::QueryRestrictions;
@@ -31,15 +33,7 @@ fn normalize_books_latest_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> Pa
     page
 }
 
-fn normalized_ondeck_sharing_labels(labels: &[String]) -> Vec<String> {
-    labels
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect()
-}
-
-fn ondeck_content_allowed_by_restrictions(
+fn ondeck_content_allowed(
     restrictions: Option<&QueryRestrictions>,
     age_rating: Option<u16>,
     sharing_labels: &[String],
@@ -47,53 +41,16 @@ fn ondeck_content_allowed_by_restrictions(
     let Some(restrictions) = restrictions else {
         return true;
     };
-
-    let labels = normalized_ondeck_sharing_labels(sharing_labels);
-
-    let age_allowed = if restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
-        restrictions
-            .age
-            .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
-    } else {
-        None
+    let domain_restrictions = DomainRestrictions {
+        age: restrictions.age,
+        age_restriction: restrictions.age_restriction.map(|kind| match kind {
+            AgeRestrictionKind::AllowOnly => komga_domain::discovery::AgeRestrictionKind::AllowOnly,
+            AgeRestrictionKind::Exclude => komga_domain::discovery::AgeRestrictionKind::Exclude,
+        }),
+        labels_allow: restrictions.labels_allow.clone(),
+        labels_exclude: restrictions.labels_exclude.clone(),
     };
-    let label_allowed = if restrictions.labels_allow.is_empty() {
-        None
-    } else {
-        Some(
-            restrictions
-                .labels_allow
-                .iter()
-                .any(|candidate| labels.contains(candidate)),
-        )
-    };
-
-    let allowed = match (age_allowed, label_allowed) {
-        (None, label_allowed) => label_allowed != Some(false),
-        (age_allowed, None) => age_allowed != Some(false),
-        (age_allowed, label_allowed) => age_allowed != Some(false) || label_allowed != Some(false),
-    };
-    if !allowed {
-        return false;
-    }
-
-    let age_denied = if restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
-        restrictions
-            .age
-            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
-    } else {
-        false
-    };
-    let label_denied = if restrictions.labels_exclude.is_empty() {
-        false
-    } else {
-        restrictions
-            .labels_exclude
-            .iter()
-            .any(|candidate| labels.contains(candidate))
-    };
-
-    !age_denied && !label_denied
+    content_allowed_by_restrictions(&domain_restrictions, age_rating, sharing_labels)
 }
 
 fn ondeck_page_payload(content: Vec<Value>, uri: &Uri) -> Value {
@@ -268,7 +225,7 @@ pub async fn books_ondeck(
                         Err(error) => return internal_error_response(error),
                     };
 
-                if !ondeck_content_allowed_by_restrictions(
+                if !ondeck_content_allowed(
                     context.restrictions.as_ref(),
                     resource.age_rating,
                     &resource.sharing_labels,

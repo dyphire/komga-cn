@@ -3,20 +3,23 @@ use komga_domain::discovery::{
     SeriesCondition, SeriesStatusCondition, SeriesValueCondition, StringCondition,
 };
 
-use super::helpers::{author_contains_filter_value, author_matches_filter_value, series_matches_read_status};
+use super::helpers::{
+    author_contains_filter_value, author_matches_filter_value, series_matches_read_status,
+};
 use super::models::{SeriesEvaluationContext, SeriesRow};
 use super::text_matching::{
-    any_ignore_ascii_case, any_normalized_text_matches, normalized_text_matches, TextMatchMode,
+    TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, normalized_text_matches,
 };
 
-pub fn evaluate(row: &SeriesRow, condition: &SeriesCondition, ctx: &SeriesEvaluationContext) -> bool {
+pub fn evaluate(
+    row: &SeriesRow,
+    condition: &SeriesCondition,
+    ctx: &SeriesEvaluationContext,
+) -> bool {
     match condition {
         SeriesCondition::Value(value) => evaluate_value(row, value, ctx),
         SeriesCondition::Composite(composite) => match composite.operator {
-            FilterOperator::All => composite
-                .conditions
-                .iter()
-                .all(|c| evaluate(row, c, ctx)),
+            FilterOperator::All => composite.conditions.iter().all(|c| evaluate(row, c, ctx)),
             FilterOperator::Any => {
                 composite.conditions.is_empty()
                     || composite.conditions.iter().any(|c| evaluate(row, c, ctx))
@@ -298,7 +301,9 @@ fn matches_author_condition(row: &SeriesRow, condition: &StringCondition) -> boo
             .any(|author| author_matches_filter_value(author, values)),
         StringCondition::IsEmpty => row.books_metadata_authors.is_empty(),
         StringCondition::IsNotEmpty => !row.books_metadata_authors.is_empty(),
-        StringCondition::StartsWith(_) | StringCondition::EndsWith(_) | StringCondition::Regex(_) => false,
+        StringCondition::StartsWith(_)
+        | StringCondition::EndsWith(_)
+        | StringCondition::Regex(_) => false,
     }
 }
 

@@ -13,6 +13,8 @@ pub use filter::{
     FilterOperator, InclusionCondition, NumberCondition, ReadStatusCondition, SeriesCondition,
     SeriesFilter, SeriesStatusCondition, SeriesValueCondition, StringCondition,
 };
-pub use models::{AgeRestrictionKind, DiscoveryQueryContext, QueryRestrictions};
+pub use models::{
+    AgeRestrictionKind, DiscoveryQueryContext, QueryRestrictions, content_allowed_by_restrictions,
+};
 pub use sorts::{BookSort, SeriesSort};
 pub use write_ports::{DiscoverySavedSearchWritePort, DiscoveryWritePort};

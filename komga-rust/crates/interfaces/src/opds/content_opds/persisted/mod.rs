@@ -6,6 +6,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
+use komga_domain::discovery::{
+    AgeRestrictionKind as DomainAgeRestrictionKind, QueryRestrictions as DomainRestrictions,
+    content_allowed_by_restrictions as domain_content_allowed,
+};
+
 use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::identity_access::auth::{
     AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
@@ -104,14 +109,6 @@ pub(super) fn opds_restrictions_for_user(user: &AuthUser) -> Option<OpdsRestrict
     }
 }
 
-fn normalized_sharing_labels(labels: &[String]) -> Vec<String> {
-    labels
-        .iter()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .collect()
-}
-
 pub(super) fn content_allowed_by_restrictions(
     restrictions: Option<&OpdsRestrictions>,
     age_rating: Option<u16>,
@@ -120,53 +117,16 @@ pub(super) fn content_allowed_by_restrictions(
     let Some(restrictions) = restrictions else {
         return true;
     };
-
-    let labels = normalized_sharing_labels(sharing_labels);
-
-    let age_allowed = if restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
-        restrictions
-            .age
-            .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
-    } else {
-        None
+    let domain_restrictions = DomainRestrictions {
+        age: restrictions.age,
+        age_restriction: restrictions.age_restriction.map(|kind| match kind {
+            AgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
+            AgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
+        }),
+        labels_allow: restrictions.labels_allow.clone(),
+        labels_exclude: restrictions.labels_exclude.clone(),
     };
-    let label_allowed = if restrictions.labels_allow.is_empty() {
-        None
-    } else {
-        Some(
-            restrictions
-                .labels_allow
-                .iter()
-                .any(|candidate| labels.contains(candidate)),
-        )
-    };
-
-    let allowed = match (age_allowed, label_allowed) {
-        (None, label_allowed) => label_allowed != Some(false),
-        (age_allowed, None) => age_allowed != Some(false),
-        (age_allowed, label_allowed) => age_allowed != Some(false) || label_allowed != Some(false),
-    };
-    if !allowed {
-        return false;
-    }
-
-    let age_denied = if restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
-        restrictions
-            .age
-            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
-    } else {
-        false
-    };
-    let label_denied = if restrictions.labels_exclude.is_empty() {
-        false
-    } else {
-        restrictions
-            .labels_exclude
-            .iter()
-            .any(|candidate| labels.contains(candidate))
-    };
-
-    !age_denied && !label_denied
+    domain_content_allowed(&domain_restrictions, age_rating, sharing_labels)
 }
 
 pub(super) async fn load_libraries(

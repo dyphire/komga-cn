@@ -41,12 +41,8 @@ pub fn sort_books(
                     .cmp(&left.series_title_sort.to_ascii_lowercase()),
                 BookSortMode::CreatedDateAsc => left.created.cmp(&right.created),
                 BookSortMode::CreatedDateDesc => right.created.cmp(&left.created),
-                BookSortMode::LastModifiedDateAsc => {
-                    left.last_modified.cmp(&right.last_modified)
-                }
-                BookSortMode::LastModifiedDateDesc => {
-                    right.last_modified.cmp(&left.last_modified)
-                }
+                BookSortMode::LastModifiedDateAsc => left.last_modified.cmp(&right.last_modified),
+                BookSortMode::LastModifiedDateDesc => right.last_modified.cmp(&left.last_modified),
                 BookSortMode::FileSizeAsc => left.size_bytes.cmp(&right.size_bytes),
                 BookSortMode::FileSizeDesc => right.size_bytes.cmp(&left.size_bytes),
                 BookSortMode::FileHashAsc => left.file_hash.cmp(&right.file_hash),
@@ -76,13 +72,25 @@ pub fn sort_books(
                     right_date.cmp(&left_date)
                 }
                 BookSortMode::ReadProgressReadDateAsc => {
-                    let left_date = left.read_progress.as_ref().and_then(|rp| rp.read_date.as_ref());
-                    let right_date = right.read_progress.as_ref().and_then(|rp| rp.read_date.as_ref());
+                    let left_date = left
+                        .read_progress
+                        .as_ref()
+                        .and_then(|rp| rp.read_date.as_ref());
+                    let right_date = right
+                        .read_progress
+                        .as_ref()
+                        .and_then(|rp| rp.read_date.as_ref());
                     left_date.cmp(&right_date)
                 }
                 BookSortMode::ReadProgressReadDateDesc => {
-                    let left_date = left.read_progress.as_ref().and_then(|rp| rp.read_date.as_ref());
-                    let right_date = right.read_progress.as_ref().and_then(|rp| rp.read_date.as_ref());
+                    let left_date = left
+                        .read_progress
+                        .as_ref()
+                        .and_then(|rp| rp.read_date.as_ref());
+                    let right_date = right
+                        .read_progress
+                        .as_ref()
+                        .and_then(|rp| rp.read_date.as_ref());
                     right_date.cmp(&left_date)
                 }
                 BookSortMode::ReleaseDateAsc => {
@@ -100,12 +108,12 @@ pub fn sort_books(
                     .partial_cmp(&left.metadata_number_sort)
                     .unwrap_or(std::cmp::Ordering::Equal),
                 BookSortMode::SeriesIdAsc => left.series_id.cmp(&right.series_id),
-                BookSortMode::ReadListNumberAsc => {
-                    readlist_order.get(&left.id).cmp(&readlist_order.get(&right.id))
-                }
-                BookSortMode::ReadListNumberDesc => {
-                    readlist_order.get(&right.id).cmp(&readlist_order.get(&left.id))
-                }
+                BookSortMode::ReadListNumberAsc => readlist_order
+                    .get(&left.id)
+                    .cmp(&readlist_order.get(&right.id)),
+                BookSortMode::ReadListNumberDesc => readlist_order
+                    .get(&right.id)
+                    .cmp(&readlist_order.get(&left.id)),
                 BookSortMode::RelevanceAsc => {
                     compare_relevance_ranks(relevance_ranks, &left.id, &right.id, false)
                 }

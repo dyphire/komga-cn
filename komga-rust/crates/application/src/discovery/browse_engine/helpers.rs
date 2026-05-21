@@ -68,7 +68,9 @@ pub fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> boo
 
 pub fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
     let normalized = author.to_ascii_lowercase();
-    expected.iter().any(|value| normalized.contains(value.as_str()))
+    expected
+        .iter()
+        .any(|value| normalized.contains(value.as_str()))
 }
 
 pub fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {

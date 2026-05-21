@@ -1,23 +1,21 @@
 use std::collections::HashMap;
 
-use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
-};
 use komga_application::discovery::browse_engine::{
     self,
     models::{
-        AuthorEntry, BookBrowseQuery, BookEvaluationContext, BookPosterRow, BookRow, BookSortMode,
-        BrowseContext, BrowseRestrictions, AgeRestrictionKind as EngineAgeRestrictionKind,
-        ReadProgressRow, WebLinkEntry,
+        AgeRestrictionKind as EngineAgeRestrictionKind, AuthorEntry, BookBrowseQuery,
+        BookEvaluationContext, BookPosterRow, BookRow, BookSortMode, BrowseContext,
+        BrowseRestrictions, ReadProgressRow, WebLinkEntry,
     },
+};
+use komga_application::discovery::{
+    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
 };
 use komga_domain::discovery::{
     BookCondition, BookValueCondition, InclusionCondition, PageEnvelope,
 };
 
-use super::models::{
-    PersistedBookSummary, PersistedBooksBrowseQuery, PersistedBooksSortMode,
-};
+use super::models::{PersistedBookSummary, PersistedBooksBrowseQuery, PersistedBooksSortMode};
 use super::{DiscoveryQueryContext, PersistedDiscoveryBrowseDataSource};
 
 use komga_application::discovery::BookReadModel;
@@ -103,7 +101,11 @@ pub(crate) async fn load_persisted_books_page(
         page: query.page,
         size: query.size,
         unpaged: query.unpaged,
-        sort_modes: query.sort_modes.iter().filter_map(to_book_sort_mode).collect(),
+        sort_modes: query
+            .sort_modes
+            .iter()
+            .filter_map(to_book_sort_mode)
+            .collect(),
         relevance_ranks,
         readlist_order,
     };
@@ -111,7 +113,10 @@ pub(crate) async fn load_persisted_books_page(
     let page = browse_engine::filter_and_paginate_books(rows, &browse_ctx, engine_query, eval_ctx)?;
 
     Ok(PageEnvelope::from_slice(
-        page.content.into_iter().map(book_row_to_read_model).collect(),
+        page.content
+            .into_iter()
+            .map(book_row_to_read_model)
+            .collect(),
         page.page,
         page.page_size,
         page.total_elements,

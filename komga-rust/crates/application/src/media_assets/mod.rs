@@ -1,6 +1,7 @@
 mod file_import;
 mod metadata_update;
 pub mod metadata_writer;
+pub mod operations;
 mod page_hash_models;
 mod page_retrieval;
 mod ports;

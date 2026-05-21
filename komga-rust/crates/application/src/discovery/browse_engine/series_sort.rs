@@ -13,7 +13,10 @@ pub fn sort_series(
         return;
     }
 
-    let random_keys = if sort_modes.iter().any(|m| matches!(m, SeriesSortMode::Random)) {
+    let random_keys = if sort_modes
+        .iter()
+        .any(|m| matches!(m, SeriesSortMode::Random))
+    {
         random_sort_keys(series)
     } else {
         HashMap::new()
@@ -48,12 +51,12 @@ pub fn sort_series(
                     let right_date = eval_ctx.read_dates.as_ref().and_then(|d| d.get(&right.id));
                     right_date.cmp(&left_date)
                 }
-                SeriesSortMode::CollectionNumberAsc => {
-                    collection_order.get(&left.id).cmp(&collection_order.get(&right.id))
-                }
-                SeriesSortMode::CollectionNumberDesc => {
-                    collection_order.get(&right.id).cmp(&collection_order.get(&left.id))
-                }
+                SeriesSortMode::CollectionNumberAsc => collection_order
+                    .get(&left.id)
+                    .cmp(&collection_order.get(&right.id)),
+                SeriesSortMode::CollectionNumberDesc => collection_order
+                    .get(&right.id)
+                    .cmp(&collection_order.get(&left.id)),
                 SeriesSortMode::Random => {
                     random_keys.get(&left.id).cmp(&random_keys.get(&right.id))
                 }

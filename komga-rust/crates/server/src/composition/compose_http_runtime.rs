@@ -66,9 +66,10 @@ pub fn compose_http_runtime(
     let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
     let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
     let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
-    let discovery_search: Arc<dyn DiscoverySearchService> = Arc::new(
-        DiscoverySearchAccess::new(db.clone(), config.lucene_data_directory.clone()),
-    );
+    let discovery_search: Arc<dyn DiscoverySearchService> = Arc::new(DiscoverySearchAccess::new(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    ));
     let discovery_browse_service = Arc::new(compose_discovery_browse_service(
         db.clone(),
         config.lucene_data_directory.clone(),

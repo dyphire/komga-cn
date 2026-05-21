@@ -19,16 +19,6 @@ pub(super) fn normalized_labels(labels: &[Value]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-pub(super) fn normalized_sharing_labels(labels: &[String]) -> Vec<String> {
-    labels
-        .iter()
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .map(|label| label.to_ascii_lowercase())
-        .collect::<Vec<_>>()
-}
-
 pub(super) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     x_auth_token(headers).or_else(|| session_cookie_token(headers))
 }

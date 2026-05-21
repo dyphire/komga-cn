@@ -8,7 +8,9 @@ pub mod text_matching;
 
 use std::collections::BTreeSet;
 
-use komga_domain::discovery::{BookCondition, BookValueCondition, SeriesCondition, SeriesValueCondition};
+use komga_domain::discovery::{
+    BookCondition, BookValueCondition, SeriesCondition, SeriesValueCondition,
+};
 
 use models::*;
 
@@ -33,7 +35,12 @@ pub fn filter_and_paginate_books(
         rows.retain(|row| book_condition::evaluate(row, condition, &eval_ctx));
     }
 
-    book_sort::sort_books(&mut rows, &query.sort_modes, &query.relevance_ranks, &query.readlist_order);
+    book_sort::sort_books(
+        &mut rows,
+        &query.sort_modes,
+        &query.relevance_ranks,
+        &query.readlist_order,
+    );
 
     paginate(rows, query.page, query.size, query.unpaged)
 }
@@ -105,9 +112,10 @@ pub fn book_condition_needs_readlist_memberships(condition: &BookCondition) -> b
 pub fn book_condition_needs_posters(condition: &BookCondition) -> bool {
     match condition {
         BookCondition::Value(BookValueCondition::Poster(_)) => true,
-        BookCondition::Composite(composite) => {
-            composite.conditions.iter().any(book_condition_needs_posters)
-        }
+        BookCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .any(book_condition_needs_posters),
         _ => false,
     }
 }
@@ -202,7 +210,12 @@ fn collect_series_offsets_recursive(condition: &SeriesCondition, offsets: &mut B
     }
 }
 
-fn paginate<T>(rows: Vec<T>, page: usize, size: usize, unpaged: bool) -> Result<PageEnvelope<T>, String> {
+fn paginate<T>(
+    rows: Vec<T>,
+    page: usize,
+    size: usize,
+    unpaged: bool,
+) -> Result<PageEnvelope<T>, String> {
     let total_elements = rows.len();
     if unpaged {
         return Ok(PageEnvelope {

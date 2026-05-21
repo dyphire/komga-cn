@@ -7,6 +7,7 @@ use komga_application::media_assets::{
     BookMetadataLink as ApplicationBookMetadataLink,
     BookMetadataPatch as ApplicationBookMetadataPatch, MetadataUpdateResult,
 };
+use komga_domain::validation::is_valid_isbn13;
 
 #[derive(Deserialize)]
 pub struct BooksThumbnailsRegenerateQuery {
@@ -19,27 +20,16 @@ pub async fn book_analyze(
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    let Some(book) = (match app
-        .book_detail
-        .load_persisted_book_detail(&book_id, None)
-        .await
-    {
-        Ok(book) => book,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    enqueue_task_records(
-        &app,
-        vec![
-            TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(&book_id))
-                .priority(6)
-                .group(book.series_id)
-                .into_queue_record(),
-        ],
+    match komga_application::media_assets::operations::derive_book_analyze_tasks(
+        app.book_detail.as_ref(),
+        &book_id,
     )
     .await
+    {
+        Ok(Some(records)) => enqueue_task_records(&app, records).await,
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 pub async fn book_metadata_refresh(
@@ -47,33 +37,16 @@ pub async fn book_metadata_refresh(
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    let Some(book) = (match app
-        .book_detail
-        .load_persisted_book_detail(&book_id, None)
-        .await
-    {
-        Ok(book) => book,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    enqueue_task_records(
-        &app,
-        vec![
-            TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
-                .priority(6)
-                .group(book.series_id.clone())
-                .into_queue_record(),
-            TaskRequest::with_payload(
-                TaskKind::RefreshBookLocalArtwork,
-                BookPayload::new(&book_id),
-            )
-            .priority(6)
-            .into_queue_record(),
-        ],
+    match komga_application::media_assets::operations::derive_book_metadata_refresh_tasks(
+        app.book_detail.as_ref(),
+        &book_id,
     )
     .await
+    {
+        Ok(Some(records)) => enqueue_task_records(&app, records).await,
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 pub async fn book_metadata_update(
@@ -272,26 +245,6 @@ fn optional_nullable_isbn(
     }
 }
 
-fn is_valid_isbn13(value: &str) -> bool {
-    let digits = value
-        .chars()
-        .filter_map(|character| character.to_digit(10))
-        .collect::<Vec<_>>();
-    if digits.len() != 13 {
-        return false;
-    }
-
-    let checksum = digits
-        .iter()
-        .take(12)
-        .enumerate()
-        .map(|(index, digit)| if index % 2 == 0 { *digit } else { digit * 3 })
-        .sum::<u32>();
-    let expected_check_digit = (10 - (checksum % 10)) % 10;
-
-    digits[12] == expected_check_digit
-}
-
 fn optional_string_vec(
     patch: &serde_json::Map<String, Value>,
     key: &str,
@@ -425,21 +378,15 @@ pub async fn series_analyze(
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
-    let book_ids = match app.reader.series_book_ids(&resolved_series_id).await {
-        Ok(book_ids) => book_ids,
-        Err(error) => return internal_error_response(error),
-    };
-    let task_records = book_ids
-        .into_iter()
-        .map(|book_id| {
-            TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(book_id))
-                .priority(6)
-                .group(resolved_series_id.clone())
-                .into_queue_record()
-        })
-        .collect::<Vec<_>>();
-
-    enqueue_task_records(&app, task_records).await
+    match komga_application::media_assets::operations::derive_series_analyze_tasks(
+        app.reader.as_ref(),
+        &resolved_series_id,
+    )
+    .await
+    {
+        Ok(records) => enqueue_task_records(&app, records).await,
+        Err(error) => internal_error_response(error),
+    }
 }
 
 pub async fn series_metadata_refresh(
@@ -447,38 +394,15 @@ pub async fn series_metadata_refresh(
     _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    let book_ids = match app.reader.series_book_ids(&series_id).await {
-        Ok(book_ids) => book_ids,
-        Err(error) => return internal_error_response(error),
-    };
-
-    let mut task_records = vec![];
-    for book_id in book_ids {
-        task_records.push(
-            TaskRequest::with_payload(TaskKind::RefreshBookMetadata, BookPayload::new(&book_id))
-                .priority(6)
-                .group(series_id.clone())
-                .into_queue_record(),
-        );
-        task_records.push(
-            TaskRequest::with_payload(
-                TaskKind::RefreshBookLocalArtwork,
-                BookPayload::new(&book_id),
-            )
-            .priority(6)
-            .into_queue_record(),
-        );
+    match komga_application::media_assets::operations::derive_series_metadata_refresh_tasks(
+        app.reader.as_ref(),
+        &series_id,
+    )
+    .await
+    {
+        Ok(records) => enqueue_task_records(&app, records).await,
+        Err(error) => internal_error_response(error),
     }
-    task_records.push(
-        TaskRequest::with_payload(
-            TaskKind::RefreshSeriesLocalArtwork,
-            SeriesPayload::new(&series_id),
-        )
-        .priority(6)
-        .into_queue_record(),
-    );
-
-    enqueue_task_records(&app, task_records).await
 }
 
 pub async fn book_file_delete(
