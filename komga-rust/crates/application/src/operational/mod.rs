@@ -1,8 +1,16 @@
+mod actuator_contract;
 mod metrics_port;
 pub mod ports;
 mod server_settings;
 mod server_settings_port;
 
+pub use actuator_contract::{
+    ActuatorBuildInfo, ActuatorDiskSpaceSnapshot, ActuatorHealthSnapshot,
+    ActuatorHttpServerRequestMetric, ActuatorInfoSnapshot, ActuatorMetricProbeSnapshot,
+    ActuatorMetricService, ActuatorOsInfo, ActuatorProcessInfo, ActuatorProcessMemorySnapshot,
+    actuator_health_payload, actuator_info_payload, actuator_metric_query_tags,
+    actuator_metrics_index_payload, actuator_root_payload,
+};
 pub use metrics_port::{OperationalMetricsPort, SqlitePoolSnapshot};
 pub use ports::{
     AnnouncementPort, ClaimInitialAdminUserResult, ClaimPort, ClientSettingsPort,

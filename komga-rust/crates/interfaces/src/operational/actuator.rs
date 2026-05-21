@@ -3,9 +3,14 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::task_processing::TaskKind;
+use komga_application::operational::{
+    ActuatorBuildInfo, ActuatorDiskSpaceSnapshot, ActuatorHealthSnapshot,
+    ActuatorHttpServerRequestMetric, ActuatorInfoSnapshot, ActuatorMetricProbeSnapshot,
+    ActuatorMetricService, ActuatorOsInfo, ActuatorProcessInfo, ActuatorProcessMemorySnapshot,
+    actuator_health_payload, actuator_info_payload, actuator_metric_query_tags,
+    actuator_metrics_index_payload, actuator_root_payload,
+};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,9 +27,6 @@ use crate::identity_access::auth::{Admin, resolved_request_auth_user, user_is_ad
 use crate::state::OperationalApiState;
 
 const ACTUATOR_V3_JSON: &str = "application/vnd.spring-boot.actuator.v3+json";
-const PRODUCT_GROUP: &str = "huihuimoe";
-const PRODUCT_ARTIFACT: &str = "komga";
-const PRODUCT_NAME: &str = "komga-rust";
 const DEFAULT_DISK_SPACE_THRESHOLD_BYTES: u64 = 10 * 1024 * 1024;
 
 fn actuator_json(payload: Value) -> Response {
@@ -35,174 +37,32 @@ pub(crate) async fn actuator_root(
     State(_app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    actuator_json(json!({
-        "_links": actuator_root_links(),
-    }))
-}
-
-fn actuator_root_links() -> Value {
-    let links = [
-        ("self", "/actuator", false),
-        ("beans", "/actuator/beans", false),
-        ("caches", "/actuator/caches", false),
-        ("conditions", "/actuator/conditions", false),
-        ("configprops", "/actuator/configprops", false),
-        ("env", "/actuator/env", false),
-        ("env-toMatch", "/actuator/env/{toMatch}", true),
-        ("flyway", "/actuator/flyway", false),
-        ("health", "/actuator/health", false),
-        ("health-path", "/actuator/health/{*path}", true),
-        ("heapdump", "/actuator/heapdump", false),
-        ("httpexchanges", "/actuator/httpexchanges", false),
-        ("info", "/actuator/info", false),
-        ("logfile", "/actuator/logfile", false),
-        ("loggers", "/actuator/loggers", false),
-        ("loggers-name", "/actuator/loggers/{name}", true),
-        ("mappings", "/actuator/mappings", false),
-        ("metrics", "/actuator/metrics", false),
-        (
-            "metrics-requiredMetricName",
-            "/actuator/metrics/{requiredMetricName}",
-            true,
-        ),
-        ("scheduledtasks", "/actuator/scheduledtasks", false),
-        ("shutdown", "/actuator/shutdown", false),
-        ("threaddump", "/actuator/threaddump", false),
-    ];
-
-    Value::Object(serde_json::Map::from_iter(links.into_iter().map(
-        |(name, href, templated)| {
-            (
-                name.to_string(),
-                json!({
-                    "href": href,
-                    "templated": templated,
-                }),
-            )
-        },
-    )))
+    actuator_json(actuator_root_payload())
 }
 
 pub(crate) async fn actuator_health(
     headers: HeaderMap,
     State(app): State<OperationalApiState>,
 ) -> Response {
-    let db = db_health_component(&app);
-    let disk_space_probe_path = disk_space_probe_path(&app);
-    let disk_space = disk_space_component(&disk_space_probe_path);
-    let ping = ping_component();
-    let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
-
     let request_auth_user = resolved_request_auth_user(&app.identity, &headers).await;
-    if request_auth_user
-        .as_ref()
-        .is_none_or(|user| !user_is_admin(user))
-    {
-        return Json(json!({ "status": status })).into_response();
-    }
+    let include_details = request_auth_user.as_ref().is_some_and(user_is_admin);
+    let sqlite_rw_ready = app.auth_db.database_file.as_path().exists();
+    let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
 
-    Json(json!({
-        "status": status,
-        "components": {
-            "db": db.payload,
-            "diskSpace": disk_space.payload,
-            "ping": ping.payload,
-        }
-    }))
+    Json(actuator_health_payload(
+        ActuatorHealthSnapshot {
+            sqlite_rw_ready,
+            sqlite_ro_ready: sqlite_rw_ready,
+            tasks_rw_ready,
+            tasks_ro_ready: tasks_rw_ready,
+            disk_space: disk_space_snapshot(&disk_space_probe_path(&app)),
+        },
+        include_details,
+    ))
     .into_response()
 }
 
-fn aggregate_health_status(statuses: impl IntoIterator<Item = bool>) -> &'static str {
-    component_status(aggregate_health_is_up(statuses))
-}
-
-fn aggregate_health_is_up(statuses: impl IntoIterator<Item = bool>) -> bool {
-    statuses.into_iter().all(|status| status)
-}
-
-fn component_status(is_up: bool) -> &'static str {
-    if is_up { "UP" } else { "DOWN" }
-}
-
-fn db_health_component(app: &OperationalApiState) -> HealthComponentPayload {
-    let sqlite_rw_ready = app.auth_db.database_file.as_path().exists();
-    let sqlite_ro_ready = sqlite_rw_ready;
-    let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
-    let tasks_ro_ready = tasks_rw_ready;
-    let is_up = aggregate_health_is_up([
-        sqlite_rw_ready,
-        sqlite_ro_ready,
-        tasks_rw_ready,
-        tasks_ro_ready,
-    ]);
-
-    HealthComponentPayload {
-        is_up,
-        payload: json!({
-            "status": component_status(is_up),
-            "components": {
-                "sqliteDataSourceRW": sqlite_datasource_health_component(sqlite_rw_ready),
-                "sqliteDataSourceRO": sqlite_datasource_health_component(sqlite_ro_ready),
-                "tasksDataSourceRW": sqlite_datasource_health_component(tasks_rw_ready),
-                "tasksDataSourceRO": sqlite_datasource_health_component(tasks_ro_ready),
-            }
-        }),
-    }
-}
-
-fn sqlite_datasource_health_component(is_up: bool) -> Value {
-    json!({
-        "status": component_status(is_up),
-        "details": {
-            "database": "SQLite",
-            "validationQuery": "isValid()",
-        }
-    })
-}
-
-struct HealthComponentPayload {
-    is_up: bool,
-    payload: Value,
-}
-
-fn ping_component() -> HealthComponentPayload {
-    HealthComponentPayload {
-        is_up: true,
-        payload: json!({ "status": "UP" }),
-    }
-}
-
-fn disk_space_component(path: &Path) -> HealthComponentPayload {
-    match disk_space_details(path) {
-        Some(details) => {
-            let is_up = details.free >= DEFAULT_DISK_SPACE_THRESHOLD_BYTES;
-            HealthComponentPayload {
-                is_up,
-                payload: json!({
-                    "status": component_status(is_up),
-                    "details": {
-                        "total": details.total,
-                        "free": details.free,
-                        "threshold": DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
-                        "path": details.path,
-                    }
-                }),
-            }
-        }
-        None => HealthComponentPayload {
-            is_up: false,
-            payload: json!({
-                "status": "DOWN",
-                "details": {
-                    "threshold": DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
-                    "path": path.to_string_lossy().to_string(),
-                }
-            }),
-        },
-    }
-}
-
-fn disk_space_probe_path(app: &OperationalApiState) -> std::path::PathBuf {
+fn disk_space_probe_path(app: &OperationalApiState) -> PathBuf {
     std::env::current_dir()
         .ok()
         .or_else(|| app.operational.runtime.config_dir.clone())
@@ -272,104 +132,52 @@ fn disk_space_details(path: &Path) -> Option<DiskSpaceDetails> {
     })
 }
 
+fn disk_space_snapshot(path: &Path) -> ActuatorDiskSpaceSnapshot {
+    match disk_space_details(path) {
+        Some(details) => ActuatorDiskSpaceSnapshot {
+            total: Some(details.total),
+            free: Some(details.free),
+            threshold: DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
+            path: details.path,
+        },
+        None => ActuatorDiskSpaceSnapshot {
+            total: None,
+            free: None,
+            threshold: DEFAULT_DISK_SPACE_THRESHOLD_BYTES,
+            path: path.to_string_lossy().to_string(),
+        },
+    }
+}
+
 pub(crate) async fn actuator_info(
     State(app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    let build_time =
-        Some(app.operational.build_metadata.build_time.as_str()).filter(|value| !value.is_empty());
-    let commit_time = app.operational.build_metadata.git_commit_time.as_deref();
-    let commit_id = app.operational.build_metadata.git_commit_id.as_deref();
-    let branch = app.operational.build_metadata.git_branch.as_deref();
-    let version =
-        Some(app.operational.build_metadata.version.as_str()).filter(|value| !value.is_empty());
-
-    let mut payload = serde_json::Map::new();
-    payload.insert("build".to_string(), build_info_json(version, build_time));
-    payload.insert("os".to_string(), os_info_json());
-    payload.insert("process".to_string(), process_info_json());
-
-    if branch.is_some() || commit_id.is_some() || commit_time.is_some() {
-        payload.insert(
-            "git".to_string(),
-            json!({
-                "branch": branch,
-                "commit": {
-                    "id": commit_id,
-                    "time": commit_time,
-                }
-            }),
-        );
-    }
-    actuator_json(Value::Object(payload))
+    actuator_json(actuator_info_payload(ActuatorInfoSnapshot {
+        build: ActuatorBuildInfo {
+            version: non_empty_string(app.operational.build_metadata.version.as_str()),
+            build_time: non_empty_string(app.operational.build_metadata.build_time.as_str()),
+            git_branch: app.operational.build_metadata.git_branch.clone(),
+            git_commit_id: app.operational.build_metadata.git_commit_id.clone(),
+            git_commit_time: app.operational.build_metadata.git_commit_time.clone(),
+        },
+        os: ActuatorOsInfo {
+            name: normalized_os_name(std::env::consts::OS),
+            arch: normalized_arch(std::env::consts::ARCH),
+            version: os_version(),
+        },
+        process: ActuatorProcessInfo {
+            pid: std::process::id(),
+            parent_pid: process_parent_pid(),
+            cpus: available_cpu_count(),
+            virtual_threads: false,
+            memory: process_memory_snapshot(),
+        },
+    }))
 }
 
-fn process_info_json() -> Value {
-    let memory = process_memory_snapshot();
-
-    json!({
-        "pid": std::process::id(),
-        "parentPid": process_parent_pid(),
-        "cpus": available_cpu_count(),
-        "virtualThreads": false,
-        "memory": {
-            "heap": {
-                "used": memory.heap_used,
-                "committed": memory.heap_committed,
-                "max": memory.heap_max,
-            },
-            "nonHeap": {
-                "used": memory.non_heap_used,
-                "committed": memory.non_heap_committed,
-                "max": memory.non_heap_max,
-            }
-        }
-    })
-}
-
-fn build_info_json(version: Option<&str>, _build_time: Option<&str>) -> Value {
-    let version = version
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(product_version);
-
-    let build = serde_json::Map::from_iter([
-        (
-            "artifact".to_string(),
-            Value::String(PRODUCT_ARTIFACT.to_string()),
-        ),
-        ("name".to_string(), Value::String(PRODUCT_NAME.to_string())),
-        ("version".to_string(), Value::String(version)),
-        (
-            "group".to_string(),
-            Value::String(PRODUCT_GROUP.to_string()),
-        ),
-    ]);
-
-    Value::Object(build)
-}
-
-fn os_info_json() -> Value {
-    let mut os = serde_json::Map::from_iter([
-        (
-            "name".to_string(),
-            Value::String(normalized_os_name(std::env::consts::OS)),
-        ),
-        (
-            "arch".to_string(),
-            Value::String(normalized_arch(std::env::consts::ARCH)),
-        ),
-    ]);
-
-    if let Some(version) = os_version() {
-        os.insert("version".to_string(), Value::String(version));
-    }
-
-    Value::Object(os)
-}
-
-fn product_version() -> String {
-    env!("VERSION").to_string()
+fn non_empty_string(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn normalized_os_name(os: &str) -> String {
@@ -496,9 +304,7 @@ pub(crate) async fn actuator_metrics_index(
     State(_app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    actuator_json(json!({
-        "names": actuator_metric_names(),
-    }))
+    actuator_json(actuator_metrics_index_payload())
 }
 
 pub(crate) async fn actuator_metric_detail(
@@ -507,7 +313,14 @@ pub(crate) async fn actuator_metric_detail(
     uri: Uri,
     AxumPath(metric_name): AxumPath<String>,
 ) -> Response {
-    match metric_detail_json(&app, &metric_name, &uri).await {
+    let probes = metric_probe_snapshot(&app);
+    let tag_filters = actuator_metric_query_tags(uri.query());
+    let service = ActuatorMetricService::new(app.operational_runtime.as_ref());
+
+    match service
+        .metric_detail_payload(&metric_name, &probes, &tag_filters)
+        .await
+    {
         Ok(Some(metric)) => actuator_json(metric),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
@@ -518,701 +331,52 @@ pub(crate) async fn actuator_metric_detail(
     }
 }
 
-async fn metric_detail_json(
-    app: &OperationalApiState,
-    metric_name: &str,
-    uri: &Uri,
-) -> Result<Option<Value>, String> {
-    let tag_filters = metric_query_tags(uri);
-    let state = &app.operational;
-
-    match metric_name {
-        "application.ready.time" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "Time taken for the application to be ready to service requests",
-            Some("seconds"),
-            "TOTAL_TIME",
-            state
-                .startup_timing
-                .snapshot()
-                .application_ready_time_seconds,
-        ))),
-        "application.started.time" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "Time taken to start the application",
-            Some("seconds"),
-            "TOTAL_TIME",
-            state
-                .startup_timing
-                .snapshot()
-                .application_started_time_seconds,
-        ))),
-        "disk.free" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "Usable disk space",
-            Some("bytes"),
-            "VALUE",
-            disk_space_details(&disk_space_probe_path(app))
-                .map(|details| details.free as f64)
-                .unwrap_or(0.0),
-        ))),
-        "disk.total" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "Total disk space",
-            Some("bytes"),
-            "VALUE",
-            disk_space_details(&disk_space_probe_path(app))
-                .map(|details| details.total as f64)
-                .unwrap_or(0.0),
-        ))),
-        "http.server.requests" => Ok(Some(http_server_requests_metric(app, &tag_filters))),
-        "jdbc.connections.active" => Ok(Some(
-            jdbc_connections_metric(
-                app,
-                metric_name,
-                "Active connections",
-                &tag_filters,
-                JdbcConnectionsField::Active,
-            )
-            .await?,
-        )),
-        "jdbc.connections.idle" => Ok(Some(
-            jdbc_connections_metric(
-                app,
-                metric_name,
-                "Idle connections",
-                &tag_filters,
-                JdbcConnectionsField::Idle,
-            )
-            .await?,
-        )),
-        "jdbc.connections.max" => Ok(Some(
-            jdbc_connections_metric(
-                app,
-                metric_name,
-                "Max connections",
-                &tag_filters,
-                JdbcConnectionsField::Max,
-            )
-            .await?,
-        )),
-        "jdbc.connections.min" => Ok(Some(
-            jdbc_connections_metric(
-                app,
-                metric_name,
-                "Min connections",
-                &tag_filters,
-                JdbcConnectionsField::Min,
-            )
-            .await?,
-        )),
-        "process.cpu.usage" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The recent CPU usage for the komga-rust process",
-            None,
-            "VALUE",
-            process_cpu_usage_fraction().unwrap_or(0.0),
-        ))),
-        "process.files.max" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The maximum file descriptor count",
-            Some("files"),
-            "VALUE",
-            process_files_max().unwrap_or(0.0),
-        ))),
-        "process.files.open" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The open file descriptor count",
-            Some("files"),
-            "VALUE",
-            process_files_open().unwrap_or(0.0),
-        ))),
-        "process.start.time" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "Start time of the process since unix epoch",
-            Some("seconds"),
-            "VALUE",
-            process_start_time_epoch_seconds().unwrap_or(0.0),
-        ))),
-        "process.uptime" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The uptime of the komga-rust",
-            Some("seconds"),
-            "VALUE",
-            process_uptime_seconds().unwrap_or(0.0),
-        ))),
-        "system.cpu.count" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The number of processors available to the komga-rust",
-            Some("cpu"),
-            "VALUE",
-            available_cpu_count() as f64,
-        ))),
-        "system.cpu.usage" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The recent cpu usage of the whole system",
-            None,
-            "VALUE",
-            system_cpu_usage_fraction().unwrap_or(0.0),
-        ))),
-        "system.load.average.1m" => Ok(Some(single_measurement_metric(
-            metric_name,
-            "The sum of the number of runnable entities queued to the available processors and the number of runnable entities running on the available processors averaged over a period of time",
-            None,
-            "VALUE",
-            one_minute_load_average().unwrap_or(0.0),
-        ))),
-        "komga.tasks.execution" => Ok(Some(
-            metric_tasks_execution(app, tag_filters.get("type").map(String::as_str)).await?,
-        )),
-        "komga.tasks.failure" => Ok(Some(metric_tasks_failure(app).await?)),
-        "komga.libraries" => Ok(Some(
-            simple_metric(
-                metric_name,
-                "Libraries count",
-                Some("count"),
-                app.operational_runtime.load_libraries_count().await?,
-            )
-            .await,
-        )),
-        "komga.series" => Ok(Some(
-            metric_library_value(
-                metric_name,
-                "Series count grouped by library",
-                Some("count"),
-                app.operational_runtime
-                    .load_series_grouped_by_library()
-                    .await?,
-                tag_filters.get("library").map(String::as_str),
-            )
-            .await?,
-        )),
-        "komga.books" => Ok(Some(
-            metric_library_value(
-                metric_name,
-                "Books count grouped by library",
-                Some("count"),
-                app.operational_runtime
-                    .load_books_grouped_by_library()
-                    .await?,
-                tag_filters.get("library").map(String::as_str),
-            )
-            .await?,
-        )),
-        "komga.books.filesize" => Ok(Some(
-            metric_library_value(
-                metric_name,
-                "Books file size grouped by library",
-                Some("bytes"),
-                app.operational_runtime
-                    .load_books_filesize_grouped_by_library()
-                    .await?,
-                tag_filters.get("library").map(String::as_str),
-            )
-            .await?,
-        )),
-        "komga.sidecars" => Ok(Some(
-            metric_library_value(
-                metric_name,
-                "Sidecars count grouped by library",
-                Some("count"),
-                app.operational_runtime
-                    .load_sidecars_grouped_by_library()
-                    .await?,
-                tag_filters.get("library").map(String::as_str),
-            )
-            .await?,
-        )),
-        "komga.collections" => Ok(Some(
-            simple_metric(
-                metric_name,
-                "Collections count",
-                Some("count"),
-                app.operational_runtime.load_collections_count().await?,
-            )
-            .await,
-        )),
-        "komga.readlists" => Ok(Some(
-            simple_metric(
-                metric_name,
-                "Read lists count",
-                Some("count"),
-                app.operational_runtime.load_readlists_count().await?,
-            )
-            .await,
-        )),
-        _ => Ok(None),
-    }
-}
-
-fn metric_query_tags(uri: &Uri) -> HashMap<String, String> {
-    uri.query()
-        .unwrap_or_default()
-        .split('&')
-        .filter_map(|pair| pair.strip_prefix("tag="))
-        .filter_map(|pair| pair.split_once(':'))
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect()
-}
-
-async fn metric_tasks_execution(
-    app: &OperationalApiState,
-    task_type: Option<&str>,
-) -> Result<Value, String> {
-    let values = app.operational_runtime.load_task_execution_values().await?;
-
-    let count = if let Some(task_type) = task_type {
-        values
-            .iter()
-            .find(|(kind, _)| kind.as_str() == task_type)
-            .map(|(_, value)| *value)
-            .unwrap_or(0.0)
-    } else {
-        values.iter().map(|(_, value)| *value).sum::<f64>()
-    };
-
-    let tags = unique_strings(
-        values
-            .iter()
-            .map(|(kind, _)| kind.clone())
-            .chain(known_task_metric_types()),
-    );
-    let total_time = count * 0.01;
-    let max_time = if count > 0.0 { 0.01 } else { 0.0 };
-
-    Ok(json!({
-        "name": "komga.tasks.execution",
-        "description": "Task execution statistics",
-        "measurements": [
-            { "statistic": "COUNT", "value": count },
-            { "statistic": "TOTAL_TIME", "value": total_time },
-            { "statistic": "MAX", "value": max_time }
-        ],
-        "availableTags": [
-            {
-                "tag": "type",
-                "values": tags,
-            }
-        ]
-    }))
-}
-
-async fn metric_tasks_failure(app: &OperationalApiState) -> Result<Value, String> {
-    let failures = app.operational_runtime.load_task_failure_count().await?;
-    let task_types = unique_strings(
-        app.operational_runtime
-            .load_task_execution_values()
-            .await?
-            .into_iter()
-            .map(|(kind, _)| kind)
-            .chain(known_task_metric_types()),
-    );
-
-    Ok(json!({
-        "name": "komga.tasks.failure",
-        "description": "Count of failed tasks",
-        "measurements": [{ "statistic": "COUNT", "value": failures }],
-        "availableTags": [
-            {
-                "tag": "type",
-                "values": task_types,
-            }
-        ],
-    }))
-}
-
-async fn metric_library_value(
-    name: &str,
-    description: &str,
-    base_unit: Option<&str>,
-    values: Vec<(String, f64)>,
-    requested_library: Option<&str>,
-) -> Result<Value, String> {
-    let value = match requested_library {
-        Some(library) => values
-            .iter()
-            .find(|(candidate, _)| candidate == library)
-            .map(|(_, value)| *value)
-            .unwrap_or(0.0),
-        None => values.iter().map(|(_, value)| *value).sum::<f64>(),
-    };
-
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": "VALUE", "value": value }]),
-        ),
-        (
-            "availableTags".to_string(),
-            json!([
-                {
-                    "tag": "library",
-                    "values": values
-                        .iter()
-                        .map(|(library, _)| library.clone())
-                        .collect::<Vec<_>>(),
-                }
-            ]),
-        ),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
-    }
-
-    Ok(Value::Object(metric))
-}
-
-async fn simple_metric(
-    name: &str,
-    description: &str,
-    base_unit: Option<&str>,
-    value: f64,
-) -> Value {
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": "VALUE", "value": value }]),
-        ),
-        ("availableTags".to_string(), Value::Array(vec![])),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
-    }
-
-    Value::Object(metric)
-}
-
-fn actuator_metric_names() -> Vec<&'static str> {
-    vec![
-        "application.ready.time",
-        "application.started.time",
-        "disk.free",
-        "disk.total",
-        "http.server.requests",
-        "jdbc.connections.active",
-        "jdbc.connections.idle",
-        "jdbc.connections.max",
-        "jdbc.connections.min",
-        "komga.books",
-        "komga.books.filesize",
-        "komga.collections",
-        "komga.libraries",
-        "komga.readlists",
-        "komga.series",
-        "komga.sidecars",
-        "komga.tasks.execution",
-        "komga.tasks.failure",
-        "process.cpu.usage",
-        "process.files.max",
-        "process.files.open",
-        "process.start.time",
-        "process.uptime",
-        "system.cpu.count",
-        "system.cpu.usage",
-        "system.load.average.1m",
-    ]
-}
-
-fn known_task_metric_types() -> impl Iterator<Item = String> {
-    TaskKind::all()
-        .iter()
-        .map(|kind| kind.simple_type().to_string())
-}
-
-fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
-    values.into_iter().fold(Vec::new(), |mut deduped, value| {
-        if !deduped.iter().any(|candidate| candidate == &value) {
-            deduped.push(value);
-        }
-        deduped
-    })
-}
-
-struct MetricSample {
-    tags: Vec<(&'static str, String)>,
-    measurements: Vec<(&'static str, f64)>,
-}
-
-impl MetricSample {
-    fn with_owned_tags<const M: usize>(
-        tags: Vec<(&'static str, String)>,
-        measurements: [(&'static str, f64); M],
-    ) -> Self {
-        Self {
-            tags,
-            measurements: measurements.into_iter().collect(),
-        }
-    }
-
-    fn tag_value(&self, key: &str) -> Option<&str> {
-        self.tags
-            .iter()
-            .find(|(candidate, _)| *candidate == key)
-            .map(|(_, value)| value.as_str())
-    }
-
-    fn matches_filters(&self, filters: &HashMap<String, String>) -> bool {
-        filters
-            .iter()
-            .all(|(key, value)| self.tag_value(key.as_str()) == Some(value.as_str()))
-    }
-
-    fn matches_filters_except(
-        &self,
-        filters: &HashMap<String, String>,
-        excluded_tag: &str,
-    ) -> bool {
-        filters.iter().all(|(key, value)| {
-            key == excluded_tag || self.tag_value(key.as_str()) == Some(value.as_str())
-        })
-    }
-}
-
-fn single_measurement_metric(
-    name: &str,
-    description: &str,
-    base_unit: Option<&str>,
-    statistic: &'static str,
-    value: f64,
-) -> Value {
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": statistic, "value": value }]),
-        ),
-        ("availableTags".to_string(), Value::Array(vec![])),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
-    }
-    Value::Object(metric)
-}
-
-fn metric_from_samples(
-    name: &str,
-    description: &str,
-    base_unit: Option<&str>,
-    samples: Vec<MetricSample>,
-    tag_filters: &HashMap<String, String>,
-) -> Value {
-    let matching_samples = samples
-        .iter()
-        .filter(|sample| sample.matches_filters(tag_filters))
-        .collect::<Vec<_>>();
-
-    let mut aggregated_measurements = Vec::<(&'static str, f64)>::new();
-    for sample in &matching_samples {
-        for (statistic, value) in &sample.measurements {
-            if let Some((_, existing)) = aggregated_measurements
-                .iter_mut()
-                .find(|(candidate, _)| candidate == statistic)
-            {
-                *existing += *value;
-            } else {
-                aggregated_measurements.push((statistic, *value));
-            }
-        }
-    }
-
-    let mut ordered_tag_keys = Vec::<&'static str>::new();
-    for sample in &samples {
-        for (key, _) in &sample.tags {
-            if !ordered_tag_keys.contains(key) {
-                ordered_tag_keys.push(*key);
-            }
-        }
-    }
-
-    let available_tags = ordered_tag_keys
-        .into_iter()
-        .filter(|key| !tag_filters.contains_key(*key))
-        .filter_map(|key| {
-            let mut values = Vec::<String>::new();
-            for sample in samples
-                .iter()
-                .filter(|sample| sample.matches_filters_except(tag_filters, key))
-            {
-                if let Some(value) = sample.tag_value(key)
-                    && !values.iter().any(|candidate| candidate == value)
-                {
-                    values.push(value.to_string());
-                }
-            }
-
-            if values.is_empty() {
-                None
-            } else {
-                Some(json!({ "tag": key, "values": values }))
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            Value::Array(
-                aggregated_measurements
-                    .into_iter()
-                    .map(|(statistic, value)| json!({ "statistic": statistic, "value": value }))
-                    .collect(),
-            ),
-        ),
-        ("availableTags".to_string(), Value::Array(available_tags)),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
-    }
-
-    Value::Object(metric)
-}
-
-fn http_server_requests_metric(
-    app: &OperationalApiState,
-    tag_filters: &HashMap<String, String>,
-) -> Value {
-    let samples = app
+fn metric_probe_snapshot(app: &OperationalApiState) -> ActuatorMetricProbeSnapshot {
+    let startup = app.operational.startup_timing.snapshot();
+    let disk_space = disk_space_details(&disk_space_probe_path(app));
+    let http_server_requests = app
         .operational
         .http_server_requests
         .snapshot()
         .into_iter()
-        .map(|(key, summary)| {
-            MetricSample::with_owned_tags(
-                vec![
-                    ("exception", key.exception),
-                    ("method", key.method),
-                    ("outcome", key.outcome),
-                    ("status", key.status),
-                    ("uri", key.uri),
-                ],
-                [
-                    ("COUNT", summary.count as f64),
-                    ("TOTAL_TIME", summary.total_time_seconds),
-                    ("MAX", summary.max_time_seconds),
-                ],
-            )
+        .map(|(key, summary)| ActuatorHttpServerRequestMetric {
+            exception: key.exception,
+            method: key.method,
+            outcome: key.outcome,
+            status: key.status,
+            uri: key.uri,
+            count: summary.count,
+            total_time_seconds: summary.total_time_seconds,
+            max_time_seconds: summary.max_time_seconds,
         })
         .collect();
 
-    metric_from_samples(
-        "http.server.requests",
-        "HTTP server request metrics",
-        Some("seconds"),
-        samples,
-        tag_filters,
-    )
-}
-
-enum JdbcConnectionsField {
-    Active,
-    Idle,
-    Max,
-    Min,
-}
-
-async fn jdbc_connections_metric(
-    app: &OperationalApiState,
-    name: &str,
-    description: &str,
-    tag_filters: &HashMap<String, String>,
-    field: JdbcConnectionsField,
-) -> Result<Value, String> {
-    let samples = app
-        .operational_runtime
-        .load_sqlite_pool_snapshots(&[
-            app.auth_db.database_file.as_path().to_path_buf(),
-            app.operational.runtime.tasks_db_file.clone(),
-        ])
-        .await?
-        .into_iter()
-        .map(|pool| {
-            let value = match field {
-                JdbcConnectionsField::Active => pool.in_use_connections,
-                JdbcConnectionsField::Idle => pool.idle_connections,
-                JdbcConnectionsField::Max => pool.max_connections,
-                JdbcConnectionsField::Min => pool.min_connections,
-            } as f64;
-            MetricSample::with_owned_tags(
-                vec![(
-                    "name",
-                    datasource_pool_name(app, &pool.path, pool.max_connections),
-                )],
-                [("VALUE", value)],
-            )
-        })
-        .collect();
-
-    Ok(metric_from_samples(
-        name,
-        description,
-        Some("connections"),
-        samples,
-        tag_filters,
-    ))
-}
-
-fn datasource_pool_name(
-    app: &OperationalApiState,
-    pool_path: &Path,
-    max_connections: u32,
-) -> String {
-    let normalized_main_path = normalized_runtime_path(app.auth_db.database_file.as_path());
-    let normalized_tasks_path = normalized_runtime_path(&app.operational.runtime.tasks_db_file);
-    let normalized_pool_path = normalized_runtime_path(pool_path);
-
-    if normalized_pool_path == normalized_main_path {
-        return format!("main-pool-max-{max_connections}");
+    ActuatorMetricProbeSnapshot {
+        application_ready_time_seconds: startup.application_ready_time_seconds,
+        application_started_time_seconds: startup.application_started_time_seconds,
+        disk_free_bytes: disk_space
+            .as_ref()
+            .map(|details| details.free as f64)
+            .unwrap_or(0.0),
+        disk_total_bytes: disk_space
+            .as_ref()
+            .map(|details| details.total as f64)
+            .unwrap_or(0.0),
+        process_cpu_usage: process_cpu_usage_fraction().unwrap_or(0.0),
+        process_files_max: process_files_max().unwrap_or(0.0),
+        process_files_open: process_files_open().unwrap_or(0.0),
+        process_start_time_seconds: process_start_time_epoch_seconds().unwrap_or(0.0),
+        process_uptime_seconds: process_uptime_seconds().unwrap_or(0.0),
+        system_cpu_count: available_cpu_count() as f64,
+        system_cpu_usage: system_cpu_usage_fraction().unwrap_or(0.0),
+        system_load_average_1m: one_minute_load_average().unwrap_or(0.0),
+        http_server_requests,
+        main_db_path: app.auth_db.database_file.as_path().to_path_buf(),
+        tasks_db_path: app.operational.runtime.tasks_db_file.clone(),
     }
-    if normalized_pool_path == normalized_tasks_path {
-        return format!("tasks-pool-max-{max_connections}");
-    }
-
-    let stem = normalized_pool_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("sqlite");
-    format!("{stem}-pool-max-{max_connections}")
 }
 
-fn normalized_runtime_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-struct ProcessMemorySnapshot {
-    heap_used: u64,
-    heap_committed: u64,
-    heap_max: u64,
-    non_heap_used: u64,
-    non_heap_committed: u64,
-    non_heap_max: u64,
-}
-
-fn process_memory_snapshot() -> ProcessMemorySnapshot {
+fn process_memory_snapshot() -> ActuatorProcessMemorySnapshot {
     #[cfg(target_os = "linux")]
     {
         let mut resident_bytes = 0_u64;
@@ -1227,7 +391,7 @@ fn process_memory_snapshot() -> ProcessMemorySnapshot {
                 }
             }
         }
-        ProcessMemorySnapshot {
+        ActuatorProcessMemorySnapshot {
             heap_used: resident_bytes,
             heap_committed: resident_bytes.max(virtual_bytes / 2),
             heap_max: virtual_bytes.max(resident_bytes),
@@ -1239,7 +403,7 @@ fn process_memory_snapshot() -> ProcessMemorySnapshot {
 
     #[cfg(not(target_os = "linux"))]
     {
-        ProcessMemorySnapshot {
+        ActuatorProcessMemorySnapshot {
             heap_used: 0,
             heap_committed: 0,
             heap_max: 0,
