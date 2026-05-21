@@ -21,7 +21,7 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
-use komga_application::discovery::DiscoveryDetailPort;
+use komga_application::discovery::BookDetailPort;
 use komga_application::media_assets::{BookMediaRecord, ContentResolverPort, MediaReaderPort};
 use komga_application::operational::ServerSettingsPort;
 
@@ -81,7 +81,7 @@ pub(crate) async fn book_file_response(
 pub(crate) async fn book_page_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
-    discovery_detail: &dyn DiscoveryDetailPort,
+    discovery_detail: &dyn BookDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -236,7 +236,7 @@ pub(crate) async fn book_page_response(
 pub(crate) async fn book_page_raw_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
-    discovery_detail: &dyn DiscoveryDetailPort,
+    discovery_detail: &dyn BookDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -387,7 +387,7 @@ pub(crate) async fn book_thumbnail_opds_small_response(
 }
 
 async fn resolve_book_id_for_persisted(
-    discovery_detail: &dyn DiscoveryDetailPort,
+    discovery_detail: &dyn BookDetailPort,
     requested_book_id: &str,
 ) -> String {
     let Some(index) = requested_book_id

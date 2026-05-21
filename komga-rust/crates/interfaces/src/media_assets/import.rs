@@ -186,13 +186,20 @@ mod tests {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("test pool");
         let handle = DatabaseHandle::single_pool(PathBuf::from(":memory:"), pool.clone());
 
+        let detail_access: Arc<
+            komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess,
+        > = Arc::new(DiscoveryDetailAccess::new(handle, PathBuf::new()));
+
         MediaAssetsState {
             read_progress: crate::state::ReadProgressState::default(),
             identity: crate::state::tests::test_identity_state().await,
             task_queue: TaskQueueState {
                 queue: task_queue.clone(),
             },
-            discovery_detail: Arc::new(DiscoveryDetailAccess::new(handle, PathBuf::new())),
+            book_detail: detail_access.clone(),
+            series_detail: detail_access.clone(),
+            collection: detail_access.clone(),
+            readlist: detail_access,
             reader: MediaReader::new(pool.clone()),
             content: ContentResolver,
             thumbnails: ThumbnailWriter::new(pool.clone()),

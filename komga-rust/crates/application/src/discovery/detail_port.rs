@@ -281,12 +281,10 @@ pub struct SeriesSummaryRecord {
     pub oneshot: bool,
 }
 
-// --- Port trait ---
+// --- Port traits ---
 
 #[async_trait]
-#[allow(clippy::too_many_arguments)]
-pub trait DiscoveryDetailPort: Send + Sync {
-    // Books
+pub trait BookDetailPort: Send + Sync {
     async fn load_book_id_by_sorted_position(&self, index: usize)
     -> Result<Option<String>, String>;
 
@@ -311,8 +309,10 @@ pub trait DiscoveryDetailPort: Send + Sync {
         &self,
         book_id: &str,
     ) -> Result<Vec<PersistedBookAuthorRecord>, String>;
+}
 
-    // Series
+#[async_trait]
+pub trait SeriesDetailPort: Send + Sync {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
 
     async fn load_series_restrictions(
@@ -364,8 +364,10 @@ pub trait DiscoveryDetailPort: Send + Sync {
         &self,
         series_id: &str,
     ) -> Result<(), String>;
+}
 
-    // Collections
+#[async_trait]
+pub trait CollectionPort: Send + Sync {
     async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
     async fn load_persisted_collections(
@@ -403,8 +405,11 @@ pub trait DiscoveryDetailPort: Send + Sync {
     async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
 
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+}
 
-    // Readlists
+#[async_trait]
+#[allow(clippy::too_many_arguments)]
+pub trait ReadlistPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
     ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;

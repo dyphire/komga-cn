@@ -14,14 +14,14 @@ pub use browse::{
     SeriesBrowseRequest,
 };
 pub use detail_port::{
-    DiscoveryDetailPort, DiscoveryPersistedReadProgressRecord,
+    BookDetailPort, CollectionPort, DiscoveryPersistedReadProgressRecord,
     DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
     ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
     PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
-    SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    PersistedSeriesRestrictionRecord, ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
 };
 pub use index_maintenance::{
     DiscoveryIndexDocument, DiscoveryIndexEntityType, DiscoveryIndexError, DiscoveryIndexEvent,

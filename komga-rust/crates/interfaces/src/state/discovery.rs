@@ -3,14 +3,14 @@ use axum::extract::FromRef;
 use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
 
 pub use komga_application::discovery::{
-    DiscoveryDetailPort, DiscoveryPersistedReadProgressRecord,
+    BookDetailPort, CollectionPort, DiscoveryPersistedReadProgressRecord,
     DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord, DiscoverySearchService,
     ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
     PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
-    SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    PersistedSeriesRestrictionRecord, ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
 };
 
 #[derive(Clone)]
@@ -18,7 +18,10 @@ pub struct DiscoveryState {
     pub(crate) discovery_auth: DiscoveryAuthState,
     pub(crate) identity: IdentityState,
     pub(crate) discovery_search: Arc<dyn DiscoverySearchService>,
-    pub(crate) discovery_detail: Arc<dyn DiscoveryDetailPort>,
+    pub(crate) book_detail: Arc<dyn BookDetailPort>,
+    pub(crate) series_detail: Arc<dyn SeriesDetailPort>,
+    pub(crate) collection: Arc<dyn CollectionPort>,
+    pub(crate) readlist: Arc<dyn ReadlistPort>,
     pub(crate) discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub(crate) discovery_facets: Arc<dyn DiscoveryFacetService>,
 }
@@ -29,7 +32,10 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
             discovery_auth: app.discovery_auth.clone(),
             identity: IdentityState::from_ref(app),
             discovery_search: app.services.discovery_search.clone(),
-            discovery_detail: app.services.discovery_detail.clone(),
+            book_detail: app.services.book_detail.clone(),
+            series_detail: app.services.series_detail.clone(),
+            collection: app.services.collection.clone(),
+            readlist: app.services.readlist.clone(),
             discovery_browse: app.services.discovery_browse.clone(),
             discovery_facets: app.services.discovery_facets.clone(),
         }

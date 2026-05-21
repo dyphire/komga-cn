@@ -3,12 +3,13 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use komga_application::discovery::{
-    DiscoveryDetailPort, DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
-    ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
-    PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+    BookDetailPort, CollectionPort, DiscoveryPersistedReadlistBookRecord,
+    DiscoveryPersistedReadlistRecord, ExistingSeriesMetadataRecord, PersistedBookAuthorRecord,
+    PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
-    PersistedSeriesRestrictionRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    PersistedSeriesRestrictionRecord, ReadlistPort, SeriesDetailPort, SeriesMetadataUpdateRecord,
+    SeriesSummaryRecord,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -39,7 +40,7 @@ impl DiscoveryDetailAccess {
 }
 
 #[async_trait]
-impl DiscoveryDetailPort for DiscoveryDetailAccess {
+impl BookDetailPort for DiscoveryDetailAccess {
     async fn load_book_id_by_sorted_position(
         &self,
         index: usize,
@@ -76,7 +77,10 @@ impl DiscoveryDetailPort for DiscoveryDetailAccess {
     ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
         readlists::load_persisted_book_authors(self.db.read_pool(), book_id).await
     }
+}
 
+#[async_trait]
+impl SeriesDetailPort for DiscoveryDetailAccess {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
         collections::load_series_library_id(self.db.read_pool(), series_id).await
     }
@@ -200,7 +204,10 @@ impl DiscoveryDetailPort for DiscoveryDetailAccess {
         )
         .await
     }
+}
 
+#[async_trait]
+impl CollectionPort for DiscoveryDetailAccess {
     async fn persisted_collections_exist(&self) -> Result<bool, String> {
         collections::persisted_collections_exist(self.db.read_pool()).await
     }
@@ -283,7 +290,10 @@ impl DiscoveryDetailPort for DiscoveryDetailAccess {
         )
         .await
     }
+}
 
+#[async_trait]
+impl ReadlistPort for DiscoveryDetailAccess {
     async fn load_persisted_readlists(
         &self,
     ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {

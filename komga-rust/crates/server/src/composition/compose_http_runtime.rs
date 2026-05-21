@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
-    DiscoveryBrowseService, DiscoveryDetailPort, DiscoveryFacetService, DiscoverySearchService,
-    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+    BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
+    DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+    ReadlistPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
 use komga_application::operational::OperationalMetricsPort;
@@ -63,10 +64,14 @@ pub fn compose_http_runtime(
     let identity = IdentityState::new(Arc::new(IdentityAccess::new(db.clone())));
     let operational_runtime_service: Arc<dyn OperationalMetricsPort> =
         Arc::new(OperationalMetricsAccess::new(db.clone(), tasks_db));
-    let discovery_detail: Arc<dyn DiscoveryDetailPort> = Arc::new(DiscoveryDetailAccess::new(
+    let discovery_detail_access = Arc::new(DiscoveryDetailAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
+    let book_detail: Arc<dyn BookDetailPort> = discovery_detail_access.clone();
+    let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
+    let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
+    let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
     let discovery_search: Arc<dyn DiscoverySearchService> = Arc::new(
         RuntimePersistedDiscoveryAccess::new(db.clone(), config.lucene_data_directory.clone()),
     );
@@ -133,7 +138,10 @@ pub fn compose_http_runtime(
         opds_catalog,
         opds_persisted,
         discovery_search,
-        discovery_detail,
+        book_detail,
+        series_detail,
+        collection,
+        readlist,
         discovery_browse,
         discovery_facets,
         media_reader: Arc::new(MediaReader::new(db.read_pool().clone())),

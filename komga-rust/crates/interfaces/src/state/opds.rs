@@ -14,7 +14,8 @@ pub struct OpdsState {
     pub(crate) server_settings: Arc<dyn komga_application::operational::ServerSettingsPort>,
     pub(crate) opds_catalog: Arc<dyn OpdsCatalogPort>,
     pub(crate) opds_persisted: Arc<dyn OpdsPersistedPort>,
-    pub(crate) discovery_detail: Arc<dyn komga_application::discovery::DiscoveryDetailPort>,
+    pub(crate) book_detail: Arc<dyn komga_application::discovery::BookDetailPort>,
+    pub(crate) series_detail: Arc<dyn komga_application::discovery::SeriesDetailPort>,
     pub(crate) reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,
     pub(crate) content: Arc<dyn komga_application::media_assets::ContentResolverPort>,
 }
@@ -25,7 +26,8 @@ impl FromRef<Arc<HttpAppState>> for OpdsState {
             server_settings: app.services.server_settings.clone(),
             opds_catalog: app.services.opds_catalog.clone(),
             opds_persisted: app.services.opds_persisted.clone(),
-            discovery_detail: app.services.discovery_detail.clone(),
+            book_detail: app.services.book_detail.clone(),
+            series_detail: app.services.series_detail.clone(),
             reader: app.services.media_reader.clone(),
             content: app.services.content_resolver.clone(),
         }

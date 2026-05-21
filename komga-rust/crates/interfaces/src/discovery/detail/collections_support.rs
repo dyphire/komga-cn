@@ -11,13 +11,13 @@ pub struct PersistedCollectionWriteInput {
 }
 
 pub async fn persisted_collections_exist(app: &DiscoveryState) -> Result<bool, String> {
-    app.discovery_detail.persisted_collections_exist().await
+    app.collection.persisted_collections_exist().await
 }
 
 pub(super) async fn load_persisted_collections(
     app: &DiscoveryState,
 ) -> Result<Vec<CollectionReadModel>, String> {
-    let rows = app.discovery_detail.load_persisted_collections().await?;
+    let rows = app.collection.load_persisted_collections().await?;
 
     let mut collections = Vec::with_capacity(rows.len());
     for row in rows {
@@ -27,7 +27,7 @@ pub(super) async fn load_persisted_collections(
             name: row.name,
             ordered: row.ordered,
             series_ids: app
-                .discovery_detail
+                .collection
                 .load_persisted_collection_series_ids(&id)
                 .await?,
             created_date: row.created_date,
@@ -44,7 +44,7 @@ pub(super) async fn load_persisted_collection_detail(
     collection_id: &str,
 ) -> Result<Option<CollectionReadModel>, String> {
     let Some(row) = app
-        .discovery_detail
+        .collection
         .load_persisted_collection_detail(collection_id)
         .await?
     else {
@@ -56,7 +56,7 @@ pub(super) async fn load_persisted_collection_detail(
         name: row.name,
         ordered: row.ordered,
         series_ids: app
-            .discovery_detail
+            .collection
             .load_persisted_collection_series_ids(collection_id)
             .await?,
         created_date: row.created_date,
@@ -71,7 +71,7 @@ pub async fn load_series_library_id(
     app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Option<String>, String> {
-    app.discovery_detail.load_series_library_id(series_id).await
+    app.series_detail.load_series_library_id(series_id).await
 }
 
 pub async fn series_visible_to_context(
@@ -103,7 +103,7 @@ pub async fn series_visible_to_context(
     };
 
     let restriction_record = app
-        .discovery_detail
+        .series_detail
         .load_series_restrictions(series_id)
         .await?;
 
@@ -177,7 +177,7 @@ pub async fn persist_collection_create(
     input: &PersistedCollectionWriteInput,
 ) -> Result<String, String> {
     let collection_id = generated_collection_id();
-    app.discovery_detail
+    app.collection
         .persist_collection_create(
             &collection_id,
             &input.name,
@@ -205,7 +205,7 @@ pub async fn persist_collection_update(
     input: &PersistedCollectionWriteInput,
 ) -> Result<bool, String> {
     let updated = app
-        .discovery_detail
+        .collection
         .persist_collection_update(collection_id, &input.name, input.ordered, &input.series_ids)
         .await?;
     if updated {
@@ -228,7 +228,7 @@ pub async fn delete_persisted_collection(
 ) -> Result<bool, String> {
     let existing = load_persisted_collection_detail(app, collection_id).await?;
     let deleted = app
-        .discovery_detail
+        .collection
         .delete_persisted_collection(collection_id)
         .await?;
     if deleted && let Some(collection) = existing {
@@ -249,7 +249,7 @@ pub async fn upsert_collection_search_document(
     app: &DiscoveryState,
     collection_id: &str,
 ) -> Result<bool, String> {
-    app.discovery_detail
+    app.collection
         .upsert_collection_search_document(collection_id)
         .await
 }
@@ -258,7 +258,7 @@ pub async fn delete_collection_search_document(
     app: &DiscoveryState,
     collection_id: &str,
 ) -> Result<(), String> {
-    app.discovery_detail
+    app.collection
         .delete_collection_search_document(collection_id)
         .await
 }

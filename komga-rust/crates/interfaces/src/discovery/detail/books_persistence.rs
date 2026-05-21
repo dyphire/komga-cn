@@ -36,11 +36,7 @@ pub async fn resolve_book_id_for_persisted(
         return requested_book_id.to_string();
     }
 
-    match app
-        .discovery_detail
-        .load_book_id_by_sorted_position(index)
-        .await
-    {
+    match app.book_detail.load_book_id_by_sorted_position(index).await {
         Ok(Some(book_id)) => book_id,
         _ => requested_book_id.to_string(),
     }
@@ -51,7 +47,7 @@ pub async fn load_persisted_book_resource(
     book_id: &str,
 ) -> Result<Option<PersistedBookResource>, String> {
     let resource = app
-        .discovery_detail
+        .book_detail
         .load_persisted_book_resource(book_id)
         .await?
         .map(|row| PersistedBookResource {
@@ -68,7 +64,7 @@ pub(super) async fn load_persisted_book_detail(
     user_id: Option<&str>,
 ) -> Result<Option<BookDetailReadModel>, String> {
     let model = app
-        .discovery_detail
+        .book_detail
         .load_persisted_book_detail(book_id, user_id)
         .await?
         .map(|row| BookDetailReadModel {
@@ -177,7 +173,7 @@ pub(super) async fn load_persisted_book_sibling_detail(
     };
 
     let Some(sibling_id) = app
-        .discovery_detail
+        .book_detail
         .load_persisted_book_sibling_id(book_id, direction)
         .await?
     else {

@@ -1,5 +1,8 @@
 use super::*;
-use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
+use komga_application::discovery::{
+    BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService, ReadlistPort,
+    SeriesDetailPort,
+};
 
 #[derive(Clone)]
 pub struct HttpServices {
@@ -12,7 +15,10 @@ pub struct HttpServices {
     pub opds_catalog: Arc<dyn komga_application::opds::OpdsCatalogPort>,
     pub opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort>,
     pub discovery_search: Arc<dyn DiscoverySearchService>,
-    pub discovery_detail: Arc<dyn komga_application::discovery::DiscoveryDetailPort>,
+    pub book_detail: Arc<dyn BookDetailPort>,
+    pub series_detail: Arc<dyn SeriesDetailPort>,
+    pub collection: Arc<dyn CollectionPort>,
+    pub readlist: Arc<dyn ReadlistPort>,
     pub discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub discovery_facets: Arc<dyn DiscoveryFacetService>,
     pub media_reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,

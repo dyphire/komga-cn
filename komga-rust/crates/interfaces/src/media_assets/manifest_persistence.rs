@@ -1,6 +1,6 @@
 use super::*;
 use flate2::read::GzDecoder;
-use komga_application::discovery::DiscoveryDetailPort;
+use komga_application::discovery::{BookDetailPort, SeriesDetailPort};
 use komga_application::media_assets::{
     BookPageRecord, ContentResolverPort, MediaReaderPort, PersistedMediaFileRecord,
 };
@@ -479,16 +479,17 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
 }
 
 async fn load_persisted_webpub_metadata_additions(
-    discovery_detail: &dyn DiscoveryDetailPort,
+    book_detail: &dyn BookDetailPort,
+    series_detail: &dyn SeriesDetailPort,
     book_id: &str,
 ) -> Result<Option<(serde_json::Map<String, Value>, bool)>, String> {
-    let Some(book) = discovery_detail
+    let Some(book) = book_detail
         .load_persisted_book_detail(book_id, None)
         .await?
     else {
         return Ok(None);
     };
-    let series = discovery_detail
+    let series = series_detail
         .load_persisted_series_detail(&book.series_id)
         .await?;
 
@@ -685,7 +686,8 @@ fn extend_webpub_metadata_with_role_authors(
 pub(crate) async fn build_persisted_book_manifest(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
-    discovery_detail: &dyn DiscoveryDetailPort,
+    book_detail: &dyn BookDetailPort,
+    series_detail: &dyn SeriesDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -708,7 +710,7 @@ pub(crate) async fn build_persisted_book_manifest(
 
     let profile = manifest_profile_from_media_type(&media_type);
     let webpub_additions =
-        load_persisted_webpub_metadata_additions(discovery_detail, book_id).await?;
+        load_persisted_webpub_metadata_additions(book_detail, series_detail, book_id).await?;
     let epub_divina_compatible = webpub_additions
         .as_ref()
         .is_some_and(|(_, epub_divina_compatible)| *epub_divina_compatible);

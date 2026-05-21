@@ -47,7 +47,8 @@ async fn opds_manifest_variant(
     match build_persisted_book_manifest(
         app.reader.as_ref(),
         app.content.as_ref(),
-        app.discovery_detail.as_ref(),
+        app.book_detail.as_ref(),
+        app.series_detail.as_ref(),
         user,
         &headers,
         book_id,
@@ -57,7 +58,7 @@ async fn opds_manifest_variant(
     {
         Ok(ManifestBuildOutcome::Found(_, mut payload)) => {
             let series_id = app
-                .discovery_detail
+                .book_detail
                 .load_persisted_book_detail(book_id, None)
                 .await
                 .ok()
