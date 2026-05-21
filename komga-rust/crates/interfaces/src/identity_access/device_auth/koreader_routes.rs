@@ -86,7 +86,10 @@ async fn load_koreader_book_target(
     app: &IdentityAccessState,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    app.identity.load_koreader_book_target(book_hash).await
+    app.identity
+        .device_sync()
+        .load_koreader_book_target(book_hash)
+        .await
 }
 
 async fn load_read_progress(
@@ -94,7 +97,10 @@ async fn load_read_progress(
     book_id: &str,
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, String> {
-    app.identity.load_read_progress(book_id, user_id).await
+    app.identity
+        .device_sync()
+        .load_read_progress(book_id, user_id)
+        .await
 }
 
 pub async fn koreader_user_create(

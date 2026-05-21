@@ -85,12 +85,14 @@ pub fn compose_http_runtime(
         OpdsPersistedAccess::new(db.clone(), config.lucene_data_directory.clone()),
     );
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
-    identity.sync_remember_me_runtime_database_file(remember_me_runtime_key.as_str());
+    identity
+        .session_lifecycle()
+        .sync_remember_me_runtime_database_file(remember_me_runtime_key.as_str());
     preload_remember_me_runtime_settings(config, remember_me_runtime_key.as_str(), &identity);
     // The current registry still derives both token families from the same configured root,
     // but the HTTP state keeps separate runtime keys so session and remember-me semantics are explicit.
     let session_runtime_key = remember_me_runtime_key.clone();
-    identity.sync_session_runtime_settings(
+    identity.session_lifecycle().sync_session_runtime_settings(
         session_runtime_key.as_str(),
         config.session_max_inactive_seconds,
     );
@@ -201,11 +203,13 @@ fn preload_remember_me_runtime_settings(
     let (remember_me_key, remember_me_duration_days) =
         operational_access::load_remember_me_runtime_settings(config.database_file.as_path())
             .expect("remember-me startup settings should load");
-    identity.sync_remember_me_runtime_settings(
-        remember_me_runtime_key,
-        remember_me_key.as_str(),
-        remember_me_duration_days,
-    );
+    identity
+        .session_lifecycle()
+        .sync_remember_me_runtime_settings(
+            remember_me_runtime_key,
+            remember_me_key.as_str(),
+            remember_me_duration_days,
+        );
 }
 
 fn compose_discovery_browse_service(

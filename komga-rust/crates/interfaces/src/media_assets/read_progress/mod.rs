@@ -29,7 +29,10 @@ pub(crate) async fn load_read_progress_from_services(
     book_id: &str,
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, String> {
-    app.identity.load_read_progress(book_id, user_id).await
+    app.identity
+        .device_sync()
+        .load_read_progress(book_id, user_id)
+        .await
 }
 
 pub(crate) async fn load_series_book_ids_from_services(

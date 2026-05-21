@@ -25,14 +25,20 @@ async fn load_thumbnail_by_id(
     app: &IdentityAccessState,
     thumbnail_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
-    app.identity.load_thumbnail_by_id(thumbnail_id).await
+    app.identity
+        .device_sync()
+        .load_thumbnail_by_id(thumbnail_id)
+        .await
 }
 
 async fn load_kobo_metadata_record(
     app: &IdentityAccessState,
     book_id: &str,
 ) -> Result<Option<crate::state::KoboMetadataRecord>, String> {
-    app.identity.load_kobo_metadata_record(book_id).await
+    app.identity
+        .device_sync()
+        .load_kobo_metadata_record(book_id)
+        .await
 }
 
 async fn load_read_progress(
@@ -40,18 +46,27 @@ async fn load_read_progress(
     book_id: &str,
     user_id: &str,
 ) -> Result<Option<PersistedReadProgressRecord>, String> {
-    app.identity.load_read_progress(book_id, user_id).await
+    app.identity
+        .device_sync()
+        .load_read_progress(book_id, user_id)
+        .await
 }
 
 async fn persisted_book_exists(app: &IdentityAccessState, book_id: &str) -> Result<bool, String> {
-    app.identity.persisted_book_exists(book_id).await
+    app.identity
+        .device_sync()
+        .persisted_book_exists(book_id)
+        .await
 }
 
 async fn load_book_created_timestamp(
     app: &IdentityAccessState,
     book_id: &str,
 ) -> Result<Option<String>, String> {
-    app.identity.load_book_created_timestamp(book_id).await
+    app.identity
+        .device_sync()
+        .load_book_created_timestamp(book_id)
+        .await
 }
 
 async fn load_book_last_epub_position_locator(
@@ -59,6 +74,7 @@ async fn load_book_last_epub_position_locator(
     book_id: &str,
 ) -> Result<Option<Value>, String> {
     app.identity
+        .device_sync()
         .load_book_last_epub_position_locator(book_id)
         .await
 }
@@ -170,6 +186,7 @@ pub async fn kobo_library_sync(
     let store_sync_enabled = load_kobo_proxy_enabled(app.server_settings.as_ref()).await;
     let sync_response = match app
         .identity
+        .device_sync()
         .load_kobo_library_sync(KoboLibrarySyncRequest {
             user: current_user,
             current_api_key_id,

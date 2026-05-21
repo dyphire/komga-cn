@@ -12,6 +12,7 @@ pub async fn persisted_api_key_comment_exists(
     comment: &str,
 ) -> Option<bool> {
     identity
+        .user_admin()
         .persisted_api_key_comment_exists(user_id, comment)
         .await
 }
@@ -21,7 +22,10 @@ pub async fn persisted_api_key_metadata(
     headers: &HeaderMap,
 ) -> Option<PersistedApiKeyMetadata> {
     let api_key = api_key_header_value(headers)?;
-    identity.api_key_metadata_by_token(&api_key).await
+    identity
+        .authentication()
+        .api_key_metadata_by_token(&api_key)
+        .await
 }
 
 pub async fn persisted_api_key_user(
@@ -31,14 +35,20 @@ pub async fn persisted_api_key_user(
     let Some(api_key) = api_key_header_value(headers) else {
         return Some(AuthOutcome::Missing);
     };
-    identity.authenticate_api_key(&api_key).await
+    identity
+        .authentication()
+        .authenticate_api_key(&api_key)
+        .await
 }
 
 pub async fn persisted_api_key_user_by_token(
     identity: &IdentityState,
     api_key: &str,
 ) -> Option<AuthOutcome> {
-    identity.authenticate_api_key(api_key).await
+    identity
+        .authentication()
+        .authenticate_api_key(api_key)
+        .await
 }
 
 pub async fn persisted_basic_user(
@@ -48,11 +58,17 @@ pub async fn persisted_basic_user(
     let Some((username, password)) = basic_credentials(headers) else {
         return Some(AuthOutcome::Missing);
     };
-    identity.authenticate_basic(&username, &password).await
+    identity
+        .authentication()
+        .authenticate_basic(&username, &password)
+        .await
 }
 
 pub async fn persisted_cleanup_authentication_activity(identity: &IdentityState) -> Option<u64> {
-    identity.persisted_cleanup_authentication_activity().await
+    identity
+        .auth_activity()
+        .persisted_cleanup_authentication_activity()
+        .await
 }
 
 pub async fn persisted_create_api_key(
@@ -60,7 +76,10 @@ pub async fn persisted_create_api_key(
     user_id: &str,
     comment: &str,
 ) -> Option<PersistedApiKey> {
-    identity.persisted_create_api_key(user_id, comment).await
+    identity
+        .user_admin()
+        .persisted_create_api_key(user_id, comment)
+        .await
 }
 
 pub async fn persisted_delete_api_key_by_id(
@@ -69,6 +88,7 @@ pub async fn persisted_delete_api_key_by_id(
     api_key_id: &str,
 ) -> Option<bool> {
     identity
+        .user_admin()
         .persisted_delete_api_key_by_id(user_id, api_key_id)
         .await
 }
@@ -79,6 +99,7 @@ pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
     api_key_id: &str,
 ) -> Option<PersistedAuthenticationActivity> {
     identity
+        .auth_activity()
         .persisted_latest_authentication_activity_by_user_and_api_key(user_id, api_key_id)
         .await
 }
@@ -87,7 +108,7 @@ pub async fn persisted_list_api_keys(
     identity: &IdentityState,
     user_id: &str,
 ) -> Option<Vec<PersistedApiKey>> {
-    identity.persisted_list_api_keys(user_id).await
+    identity.user_admin().persisted_list_api_keys(user_id).await
 }
 
 pub async fn persisted_list_authentication_activity(
@@ -95,6 +116,7 @@ pub async fn persisted_list_authentication_activity(
     user_id: Option<&str>,
 ) -> Option<Vec<PersistedAuthenticationActivity>> {
     identity
+        .auth_activity()
         .persisted_list_authentication_activity(user_id)
         .await
 }
@@ -106,6 +128,7 @@ pub async fn persisted_record_failed_authentication_activity(
     error: &str,
 ) -> Option<()> {
     identity
+        .auth_activity()
         .persisted_record_failed_authentication_activity(
             email,
             &input.source,
@@ -122,6 +145,7 @@ pub async fn persisted_record_successful_authentication_activity(
     input: AuthenticationActivityWriteInput,
 ) -> Option<()> {
     identity
+        .auth_activity()
         .persisted_record_successful_authentication_activity(
             user,
             &input.source,
@@ -139,12 +163,13 @@ pub async fn persisted_update_password_by_user_id(
     password: &str,
 ) -> Option<bool> {
     identity
+        .user_admin()
         .persisted_update_password_by_user_id(user_id, password)
         .await
 }
 
 pub async fn persisted_users(identity: &IdentityState) -> Option<Vec<AuthUser>> {
-    identity.persisted_users().await
+    identity.user_admin().persisted_users().await
 }
 
 fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {

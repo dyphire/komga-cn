@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
     AuthActivityPort, AuthOutcome, AuthUser, AuthenticationPort, CreateAuthUserInput,
-    DeviceSyncPort, IdentityAccessPort, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
-    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, ResolvedAuthToken,
+    DeviceSyncPort, KoboLibrarySyncRequest, KoboLibrarySyncResponse, PersistedApiKey,
+    PersistedApiKeyMetadata, PersistedAuthenticationActivity, ResolvedAuthToken,
     SessionLifecyclePort, SessionResolverPort, UpdateAuthUserInput, UpdateAuthUserResult,
     UserAdminPort,
 };
@@ -374,8 +374,6 @@ impl IdentityAccess {
         auth_identity::open_auth_pool(self.db.database_file()).await
     }
 }
-
-impl IdentityAccessPort for IdentityAccess {}
 
 impl SessionResolverPort for IdentityAccess {
     fn resolve_session_user(

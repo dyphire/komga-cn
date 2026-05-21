@@ -56,8 +56,9 @@ pub fn resolved_auth_token(
 ) -> Option<komga_application::identity_access::ResolvedAuthToken> {
     let session_token = token::session_token_from_headers(headers);
     let remember_me_token = token::remember_me_token_from_headers(headers);
-    let resolved =
-        identity.resolve_auth_token(session_token.as_deref(), remember_me_token.as_deref());
+    let resolved = identity
+        .session_resolver()
+        .resolve_auth_token(session_token.as_deref(), remember_me_token.as_deref());
     access_log::record_resolved_auth_user_id(
         resolved.as_ref().map(|resolved| user_id(&resolved.user)),
     );
@@ -95,11 +96,15 @@ pub fn sync_remember_me_runtime_settings(
     key: &str,
     duration_days: u64,
 ) {
-    identity.sync_remember_me_runtime_settings(runtime_key, key, duration_days)
+    identity
+        .session_lifecycle()
+        .sync_remember_me_runtime_settings(runtime_key, key, duration_days)
 }
 
 pub fn sync_remember_me_runtime_database_file(identity: &IdentityState, runtime_key: &str) {
-    identity.sync_remember_me_runtime_database_file(runtime_key);
+    identity
+        .session_lifecycle()
+        .sync_remember_me_runtime_database_file(runtime_key);
 }
 
 pub fn sync_session_runtime_settings(
@@ -107,15 +112,21 @@ pub fn sync_session_runtime_settings(
     runtime_key: &str,
     max_inactive_seconds: u64,
 ) {
-    identity.sync_session_runtime_settings(runtime_key, max_inactive_seconds);
+    identity
+        .session_lifecycle()
+        .sync_session_runtime_settings(runtime_key, max_inactive_seconds);
 }
 
 pub fn remember_me_max_age_seconds(identity: &IdentityState, runtime_key: &str) -> u64 {
-    identity.remember_me_max_age_seconds(runtime_key)
+    identity
+        .session_lifecycle()
+        .remember_me_max_age_seconds(runtime_key)
 }
 
 pub fn invalidate_user_sessions(identity: &IdentityState, user_id: &str) {
-    identity.invalidate_user_sessions(user_id);
+    identity
+        .session_lifecycle()
+        .invalidate_user_sessions(user_id);
 }
 
 pub fn invalidate_user_sessions_for_runtime_key(
@@ -123,13 +134,17 @@ pub fn invalidate_user_sessions_for_runtime_key(
     user_id: &str,
     runtime_key: &str,
 ) {
-    identity.invalidate_user_sessions_with_runtime_key(user_id, runtime_key);
+    identity
+        .session_lifecycle()
+        .invalidate_user_sessions_with_runtime_key(user_id, runtime_key);
 }
 
 pub fn invalidate_session_token(identity: &IdentityState, token: &str) {
-    identity.invalidate_session_token(token);
+    identity.session_lifecycle().invalidate_session_token(token);
 }
 
 pub fn invalidate_remember_me_token(identity: &IdentityState, token: &str) {
-    identity.invalidate_remember_me_token(token);
+    identity
+        .session_lifecycle()
+        .invalidate_remember_me_token(token);
 }

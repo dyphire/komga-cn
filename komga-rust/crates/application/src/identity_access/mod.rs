@@ -1,4 +1,3 @@
-mod access_port;
 mod device_records;
 mod device_tokens;
 mod kobo_sync;
@@ -8,7 +7,6 @@ mod principal_resolution;
 mod session_tokens;
 mod user_models;
 
-pub use access_port::IdentityAccessPort;
 pub use device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
     PersistedReadProgressRecord,

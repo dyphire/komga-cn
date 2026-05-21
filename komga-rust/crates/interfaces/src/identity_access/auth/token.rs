@@ -7,7 +7,9 @@ use crate::state::IdentityState;
 pub fn auth_token_user(identity: &IdentityState, headers: &HeaderMap) -> Option<AuthUser> {
     let session_token = session_token_from_headers(headers);
     let remember_me_token = remember_me_token_from_headers(headers);
-    identity.resolve_session_user(session_token.as_deref(), remember_me_token.as_deref())
+    identity
+        .session_resolver()
+        .resolve_session_user(session_token.as_deref(), remember_me_token.as_deref())
 }
 
 pub fn resolved_token(headers: &HeaderMap) -> String {
@@ -39,7 +41,9 @@ pub fn session_token_for_user_with_runtime_key(
     user: &AuthUser,
     runtime_key: &str,
 ) -> String {
-    identity.session_token_for_user(user, runtime_key)
+    identity
+        .session_lifecycle()
+        .session_token_for_user(user, runtime_key)
 }
 
 pub fn remember_me_token_for_user_with_runtime_key(
@@ -47,7 +51,9 @@ pub fn remember_me_token_for_user_with_runtime_key(
     user: &AuthUser,
     runtime_key: &str,
 ) -> Option<String> {
-    identity.remember_me_token_for_user(user, runtime_key)
+    identity
+        .session_lifecycle()
+        .remember_me_token_for_user(user, runtime_key)
 }
 
 fn x_auth_token(headers: &HeaderMap) -> Option<String> {

@@ -1,26 +1,68 @@
 use super::*;
 use axum::extract::FromRef;
 
-use komga_application::identity_access::IdentityAccessPort;
+use komga_application::identity_access::{
+    AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,
+    SessionResolverPort, UserAdminPort,
+};
 pub use komga_application::identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
     PersistedReadProgressRecord,
 };
 
 #[derive(Clone)]
-pub struct IdentityState(Arc<dyn IdentityAccessPort>);
-
-impl IdentityState {
-    pub fn new(access: Arc<dyn IdentityAccessPort>) -> Self {
-        Self(access)
-    }
+pub struct IdentityState {
+    authentication: Arc<dyn AuthenticationPort>,
+    session_resolver: Arc<dyn SessionResolverPort>,
+    session_lifecycle: Arc<dyn SessionLifecyclePort>,
+    user_admin: Arc<dyn UserAdminPort>,
+    auth_activity: Arc<dyn AuthActivityPort>,
+    device_sync: Arc<dyn DeviceSyncPort>,
 }
 
-impl std::ops::Deref for IdentityState {
-    type Target = dyn IdentityAccessPort + 'static;
+impl IdentityState {
+    pub fn new<T>(access: Arc<T>) -> Self
+    where
+        T: AuthenticationPort
+            + SessionResolverPort
+            + SessionLifecyclePort
+            + UserAdminPort
+            + AuthActivityPort
+            + DeviceSyncPort
+            + 'static,
+    {
+        Self {
+            authentication: access.clone(),
+            session_resolver: access.clone(),
+            session_lifecycle: access.clone(),
+            user_admin: access.clone(),
+            auth_activity: access.clone(),
+            device_sync: access,
+        }
+    }
 
-    fn deref(&self) -> &(dyn IdentityAccessPort + 'static) {
-        &*self.0
+    pub fn authentication(&self) -> &dyn AuthenticationPort {
+        &*self.authentication
+    }
+
+    pub fn session_resolver(&self) -> &dyn SessionResolverPort {
+        &*self.session_resolver
+    }
+
+    pub fn session_lifecycle(&self) -> &dyn SessionLifecyclePort {
+        &*self.session_lifecycle
+    }
+
+    pub fn user_admin(&self) -> &dyn UserAdminPort {
+        &*self.user_admin
+    }
+
+    pub fn auth_activity(&self) -> &dyn AuthActivityPort {
+        &*self.auth_activity
+    }
+
+    pub fn device_sync(&self) -> &dyn DeviceSyncPort {
+        &*self.device_sync
     }
 }
 

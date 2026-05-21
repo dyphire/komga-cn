@@ -47,12 +47,14 @@ pub async fn oauth2_authorization(
     let session_token = existing_session_token
         .clone()
         .unwrap_or_else(issue_oauth2_session_token);
-    app.identity.store_oauth2_authorization_state(
-        &state.remember_me_runtime_key,
-        &session_token,
-        &client.registration_id,
-        csrf_state.secret(),
-    );
+    app.identity
+        .session_lifecycle()
+        .store_oauth2_authorization_state(
+            &state.remember_me_runtime_key,
+            &session_token,
+            &client.registration_id,
+            csrf_state.secret(),
+        );
 
     let mut response = (
         StatusCode::FOUND,
@@ -142,11 +144,15 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-    let Some(expected_state) = app.identity.take_oauth2_authorization_state(
-        &auth_db.session_runtime_key,
-        &session_token,
-        &registration_id,
-    ) else {
+    let Some(expected_state) = app
+        .identity
+        .session_lifecycle()
+        .take_oauth2_authorization_state(
+            &auth_db.session_runtime_key,
+            &session_token,
+            &registration_id,
+        )
+    else {
         return oauth2_login_error_response(
             &app,
             &headers,
@@ -264,7 +270,12 @@ pub async fn oauth2_login_code(
     };
 
     let allow_create = oauth2_account_creation_enabled(&app).await;
-    let user = match app.identity.ensure_oauth_user(&email, allow_create).await {
+    let user = match app
+        .identity
+        .user_admin()
+        .ensure_oauth_user(&email, allow_create)
+        .await
+    {
         Ok(Some(user)) => user,
         Ok(None) => {
             return oauth2_login_error_response(
@@ -634,6 +645,7 @@ async fn oauth2_login_error_response(
     );
     let _ = app
         .identity
+        .auth_activity()
         .persisted_record_failed_authentication_activity(
             email,
             &input.source,
