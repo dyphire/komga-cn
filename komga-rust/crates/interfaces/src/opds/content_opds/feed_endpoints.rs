@@ -3,9 +3,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-use crate::identity_access::auth::{AuthUser, user_id};
+use crate::identity_access::auth::AuthUser;
 use crate::request_urls::app_absolute_url;
-use crate::state::{OpdsBookFeedEntry, OpdsSeriesEntry, OpdsState};
+use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsState};
 
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
@@ -13,11 +13,10 @@ use super::feeds::{
     parse_page_size,
 };
 use super::persisted::{
-    allowed_library_ids_for_user, content_allowed_by_restrictions,
-    has_visible_collections_for_scope, has_visible_readlists_for_scope, library_visible,
-    load_all_readlists, load_collection_series, load_collections, load_libraries, load_library,
-    load_readlist_books, load_readlists_for_library, opds_restrictions_for_user,
-    validate_library_scope,
+    allowed_library_ids_for_user, has_visible_collections_for_scope,
+    has_visible_readlists_for_scope, library_visible, load_all_readlists, load_collection_series,
+    load_collections, load_libraries, load_library, load_readlist_books,
+    load_readlists_for_library, opds_restrictions_for_user, validate_library_scope,
 };
 
 pub(super) async fn opds_v2_keep_reading_feed(
@@ -38,7 +37,6 @@ pub(super) async fn opds_v2_keep_reading_feed(
         return response;
     }
 
-    let user_id = user_id(user);
     let selected_library = if let Some(id) = library_id {
         match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
@@ -53,15 +51,15 @@ pub(super) async fn opds_v2_keep_reading_feed(
     } else {
         None
     };
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
 
-    let books = match app
-        .opds_catalog
-        .load_keep_reading_books(user_id, None)
+    let page_result = match feed_service
+        .keep_reading_page(&feed_user, None, page, size)
         .await
     {
-        Ok(books) => books,
+        Ok(page_result) => page_result,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -71,22 +69,9 @@ pub(super) async fn opds_v2_keep_reading_feed(
         }
     };
 
-    let visible_books = books
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let total_visible_books = visible_books.len();
-    let publications = visible_books
-        .into_iter()
-        .skip(page.saturating_mul(size))
-        .take(size)
+    let publications = page_result
+        .books
+        .iter()
         .map(|book| opds_publication_for_feed_entry(&headers, &book))
         .collect::<Vec<_>>();
 
@@ -106,7 +91,7 @@ pub(super) async fn opds_v2_keep_reading_feed(
         publications,
         page,
         size,
-        total_visible_books,
+        page_result.total_visible_books,
     )
 }
 
@@ -128,8 +113,6 @@ pub(super) async fn opds_v2_on_deck_feed(
         return response;
     }
 
-    let user_id = user_id(user);
-    let restrictions = opds_restrictions_for_user(user);
     let selected_library = if let Some(id) = library_id {
         match load_library(app.opds_persisted.as_ref(), id).await {
             Ok(library) => library,
@@ -145,12 +128,14 @@ pub(super) async fn opds_v2_on_deck_feed(
         None
     };
 
-    let books = match app
-        .opds_catalog
-        .load_on_deck_books(user_id, library_id)
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = match feed_service
+        .on_deck_page(&feed_user, library_id, page, size)
         .await
     {
-        Ok(books) => books,
+        Ok(page_result) => page_result,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -160,23 +145,9 @@ pub(super) async fn opds_v2_on_deck_feed(
         }
     };
 
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let visible_books = books
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let total_visible_books = visible_books.len();
-    let publications = visible_books
-        .into_iter()
-        .skip(page.saturating_mul(size))
-        .take(size)
+    let publications = page_result
+        .books
+        .iter()
         .map(|book| opds_publication_for_feed_entry(&headers, &book))
         .collect::<Vec<_>>();
 
@@ -196,7 +167,7 @@ pub(super) async fn opds_v2_on_deck_feed(
         publications,
         page,
         size,
-        total_visible_books,
+        page_result.total_visible_books,
     )
 }
 
@@ -232,19 +203,15 @@ pub(super) async fn opds_v2_latest_books_feed(
     } else {
         None
     };
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
 
-    let (visible_books, total_visible_books) = match load_visible_latest_books_page(
-        app,
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        page,
-        size,
-    )
-    .await
+    let page_result = match feed_service
+        .latest_books_page(&feed_user, None, page, size)
+        .await
     {
-        Ok(result) => result,
+        Ok(page_result) => page_result,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -254,9 +221,10 @@ pub(super) async fn opds_v2_latest_books_feed(
         }
     };
 
-    let publications = visible_books
-        .into_iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
+    let publications = page_result
+        .books
+        .iter()
+        .map(|book| opds_publication_for_feed_entry(&headers, book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
@@ -275,56 +243,8 @@ pub(super) async fn opds_v2_latest_books_feed(
         publications,
         page,
         size,
-        total_visible_books,
+        page_result.total_visible_books,
     )
-}
-
-async fn load_visible_latest_books_page(
-    app: &OpdsState,
-    allowed_library_ids: &Option<std::collections::HashSet<String>>,
-    restrictions: Option<&super::types::OpdsRestrictions>,
-    page: usize,
-    size: usize,
-) -> Result<(Vec<OpdsBookFeedEntry>, usize), String> {
-    let mut offset = 0;
-    let mut visible = Vec::new();
-    let mut total = 0;
-    let scan_limit = std::cmp::max(size, 100) as i64;
-    let page_start = page.saturating_mul(size);
-    let page_end = page_start.saturating_add(size);
-
-    loop {
-        let batch = app
-            .opds_catalog
-            .load_latest_books_paged(allowed_library_ids.as_ref(), None, None, offset, scan_limit)
-            .await?;
-        if batch.is_empty() {
-            break;
-        }
-
-        let batch_len = batch.len();
-        for book in batch {
-            if library_visible(allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-            {
-                if total >= page_start && total < page_end {
-                    visible.push(book);
-                }
-                total += 1;
-            }
-        }
-
-        if batch_len < scan_limit as usize {
-            break;
-        }
-        offset += batch_len as i64;
-    }
-
-    Ok((visible, total))
 }
 
 pub(super) async fn opds_v2_latest_series_feed(
@@ -358,19 +278,14 @@ pub(super) async fn opds_v2_latest_series_feed(
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
 
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let (visible_series, total_series) = match load_visible_latest_series_page(
-        app,
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-        page,
-        size,
-    )
-    .await
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = match feed_service
+        .latest_series_page(&feed_user, library_id, page, size)
+        .await
     {
-        Ok(result) => result,
+        Ok(page_result) => page_result,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -380,7 +295,8 @@ pub(super) async fn opds_v2_latest_series_feed(
         }
     };
 
-    let navigation = visible_series
+    let navigation = page_result
+        .series
         .into_iter()
         .map(|series| {
             json!({
@@ -408,58 +324,8 @@ pub(super) async fn opds_v2_latest_series_feed(
         navigation,
         page,
         size,
-        total_series,
+        page_result.total_visible_series,
     )
-}
-
-async fn load_visible_latest_series_page(
-    app: &OpdsState,
-    allowed_library_ids: &Option<std::collections::HashSet<String>>,
-    restrictions: Option<&super::types::OpdsRestrictions>,
-    library_id: Option<&str>,
-    page: usize,
-    size: usize,
-) -> Result<(Vec<OpdsSeriesEntry>, usize), String> {
-    let batch_size = 100_i64.max(size as i64);
-    let start = page.saturating_mul(size);
-    let end = start.saturating_add(size);
-    let mut offset = 0_i64;
-    let mut total = 0_usize;
-    let mut visible = Vec::new();
-
-    loop {
-        let batch = app
-            .opds_catalog
-            .load_latest_series_paged(allowed_library_ids.as_ref(), library_id, offset, batch_size)
-            .await?;
-        if batch.is_empty() {
-            break;
-        }
-
-        let batch_len = batch.len();
-        for series in batch {
-            if !series.one_shot
-                && library_visible(allowed_library_ids, &series.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    series.age_rating,
-                    &series.sharing_labels,
-                )
-            {
-                if total >= start && total < end {
-                    visible.push(series);
-                }
-                total += 1;
-            }
-        }
-
-        if batch_len < batch_size as usize {
-            break;
-        }
-        offset += batch_len as i64;
-    }
-
-    Ok((visible, total))
 }
 
 pub(super) async fn opds_v2_collections_feed(

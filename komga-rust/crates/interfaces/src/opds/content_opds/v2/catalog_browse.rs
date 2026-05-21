@@ -1,9 +1,7 @@
 use super::*;
-use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::{OpdsBookFeedEntry, OpdsSeriesEntry, OpdsState};
+use crate::identity_access::auth::AuthUser;
+use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsState};
 use axum::extract::State;
-
-const RECOMMENDED_PAGE_SIZE: i64 = 100;
 
 pub(crate) async fn opds_catalog(
     State(app): State<OpdsState>,
@@ -69,91 +67,92 @@ async fn opds_v2_recommended(
         None
     };
 
-    let user_id_value = user_id(user);
-
     let library_segment = selected_library
         .as_ref()
         .map(|library| format!("/{}", library.id))
         .unwrap_or_default();
     let recommended_path = format!("/opds/v2/libraries{library_segment}");
     let restrictions = opds_restrictions_for_user(user);
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
 
-    let mut keep_reading = app
-        .opds_catalog
-        .load_keep_reading_books(user_id_value, library_id)
+    let keep_reading = feed_service
+        .keep_reading_page(&feed_user, library_id, 0, 5)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let total_keep_reading = keep_reading.len();
-    keep_reading.truncate(5);
+        .ok();
     let keep_reading_publications = keep_reading
-        .into_iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
-        .collect::<Vec<_>>();
+        .as_ref()
+        .map(|page| {
+            page.books
+                .iter()
+                .map(|book| opds_publication_for_feed_entry(&headers, book))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let total_keep_reading = keep_reading
+        .as_ref()
+        .map(|page| page.total_visible_books)
+        .unwrap_or_default();
 
-    let mut on_deck = app
-        .opds_catalog
-        .load_on_deck_books(user_id_value, library_id)
+    let on_deck = feed_service
+        .on_deck_page(&feed_user, library_id, 0, 5)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let total_on_deck = on_deck.len();
-    on_deck.truncate(5);
+        .ok();
     let on_deck_publications = on_deck
-        .into_iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
-        .collect::<Vec<_>>();
-
-    let (latest_books, total_latest_books) = load_visible_latest_books_for_catalog(
-        app,
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        user_id_value,
-        library_id,
-    )
-    .await
-    .unwrap_or_default();
-    let latest_books_publications = latest_books
-        .into_iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
-        .collect::<Vec<_>>();
-
-    let (latest_series, total_latest_series) = load_visible_latest_series_for_catalog(
-        app,
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-    )
-    .await
-    .unwrap_or_default();
-    let latest_series_navigation = latest_series
-        .into_iter()
-        .map(|series| {
-            json!({
-                "title": series.title,
-                "href": app_absolute_url(&headers, format!("/opds/v2/series/{}", series.id).as_str()),
-                "type": "application/opds+json",
-            })
+        .as_ref()
+        .map(|page| {
+            page.books
+                .iter()
+                .map(|book| opds_publication_for_feed_entry(&headers, book))
+                .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
+        .unwrap_or_default();
+    let total_on_deck = on_deck
+        .as_ref()
+        .map(|page| page.total_visible_books)
+        .unwrap_or_default();
+
+    let latest_books = feed_service
+        .latest_books_page_with_read_progress(&feed_user, library_id, 0, 5)
+        .await
+        .ok();
+    let latest_books_publications = latest_books
+        .as_ref()
+        .map(|page| {
+            page.books
+                .iter()
+                .map(|book| opds_publication_for_feed_entry(&headers, book))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let total_latest_books = latest_books
+        .as_ref()
+        .map(|page| page.total_visible_books)
+        .unwrap_or_default();
+
+    let latest_series = feed_service
+        .latest_series_page(&feed_user, library_id, 0, 5)
+        .await
+        .ok();
+    let latest_series_navigation = latest_series
+        .as_ref()
+        .map(|page| {
+            page.series
+                .iter()
+                .map(|series| {
+                    json!({
+                        "title": series.title,
+                        "href": app_absolute_url(&headers, format!("/opds/v2/series/{}", series.id).as_str()),
+                        "type": "application/opds+json",
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let total_latest_series = latest_series
+        .as_ref()
+        .map(|page| page.total_visible_series)
+        .unwrap_or_default();
 
     let has_visible_collections = has_visible_collections_for_scope(
         app.opds_persisted.as_ref(),
@@ -312,107 +311,6 @@ async fn opds_v2_recommended(
         })),
     )
         .into_response()
-}
-
-async fn load_visible_latest_books_for_catalog(
-    app: &OpdsState,
-    allowed_library_ids: &Option<std::collections::HashSet<String>>,
-    restrictions: Option<&super::super::types::OpdsRestrictions>,
-    user_id: &str,
-    library_id: Option<&str>,
-) -> Result<(Vec<OpdsBookFeedEntry>, usize), String> {
-    let mut offset = 0;
-    let mut visible = Vec::new();
-    let mut total = 0;
-
-    loop {
-        let page = app
-            .opds_catalog
-            .load_latest_books_paged(
-                allowed_library_ids.as_ref(),
-                Some(user_id),
-                library_id,
-                offset,
-                RECOMMENDED_PAGE_SIZE,
-            )
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-
-        let page_len = page.len();
-        for book in page {
-            if library_visible(allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-            {
-                total += 1;
-                if visible.len() < 5 {
-                    visible.push(book);
-                }
-            }
-        }
-
-        if page_len < RECOMMENDED_PAGE_SIZE as usize {
-            break;
-        }
-        offset += page_len as i64;
-    }
-
-    Ok((visible, total))
-}
-
-async fn load_visible_latest_series_for_catalog(
-    app: &OpdsState,
-    allowed_library_ids: &Option<std::collections::HashSet<String>>,
-    restrictions: Option<&super::super::types::OpdsRestrictions>,
-    library_id: Option<&str>,
-) -> Result<(Vec<OpdsSeriesEntry>, usize), String> {
-    let mut offset = 0;
-    let mut visible = Vec::new();
-    let mut total = 0;
-
-    loop {
-        let page = app
-            .opds_catalog
-            .load_latest_series_paged(
-                allowed_library_ids.as_ref(),
-                library_id,
-                offset,
-                RECOMMENDED_PAGE_SIZE,
-            )
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-
-        let page_len = page.len();
-        for series in page {
-            if !series.one_shot
-                && library_visible(allowed_library_ids, &series.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    series.age_rating,
-                    &series.sharing_labels,
-                )
-            {
-                total += 1;
-                if visible.len() < 5 {
-                    visible.push(series);
-                }
-            }
-        }
-
-        if page_len < RECOMMENDED_PAGE_SIZE as usize {
-            break;
-        }
-        offset += page_len as i64;
-    }
-
-    Ok((visible, total))
 }
 
 fn recommended_group_metadata(

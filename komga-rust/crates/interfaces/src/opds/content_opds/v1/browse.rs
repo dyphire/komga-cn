@@ -1,8 +1,8 @@
 use super::helpers::{nav_entry_with_content, publisher_entry_id, series_feed_self_path};
 use super::streaming::{build_book_feed_acquisition_entries, localized_opds_updated};
 use super::*;
-use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::{OpdsBookFeedEntry, OpdsState};
+use crate::identity_access::auth::AuthUser;
+use crate::state::{OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsState};
 
 fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
@@ -133,27 +133,20 @@ pub(crate) async fn opds_v1_on_deck(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let user_id = user_id(user);
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let books = app
-        .opds_catalog
-        .load_on_deck_books(user_id, None)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = feed_service
+        .on_deck_page(&feed_user, None, page, size)
         .await
+        .ok();
+    let has_next = page_result
+        .as_ref()
+        .map(|page| page.has_next)
+        .unwrap_or(false);
+    let books = page_result
+        .map(|page| page.books)
         .unwrap_or_default()
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let (books, has_next) = paginate_vec(books, page, size);
-    let books = books
         .into_iter()
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
@@ -177,28 +170,20 @@ pub(crate) async fn opds_v1_keep_reading(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let user_id = user_id(user);
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let restrictions = opds_restrictions_for_user(user);
-
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let books = app
-        .opds_catalog
-        .load_keep_reading_books(user_id, None)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = feed_service
+        .keep_reading_page(&feed_user, None, page, size)
         .await
+        .ok();
+    let has_next = page_result
+        .as_ref()
+        .map(|page| page.has_next)
+        .unwrap_or(false);
+    let books = page_result
+        .map(|page| page.books)
         .unwrap_or_default()
-        .into_iter()
-        .filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    let (books, has_next) = paginate_vec(books, page, size);
-    let books = books
         .into_iter()
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
@@ -222,60 +207,34 @@ pub(crate) async fn opds_v1_series_latest(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let restrictions = opds_restrictions_for_user(user);
-
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let visible_offset = page.saturating_mul(size);
-    let mut raw_offset = 0_i64;
-    let batch_limit = (size + 1).max(20) as i64;
-    let mut visible_seen = 0usize;
-    let mut rows = Vec::with_capacity(size + 1);
-    let has_next = loop {
-        let batch = app
-            .opds_catalog
-            .load_latest_series_paged(allowed_library_ids.as_ref(), None, raw_offset, batch_limit)
-            .await
-            .unwrap_or_default();
-        if batch.is_empty() {
-            break false;
-        }
-        let batch_len = batch.len();
-        raw_offset += batch_len as i64;
-
-        for series in batch.into_iter().filter(|series| {
-            library_visible(&allowed_library_ids, &series.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    series.age_rating,
-                    &series.sharing_labels,
-                )
-        }) {
-            if visible_seen < visible_offset {
-                visible_seen += 1;
-                continue;
-            }
-            let series_id = series.id;
-            rows.push(OpdsV1NavigationEntry {
-                id: series_id.clone(),
-                title: series.title,
-                content: String::new(),
-                href_path: format!("/opds/v1.2/series/{series_id}"),
-                updated: Some(series.last_modified),
-            });
-            if rows.len() > size {
-                break;
-            }
-        }
-
-        if rows.len() > size {
-            break true;
-        }
-        if batch_len < batch_limit as usize {
-            break false;
-        }
-    };
-    let rows = rows.into_iter().take(size).collect::<Vec<_>>();
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = feed_service
+        .latest_series_page_including_one_shots(&feed_user, None, page, size)
+        .await
+        .ok();
+    let has_next = page_result
+        .as_ref()
+        .map(|page| page.has_next)
+        .unwrap_or(false);
+    let rows = page_result
+        .map(|page| {
+            page.series
+                .into_iter()
+                .map(|series| {
+                    let series_id = series.id;
+                    OpdsV1NavigationEntry {
+                        id: series_id.clone(),
+                        title: series.title,
+                        content: String::new(),
+                        href_path: format!("/opds/v1.2/series/{series_id}"),
+                        updated: Some(series.last_modified),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     opds_v1_navigation_feed_response(
         &headers,
@@ -293,63 +252,21 @@ pub(crate) async fn opds_v1_books_latest(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let current_user_id = user_id(user);
-
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let restrictions = opds_restrictions_for_user(user);
-
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let visible_offset = page.saturating_mul(size);
-    let mut raw_offset = 0_i64;
-    let batch_limit = (size + 1).max(20) as i64;
-    let mut visible_seen = 0usize;
-    let mut books = Vec::with_capacity(size + 1);
-    let has_next = loop {
-        let batch = app
-            .opds_catalog
-            .load_latest_books_paged(
-                allowed_library_ids.as_ref(),
-                Some(current_user_id),
-                None,
-                raw_offset,
-                batch_limit,
-            )
-            .await
-            .unwrap_or_default();
-        if batch.is_empty() {
-            break false;
-        }
-        let batch_len = batch.len();
-        raw_offset += batch_len as i64;
-
-        for book in batch.into_iter().filter(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        }) {
-            if visible_seen < visible_offset {
-                visible_seen += 1;
-                continue;
-            }
-            books.push(book);
-            if books.len() > size {
-                break;
-            }
-        }
-
-        if books.len() > size {
-            break true;
-        }
-        if batch_len < batch_limit as usize {
-            break false;
-        }
-    };
-    let books = books
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let page_result = feed_service
+        .latest_books_page_with_read_progress(&feed_user, None, page, size)
+        .await
+        .ok();
+    let has_next = page_result
+        .as_ref()
+        .map(|page| page.has_next)
+        .unwrap_or(false);
+    let books = page_result
+        .map(|page| page.books)
+        .unwrap_or_default()
         .into_iter()
-        .take(size)
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
     let entries = build_book_feed_acquisition_entries(app, &headers, books).await;
