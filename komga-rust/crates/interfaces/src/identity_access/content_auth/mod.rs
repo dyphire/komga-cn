@@ -305,7 +305,6 @@ pub(super) async fn users_create(
 
     match app
         .identity
-        .user_management
         .create_auth_user(CreateAuthUserInput {
             user_id: new_user_id,
             email: email.to_string(),
@@ -351,12 +350,7 @@ pub(super) async fn users_delete(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match app
-        .identity
-        .user_management
-        .delete_auth_user(&target_user_id)
-        .await
-    {
+    match app.identity.delete_auth_user(&target_user_id).await {
         Ok(true) => {
             expire_user_sessions_for_runtime_key(
                 &app.identity,
@@ -439,7 +433,6 @@ pub(super) async fn users_update(
 
     match app
         .identity
-        .user_management
         .update_auth_user(
             &target_user_id,
             UpdateAuthUserInput {

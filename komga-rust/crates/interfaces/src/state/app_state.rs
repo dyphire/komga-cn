@@ -3,23 +3,19 @@ use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService
 
 #[derive(Clone)]
 pub struct HttpServices {
-    pub library_catalog: Arc<dyn LibraryCatalogService>,
+    pub library_catalog: Arc<komga_infrastructure::library_catalog::LibraryCatalogAccess>,
     pub task_queue: Arc<dyn TaskEngine>,
-    pub server_settings: Arc<dyn ServerSettingsService>,
-    pub auth_token: Arc<dyn AuthTokenService>,
-    pub user_management: Arc<dyn UserManagementService>,
-    pub api_key: Arc<dyn ApiKeyService>,
-    pub auth_activity: Arc<dyn AuthActivityService>,
-    pub device_sync: Arc<dyn DeviceSyncService>,
-    pub operational_runtime: Arc<dyn OperationalRuntimeService>,
-    pub operational_settings: Arc<dyn OperationalSettingsService>,
-    pub opds_catalog: Arc<dyn OpdsCatalogService>,
-    pub opds_persisted: Arc<dyn OpdsPersistedService>,
+    pub server_settings:
+        Arc<komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore>,
+    pub identity: IdentityState,
+    pub operational_runtime:
+        Arc<komga_infrastructure::operational_metrics_access::OperationalMetricsAccess>,
+    pub operational_settings:
+        Arc<komga_infrastructure::operational_settings_access::OperationalSettingsAccess>,
+    pub opds_catalog: Arc<komga_infrastructure::opds_catalog_access::OpdsCatalogAccess>,
+    pub opds_persisted: Arc<komga_infrastructure::opds_persisted_access::OpdsPersistedAccess>,
     pub discovery_search: Arc<dyn DiscoverySearchService>,
-    pub book_access: Arc<dyn BookAccessService>,
-    pub series_access: Arc<dyn SeriesAccessService>,
-    pub collection_access: Arc<dyn CollectionAccessService>,
-    pub readlist_access: Arc<dyn ReadlistAccessService>,
+    pub discovery_detail: Arc<komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess>,
     pub discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub discovery_facets: Arc<dyn DiscoveryFacetService>,
     pub media_reader: komga_infrastructure::media_reader::MediaReader,

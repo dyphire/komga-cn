@@ -1,7 +1,7 @@
 use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
-pub struct PersistedCollectionRecord {
+pub struct PersistedCollectionAccessRecord {
     pub id: String,
     pub name: String,
     pub ordered: bool,
@@ -28,7 +28,7 @@ LIMIT 1"#,
 
 pub async fn load_persisted_collections(
     pool: &SqlitePool,
-) -> Result<Vec<PersistedCollectionRecord>, String> {
+) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
@@ -40,7 +40,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| PersistedCollectionRecord {
+        .map(|row| PersistedCollectionAccessRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
             ordered: row.get::<bool, _>("ORDERED"),
@@ -53,7 +53,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 pub async fn load_persisted_collection_detail(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<Option<PersistedCollectionRecord>, String> {
+) -> Result<Option<PersistedCollectionAccessRecord>, String> {
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
@@ -64,7 +64,7 @@ WHERE ID = ?"#,
     .await
     .map_err(|error| format!("query persisted collection detail: {error}"))?;
 
-    Ok(row.map(|row| PersistedCollectionRecord {
+    Ok(row.map(|row| PersistedCollectionAccessRecord {
         id: row.get::<String, _>("ID"),
         name: row.get::<String, _>("NAME"),
         ordered: row.get::<bool, _>("ORDERED"),

@@ -115,13 +115,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crate::state::{
-        MediaAssetsState, TaskEngine, TaskQueueState,
-        tests::{
-            NoopBookAccessService, NoopCollectionAccessService, NoopReadlistAccessService,
-            NoopSeriesAccessService,
-        },
-    };
+    use crate::state::{MediaAssetsState, TaskEngine, TaskQueueState};
 
     struct TestTaskEngine {
         persisted_ids: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -177,25 +171,25 @@ mod tests {
         fn wakeup(&self) {}
     }
 
-    fn test_media_state(task_queue: Arc<dyn TaskEngine>) -> MediaAssetsState {
+    async fn test_media_state(task_queue: Arc<dyn TaskEngine>) -> MediaAssetsState {
         use komga_infrastructure::content_resolver::ContentResolver;
+        use komga_infrastructure::database_handle::DatabaseHandle;
+        use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
         use komga_infrastructure::filesystem::import::FilesystemImportPort;
         use komga_infrastructure::media_reader::MediaReader;
         use komga_infrastructure::progress_writer::ProgressWriter;
         use komga_infrastructure::thumbnail_writer::ThumbnailWriter;
 
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("test pool");
+        let handle = DatabaseHandle::single_pool(PathBuf::from(":memory:"), pool.clone());
 
         MediaAssetsState {
             read_progress: crate::state::ReadProgressState::default(),
-            identity: crate::state::default_test_identity_state(),
+            identity: crate::state::tests::test_identity_state().await,
             task_queue: TaskQueueState {
                 engine: task_queue.clone(),
             },
-            book_access: Arc::new(NoopBookAccessService),
-            series_access: Arc::new(NoopSeriesAccessService),
-            collection_access: Arc::new(NoopCollectionAccessService),
-            readlist_access: Arc::new(NoopReadlistAccessService),
+            discovery_detail: Arc::new(DiscoveryDetailAccess::new(handle, PathBuf::new())),
             reader: MediaReader::new(pool.clone()),
             content: ContentResolver,
             thumbnails: ThumbnailWriter::new(pool.clone()),
@@ -236,7 +230,8 @@ mod tests {
         let persisted_ids = Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let media_state = test_media_state(Arc::new(TestTaskEngine {
             persisted_ids: persisted_ids.clone(),
-        }));
+        }))
+        .await;
 
         enqueue_books_best_effort(payload, &media_state).await;
 

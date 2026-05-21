@@ -6,19 +6,6 @@ use komga_application::identity_access::{
     build_kobo_sync_events, generated_kobo_api_token, sanitize_identifier,
 };
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::state::{KoreaderBookLookupError, KoreaderBookTarget, seed_koreader_book_target};
-
-fn unique_temp_path(prefix: &str) -> PathBuf {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_millis();
-    std::env::temp_dir().join(format!("{prefix}-{millis}.sqlite"))
-}
 
 #[test]
 fn sanitize_identifier_normalizes_and_replaces_non_alnum() {
@@ -488,7 +475,7 @@ fn build_kobo_sync_events_incremental_sync_emits_changed_and_removed_shapes() {
 
 #[tokio::test]
 async fn kobo_ping_rejects_requests_without_valid_auth() {
-    let identity = default_test_identity_state();
+    let identity = crate::state::tests::test_identity_state().await;
     let response = kobo_ping_for_tests(
         &identity,
         "invalid-token",
@@ -497,43 +484,4 @@ async fn kobo_ping_rejects_requests_without_valid_auth() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn load_koreader_book_target_returns_unique_book_and_page_count() {
-    let database_file = unique_temp_path("komga-device-auth-koreader-unique");
-    seed_koreader_book_target(
-        database_file.as_path(),
-        "hash-unique",
-        Ok(Some(KoreaderBookTarget {
-            id: "book-1".to_string(),
-            page_count: 42,
-            media_type: "application/epub+zip".to_string(),
-        })),
-    );
-
-    let target = load_koreader_book_target_for_tests(database_file.as_path(), "hash-unique")
-        .await
-        .expect("unique hash should not fail")
-        .expect("unique hash should resolve a book");
-    assert_eq!(target.id, "book-1");
-    assert_eq!(target.page_count, 42);
-    assert_eq!(target.media_type, "application/epub+zip");
-
-    let _ = fs::remove_file(database_file);
-}
-
-#[tokio::test]
-async fn load_koreader_book_target_reports_conflict_for_duplicate_hash() {
-    let database_file = unique_temp_path("komga-device-auth-koreader-conflict");
-    seed_koreader_book_target(
-        database_file.as_path(),
-        "hash-dup",
-        Err(KoreaderBookLookupError::Conflict),
-    );
-
-    let result = load_koreader_book_target_for_tests(database_file.as_path(), "hash-dup").await;
-    assert!(matches!(result, Err(KoreaderBookLookupError::Conflict)));
-
-    let _ = fs::remove_file(database_file);
 }

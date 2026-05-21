@@ -1,16 +1,14 @@
-use super::*;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
-fn discovery_index_dir_mappings() -> &'static std::sync::RwLock<HashMap<PathBuf, PathBuf>> {
-    static DISCOVERY_INDEX_DIR_MAPPINGS: OnceLock<std::sync::RwLock<HashMap<PathBuf, PathBuf>>> =
+fn discovery_index_dir_mappings() -> &'static RwLock<HashMap<PathBuf, PathBuf>> {
+    static DISCOVERY_INDEX_DIR_MAPPINGS: OnceLock<RwLock<HashMap<PathBuf, PathBuf>>> =
         OnceLock::new();
-    DISCOVERY_INDEX_DIR_MAPPINGS.get_or_init(|| std::sync::RwLock::new(HashMap::new()))
+    DISCOVERY_INDEX_DIR_MAPPINGS.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-pub(super) fn register_discovery_index_dir(
-    database_file: &std::path::Path,
-    lucene_data_directory: &std::path::Path,
-) {
+pub fn register_discovery_index_dir(database_file: &Path, lucene_data_directory: &Path) {
     let key = database_file.to_path_buf();
     let value = lucene_data_directory.to_path_buf();
     let mappings = discovery_index_dir_mappings();
@@ -20,9 +18,9 @@ pub(super) fn register_discovery_index_dir(
     guard.insert(key, value);
 }
 
-pub(super) fn resolve_discovery_index_dir(
-    database_file: &std::path::Path,
-    default_lucene_data_directory: &std::path::Path,
+pub fn resolve_discovery_index_dir(
+    database_file: &Path,
+    default_lucene_data_directory: &Path,
 ) -> PathBuf {
     let mappings = discovery_index_dir_mappings();
     let guard = mappings

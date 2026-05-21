@@ -47,14 +47,14 @@ pub struct PersistedBookDetailRecord {
     pub metadata_last_modified: String,
     pub media_epub_divina_compatible: bool,
     pub media_epub_is_kepub: bool,
-    pub read_progress: Option<PersistedReadProgressRecord>,
+    pub read_progress: Option<DiscoveryPersistedReadProgressRecord>,
     pub deleted: bool,
     pub file_hash: String,
     pub oneshot: bool,
 }
 
 #[derive(Clone)]
-pub struct PersistedReadProgressRecord {
+pub struct DiscoveryPersistedReadProgressRecord {
     pub page: i32,
     pub completed: bool,
     pub read_date: Option<String>,
@@ -221,7 +221,7 @@ pub async fn load_persisted_book_detail(
         media_epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
         media_epub_is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
         read_progress: row.get::<Option<i64>, _>("READ_PROGRESS_PAGE").map(|page| {
-            PersistedReadProgressRecord {
+            DiscoveryPersistedReadProgressRecord {
                 page: page as i32,
                 completed: row
                     .get::<Option<bool>, _>("READ_PROGRESS_COMPLETED")

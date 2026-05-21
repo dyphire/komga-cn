@@ -21,10 +21,11 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
-use crate::state::{BookAccessService, ServerSettingsService};
 use komga_application::media_assets::BookMediaRecord;
 use komga_infrastructure::content_resolver::ContentResolver;
+use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
 use komga_infrastructure::media_reader::MediaReader;
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BookPageResponseOptions {
@@ -82,14 +83,14 @@ pub(crate) async fn book_file_response(
 pub(crate) async fn book_page_response(
     reader: &MediaReader,
     content: &ContentResolver,
-    book_access: &dyn BookAccessService,
+    discovery_detail: &DiscoveryDetailAccess,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
     page_number: u32,
     options: BookPageResponseOptions,
 ) -> Response {
-    let resolved_book_id = resolve_book_id_for_persisted(book_access, book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
     let requested_page_number = if options.zero_based {
         page_number.saturating_add(1)
     } else {
@@ -237,7 +238,7 @@ pub(crate) async fn book_page_response(
 pub(crate) async fn book_page_raw_response(
     reader: &MediaReader,
     content: &ContentResolver,
-    book_access: &dyn BookAccessService,
+    discovery_detail: &DiscoveryDetailAccess,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -247,7 +248,7 @@ pub(crate) async fn book_page_raw_response(
         return json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist");
     }
     let page_number = page_number_signed as u32;
-    let resolved_book_id = resolve_book_id_for_persisted(book_access, book_id).await;
+    let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
 
     if let Ok(Some(media)) = reader.book_media(&resolved_book_id).await {
         if !user_has_role(user, "PAGE_STREAMING") {
@@ -330,7 +331,7 @@ pub(crate) async fn book_thumbnail_opds_response(
 
 pub(crate) async fn book_thumbnail_opds_small_default_response(
     reader: &MediaReader,
-    server_settings: &dyn ServerSettingsService,
+    server_settings: &ServerSettingsStore,
     headers: &HeaderMap,
     book_id: &str,
     user: &AuthUser,
@@ -388,7 +389,7 @@ pub(crate) async fn book_thumbnail_opds_small_response(
 }
 
 async fn resolve_book_id_for_persisted(
-    book_access: &dyn BookAccessService,
+    discovery_detail: &DiscoveryDetailAccess,
     requested_book_id: &str,
 ) -> String {
     let Some(index) = requested_book_id
@@ -403,7 +404,7 @@ async fn resolve_book_id_for_persisted(
     }
 
     if matches!(
-        book_access
+        discovery_detail
             .load_persisted_book_resource(requested_book_id)
             .await,
         Ok(Some(_))
@@ -411,7 +412,10 @@ async fn resolve_book_id_for_persisted(
         return requested_book_id.to_string();
     }
 
-    match book_access.load_book_id_by_sorted_position(index).await {
+    match discovery_detail
+        .load_book_id_by_sorted_position(index)
+        .await
+    {
         Ok(Some(book_id)) => book_id,
         _ => requested_book_id.to_string(),
     }

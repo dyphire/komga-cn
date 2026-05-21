@@ -1,6 +1,5 @@
 use super::*;
 
-use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,95 +10,31 @@ use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
-use komga_application::operational::PersistedServerSettings;
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, TaskEngine, TaskEnqueuer, TaskKind, TaskRequest,
 };
+use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 
 use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
 use crate::state::{
     BookImportSseEvent, HttpServerRequestsState, OAuth2ClientConfig, OperationalBuildMetadata,
-    RemoteCacheEntry, RuntimeState, ServerSettingsService, ServerSettingsState,
-    SseOperationalState, StartupTimingState, TaskQueueState, TransientBooksStore,
+    RemoteCacheEntry, RuntimeState, ServerSettingsState, SseOperationalState, StartupTimingState,
+    TaskQueueState, TransientBooksStore,
 };
 
 #[tokio::test]
-async fn update_server_settings_does_not_apply_runtime_task_pool_before_persistence_succeeds() {
-    let fixture_root = unique_fixture_root("server-settings-persistence-failure");
-    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
-    let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::from([
-        (
-            "REMEMBER_ME_KEY".to_string(),
-            Some("seeded-remember-me-key".to_string()),
-        ),
-        ("TASK_POOL_SIZE".to_string(), Some("1".to_string())),
-    ])));
-    let persist_attempts = Arc::new(AtomicUsize::new(0));
-    let settings_store = fake_settings_store(persisted_settings.clone(), persist_attempts.clone());
-
-    let apply_count = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(fixture_root.clone());
-    let app = Arc::new(test_app_state(
-        database_file.clone(),
-        state,
-        Arc::new(FakeTaskEngine {
-            apply: {
-                let apply_count = apply_count.clone();
-                move |_value| {
-                    apply_count.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }
-            },
-        }),
-        fake_settings_store(persisted_settings.clone(), persist_attempts.clone()),
-    ));
-    let response = update_server_settings(
-        State(test_server_settings_state(&app)),
-        Admin(admin_user()),
-        Bytes::from(serde_json::json!({ "taskPoolSize": 4_u64 }).to_string()),
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let response_body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("settings error response body should be readable");
-    let response_body: Value = serde_json::from_slice(&response_body)
-        .expect("settings error response should be valid JSON");
-    assert!(response_body.get("message").is_some());
-    assert_eq!(apply_count.load(Ordering::SeqCst), 0);
-    assert_eq!(persist_attempts.load(Ordering::SeqCst), 1);
-
-    let persisted = settings_store
-        .load_map()
-        .await
-        .expect("settings should remain readable after failure");
-    assert_eq!(
-        persisted.get("TASK_POOL_SIZE"),
-        Some(&Some("1".to_string()))
-    );
-
-    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
-}
-
-#[tokio::test]
 async fn update_server_settings_applies_runtime_task_pool_after_persistence_succeeds() {
-    let fixture_root = unique_fixture_root("server-settings-task-pool-apply-success");
-    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
-    let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::from([(
-        "TASK_POOL_SIZE".to_string(),
-        Some("1".to_string()),
-    )])));
-    let persist_attempts = Arc::new(AtomicUsize::new(0));
+    let (fixture_root, store) = sqlite_fixture("task-pool-apply-success").await;
+    store
+        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("1".to_string()))])
+        .await
+        .expect("seed task pool size should succeed");
+
     let apply_count = Arc::new(AtomicUsize::new(0));
     let applied_value = Arc::new(AtomicUsize::new(0));
-
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
-        database_file,
         state,
         Arc::new(FakeTaskEngine {
             apply: {
@@ -112,7 +47,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
                 }
             },
         }),
-        fake_settings_store(persisted_settings.clone(), persist_attempts.clone()),
+        store.clone(),
     ));
     let response = update_server_settings(
         State(test_server_settings_state(&app)),
@@ -122,35 +57,31 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     .await;
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert_eq!(persist_attempts.load(Ordering::SeqCst), 1);
     assert_eq!(apply_count.load(Ordering::SeqCst), 1);
     assert_eq!(applied_value.load(Ordering::SeqCst), 3);
+    let persisted = store
+        .load_map()
+        .await
+        .expect("settings should be readable after update");
     assert_eq!(
-        persisted_settings
-            .lock()
-            .expect("persisted settings should lock")
-            .get("TASK_POOL_SIZE")
-            .cloned(),
-        Some(Some("3".to_string()))
+        persisted.get("TASK_POOL_SIZE"),
+        Some(&Some("3".to_string()))
     );
 
-    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
+    cleanup_fixture(fixture_root);
 }
 
 #[tokio::test]
-async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
-    let fixture_root = unique_fixture_root("server-settings-read-side-effect-free");
-    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
-    let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::from([(
-        "TASK_POOL_SIZE".to_string(),
-        Some("4".to_string()),
-    )])));
-    let apply_count = Arc::new(AtomicUsize::new(0));
+async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change() {
+    let (fixture_root, store) = sqlite_fixture("task-pool-not-changed").await;
+    store
+        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("2".to_string()))])
+        .await
+        .expect("seed task pool size should succeed");
 
+    let apply_count = Arc::new(AtomicUsize::new(0));
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
-        database_file,
         state,
         Arc::new(FakeTaskEngine {
             apply: {
@@ -161,7 +92,55 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
                 }
             },
         }),
-        fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0))),
+        store.clone(),
+    ));
+    let response = update_server_settings(
+        State(test_server_settings_state(&app)),
+        Admin(admin_user()),
+        Bytes::from(serde_json::json!({ "deleteEmptyCollections": true }).to_string()),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(apply_count.load(Ordering::SeqCst), 0);
+    let persisted = store
+        .load_map()
+        .await
+        .expect("settings should be readable after update");
+    assert_eq!(
+        persisted.get("TASK_POOL_SIZE"),
+        Some(&Some("2".to_string()))
+    );
+    assert_eq!(
+        persisted.get("DELETE_EMPTY_COLLECTIONS"),
+        Some(&Some("true".to_string()))
+    );
+
+    cleanup_fixture(fixture_root);
+}
+
+#[tokio::test]
+async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
+    let (fixture_root, store) = sqlite_fixture("read-side-effect-free").await;
+    store
+        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("4".to_string()))])
+        .await
+        .expect("seed task pool size should succeed");
+
+    let apply_count = Arc::new(AtomicUsize::new(0));
+    let state = test_operational_state(fixture_root.clone());
+    let app = Arc::new(test_app_state(
+        state,
+        Arc::new(FakeTaskEngine {
+            apply: {
+                let apply_count = apply_count.clone();
+                move |_value| {
+                    apply_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        }),
+        store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -169,23 +148,18 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(apply_count.load(Ordering::SeqCst), 0);
 
-    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
+    cleanup_fixture(fixture_root);
 }
 
 #[tokio::test]
 async fn get_server_settings_returns_empty_string_placeholders_for_missing_string_sources() {
-    let fixture_root = unique_fixture_root("server-settings-string-placeholders");
-    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
-    let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::new()));
-    let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
+    let (fixture_root, store) = sqlite_fixture("string-placeholders").await;
 
     let state = test_operational_state(fixture_root.clone());
     let app = Arc::new(test_app_state(
-        database_file,
         state,
         Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
-        settings_store,
+        store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -205,29 +179,25 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     assert_eq!(response_body.get("serverContextPath"), Some(&placeholder));
     assert_eq!(response_body.get("kepubifyPath"), Some(&placeholder));
 
-    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
+    cleanup_fixture(fixture_root);
 }
 
 #[tokio::test]
 async fn get_server_settings_returns_runtime_server_port_configuration_source() {
-    let fixture_root = unique_fixture_root("server-settings-runtime-port-source");
-    std::fs::create_dir_all(&fixture_root).expect("fixture root should be created");
-    let database_file = fixture_root.join("main.db");
-    let persisted_settings = Arc::new(Mutex::new(HashMap::from([(
-        "SERVER_PORT".to_string(),
-        Some("9090".to_string()),
-    )])));
-    let settings_store = fake_settings_store(persisted_settings, Arc::new(AtomicUsize::new(0)));
+    let (fixture_root, store) = sqlite_fixture("runtime-port-source").await;
+    store
+        .apply_changes(&[("SERVER_PORT".to_string(), Some("9090".to_string()))])
+        .await
+        .expect("seed server port should succeed");
 
     let mut state = test_operational_state(fixture_root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     state.runtime.configuration_bind_address =
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
-        database_file,
         state,
         Arc::new(FakeTaskEngine { apply: |_| Ok(()) }),
-        settings_store,
+        store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -248,84 +218,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
         }))
     );
 
-    std::fs::remove_dir_all(&fixture_root).expect("fixture root should be removed");
-}
-
-struct FakeSettingsStore {
-    persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
-    persist_attempts: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl ServerSettingsService for FakeSettingsStore {
-    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
-        Ok(self
-            .persisted
-            .lock()
-            .expect("fake settings store should lock")
-            .clone()
-            .into_iter()
-            .collect())
-    }
-
-    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
-        let persisted = self.load_map().await?;
-        Ok(PersistedServerSettings {
-            delete_empty_collections: persisted
-                .get("DELETE_EMPTY_COLLECTIONS")
-                .and_then(|v| v.as_deref())
-                .is_some_and(|v| v == "true"),
-            delete_empty_read_lists: persisted
-                .get("DELETE_EMPTY_READLISTS")
-                .and_then(|v| v.as_deref())
-                .is_some_and(|v| v == "true"),
-            remember_me_key: persisted
-                .get("REMEMBER_ME_KEY")
-                .and_then(|v| v.clone())
-                .unwrap_or_default(),
-            remember_me_duration_days: persisted
-                .get("REMEMBER_ME_DURATION")
-                .and_then(|v| v.as_deref())
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(365),
-            thumbnail_size: "DEFAULT",
-            task_pool_size: persisted
-                .get("TASK_POOL_SIZE")
-                .and_then(|v| v.as_deref())
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(1),
-            server_port: persisted
-                .get("SERVER_PORT")
-                .and_then(|v| v.as_deref())
-                .and_then(|v| v.parse::<u16>().ok()),
-            server_context_path: persisted.get("SERVER_CONTEXT_PATH").and_then(|v| v.clone()),
-            kobo_proxy: false,
-            kobo_port: None,
-        })
-    }
-
-    async fn apply_changes(&self, changes: &[(String, Option<String>)]) -> Result<(), String> {
-        self.persist_attempts.fetch_add(1, Ordering::SeqCst);
-        if changes
-            .iter()
-            .any(|(key, value)| key == "TASK_POOL_SIZE" && value.as_deref() == Some("4"))
-        {
-            return Err("reject task pool size update".to_string());
-        }
-
-        let mut persisted = self
-            .persisted
-            .lock()
-            .expect("fake settings store should lock");
-        for (key, value) in changes {
-            if let Some(value) = value {
-                persisted.insert(key.clone(), Some(value.clone()));
-            } else {
-                persisted.remove(key);
-            }
-        }
-        Ok(())
-    }
+    cleanup_fixture(fixture_root);
 }
 
 struct FakeTaskEngine<F> {
@@ -372,11 +265,26 @@ where
     fn wakeup(&self) {}
 }
 
+async fn sqlite_fixture(case: &str) -> (PathBuf, Arc<ServerSettingsStore>) {
+    let root = unique_fixture_root(case);
+    std::fs::create_dir_all(&root).expect("fixture root should be created");
+    let store = Arc::new(ServerSettingsStore::new(root.join("main.db")));
+    // First access bootstraps the main schema, including SERVER_SETTINGS.
+    store
+        .load_map()
+        .await
+        .expect("schema bootstrap should succeed");
+    (root, store)
+}
+
+fn cleanup_fixture(root: PathBuf) {
+    std::fs::remove_dir_all(&root).expect("fixture root should be removed");
+}
+
 fn test_app_state(
-    _database_file: PathBuf,
     operational: OperationalState,
     task_queue: Arc<dyn TaskEngine>,
-    server_settings: Arc<dyn ServerSettingsService>,
+    server_settings: Arc<ServerSettingsStore>,
 ) -> ServerSettingsState {
     ServerSettingsState {
         runtime: operational.runtime,
@@ -426,16 +334,6 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
     }
 }
 
-fn fake_settings_store(
-    persisted: Arc<Mutex<HashMap<String, Option<String>>>>,
-    persist_attempts: Arc<AtomicUsize>,
-) -> Arc<dyn ServerSettingsService> {
-    Arc::new(FakeSettingsStore {
-        persisted,
-        persist_attempts,
-    })
-}
-
 fn admin_user() -> AuthUser {
     AuthUser {
         id: "admin-user".to_string(),
@@ -459,5 +357,8 @@ fn unique_fixture_root(case_name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!("komga-rust-{case_name}-{unique_suffix}"))
+    std::env::temp_dir().join(format!(
+        "komga-rust-server-settings-{case_name}-{}-{unique_suffix}",
+        std::process::id()
+    ))
 }

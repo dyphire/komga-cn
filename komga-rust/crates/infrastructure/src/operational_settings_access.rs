@@ -3,8 +3,17 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 use komga_application::operational::PersistedServerSettings;
 
+use crate::announcements_access;
+use crate::claims_access::{self, ClaimInitialAdminUserResult};
+use crate::database_handle::DatabaseHandle;
+use crate::filesystem::{
+    browser, fonts,
+    transient_books::{self, TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage},
+};
+use crate::page_hashes_access;
 use crate::sqlite::read_models::client_settings::{
     load_client_settings_global as load_client_settings_global_model,
     load_client_settings_user as load_client_settings_user_model,
@@ -20,6 +29,247 @@ use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
+
+#[derive(Clone)]
+pub struct OperationalSettingsAccess {
+    db: DatabaseHandle,
+}
+
+impl OperationalSettingsAccess {
+    pub fn new(db: DatabaseHandle) -> Self {
+        Self { db }
+    }
+
+    pub async fn load_announcement_read_ids(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        announcements_access::load_announcement_read_ids(self.db.read_pool(), user_id).await
+    }
+
+    pub async fn save_announcements_read(
+        &self,
+        user_id: &str,
+        ids: &[String],
+    ) -> Result<(), sqlx::Error> {
+        announcements_access::save_announcements_read(self.db.write_pool(), user_id, ids).await
+    }
+
+    pub async fn load_claim_status(&self) -> Result<bool, sqlx::Error> {
+        claims_access::load_claim_status(self.db.read_pool()).await
+    }
+
+    pub async fn claim_initial_admin_user(
+        &self,
+        user_id: &str,
+        email: &str,
+        password_hash: &str,
+    ) -> Result<ClaimInitialAdminUserResult, sqlx::Error> {
+        claims_access::claim_initial_admin_user(self.db.write_pool(), user_id, email, password_hash)
+            .await
+    }
+
+    pub async fn load_client_settings_global(
+        &self,
+        allow_unauthorized_only: bool,
+    ) -> Result<Value, sqlx::Error> {
+        load_client_settings_global(self.db.read_pool(), allow_unauthorized_only).await
+    }
+
+    pub async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, sqlx::Error> {
+        load_client_settings_user(self.db.read_pool(), user_id).await
+    }
+
+    pub async fn upsert_client_settings_global(
+        &self,
+        settings: &[(String, String, bool)],
+    ) -> Result<(), sqlx::Error> {
+        upsert_client_settings_global(self.db.write_pool(), settings).await
+    }
+
+    pub async fn upsert_client_settings_user(
+        &self,
+        user_id: &str,
+        settings: &[(String, String)],
+    ) -> Result<(), sqlx::Error> {
+        upsert_client_settings_user(self.db.write_pool(), user_id, settings).await
+    }
+
+    pub async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), sqlx::Error> {
+        delete_client_settings_global(self.db.write_pool(), keys).await
+    }
+
+    pub async fn delete_client_settings_user(
+        &self,
+        user_id: &str,
+        keys: &[String],
+    ) -> Result<(), sqlx::Error> {
+        delete_client_settings_user(self.db.write_pool(), user_id, keys).await
+    }
+
+    pub fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
+        browser::list_directory_entries(path, directories_only)
+    }
+
+    pub fn list_font_families(&self, path: &Path) -> Vec<String> {
+        fonts::list_font_families(path)
+    }
+
+    pub fn load_font_family_css(&self, path: &Path, family: &str) -> Option<String> {
+        fonts::load_font_family_css(path, family)
+    }
+
+    pub fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
+        fonts::load_font_file(path, family, file)
+    }
+
+    pub async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), sqlx::Error> {
+        delete_syncpoints_by_user(self.db.write_pool(), user_id).await
+    }
+
+    pub async fn delete_syncpoints_by_user_and_key_ids(
+        &self,
+        user_id: &str,
+        key_ids: &[String],
+    ) -> Result<(), sqlx::Error> {
+        delete_syncpoints_by_user_and_key_ids(self.db.write_pool(), user_id, key_ids).await
+    }
+
+    pub async fn load_history_page(
+        &self,
+        page: u64,
+        size: u64,
+        sorts: Vec<String>,
+    ) -> Result<Value, sqlx::Error> {
+        load_history_page(self.db.read_pool(), page, size, &sorts).await
+    }
+
+    pub async fn load_page_hash_matches_page(
+        &self,
+        page_hash: &str,
+        page: u64,
+        size: u64,
+        sorts: &[String],
+    ) -> Result<Value, sqlx::Error> {
+        page_hashes_access::load_page_hash_matches_page(
+            self.db.read_pool(),
+            page_hash,
+            page,
+            size,
+            sorts,
+        )
+        .await
+    }
+
+    pub async fn load_page_hash_thumbnail(
+        &self,
+        page_hash: &str,
+    ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
+        page_hashes_access::load_page_hash_thumbnail(self.db.read_pool(), page_hash).await
+    }
+
+    pub async fn load_unknown_page_hash_thumbnail(
+        &self,
+        page_hash: &str,
+        resize_to: Option<u32>,
+    ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
+        page_hashes_access::load_unknown_page_hash_thumbnail(
+            self.db.read_pool(),
+            page_hash,
+            resize_to,
+        )
+        .await
+    }
+
+    pub async fn load_page_hashes_page(
+        &self,
+        page: u64,
+        size: u64,
+        actions: &[String],
+        sorts: &[String],
+    ) -> Result<Value, sqlx::Error> {
+        page_hashes_access::load_page_hashes_page(self.db.read_pool(), page, size, actions, sorts)
+            .await
+    }
+
+    pub async fn load_page_hashes_unknown_page(
+        &self,
+        page: u64,
+        size: u64,
+        sorts: &[String],
+    ) -> Result<Value, sqlx::Error> {
+        page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), page, size, sorts)
+            .await
+    }
+
+    pub async fn load_page_hash_delete_targets(
+        &self,
+        hash: &str,
+    ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
+        page_hashes_access::load_page_hash_delete_targets(self.db.read_pool(), hash).await
+    }
+
+    pub async fn upsert_page_hash(
+        &self,
+        hash: &str,
+        size: Option<i64>,
+        action: &str,
+    ) -> Result<(), sqlx::Error> {
+        page_hashes_access::upsert_page_hash(
+            self.db.read_pool(),
+            self.db.write_pool(),
+            hash,
+            size,
+            action,
+        )
+        .await
+    }
+
+    pub fn analyze_transient_book(&self, path: &str) -> TransientBookAnalysis {
+        transient_books::analyze_transient_book(path)
+    }
+
+    pub async fn infer_transient_series_and_number(
+        &self,
+        transient_name: &str,
+    ) -> (Option<String>, Option<f64>) {
+        transient_books::infer_transient_series_and_number(self.db.read_pool(), transient_name)
+            .await
+    }
+
+    pub fn list_transient_book_entries(&self, root: &Path) -> Vec<Value> {
+        transient_books::list_transient_book_entries(root)
+    }
+
+    pub async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
+        transient_books::validate_transient_scan_root(self.db.read_pool(), Path::new(path)).await
+    }
+
+    pub fn load_transient_book_file_metadata(
+        &self,
+        path: &str,
+    ) -> Option<TransientBookFileMetadata> {
+        transient_books::load_transient_book_file_metadata(path)
+    }
+
+    pub fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>> {
+        transient_books::load_transient_book_media(path)
+    }
+
+    pub fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str {
+        transient_books::transient_book_content_type(path, media_type)
+    }
+
+    pub fn transient_book_page_content(
+        &self,
+        path: &str,
+        media_type: &str,
+        pages: &[TransientBookPage],
+        page_number: u32,
+    ) -> Option<(String, Vec<u8>)> {
+        transient_books::transient_book_page_content(path, media_type, pages, page_number)
+    }
+}
 
 struct PersistedHistoricalEvent {
     id: String,

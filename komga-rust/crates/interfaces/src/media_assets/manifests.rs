@@ -12,8 +12,7 @@ pub async fn book_manifest(
     match build_persisted_book_manifest(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
-        app.series_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -45,8 +44,7 @@ pub async fn book_manifest_epub(
     match build_persisted_book_manifest(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
-        app.series_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -78,8 +76,7 @@ pub async fn book_manifest_pdf(
     match build_persisted_book_manifest(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
-        app.series_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -111,8 +108,7 @@ pub async fn book_manifest_divina(
     match build_persisted_book_manifest(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
-        app.series_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,

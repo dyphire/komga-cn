@@ -46,7 +46,7 @@ pub async fn load_persisted_series_resource(
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResource>, String> {
     let resource = app
-        .series_access
+        .discovery_detail
         .load_persisted_series_resource(series_id)
         .await?
         .map(|row| PersistedSeriesResource {
@@ -81,7 +81,7 @@ pub async fn resolve_series_id_for_persisted(
     }
 
     match app
-        .series_access
+        .discovery_detail
         .load_series_id_by_sorted_position(index)
         .await
     {
@@ -96,7 +96,7 @@ pub(super) async fn load_persisted_series_detail(
     user_id: Option<&str>,
 ) -> Result<Option<SeriesDetailReadModel>, String> {
     let Some(row) = app
-        .series_access
+        .discovery_detail
         .load_persisted_series_detail(series_id)
         .await?
     else {
@@ -107,14 +107,14 @@ pub(super) async fn load_persisted_series_detail(
         .unwrap_or_else(|| fallback_existing_series_metadata(&row));
 
     let persisted_summary = app
-        .series_access
+        .discovery_detail
         .load_persisted_series_summaries()
         .await?
         .into_iter()
         .find(|entry| entry.id == series_id);
 
     let total_book_count = app
-        .series_access
+        .discovery_detail
         .load_series_total_book_counts()
         .await?
         .get(series_id)
@@ -123,7 +123,7 @@ pub(super) async fn load_persisted_series_detail(
 
     let (books_read_count, books_in_progress_count) = if let Some(user_id) = user_id {
         let counts = app
-            .series_access
+            .discovery_detail
             .load_series_read_progress_counts(user_id)
             .await?
             .get(series_id)
@@ -278,7 +278,7 @@ pub(super) async fn load_persisted_series_collections(
     series_id: &str,
 ) -> Result<Vec<CollectionReadModel>, String> {
     let rows = app
-        .series_access
+        .discovery_detail
         .load_persisted_series_collections(series_id)
         .await?;
     Ok(rows
@@ -300,7 +300,7 @@ pub async fn load_existing_series_metadata(
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadata>, String> {
     let metadata = app
-        .series_access
+        .discovery_detail
         .load_existing_series_metadata(series_id)
         .await?
         .map(|row| ExistingSeriesMetadata {
@@ -343,7 +343,7 @@ pub async fn persist_series_metadata_update(
     update: SeriesMetadataUpdateRecord,
 ) -> Result<bool, String> {
     let updated = app
-        .series_access
+        .discovery_detail
         .persist_series_metadata_update(series_id, update)
         .await?;
     if updated && let Some(series) = load_persisted_series_resource(app, series_id).await? {
@@ -364,7 +364,7 @@ pub async fn sync_series_search_documents_after_metadata_update(
     app: &DiscoveryState,
     series_id: &str,
 ) -> Result<(), String> {
-    app.series_access
+    app.discovery_detail
         .refresh_series_search_documents_after_metadata_update(series_id)
         .await
 }

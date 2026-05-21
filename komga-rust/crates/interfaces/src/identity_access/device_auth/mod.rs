@@ -23,8 +23,6 @@ use crate::identity_access::auth::{
     session_token_for_user_with_runtime_key, user_has_role, user_is_admin,
 };
 use crate::request_urls::{request_base_url, request_base_url_with_port, request_context_path};
-#[cfg(test)]
-use crate::state::default_test_identity_state;
 use crate::state::{
     IdentityAccessState, IdentityState, KoreaderBookLookupError, KoreaderBookTarget,
     PersistedReadProgressRecord,
@@ -50,17 +48,6 @@ pub use oauth::{oauth2_authorization, oauth2_login_code};
 
 use auth_resolvers::*;
 use helpers::*;
-
-#[cfg(test)]
-pub(crate) async fn load_koreader_book_target_for_tests(
-    _database_file: &FsPath,
-    book_hash: &str,
-) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
-    default_test_identity_state()
-        .device_sync
-        .load_koreader_book_target(book_hash)
-        .await
-}
 
 #[cfg(test)]
 pub(crate) async fn kobo_ping_for_tests(
@@ -183,7 +170,7 @@ fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> 
 }
 
 async fn load_kobo_proxy_enabled(
-    server_settings: &dyn crate::state::ServerSettingsService,
+    server_settings: &komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore,
 ) -> bool {
     server_settings
         .load_map()

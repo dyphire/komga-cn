@@ -6,8 +6,9 @@ use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_infrastructure::claims_access::ClaimInitialAdminUserResult;
+
 use crate::identity_access::auth::{AuthUser, user_payload_json};
-use crate::state::ClaimInitialAdminUserResult;
 use crate::state::OperationalApiState;
 
 pub(crate) async fn get_claim_status(State(app): State<OperationalApiState>) -> Response {
@@ -50,7 +51,7 @@ pub(crate) async fn post_claim(
         .claim_initial_admin_user(&created_user_id, &email, &hashed_password)
         .await
     {
-        Ok(ClaimInitialAdminUserResult::Created(created_user)) => *created_user,
+        Ok(ClaimInitialAdminUserResult::Created(created_user)) => created_user,
         Ok(ClaimInitialAdminUserResult::AlreadyClaimed) => {
             return claim_already_claimed_response();
         }

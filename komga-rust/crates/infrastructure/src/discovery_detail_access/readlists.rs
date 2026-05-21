@@ -1,7 +1,7 @@
 use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
-pub struct PersistedReadlistRecord {
+pub struct DiscoveryPersistedReadlistRecord {
     pub id: String,
     pub name: String,
     pub summary: String,
@@ -11,7 +11,7 @@ pub struct PersistedReadlistRecord {
 }
 
 #[derive(Clone)]
-pub struct PersistedReadlistBookRecord {
+pub struct DiscoveryPersistedReadlistBookRecord {
     pub book_id: String,
     pub library_id: String,
 }
@@ -46,7 +46,7 @@ LIMIT 1"#,
 
 pub async fn load_persisted_readlists(
     pool: &SqlitePool,
-) -> Result<Vec<PersistedReadlistRecord>, String> {
+) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
@@ -58,7 +58,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| PersistedReadlistRecord {
+        .map(|row| DiscoveryPersistedReadlistRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
             summary: row.get::<String, _>("SUMMARY"),
@@ -72,7 +72,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 pub async fn load_persisted_readlist_detail(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Option<PersistedReadlistRecord>, String> {
+) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
     let row = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
@@ -83,7 +83,7 @@ WHERE ID = ?"#,
     .await
     .map_err(|error| format!("query persisted readlist detail: {error}"))?;
 
-    Ok(row.map(|row| PersistedReadlistRecord {
+    Ok(row.map(|row| DiscoveryPersistedReadlistRecord {
         id: row.get::<String, _>("ID"),
         name: row.get::<String, _>("NAME"),
         summary: row.get::<String, _>("SUMMARY"),
@@ -96,7 +96,7 @@ WHERE ID = ?"#,
 pub async fn load_persisted_readlist_book_rows(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
     let rows = sqlx::query(
         r#"SELECT rb.BOOK_ID, b.LIBRARY_ID
 FROM READLIST_BOOK rb
@@ -111,7 +111,7 @@ ORDER BY rb.NUMBER ASC"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| PersistedReadlistBookRecord {
+        .map(|row| DiscoveryPersistedReadlistBookRecord {
             book_id: row.get::<String, _>("BOOK_ID"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
         })

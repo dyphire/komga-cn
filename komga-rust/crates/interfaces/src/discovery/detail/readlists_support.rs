@@ -65,7 +65,7 @@ pub(super) async fn load_persisted_readlists(
     app: &DiscoveryState,
     library_ids: Option<&[String]>,
 ) -> Result<Vec<ReadListReadModel>, String> {
-    let rows = app.readlist_access.load_persisted_readlists().await?;
+    let rows = app.discovery_detail.load_persisted_readlists().await?;
 
     let mut readlists = Vec::with_capacity(rows.len());
     for row in rows {
@@ -93,14 +93,16 @@ pub(super) async fn load_persisted_readlists(
 pub async fn load_comicrack_match_candidates(
     app: &DiscoveryState,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-    app.readlist_access.load_comicrack_match_candidates().await
+    app.discovery_detail.load_comicrack_match_candidates().await
 }
 
 pub async fn load_persisted_book_authors(
     app: &DiscoveryState,
     book_id: &str,
 ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
-    app.book_access.load_persisted_book_authors(book_id).await
+    app.discovery_detail
+        .load_persisted_book_authors(book_id)
+        .await
 }
 
 pub(super) async fn load_persisted_readlist_detail(
@@ -109,7 +111,7 @@ pub(super) async fn load_persisted_readlist_detail(
     library_ids: Option<&[String]>,
 ) -> Result<Option<ReadListReadModel>, String> {
     let Some(row) = app
-        .readlist_access
+        .discovery_detail
         .load_persisted_readlist_detail(readlist_id)
         .await?
     else {
@@ -139,7 +141,7 @@ async fn load_persisted_readlist_book_ids(
     library_ids: Option<&[String]>,
 ) -> Result<(Vec<String>, bool), String> {
     let rows = app
-        .readlist_access
+        .discovery_detail
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
 
@@ -199,7 +201,7 @@ pub async fn persist_readlist_create(
     input: &PersistedReadlistWriteInput,
 ) -> Result<String, String> {
     let readlist_id = generated_readlist_id();
-    app.readlist_access
+    app.discovery_detail
         .persist_readlist_create(
             &readlist_id,
             &input.name,
@@ -228,7 +230,7 @@ pub async fn persist_readlist_update(
     input: &PersistedReadlistWriteInput,
 ) -> Result<bool, String> {
     let updated = app
-        .readlist_access
+        .discovery_detail
         .persist_readlist_update(
             readlist_id,
             &input.name,
@@ -257,7 +259,7 @@ pub async fn delete_persisted_readlist(
 ) -> Result<bool, String> {
     let existing = load_persisted_readlist_detail(app, readlist_id, None).await?;
     let deleted = app
-        .readlist_access
+        .discovery_detail
         .delete_persisted_readlist(readlist_id)
         .await?;
     if deleted && let Some(readlist) = existing {
@@ -278,7 +280,7 @@ pub async fn upsert_readlist_search_document(
     app: &DiscoveryState,
     readlist_id: &str,
 ) -> Result<bool, String> {
-    app.readlist_access
+    app.discovery_detail
         .upsert_readlist_search_document(readlist_id)
         .await
 }
@@ -287,7 +289,7 @@ pub async fn delete_readlist_search_document(
     app: &DiscoveryState,
     readlist_id: &str,
 ) -> Result<(), String> {
-    app.readlist_access
+    app.discovery_detail
         .delete_readlist_search_document(readlist_id)
         .await
 }
@@ -567,7 +569,7 @@ pub(super) async fn load_visible_persisted_readlist_books(
     }
 
     let rows = app
-        .readlist_access
+        .discovery_detail
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
     let mut visible = Vec::new();

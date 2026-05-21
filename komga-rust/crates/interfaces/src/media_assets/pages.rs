@@ -17,7 +17,7 @@ pub async fn book_page(
     media_responses::book_page_response(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -39,7 +39,7 @@ pub async fn book_page_opds_v1(
     media_responses::book_page_response(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,
@@ -58,7 +58,7 @@ pub async fn book_page_raw(
     media_responses::book_page_raw_response(
         &app.reader,
         &app.content,
-        app.book_access.as_ref(),
+        app.discovery_detail.as_ref(),
         &user,
         &headers,
         &book_id,

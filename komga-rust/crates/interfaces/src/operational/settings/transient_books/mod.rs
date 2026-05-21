@@ -8,10 +8,10 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_infrastructure::filesystem::transient_books::TransientBookPage;
+
 use crate::identity_access::auth::Admin;
-use crate::state::{
-    OperationalApiState, TransientBookPage, TransientBookPageRecord, TransientBookRecord,
-};
+use crate::state::{OperationalApiState, TransientBookPageRecord, TransientBookRecord};
 
 mod discovery;
 mod payload;

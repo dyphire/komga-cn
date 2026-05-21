@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::request_urls::app_absolute_url;
 use crate::state::{
-    BrowseSeriesNavigationEntry, OpdsCatalogService, OpdsReadlistEntry, OpdsSeriesEntry,
+    BrowseSeriesNavigationEntry, OpdsCatalogAccess, OpdsReadlistEntry, OpdsSeriesEntry,
 };
 
 use super::{PersistedReadlist, PersistedSeries};
@@ -33,7 +33,7 @@ fn persisted_readlist(entry: OpdsReadlistEntry) -> PersistedReadlist {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
-    backend: &dyn OpdsCatalogService,
+    backend: &OpdsCatalogAccess,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -75,7 +75,7 @@ pub(super) fn browse_series_navigation_values(
 }
 
 pub(super) async fn load_browse_publisher_navigation(
-    backend: &dyn OpdsCatalogService,
+    backend: &OpdsCatalogAccess,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -101,7 +101,7 @@ pub(super) async fn load_browse_publisher_navigation(
 }
 
 pub(super) async fn load_series_page(
-    backend: &dyn OpdsCatalogService,
+    backend: &OpdsCatalogAccess,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
@@ -121,7 +121,7 @@ pub(super) async fn load_series_page(
 }
 
 pub(super) async fn load_all_readlists(
-    backend: &dyn OpdsCatalogService,
+    backend: &OpdsCatalogAccess,
 ) -> Result<Vec<PersistedReadlist>, String> {
     backend
         .load_all_readlists()

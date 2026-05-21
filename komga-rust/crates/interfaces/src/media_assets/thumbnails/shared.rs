@@ -186,7 +186,7 @@ pub(super) async fn load_readlist_mosaic_bytes(
     readlist_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let book_ids = repeated_thumbnail_source_ids(
-        app.readlist_access
+        app.discovery_detail
             .load_persisted_readlist_book_rows(readlist_id)
             .await?
             .into_iter()
@@ -214,7 +214,7 @@ pub(super) async fn load_collection_mosaic_bytes(
     collection_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let series_ids = repeated_thumbnail_source_ids(
-        app.collection_access
+        app.discovery_detail
             .load_persisted_collection_series_ids(collection_id)
             .await?,
     );

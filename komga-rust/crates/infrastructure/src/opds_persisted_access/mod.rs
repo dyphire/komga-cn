@@ -1,4 +1,11 @@
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
 use sqlx::{Row, SqlitePool};
+
+use crate::database_handle::DatabaseHandle;
+use crate::search::index_dirs::resolve_discovery_index_dir;
+use crate::search::index_lifecycle::{SearchEntityType, SearchQueryLifecycle};
 
 mod collections;
 mod records;
@@ -19,6 +26,315 @@ use records::{
     parsed_age_rating, parsed_book_author_records, parsed_book_tags, parsed_sharing_labels,
     placeholder_list,
 };
+
+const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
+
+#[derive(Clone)]
+pub struct OpdsPersistedAccess {
+    db: DatabaseHandle,
+    lucene_data_directory: PathBuf,
+}
+
+impl OpdsPersistedAccess {
+    pub fn new(db: DatabaseHandle, lucene_data_directory: PathBuf) -> Self {
+        Self {
+            db,
+            lucene_data_directory,
+        }
+    }
+
+    pub async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+        load_libraries(self.db.read_pool())
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_library(
+        &self,
+        library_id: &str,
+    ) -> Result<Option<PersistedLibraryRecord>, String> {
+        load_library(self.db.read_pool(), library_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_readlists_for_library(
+        &self,
+        library_id: &str,
+    ) -> Result<Vec<PersistedReadlistRecord>, String> {
+        load_readlists_for_library(self.db.read_pool(), library_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_series(
+        &self,
+        series_id: &str,
+    ) -> Result<Option<PersistedSeriesRecord>, String> {
+        load_series(self.db.read_pool(), series_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_series_books_paged(
+        &self,
+        series_id: &str,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
+        load_series_books_paged(self.db.read_pool(), series_id, user_id, offset, limit)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
+        load_series_tags(self.db.read_pool(), series_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_readlist(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Option<PersistedReadlistRecord>, String> {
+        load_readlist(self.db.read_pool(), readlist_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_readlist_books(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        load_readlist_books(self.db.read_pool(), readlist_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_unified_search_results(
+        &self,
+        query: &str,
+    ) -> Result<
+        (
+            Vec<PersistedSeriesSearchRecord>,
+            Vec<PersistedBookSearchRecord>,
+            Vec<PersistedNamedRecord>,
+            Vec<PersistedNamedRecord>,
+        ),
+        String,
+    > {
+        let trimmed_query = query.trim();
+        if trimmed_query.is_empty() {
+            return load_blank_opds_search_results(self.db.read_pool()).await;
+        }
+
+        let index_dir = resolve_discovery_index_dir(
+            self.db.database_file(),
+            self.lucene_data_directory.as_path(),
+        );
+        let Ok(index) = SearchQueryLifecycle::bootstrap(index_dir.as_path()) else {
+            return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+        };
+
+        Ok((
+            load_ranked_series_search_results(self.db.read_pool(), &index, trimmed_query).await?,
+            load_ranked_book_search_results(self.db.read_pool(), &index, trimmed_query).await?,
+            load_ranked_collection_search_results(self.db.read_pool(), &index, trimmed_query)
+                .await?,
+            load_ranked_readlist_search_results(self.db.read_pool(), &index, trimmed_query).await?,
+        ))
+    }
+
+    pub async fn load_publishers(
+        &self,
+        allowed_library_ids: Option<&HashSet<String>>,
+    ) -> Result<Vec<String>, String> {
+        load_publishers(self.db.read_pool(), allowed_library_ids)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_collections(
+        &self,
+        library_id: Option<&str>,
+    ) -> Result<Vec<PersistedNamedRecord>, String> {
+        load_collections(self.db.read_pool(), library_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_collection(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedNamedRecord>, String> {
+        load_collection(self.db.read_pool(), collection_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_collection_books(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+        load_collection_books(self.db.read_pool(), collection_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn load_collection_series(
+        &self,
+        collection_id: &str,
+        ordered: bool,
+    ) -> Result<Vec<PersistedSeriesRecord>, String> {
+        load_collection_series(self.db.read_pool(), collection_id, ordered)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+async fn load_blank_opds_search_results(
+    pool: &SqlitePool,
+) -> Result<
+    (
+        Vec<PersistedSeriesSearchRecord>,
+        Vec<PersistedBookSearchRecord>,
+        Vec<PersistedNamedRecord>,
+        Vec<PersistedNamedRecord>,
+    ),
+    String,
+> {
+    Ok((
+        load_series_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
+        load_book_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
+        load_collection_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS collection search rows: {error}"))?,
+        load_readlist_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+            .await
+            .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
+    ))
+}
+
+async fn load_ranked_series_search_results(
+    pool: &SqlitePool,
+    index: &SearchQueryLifecycle,
+    query: &str,
+) -> Result<Vec<PersistedSeriesSearchRecord>, String> {
+    let limit = load_series_search_count(pool)
+        .await
+        .map_err(|error| format!("load OPDS series search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Series, limit)
+        .unwrap_or_default();
+    ordered_series_search_rows(pool, &ids).await
+}
+
+async fn load_ranked_book_search_results(
+    pool: &SqlitePool,
+    index: &SearchQueryLifecycle,
+    query: &str,
+) -> Result<Vec<PersistedBookSearchRecord>, String> {
+    let limit = load_book_search_count(pool)
+        .await
+        .map_err(|error| format!("load OPDS book search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Book, limit)
+        .unwrap_or_default();
+    ordered_book_search_rows(pool, &ids).await
+}
+
+async fn load_ranked_collection_search_results(
+    pool: &SqlitePool,
+    index: &SearchQueryLifecycle,
+    query: &str,
+) -> Result<Vec<PersistedNamedRecord>, String> {
+    let limit = load_collection_search_count(pool)
+        .await
+        .map_err(|error| format!("load OPDS collection search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::Collection, limit)
+        .unwrap_or_default();
+    ordered_collection_search_rows(pool, &ids).await
+}
+
+async fn load_ranked_readlist_search_results(
+    pool: &SqlitePool,
+    index: &SearchQueryLifecycle,
+    query: &str,
+) -> Result<Vec<PersistedNamedRecord>, String> {
+    let limit = load_readlist_search_count(pool)
+        .await
+        .map_err(|error| format!("load OPDS readlist search count: {error}"))?
+        .max(1);
+    let ids = index
+        .search_ids(query, SearchEntityType::ReadList, limit)
+        .unwrap_or_default();
+    ordered_readlist_search_rows(pool, &ids).await
+}
+
+async fn ordered_series_search_rows(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<PersistedSeriesSearchRecord>, String> {
+    let rows = load_series_search_records_by_ids(pool, ids)
+        .await
+        .map_err(|error| format!("load OPDS series search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_book_search_rows(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<PersistedBookSearchRecord>, String> {
+    let rows = load_book_search_records_by_ids(pool, ids)
+        .await
+        .map_err(|error| format!("load OPDS book search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_collection_search_rows(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<PersistedNamedRecord>, String> {
+    let rows = load_collection_search_records_by_ids(pool, ids)
+        .await
+        .map_err(|error| format!("load OPDS collection search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
+
+async fn ordered_readlist_search_rows(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<PersistedNamedRecord>, String> {
+    let rows = load_readlist_search_records_by_ids(pool, ids)
+        .await
+        .map_err(|error| format!("load OPDS readlist search rows by ids: {error}"))?;
+    let mut by_id = rows
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+}
 
 pub async fn load_libraries(pool: &SqlitePool) -> Result<Vec<PersistedLibraryRecord>, sqlx::Error> {
     let rows = sqlx::query(

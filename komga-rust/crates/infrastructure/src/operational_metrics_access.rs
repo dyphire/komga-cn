@@ -1,5 +1,63 @@
+use crate::database_handle::DatabaseHandle;
 use crate::sqlite::{SharedSqlitePoolSnapshot, shared_pool_snapshots_for_paths};
 use sqlx::{Row, SqlitePool};
+
+#[derive(Clone)]
+pub struct OperationalMetricsAccess {
+    main_db: DatabaseHandle,
+    tasks_db: DatabaseHandle,
+}
+
+impl OperationalMetricsAccess {
+    pub fn new(main_db: DatabaseHandle, tasks_db: DatabaseHandle) -> Self {
+        Self { main_db, tasks_db }
+    }
+
+    pub async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
+        load_task_execution_values(self.tasks_db.read_pool()).await
+    }
+
+    pub async fn load_libraries_count(&self) -> Result<f64, String> {
+        load_libraries_count(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        load_series_grouped_by_library(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        load_books_grouped_by_library(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_books_filesize_grouped_by_library(
+        &self,
+    ) -> Result<Vec<(String, f64)>, String> {
+        load_books_filesize_grouped_by_library(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+        load_sidecars_grouped_by_library(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_collections_count(&self) -> Result<f64, String> {
+        load_collections_count(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_readlists_count(&self) -> Result<f64, String> {
+        load_readlists_count(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_task_failure_count(&self) -> Result<f64, String> {
+        load_task_failure_count(self.main_db.read_pool()).await
+    }
+
+    pub async fn load_sqlite_pool_snapshots(
+        &self,
+        paths: &[std::path::PathBuf],
+    ) -> Result<Vec<SharedSqlitePoolSnapshot>, String> {
+        Ok(shared_pool_snapshots_for_paths(paths))
+    }
+}
 
 pub fn load_sqlite_pool_snapshots(paths: &[std::path::PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
     shared_pool_snapshots_for_paths(paths)

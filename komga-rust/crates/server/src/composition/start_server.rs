@@ -11,7 +11,7 @@ use tokio::signal;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
-use crate::composition::http_state::compose_http_runtime;
+use crate::composition::compose_http_runtime::compose_http_runtime;
 use crate::runtime::{TaskRuntime, TaskRuntimeMode};
 use komga_config::env_config::RuntimeConfig;
 

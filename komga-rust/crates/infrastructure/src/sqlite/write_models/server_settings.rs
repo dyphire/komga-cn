@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use komga_application::operational::PersistedServerSettings;
 use sqlx::Row;
 
 use crate::context::SqlitePersistenceContext;
@@ -58,6 +59,10 @@ impl ServerSettingsStore {
         })
         .collect::<BTreeMap<_, _>>();
         Ok(rows)
+    }
+
+    pub async fn load_settings(&self) -> Result<PersistedServerSettings, sqlx::Error> {
+        crate::operational_settings_access::load_server_settings(self).await
     }
 
     pub async fn apply_changes(

@@ -33,7 +33,7 @@ pub struct PersistedSeriesDetailRecord {
 }
 
 #[derive(Clone)]
-pub struct PersistedCollectionRecord {
+pub struct PersistedSeriesCollectionRecord {
     pub id: String,
     pub name: String,
     pub ordered: bool,
@@ -242,7 +242,7 @@ pub async fn load_persisted_series_detail(
 pub async fn load_persisted_series_collections(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Vec<PersistedCollectionRecord>, String> {
+) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
     let rows = sqlx::query(
         r#"SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE
          FROM COLLECTION c
@@ -269,7 +269,7 @@ pub async fn load_persisted_series_collections(
         .await
         .map_err(|error| format!("query persisted collection series ids: {error}"))?;
 
-        collections.push(PersistedCollectionRecord {
+        collections.push(PersistedSeriesCollectionRecord {
             id: collection_id,
             name: row.get::<String, _>("NAME"),
             ordered: row.get::<bool, _>("ORDERED"),
