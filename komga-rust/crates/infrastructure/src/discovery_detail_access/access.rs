@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use komga_application::discovery::{
-    BookDetailPort, CollectionPort, DiscoveryPersistedReadlistBookRecord,
-    DiscoveryPersistedReadlistRecord, ExistingSeriesMetadataRecord, PersistedBookAuthorRecord,
-    PersistedBookDetailRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+    BookDetailPort, BookMetadataAuthorReadModel, BookReadModel, CollectionPort,
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    ExistingSeriesMetadataRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
     PersistedSeriesRestrictionRecord, ReadlistPort, SeriesDetailPort, SeriesMetadataUpdateRecord,
-    SeriesSummaryRecord,
+    SeriesReadModel,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -59,7 +59,7 @@ impl BookDetailPort for DiscoveryDetailAccess {
         &self,
         book_id: &str,
         user_id: Option<&str>,
-    ) -> Result<Option<PersistedBookDetailRecord>, String> {
+    ) -> Result<Option<BookReadModel>, String> {
         books::load_persisted_book_detail(self.db.read_pool(), book_id, user_id).await
     }
 
@@ -74,7 +74,7 @@ impl BookDetailPort for DiscoveryDetailAccess {
     async fn load_persisted_book_authors(
         &self,
         book_id: &str,
-    ) -> Result<Vec<PersistedBookAuthorRecord>, String> {
+    ) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
         readlists::load_persisted_book_authors(self.db.read_pool(), book_id).await
     }
 }
@@ -113,13 +113,13 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
         series::load_persisted_series_detail(self.db.read_pool(), series_id).await
     }
 
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesSummaryRecord>, String> {
+    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesReadModel>, String> {
         let summaries =
             infrastructure_discovery_series::load_persisted_series_summaries(self.db.read_pool())
                 .await?;
         Ok(summaries
             .into_iter()
-            .map(|s| SeriesSummaryRecord {
+            .map(|s| SeriesReadModel {
                 id: s.id,
                 library_id: s.library_id,
                 name: s.name,

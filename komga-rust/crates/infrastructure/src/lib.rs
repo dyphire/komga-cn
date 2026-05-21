@@ -23,6 +23,7 @@ pub mod opds_persisted_access;
 pub mod operational_metrics_access;
 pub mod operational_settings_access;
 pub mod page_hashes_access;
+mod parsing;
 mod persisted_paths;
 pub mod progress_writer;
 mod rar_support;

@@ -278,7 +278,8 @@ fn book_row_to_read_model(row: BookRow) -> BookReadModel {
     BookReadModel {
         id: row.id,
         series_id: row.series_id,
-        series_title: row.series_title,
+        series_title: row.series_title.clone(),
+        series_title_sort: row.series_title,
         library_id: row.library_id,
         name: row.name,
         url: row.url,

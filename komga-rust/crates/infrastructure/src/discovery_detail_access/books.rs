@@ -1,9 +1,11 @@
 use sqlx::{Row, SqlitePool};
 
-pub use komga_application::discovery::{
-    DiscoveryPersistedReadProgressRecord, PersistedBookDetailRecord, PersistedBookResourceRecord,
+use komga_application::discovery::{
+    BookReadModel, BookReadProgressReadModel, PersistedBookResourceRecord,
     PersistedBookSiblingDirectionRecord,
 };
+
+use crate::parsing::{parse_csv_values, parse_metadata_authors, parse_metadata_links};
 
 pub async fn load_book_id_by_sorted_position(
     pool: &SqlitePool,
@@ -58,7 +60,7 @@ pub async fn load_persisted_book_detail(
     pool: &SqlitePool,
     book_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<PersistedBookDetailRecord>, String> {
+) -> Result<Option<BookReadModel>, String> {
     let row = sqlx::query(
         r#"SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
                 COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT,
@@ -116,7 +118,7 @@ pub async fn load_persisted_book_detail(
     .await
     .map_err(|error| format!("query persisted book detail: {error}"))?;
 
-    Ok(row.map(|row| PersistedBookDetailRecord {
+    Ok(row.map(|row| BookReadModel {
         id: row.get::<String, _>("ID"),
         series_id: row.get::<String, _>("SERIES_ID"),
         series_title: row.get::<String, _>("SERIES_TITLE"),
@@ -133,30 +135,30 @@ pub async fn load_persisted_book_detail(
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         media_pages_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u32,
         media_comment: row.get::<String, _>("MEDIA_COMMENT"),
+        media_epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
+        media_epub_is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
         metadata_title: row.get::<String, _>("METADATA_TITLE"),
-        metadata_summary: row.get::<String, _>("METADATA_SUMMARY"),
-        metadata_number: row.get::<String, _>("METADATA_NUMBER"),
-        metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
-        metadata_release_date: row.get::<Option<String>, _>("METADATA_RELEASE_DATE"),
         metadata_title_lock: row.get::<bool, _>("METADATA_TITLE_LOCK"),
+        metadata_summary: row.get::<String, _>("METADATA_SUMMARY"),
         metadata_summary_lock: row.get::<bool, _>("METADATA_SUMMARY_LOCK"),
+        metadata_number: row.get::<String, _>("METADATA_NUMBER"),
         metadata_number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
+        metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
         metadata_number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
+        metadata_release_date: row.get::<Option<String>, _>("METADATA_RELEASE_DATE"),
         metadata_release_date_lock: row.get::<bool, _>("METADATA_RELEASE_DATE_LOCK"),
-        metadata_authors: row.get::<String, _>("METADATA_AUTHORS"),
+        metadata_authors: parse_metadata_authors(&row.get::<String, _>("METADATA_AUTHORS")),
         metadata_authors_lock: row.get::<bool, _>("METADATA_AUTHORS_LOCK"),
-        metadata_tags: row.get::<String, _>("METADATA_TAGS"),
+        metadata_tags: parse_csv_values(&row.get::<String, _>("METADATA_TAGS")),
         metadata_tags_lock: row.get::<bool, _>("METADATA_TAGS_LOCK"),
         metadata_isbn: row.get::<String, _>("METADATA_ISBN"),
         metadata_isbn_lock: row.get::<bool, _>("METADATA_ISBN_LOCK"),
-        metadata_links: row.get::<String, _>("METADATA_LINKS"),
+        metadata_links: parse_metadata_links(&row.get::<String, _>("METADATA_LINKS")),
         metadata_links_lock: row.get::<bool, _>("METADATA_LINKS_LOCK"),
         metadata_created: row.get::<String, _>("METADATA_CREATED"),
         metadata_last_modified: row.get::<String, _>("METADATA_LAST_MODIFIED"),
-        media_epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
-        media_epub_is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
         read_progress: row.get::<Option<i64>, _>("READ_PROGRESS_PAGE").map(|page| {
-            DiscoveryPersistedReadProgressRecord {
+            BookReadProgressReadModel {
                 page: page as i32,
                 completed: row
                     .get::<Option<bool>, _>("READ_PROGRESS_COMPLETED")

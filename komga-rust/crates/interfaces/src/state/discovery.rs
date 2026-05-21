@@ -3,14 +3,13 @@ use axum::extract::FromRef;
 use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
 
 pub use komga_application::discovery::{
-    BookDetailPort, CollectionPort, DiscoveryPersistedReadProgressRecord,
-    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord, DiscoverySearchService,
-    ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
+    BookDetailPort, CollectionPort, DiscoveryPersistedReadlistBookRecord,
+    DiscoveryPersistedReadlistRecord, DiscoverySearchService, ExistingSeriesMetadataRecord,
     PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
     PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
     PersistedSeriesRestrictionRecord, ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort,
-    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord, SeriesSummaryRecord,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
 };
 
 #[derive(Clone)]

@@ -1,6 +1,6 @@
 use super::*;
 use flate2::read::GzDecoder;
-use komga_application::discovery::{BookDetailPort, SeriesDetailPort};
+use komga_application::discovery::{BookDetailPort, BookMetadataAuthorReadModel, SeriesDetailPort};
 use komga_application::media_assets::{
     BookPageRecord, ContentResolverPort, MediaReaderPort, PersistedMediaFileRecord,
 };
@@ -529,17 +529,15 @@ async fn load_persisted_webpub_metadata_additions(
         metadata.insert(
             "subject".to_string(),
             Value::Array(
-                parse_csv_values(&book.metadata_tags)
-                    .into_iter()
+                book.metadata_tags
+                    .iter()
+                    .cloned()
                     .map(Value::String)
                     .collect(),
             ),
         );
     }
-    extend_webpub_metadata_with_role_authors(
-        &mut metadata,
-        parse_metadata_authors(&book.metadata_authors).as_slice(),
-    );
+    extend_webpub_metadata_with_role_authors(&mut metadata, &book.metadata_authors);
     if !book.series_title.is_empty() {
         let mut series_entry = serde_json::Map::new();
         series_entry.insert("name".to_string(), Value::String(book.series_title.clone()));
@@ -572,38 +570,6 @@ async fn load_persisted_webpub_metadata_additions(
     Ok(Some((metadata, book.media_epub_divina_compatible)))
 }
 
-struct ManifestAuthor {
-    name: String,
-    role: String,
-}
-
-fn parse_metadata_authors(raw: &str) -> Vec<ManifestAuthor> {
-    raw.split('\u{001F}')
-        .filter(|entry| !entry.is_empty())
-        .map(|author| match author.split_once('\u{001E}') {
-            Some((name, role)) => ManifestAuthor {
-                name: name.to_string(),
-                role: role.to_string(),
-            },
-            None => ManifestAuthor {
-                name: author.to_string(),
-                role: String::new(),
-            },
-        })
-        .collect()
-}
-
-fn parse_csv_values(raw: &str) -> Vec<String> {
-    if raw.trim().is_empty() {
-        return vec![];
-    }
-    raw.split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 fn webpub_reading_progression(reading_direction: &str) -> Option<&'static str> {
     match reading_direction.trim().to_ascii_uppercase().as_str() {
         "LEFT_TO_RIGHT" => Some("ltr"),
@@ -633,7 +599,7 @@ fn normalize_webpub_modified(value: &str) -> String {
 
 fn extend_webpub_metadata_with_role_authors(
     metadata: &mut serde_json::Map<String, Value>,
-    authors: &[ManifestAuthor],
+    authors: &[BookMetadataAuthorReadModel],
 ) {
     let mut author = Vec::new();
     let mut translator = Vec::new();

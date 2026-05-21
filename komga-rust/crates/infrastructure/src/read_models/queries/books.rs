@@ -1,7 +1,4 @@
-use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
-    BookReadProgressReadModel, BooksBrowseRequest,
-};
+use komga_application::discovery::{BookReadModel, BookReadProgressReadModel, BooksBrowseRequest};
 use komga_domain::discovery::{
     BookCondition, BookSort, BookValueCondition, CompositeBookCondition, DateCondition,
     DiscoveryError, DiscoveryQueryContext, FilterOperator, InclusionCondition, NumberCondition,
@@ -10,6 +7,7 @@ use komga_domain::discovery::{
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::map_sqlx_error;
+use crate::parsing::{parse_csv_values, parse_metadata_authors, parse_metadata_links};
 use crate::read_models::filters::{
     SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx, append_like_clause_sqlx,
     append_not_in_clause_sqlx, effective_library_ids, query_filters_sqlx,
@@ -34,6 +32,7 @@ struct SqlxBookListRow {
     id: String,
     series_id: String,
     series_title: String,
+    series_title_sort: String,
     library_id: String,
     title: String,
     url: String,
@@ -87,6 +86,7 @@ impl From<SqlxBookListRow> for BookReadModel {
             id: value.id,
             series_id: value.series_id,
             series_title: value.series_title,
+            series_title_sort: value.series_title_sort,
             library_id: value.library_id,
             name: value.title,
             url: value.url,
@@ -239,7 +239,8 @@ async fn list_books_sqlx_common(
                rp.read_date AS read_progress_read_date, rp.created AS read_progress_created,
                rp.last_modified AS read_progress_last_modified, rp.device_id AS read_progress_device_id,
                rp.device_name AS read_progress_device_name,
-               b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title
+               b.deleted AS deleted, '' AS file_hash, b.oneshot AS oneshot, s.title AS series_title,
+               s.title AS series_title_sort
         FROM books b
         JOIN series s ON s.id = b.series_id
         LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id =
@@ -907,43 +908,6 @@ fn pattern_value(value: &str, kind: PatternKind) -> String {
         PatternKind::StartsWith => format!("{value}%"),
         PatternKind::EndsWith => format!("%{value}"),
     }
-}
-
-pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.to_string())
-        .collect()
-}
-
-pub(super) fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {
-    raw.split('\u{001F}')
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| match entry.split_once('\u{001E}') {
-            Some((name, role)) => BookMetadataAuthorReadModel {
-                name: name.to_string(),
-                role: role.to_string(),
-            },
-            None => BookMetadataAuthorReadModel {
-                name: entry.to_string(),
-                role: String::new(),
-            },
-        })
-        .collect()
-}
-
-pub(super) fn parse_metadata_links(raw: &str) -> Vec<BookMetadataLinkReadModel> {
-    raw.split('\u{001F}')
-        .filter(|entry| !entry.is_empty())
-        .filter_map(|entry| {
-            entry
-                .split_once('\u{001E}')
-                .map(|(label, url)| BookMetadataLinkReadModel {
-                    label: label.to_string(),
-                    url: url.to_string(),
-                })
-        })
-        .collect()
 }
 
 fn extract_book_library_ids(condition: Option<&BookCondition>) -> Option<Vec<String>> {

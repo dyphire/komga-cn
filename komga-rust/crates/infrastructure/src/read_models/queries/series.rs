@@ -12,8 +12,8 @@ use super::super::filters::{
     append_in_clause_sqlx, append_like_clause_sqlx, append_not_in_clause_sqlx,
     append_subquery_exists_clause, effective_library_ids, query_filters_sqlx,
 };
-use super::books::parse_csv_values;
 use super::map_sqlx_error;
+use crate::parsing::parse_csv_values;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SeriesOrdering {

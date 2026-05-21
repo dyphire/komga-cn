@@ -18,10 +18,11 @@ use crate::helpers::{
 };
 use crate::state::DiscoveryState;
 use crate::state::{
-    PersistedBookAuthorRecord, PersistedBookSiblingDirectionRecord,
-    PersistedComicrackMatchCandidateRecord, PersistedSeriesDetailRecord,
-    SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
+    PersistedBookSiblingDirectionRecord, PersistedComicrackMatchCandidateRecord,
+    PersistedSeriesDetailRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
+    SeriesMetadataUpdateRecord,
 };
+use komga_application::discovery::{BookMetadataAuthorReadModel, BookReadModel};
 
 mod books_detail;
 mod books_persistence;
@@ -78,74 +79,7 @@ pub use series_persistence::{
 };
 use series_persistence::{load_persisted_series_collections, load_persisted_series_detail};
 
-#[derive(Clone)]
-struct PersistedReadProgress {
-    page: i32,
-    completed: bool,
-    read_date: Option<String>,
-    created: String,
-    last_modified: String,
-    device_id: String,
-    device_name: String,
-}
-
-#[derive(Clone)]
-struct BookMetadataAuthorReadModel {
-    name: String,
-    role: String,
-}
-
-#[derive(Clone)]
-struct BookMetadataLinkReadModel {
-    label: String,
-    url: String,
-}
-
-#[derive(Clone)]
-pub(super) struct BookDetailReadModel {
-    id: String,
-    series_id: String,
-    series_title: String,
-    pub(super) series_title_sort: String,
-    library_id: String,
-    name: String,
-    url: String,
-    number: i32,
-    created: String,
-    last_modified: String,
-    file_last_modified: String,
-    size_bytes: u64,
-    media_status: String,
-    media_type: String,
-    media_pages_count: u32,
-    media_comment: String,
-    metadata_title: String,
-    metadata_summary: String,
-    metadata_number: String,
-    metadata_number_sort: f64,
-    metadata_release_date: Option<String>,
-    metadata_title_lock: bool,
-    metadata_summary_lock: bool,
-    metadata_number_lock: bool,
-    metadata_number_sort_lock: bool,
-    metadata_release_date_lock: bool,
-    metadata_authors: Vec<BookMetadataAuthorReadModel>,
-    metadata_authors_lock: bool,
-    metadata_tags: Vec<String>,
-    metadata_tags_lock: bool,
-    metadata_isbn: String,
-    metadata_isbn_lock: bool,
-    metadata_links: Vec<BookMetadataLinkReadModel>,
-    metadata_links_lock: bool,
-    metadata_created: String,
-    metadata_last_modified: String,
-    media_epub_divina_compatible: bool,
-    media_epub_is_kepub: bool,
-    read_progress: Option<PersistedReadProgress>,
-    deleted: bool,
-    file_hash: String,
-    oneshot: bool,
-}
+pub(super) type BookDetailReadModel = BookReadModel;
 
 #[derive(Clone)]
 pub(super) struct ReadListReadModel {
@@ -228,11 +162,11 @@ pub(super) async fn load_persisted_book_detail(
     app: &DiscoveryState,
     book_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<BookDetailReadModel>, String> {
+) -> Result<Option<BookReadModel>, String> {
     books_persistence::load_persisted_book_detail(app, book_id, user_id).await
 }
 
-pub(super) fn book_detail_payload(book: &BookDetailReadModel, is_admin: bool) -> Value {
+pub(super) fn book_detail_payload(book: &BookReadModel, is_admin: bool) -> Value {
     let admin_url = api_file_path(&book.url);
     let url = if is_admin {
         admin_url
@@ -522,6 +456,7 @@ fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use komga_application::discovery::BookMetadataLinkReadModel;
 
     #[test]
     fn book_detail_payload_uses_persisted_lock_link_and_media_flags() {

@@ -99,7 +99,7 @@ pub async fn load_comicrack_match_candidates(
 pub async fn load_persisted_book_authors(
     app: &DiscoveryState,
     book_id: &str,
-) -> Result<Vec<PersistedBookAuthorRecord>, String> {
+) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
     app.book_detail.load_persisted_book_authors(book_id).await
 }
 
@@ -634,7 +634,7 @@ pub(super) fn sort_visible_persisted_readlist_books(
 
 fn matches_persisted_readlist_book_filters(
     book: &BookDetailReadModel,
-    book_authors: &[PersistedBookAuthorRecord],
+    book_authors: &[BookMetadataAuthorReadModel],
     query: &PersistedReadlistBooksQuery,
 ) -> bool {
     if query.deleted.is_some_and(|deleted| deleted != book.deleted) {
@@ -851,13 +851,12 @@ pub(super) fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel,
-    };
+    use super::super::BookDetailReadModel;
     use super::{
         ComicRackReadListRequest, ComicRackReadListRequestBook, comicrack_payload,
         decode_query_component, parse_comicrack_readlist, sort_visible_persisted_readlist_books,
     };
+    use komga_application::discovery::{BookMetadataAuthorReadModel, BookMetadataLinkReadModel};
     use serde_json::json;
 
     #[test]

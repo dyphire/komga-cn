@@ -3,8 +3,8 @@ use sqlx::{Row, SqlitePool};
 use super::common;
 
 pub use komga_application::discovery::{
-    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
-    PersistedBookAuthorRecord, PersistedComicrackMatchCandidateRecord,
+    BookMetadataAuthorReadModel, DiscoveryPersistedReadlistBookRecord,
+    DiscoveryPersistedReadlistRecord, PersistedComicrackMatchCandidateRecord,
 };
 
 pub async fn persisted_readlists_exist(pool: &SqlitePool) -> Result<bool, String> {
@@ -121,7 +121,7 @@ LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
 pub async fn load_persisted_book_authors(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<PersistedBookAuthorRecord>, String> {
+) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
     let rows = sqlx::query(
         r#"SELECT NAME, COALESCE(ROLE, '') AS ROLE
 FROM BOOK_METADATA_AUTHOR
@@ -134,7 +134,7 @@ WHERE BOOK_ID = ?"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| PersistedBookAuthorRecord {
+        .map(|row| BookMetadataAuthorReadModel {
             name: row.get::<String, _>("NAME"),
             role: row.get::<String, _>("ROLE"),
         })
