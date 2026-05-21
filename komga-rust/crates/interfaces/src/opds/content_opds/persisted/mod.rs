@@ -11,7 +11,7 @@ use crate::identity_access::auth::{
     AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::{
-    OpdsBookAuthorEntry, OpdsCatalogAccess, OpdsPersistedAccess, PersistedLibraryRecord,
+    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord,
     PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
     PersistedSeriesRecord,
 };
@@ -170,14 +170,14 @@ pub(super) fn content_allowed_by_restrictions(
 }
 
 pub(super) async fn load_libraries(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
 ) -> Result<Vec<PersistedLibrary>, String> {
     let records = backend.load_libraries().await?;
     Ok(records.into_iter().map(map_library_record).collect())
 }
 
 pub(super) async fn load_library(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     library_id: &str,
 ) -> Result<Option<PersistedLibrary>, String> {
     let record = backend.load_library(library_id).await?;
@@ -185,7 +185,7 @@ pub(super) async fn load_library(
 }
 
 pub(super) async fn load_readlists_for_library(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     library_id: &str,
 ) -> Result<Vec<PersistedReadlist>, String> {
     let records = backend.load_readlists_for_library(library_id).await?;
@@ -193,7 +193,7 @@ pub(super) async fn load_readlists_for_library(
 }
 
 pub(super) async fn load_series(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     series_id: &str,
 ) -> Result<Option<PersistedSeries>, String> {
     let record = backend.load_series(series_id).await?;
@@ -201,7 +201,7 @@ pub(super) async fn load_series(
 }
 
 pub(super) async fn load_series_books_paged(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     series_id: &str,
     user_id: &str,
     offset: i64,
@@ -214,7 +214,7 @@ pub(super) async fn load_series_books_paged(
 }
 
 pub(super) async fn load_readlist(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlist>, String> {
     let record = backend.load_readlist(readlist_id).await?;
@@ -222,7 +222,7 @@ pub(super) async fn load_readlist(
 }
 
 pub(super) async fn load_readlist_books(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBook>, String> {
     let records = backend.load_readlist_books(readlist_id).await?;
@@ -230,7 +230,7 @@ pub(super) async fn load_readlist_books(
 }
 
 pub(super) async fn load_unified_search_results(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     query: &str,
 ) -> Result<
     (
@@ -306,8 +306,8 @@ pub(super) async fn load_unified_search_results(
 }
 
 pub(super) async fn load_opds_v1_series_search_results(
-    persisted_backend: &OpdsPersistedAccess,
-    catalog_backend: &OpdsCatalogAccess,
+    persisted_backend: &dyn OpdsPersistedPort,
+    catalog_backend: &dyn OpdsCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
     search: &str,
     publishers: &[String],
@@ -354,14 +354,14 @@ pub(super) async fn load_opds_v1_series_search_results(
 }
 
 pub(super) async fn load_publishers(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     allowed_library_ids: &Option<HashSet<String>>,
 ) -> Result<Vec<String>, String> {
     backend.load_publishers(allowed_library_ids.as_ref()).await
 }
 
 pub(super) async fn has_visible_collections_for_scope(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     allowed_library_ids: &Option<HashSet<String>>,
     restrictions: Option<&OpdsRestrictions>,
     library_id: Option<&str>,
@@ -391,8 +391,8 @@ pub(super) async fn has_visible_collections_for_scope(
 }
 
 pub(super) async fn has_visible_readlists_for_scope(
-    catalog_backend: &OpdsCatalogAccess,
-    persisted_backend: &OpdsPersistedAccess,
+    catalog_backend: &dyn OpdsCatalogPort,
+    persisted_backend: &dyn OpdsPersistedPort,
     allowed_library_ids: &Option<HashSet<String>>,
     restrictions: Option<&OpdsRestrictions>,
     library_id: Option<&str>,
@@ -444,7 +444,7 @@ pub(super) async fn has_visible_readlists_for_scope(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
-    backend: &OpdsCatalogAccess,
+    backend: &dyn OpdsCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -465,7 +465,7 @@ pub(super) async fn load_browse_series_navigation(
 }
 
 pub(super) async fn load_browse_publisher_navigation(
-    backend: &OpdsCatalogAccess,
+    backend: &dyn OpdsCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -480,7 +480,7 @@ pub(super) async fn load_browse_publisher_navigation(
 }
 
 pub(super) async fn load_collections(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedCollection>, String> {
     let rows = backend.load_collections(library_id).await?;
@@ -496,7 +496,7 @@ pub(super) async fn load_collections(
 }
 
 pub(super) async fn load_collection(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     collection_id: &str,
 ) -> Result<Option<PersistedCollection>, String> {
     let row = backend.load_collection(collection_id).await?;
@@ -509,7 +509,7 @@ pub(super) async fn load_collection(
 }
 
 pub(super) async fn load_collection_series(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     collection_id: &str,
     ordered: bool,
 ) -> Result<Vec<PersistedSeries>, String> {
@@ -616,7 +616,7 @@ fn map_readlist_book_record(row: PersistedReadlistBookRecord) -> PersistedReadli
 }
 
 pub(super) async fn load_series_page(
-    backend: &OpdsCatalogAccess,
+    backend: &dyn OpdsCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
@@ -635,13 +635,13 @@ pub(super) async fn load_series_page(
 }
 
 pub(super) async fn load_all_readlists(
-    backend: &OpdsCatalogAccess,
+    backend: &dyn OpdsCatalogPort,
 ) -> Result<Vec<PersistedReadlist>, String> {
     catalog_queries::load_all_readlists(backend).await
 }
 
 pub(super) async fn validate_library_scope(
-    backend: &OpdsPersistedAccess,
+    backend: &dyn OpdsPersistedPort,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
 ) -> Option<Response> {

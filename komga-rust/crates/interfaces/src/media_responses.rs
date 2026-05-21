@@ -21,11 +21,9 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
-use komga_application::media_assets::BookMediaRecord;
-use komga_infrastructure::content_resolver::ContentResolver;
-use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
-use komga_infrastructure::media_reader::MediaReader;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_application::discovery::DiscoveryDetailPort;
+use komga_application::media_assets::{BookMediaRecord, ContentResolverPort, MediaReaderPort};
+use komga_application::operational::ServerSettingsPort;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BookPageResponseOptions {
@@ -45,8 +43,8 @@ impl Default for BookPageResponseOptions {
 }
 
 pub(crate) async fn book_file_response(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
@@ -81,9 +79,9 @@ pub(crate) async fn book_file_response(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn book_page_response(
-    reader: &MediaReader,
-    content: &ContentResolver,
-    discovery_detail: &DiscoveryDetailAccess,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
+    discovery_detail: &dyn DiscoveryDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -236,9 +234,9 @@ pub(crate) async fn book_page_response(
 }
 
 pub(crate) async fn book_page_raw_response(
-    reader: &MediaReader,
-    content: &ContentResolver,
-    discovery_detail: &DiscoveryDetailAccess,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
+    discovery_detail: &dyn DiscoveryDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,
@@ -306,8 +304,8 @@ pub(crate) async fn book_page_raw_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_response(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     headers: &HeaderMap,
     book_id: &str,
     user: &AuthUser,
@@ -330,8 +328,8 @@ pub(crate) async fn book_thumbnail_opds_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_small_default_response(
-    reader: &MediaReader,
-    server_settings: &ServerSettingsStore,
+    reader: &dyn MediaReaderPort,
+    server_settings: &dyn ServerSettingsPort,
     headers: &HeaderMap,
     book_id: &str,
     user: &AuthUser,
@@ -352,7 +350,7 @@ pub(crate) async fn book_thumbnail_opds_small_default_response(
 }
 
 pub(crate) async fn book_thumbnail_opds_small_response(
-    reader: &MediaReader,
+    reader: &dyn MediaReaderPort,
     headers: &HeaderMap,
     book_id: &str,
     max_edge: u32,
@@ -389,7 +387,7 @@ pub(crate) async fn book_thumbnail_opds_small_response(
 }
 
 async fn resolve_book_id_for_persisted(
-    discovery_detail: &DiscoveryDetailAccess,
+    discovery_detail: &dyn DiscoveryDetailPort,
     requested_book_id: &str,
 ) -> String {
     let Some(index) = requested_book_id
@@ -422,8 +420,8 @@ async fn resolve_book_id_for_persisted(
 }
 
 async fn load_book_thumbnail_source_bytes(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     book_id: &str,
     media: &BookMediaRecord,
 ) -> Option<Vec<u8>> {

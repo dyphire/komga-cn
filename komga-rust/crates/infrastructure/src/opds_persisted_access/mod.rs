@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use async_trait::async_trait;
+use komga_application::opds::OpdsPersistedPort;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
@@ -42,14 +44,17 @@ impl OpdsPersistedAccess {
             lucene_data_directory,
         }
     }
+}
 
-    pub async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+#[async_trait]
+impl OpdsPersistedPort for OpdsPersistedAccess {
+    async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
         load_libraries(self.db.read_pool())
             .await
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_library(
+    async fn load_library(
         &self,
         library_id: &str,
     ) -> Result<Option<PersistedLibraryRecord>, String> {
@@ -58,7 +63,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_readlists_for_library(
+    async fn load_readlists_for_library(
         &self,
         library_id: &str,
     ) -> Result<Vec<PersistedReadlistRecord>, String> {
@@ -67,16 +72,13 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_series(
-        &self,
-        series_id: &str,
-    ) -> Result<Option<PersistedSeriesRecord>, String> {
+    async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
         load_series(self.db.read_pool(), series_id)
             .await
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_series_books_paged(
+    async fn load_series_books_paged(
         &self,
         series_id: &str,
         user_id: &str,
@@ -88,13 +90,13 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
+    async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
         load_series_tags(self.db.read_pool(), series_id)
             .await
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_readlist(
+    async fn load_readlist(
         &self,
         readlist_id: &str,
     ) -> Result<Option<PersistedReadlistRecord>, String> {
@@ -103,7 +105,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_readlist_books(
+    async fn load_readlist_books(
         &self,
         readlist_id: &str,
     ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
@@ -112,7 +114,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_unified_search_results(
+    async fn load_unified_search_results(
         &self,
         query: &str,
     ) -> Result<
@@ -146,7 +148,7 @@ impl OpdsPersistedAccess {
         ))
     }
 
-    pub async fn load_publishers(
+    async fn load_publishers(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
     ) -> Result<Vec<String>, String> {
@@ -155,7 +157,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_collections(
+    async fn load_collections(
         &self,
         library_id: Option<&str>,
     ) -> Result<Vec<PersistedNamedRecord>, String> {
@@ -164,7 +166,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_collection(
+    async fn load_collection(
         &self,
         collection_id: &str,
     ) -> Result<Option<PersistedNamedRecord>, String> {
@@ -173,7 +175,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_collection_books(
+    async fn load_collection_books(
         &self,
         collection_id: &str,
     ) -> Result<Vec<PersistedBookFeedRecord>, String> {
@@ -182,7 +184,7 @@ impl OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_collection_series(
+    async fn load_collection_series(
         &self,
         collection_id: &str,
         ordered: bool,

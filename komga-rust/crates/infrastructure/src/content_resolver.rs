@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use komga_application::media_assets::{BookMediaRecord, BookPageRecord};
+use async_trait::async_trait;
+use komga_application::media_assets::{BookMediaRecord, BookPageRecord, ContentResolverPort};
 use serde_json::Value;
 
 use crate::filesystem::media_access::epub;
@@ -10,10 +11,11 @@ use crate::filesystem::media_access::page_content;
 #[derive(Clone, Default)]
 pub struct ContentResolver;
 
-impl ContentResolver {
+#[async_trait]
+impl ContentResolverPort for ContentResolver {
     // --- Page content ---
 
-    pub async fn resolve_page_bytes(
+    async fn resolve_page_bytes(
         &self,
         media: &BookMediaRecord,
         page: &BookPageRecord,
@@ -22,7 +24,7 @@ impl ContentResolver {
         page_content::resolve_book_page_bytes(media, page, page_number).await
     }
 
-    pub async fn render_page_thumbnail(
+    async fn render_page_thumbnail(
         &self,
         media: &BookMediaRecord,
         page: &BookPageRecord,
@@ -32,7 +34,7 @@ impl ContentResolver {
         page_content::render_book_page_thumbnail(media, page, page_number, max_edge).await
     }
 
-    pub async fn archive_page_row(
+    async fn archive_page_row(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
@@ -40,23 +42,19 @@ impl ContentResolver {
         page_content::load_archive_page_row(media, page_number).await
     }
 
-    pub async fn archive_page_rows(&self, media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
+    async fn archive_page_rows(&self, media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
         page_content::load_archive_page_rows(media).await
     }
 
-    pub fn pdf_page_row(
-        &self,
-        media: &BookMediaRecord,
-        page_number: u64,
-    ) -> Option<BookPageRecord> {
+    fn pdf_page_row(&self, media: &BookMediaRecord, page_number: u64) -> Option<BookPageRecord> {
         page_content::load_pdf_page_row(media, page_number)
     }
 
-    pub fn generated_pdf_page_rows(&self, media: &BookMediaRecord) -> Vec<BookPageRecord> {
+    fn generated_pdf_page_rows(&self, media: &BookMediaRecord) -> Vec<BookPageRecord> {
         page_content::load_generated_pdf_page_rows(media)
     }
 
-    pub fn read_pdf_page_as_single_page_pdf(
+    fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
@@ -64,25 +62,25 @@ impl ContentResolver {
         page_content::read_pdf_page_as_single_page_pdf(media, page_number)
     }
 
-    pub fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> Option<u64> {
+    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> Option<u64> {
         page_content::detect_pdf_page_count(media)
     }
 
-    pub async fn read_media_file_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+    async fn read_media_file_bytes(&self, path: &Path) -> Option<Vec<u8>> {
         page_content::read_media_file_bytes(path).await
     }
 
-    pub async fn read_media_file_size(&self, path: &Path) -> Option<i64> {
+    async fn read_media_file_size(&self, path: &Path) -> Option<i64> {
         page_content::read_media_file_size(path).await
     }
 
     // --- EPUB ---
 
-    pub fn is_font_resource(&self, resource_name: &str) -> bool {
+    fn is_font_resource(&self, resource_name: &str) -> bool {
         epub::is_font_resource(resource_name)
     }
 
-    pub async fn read_epub_resource_bytes(
+    async fn read_epub_resource_bytes(
         &self,
         epub_path: &Path,
         resource_name: &str,
@@ -90,31 +88,31 @@ impl ContentResolver {
         epub::read_epub_resource_bytes(epub_path, resource_name).await
     }
 
-    pub fn decode_epub_positions_blob(&self, blob: &[u8]) -> Result<Vec<Value>, String> {
+    fn decode_epub_positions_blob(&self, blob: &[u8]) -> Result<Vec<Value>, String> {
         epub::decode_epub_positions_blob(blob)
     }
 
-    pub async fn epub_archive_positions(&self, media: &BookMediaRecord) -> Option<Vec<Value>> {
+    async fn epub_archive_positions(&self, media: &BookMediaRecord) -> Option<Vec<Value>> {
         epub::load_epub_archive_positions(media).await
     }
 
-    pub async fn epub_cover_bytes(&self, media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
+    async fn epub_cover_bytes(&self, media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
         epub::load_epub_cover_bytes(media).await
     }
 
-    pub async fn epub_package_document(&self, media: &BookMediaRecord) -> Option<Vec<u8>> {
+    async fn epub_package_document(&self, media: &BookMediaRecord) -> Option<Vec<u8>> {
         epub::load_epub_package_document(media).await
     }
 
-    pub fn epub_fixed_layout(&self, package_document: &[u8]) -> bool {
+    fn epub_fixed_layout(&self, package_document: &[u8]) -> bool {
         epub::parse_epub_fixed_layout(package_document)
     }
 
-    pub fn epub_kobo_spans(&self, resource_bytes: &[u8]) -> Vec<(String, f64)> {
+    fn epub_kobo_spans(&self, resource_bytes: &[u8]) -> Vec<(String, f64)> {
         epub::parse_epub_kobo_spans(resource_bytes)
     }
 
-    pub fn normalize_epub_resource_href(&self, rootfile_path: &str, href: &str) -> String {
+    fn normalize_epub_resource_href(&self, rootfile_path: &str, href: &str) -> String {
         epub::normalize_epub_resource_href(rootfile_path, href)
     }
 }

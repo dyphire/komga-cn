@@ -19,7 +19,6 @@ language-tags.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-kepubify = { path = "../kepubify" }
-komga-infrastructure = { path = "../infrastructure" }
 lopdf.workspace = true
 mime_guess.workspace = true
 oauth2.workspace = true
@@ -39,7 +38,6 @@ tsid.workspace = true
 futures-util.workspace = true
 async-trait.workspace = true
 zip.workspace = true
-sqlx.workspace = true
 unicode-normalization.workspace = true
 
 [target.'cfg(unix)'.dependencies]
@@ -49,6 +47,7 @@ libc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
+komga-infrastructure = { path = "../infrastructure" }
 sqlx.workspace = true
 
 [build-dependencies]

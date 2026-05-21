@@ -1,8 +1,10 @@
 mod books;
 mod browse;
+mod detail_port;
 mod index_maintenance;
 mod read_models;
 mod readlists;
+mod search_service;
 mod series;
 
 pub use books::{BookDetailQuery, BookReadlistsQuery, BookSiblingQuery};
@@ -10,6 +12,16 @@ pub use browse::{
     BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService, FacetKind,
     FacetScope, LatestBooksRequest, PageRequest, SeriesAlphabeticalGroupsRequest,
     SeriesBrowseRequest,
+};
+pub use detail_port::{
+    DiscoveryDetailPort, DiscoveryPersistedReadProgressRecord,
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    ExistingSeriesMetadataRecord, PersistedBookAuthorRecord, PersistedBookDetailRecord,
+    PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
+    PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
+    PersistedSeriesRestrictionRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
+    SeriesMetadataUpdateRecord, SeriesSummaryRecord,
 };
 pub use index_maintenance::{
     DiscoveryIndexDocument, DiscoveryIndexEntityType, DiscoveryIndexError, DiscoveryIndexEvent,
@@ -23,5 +35,8 @@ pub use read_models::{
 pub use readlists::{
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, RuntimeReadListsQuery,
     classify_readlist_books_query, normalize_readlists_search,
+};
+pub use search_service::{
+    DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
 };
 pub use series::{SeriesCollectionsQuery, SeriesDetailQuery};

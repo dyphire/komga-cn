@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
 use super::*;
+use async_trait::async_trait;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::runtime_identity_access::IdentityAccess;
 use komga_infrastructure::sqlite::setup;

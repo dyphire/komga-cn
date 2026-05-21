@@ -16,7 +16,6 @@ pub use komga_application::identity_access::{
     PersistedAuthenticationActivity, user_has_role, user_id, user_is_admin, user_payload_json,
     user_shared_all_libraries, user_shared_library_ids,
 };
-pub use komga_infrastructure::auth::session_store::RememberMeRuntimeSettings;
 pub use request_metadata::{
     authentication_activity_headers_metadata_with_remote_addr,
     authentication_activity_request_metadata, authentication_activity_write_input,
@@ -55,7 +54,10 @@ pub fn resolved_auth_token(
     identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<komga_application::identity_access::ResolvedAuthToken> {
-    let resolved = identity.auth_token_resolution(headers);
+    let session_token = token::session_token_from_headers(headers);
+    let remember_me_token = token::remember_me_token_from_headers(headers);
+    let resolved =
+        identity.resolve_auth_token(session_token.as_deref(), remember_me_token.as_deref());
     access_log::record_resolved_auth_user_id(
         resolved.as_ref().map(|resolved| user_id(&resolved.user)),
     );
@@ -72,7 +74,7 @@ pub async fn resolved_request_auth_user(
     {
         AuthOutcome::Valid(user) => Some(*user),
         AuthOutcome::Invalid => None,
-        AuthOutcome::Missing => match identity.auth_token_user(headers) {
+        AuthOutcome::Missing => match auth_token_user(identity, headers) {
             Some(user) => Some(user),
             None => match persisted_basic_user(identity, headers)
                 .await

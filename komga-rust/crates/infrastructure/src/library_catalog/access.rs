@@ -1,7 +1,8 @@
+use async_trait::async_trait;
 use komga_application::library_catalog::{
     CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
-    LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord, LibraryTaskResult,
-    LibraryTaskService, UpdateLibraryService,
+    LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord,
+    LibraryTaskResult, LibraryTaskService, UpdateLibraryService,
 };
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
@@ -19,8 +20,11 @@ impl LibraryCatalogAccess {
             adapter: SqliteLibraryCatalogAdapter::new(read_pool, write_pool),
         }
     }
+}
 
-    pub async fn list_libraries(
+#[async_trait]
+impl LibraryCatalogPort for LibraryCatalogAccess {
+    async fn list_libraries(
         &self,
         context: DiscoveryQueryContext,
     ) -> Result<Vec<LibraryRecord>, DiscoveryError> {
@@ -29,7 +33,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn get_library(
+    async fn get_library(
         &self,
         context: DiscoveryQueryContext,
         library_id: &str,
@@ -39,7 +43,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn create_library(
+    async fn create_library(
         &self,
         changes: LibraryChangeSet,
     ) -> Result<CreateLibraryResult, LibraryCatalogMutationError> {
@@ -48,7 +52,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn update_library(
+    async fn update_library(
         &self,
         library_id: &str,
         changes: LibraryChangeSet,
@@ -58,16 +62,13 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn delete_library(
-        &self,
-        library_id: &str,
-    ) -> Result<bool, LibraryCatalogMutationError> {
+    async fn delete_library(&self, library_id: &str) -> Result<bool, LibraryCatalogMutationError> {
         DeleteLibraryService::new(self.adapter.clone())
             .delete_library(library_id)
             .await
     }
 
-    pub async fn scan_library(
+    async fn scan_library(
         &self,
         library_id: &str,
         deep_scan: bool,
@@ -77,7 +78,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn analyze_library(
+    async fn analyze_library(
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
@@ -86,7 +87,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn refresh_metadata(
+    async fn refresh_metadata(
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
@@ -95,7 +96,7 @@ impl LibraryCatalogAccess {
             .await
     }
 
-    pub async fn empty_trash(
+    async fn empty_trash(
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {

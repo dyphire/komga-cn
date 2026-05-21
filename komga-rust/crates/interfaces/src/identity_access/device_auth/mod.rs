@@ -170,7 +170,7 @@ fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> 
 }
 
 async fn load_kobo_proxy_enabled(
-    server_settings: &komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore,
+    server_settings: &dyn komga_application::operational::ServerSettingsPort,
 ) -> bool {
     server_settings
         .load_map()

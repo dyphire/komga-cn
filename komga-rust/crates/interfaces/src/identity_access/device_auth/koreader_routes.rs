@@ -93,7 +93,7 @@ async fn load_read_progress(
     app: &IdentityAccessState,
     book_id: &str,
     user_id: &str,
-) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
+) -> Result<Option<PersistedReadProgressRecord>, String> {
     app.identity.load_read_progress(book_id, user_id).await
 }
 

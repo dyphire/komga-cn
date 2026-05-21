@@ -1,9 +1,9 @@
 use super::*;
 use axum::extract::FromRef;
 
-use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
-use komga_infrastructure::operational_settings_access::OperationalSettingsAccess;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_application::operational::{
+    OperationalMetricsPort, OperationalSettingsPort, ServerSettingsPort,
+};
 
 #[derive(Clone)]
 pub struct OperationalApiState {
@@ -11,8 +11,8 @@ pub struct OperationalApiState {
     pub(crate) operational: OperationalState,
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
-    pub(crate) operational_runtime: Arc<OperationalMetricsAccess>,
-    pub(crate) operational_settings: Arc<OperationalSettingsAccess>,
+    pub(crate) operational_runtime: Arc<dyn OperationalMetricsPort>,
+    pub(crate) operational_settings: Arc<dyn OperationalSettingsPort>,
 }
 
 impl FromRef<Arc<HttpAppState>> for OperationalApiState {
@@ -31,7 +31,7 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
 #[derive(Clone)]
 pub struct ServerSettingsState {
     pub runtime: RuntimeState,
-    pub(crate) server_settings: Arc<ServerSettingsStore>,
+    pub(crate) server_settings: Arc<dyn ServerSettingsPort>,
     pub(crate) task_queue: TaskQueueState,
 }
 

@@ -19,6 +19,13 @@ pub struct BookPageRecord {
     pub file_size: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedMediaFileRecord {
+    pub file_name: String,
+    pub media_type: String,
+    pub sub_type: Option<String>,
+}
+
 pub fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
     let extension = file_name
         .rsplit_once('.')

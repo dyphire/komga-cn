@@ -29,6 +29,14 @@ pub fn auth_token_user(headers: &HeaderMap) -> Option<AuthUser> {
     auth_token_resolution(headers).map(|resolved| resolved.user)
 }
 
+pub fn auth_token_user_from_tokens(
+    session_token: Option<&str>,
+    remember_me_token: Option<&str>,
+) -> Option<AuthUser> {
+    auth_token_resolution_from_tokens(session_token, remember_me_token)
+        .map(|resolved| resolved.user)
+}
+
 pub fn auth_token_resolution(headers: &HeaderMap) -> Option<ResolvedAuthToken> {
     let session_token = session_token_from_headers(headers);
     let remember_me_token = remember_me_token_from_headers(headers);
@@ -37,6 +45,18 @@ pub fn auth_token_resolution(headers: &HeaderMap) -> Option<ResolvedAuthToken> {
         session_token_store(),
         session_token.as_deref(),
         remember_me_token.as_deref(),
+    )
+}
+
+pub fn auth_token_resolution_from_tokens(
+    session_token: Option<&str>,
+    remember_me_token: Option<&str>,
+) -> Option<ResolvedAuthToken> {
+    resolve_authenticated_token(
+        session_token_store(),
+        session_token_store(),
+        session_token,
+        remember_me_token,
     )
 }
 
@@ -118,15 +138,23 @@ pub async fn persisted_basic_user(headers: &HeaderMap, pool: &SqlitePool) -> Opt
         return Some(AuthOutcome::Missing);
     };
 
+    authenticate_basic_credentials(pool, &username, &password).await
+}
+
+pub async fn authenticate_basic_credentials(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+) -> Option<AuthOutcome> {
     let mut users = open_persisted_users(pool).await?;
     let Some(user) = users
         .iter_mut()
-        .find(|user| user.email.eq_ignore_ascii_case(&username))
+        .find(|user| user.email.eq_ignore_ascii_case(username))
     else {
         return Some(AuthOutcome::Invalid);
     };
 
-    match verify_bcrypt_password(&password, &user.password) {
+    match verify_bcrypt_password(password, &user.password) {
         Ok(true) => Some(AuthOutcome::Valid(Box::new(user.clone()))),
         Ok(false) | Err(_) => Some(AuthOutcome::Invalid),
     }
@@ -177,7 +205,14 @@ pub async fn persisted_api_key_metadata(
     pool: &SqlitePool,
 ) -> Option<PersistedApiKeyMetadata> {
     let api_key = api_key_header_value(headers)?;
-    let api_key_hash = sha512_hex(&api_key);
+    persisted_api_key_metadata_by_token(&api_key, pool).await
+}
+
+pub async fn persisted_api_key_metadata_by_token(
+    api_key: &str,
+    pool: &SqlitePool,
+) -> Option<PersistedApiKeyMetadata> {
+    let api_key_hash = sha512_hex(api_key);
     let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
         .bind(api_key_hash)
         .fetch_optional(pool)

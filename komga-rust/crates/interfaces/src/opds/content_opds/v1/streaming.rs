@@ -113,8 +113,8 @@ async fn opds_book_page_streaming_links(
     last_read_date: Option<&str>,
 ) -> Vec<String> {
     let media_types = opds_book_page_stream_media_types(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         book_id,
         media_type,
         page_count,
@@ -173,8 +173,8 @@ async fn opds_book_page_streaming_links(
 }
 
 async fn opds_book_page_stream_media_types(
-    reader: &komga_infrastructure::media_reader::MediaReader,
-    content: &komga_infrastructure::content_resolver::ContentResolver,
+    reader: &dyn komga_application::media_assets::MediaReaderPort,
+    content: &dyn komga_application::media_assets::ContentResolverPort,
     book_id: &str,
     media_type: &str,
     page_count: i64,
@@ -202,8 +202,8 @@ async fn opds_book_page_stream_media_types(
 }
 
 async fn load_divina_page_media_types_for_opds(
-    reader: &komga_infrastructure::media_reader::MediaReader,
-    content: &komga_infrastructure::content_resolver::ContentResolver,
+    reader: &dyn komga_application::media_assets::MediaReaderPort,
+    content: &dyn komga_application::media_assets::ContentResolverPort,
     book_id: &str,
 ) -> Vec<String> {
     let persisted = reader

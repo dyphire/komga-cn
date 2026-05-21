@@ -24,14 +24,14 @@ fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
 async fn load_thumbnail_by_id(
     app: &IdentityAccessState,
     thumbnail_id: &str,
-) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
+) -> Result<Option<(String, Vec<u8>)>, String> {
     app.identity.load_thumbnail_by_id(thumbnail_id).await
 }
 
 async fn load_kobo_metadata_record(
     app: &IdentityAccessState,
     book_id: &str,
-) -> Result<Option<crate::state::KoboMetadataRecord>, sqlx::Error> {
+) -> Result<Option<crate::state::KoboMetadataRecord>, String> {
     app.identity.load_kobo_metadata_record(book_id).await
 }
 
@@ -39,28 +39,25 @@ async fn load_read_progress(
     app: &IdentityAccessState,
     book_id: &str,
     user_id: &str,
-) -> Result<Option<PersistedReadProgressRecord>, sqlx::Error> {
+) -> Result<Option<PersistedReadProgressRecord>, String> {
     app.identity.load_read_progress(book_id, user_id).await
 }
 
-async fn persisted_book_exists(
-    app: &IdentityAccessState,
-    book_id: &str,
-) -> Result<bool, sqlx::Error> {
+async fn persisted_book_exists(app: &IdentityAccessState, book_id: &str) -> Result<bool, String> {
     app.identity.persisted_book_exists(book_id).await
 }
 
 async fn load_book_created_timestamp(
     app: &IdentityAccessState,
     book_id: &str,
-) -> Result<Option<String>, sqlx::Error> {
+) -> Result<Option<String>, String> {
     app.identity.load_book_created_timestamp(book_id).await
 }
 
 async fn load_book_last_epub_position_locator(
     app: &IdentityAccessState,
     book_id: &str,
-) -> Result<Option<Value>, sqlx::Error> {
+) -> Result<Option<Value>, String> {
     app.identity
         .load_book_last_epub_position_locator(book_id)
         .await
@@ -69,7 +66,7 @@ async fn load_book_last_epub_position_locator(
 #[allow(clippy::too_many_arguments)]
 async fn kobo_book_thumbnail_response(
     app: &IdentityAccessState,
-    server_settings: &komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore,
+    server_settings: &dyn komga_application::operational::ServerSettingsPort,
     auth_token: &str,
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
@@ -504,14 +501,14 @@ pub async fn kobo_library_book_state_update(
             },
         });
 
-        match normalize_book_epub_locator(&app.reader, &book_id, &request_locator).await {
+        match normalize_book_epub_locator(app.reader.as_ref(), &book_id, &request_locator).await {
             Ok(locator) => locator,
             Err(_) => return kobo_state_update_failure(book_id.as_str()),
         }
     };
 
     let stale_progression = match progression_is_older_than_existing(
-        &app.reader,
+        app.reader.as_ref(),
         &book_id,
         user_id_value,
         progress_last_modified.as_str(),
@@ -622,7 +619,7 @@ pub async fn kobo_book_file_epub(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    if !user_can_access_book_media(&app.reader, &book_id, &current_user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), &book_id, &current_user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 

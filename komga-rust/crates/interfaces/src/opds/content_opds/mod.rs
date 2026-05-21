@@ -198,7 +198,8 @@ pub(crate) async fn opds_v1_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(&app.reader, &app.content, &user, &book_id).await
+    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+        .await
 }
 
 pub(crate) async fn opds_v1_book_thumbnail_route(
@@ -208,8 +209,8 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
     media_responses::book_thumbnail_opds_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         &headers,
         &book_id,
         &user,
@@ -224,7 +225,7 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
     media_responses::book_thumbnail_opds_small_default_response(
-        &app.reader,
+        app.reader.as_ref(),
         app.server_settings.as_ref(),
         &headers,
         &book_id,
@@ -242,7 +243,8 @@ pub(crate) async fn opds_v2_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(&app.reader, &app.content, &user, &book_id).await
+    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+        .await
 }
 
 pub(crate) async fn opds_v2_book_file_with_suffix_route(
@@ -254,7 +256,8 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(&app.reader, &app.content, &user, &book_id).await
+    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+        .await
 }
 
 pub(crate) async fn opds_v2_book_page_route(
@@ -267,8 +270,8 @@ pub(crate) async fn opds_v2_book_page_route(
     query.zero_based = false;
     query.content_negotiation = false;
     media_responses::book_page_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -286,8 +289,8 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
     media_responses::book_page_raw_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -304,8 +307,8 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
     media_responses::book_thumbnail_opds_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         &headers,
         &book_id,
         &user,

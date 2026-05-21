@@ -1,5 +1,5 @@
 use super::*;
-use komga_infrastructure::media_reader::MediaReader;
+use komga_application::media_assets::MediaReaderPort;
 
 #[derive(Clone)]
 pub(super) struct PersistedReadlistBookAccessRecord {
@@ -14,7 +14,7 @@ pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool
 }
 
 pub(crate) async fn user_can_access_book_media(
-    reader: &MediaReader,
+    reader: &dyn MediaReaderPort,
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,

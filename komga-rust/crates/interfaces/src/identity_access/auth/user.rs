@@ -20,28 +20,35 @@ pub async fn persisted_api_key_metadata(
     identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<PersistedApiKeyMetadata> {
-    identity.persisted_api_key_metadata(headers).await
+    let api_key = api_key_header_value(headers)?;
+    identity.api_key_metadata_by_token(&api_key).await
 }
 
 pub async fn persisted_api_key_user(
     identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<AuthOutcome> {
-    identity.persisted_api_key_user(headers).await
+    let Some(api_key) = api_key_header_value(headers) else {
+        return Some(AuthOutcome::Missing);
+    };
+    identity.authenticate_api_key(&api_key).await
 }
 
 pub async fn persisted_api_key_user_by_token(
     identity: &IdentityState,
     api_key: &str,
 ) -> Option<AuthOutcome> {
-    identity.persisted_api_key_user_by_token(api_key).await
+    identity.authenticate_api_key(api_key).await
 }
 
 pub async fn persisted_basic_user(
     identity: &IdentityState,
     headers: &HeaderMap,
 ) -> Option<AuthOutcome> {
-    identity.persisted_basic_user(headers).await
+    let Some((username, password)) = basic_credentials(headers) else {
+        return Some(AuthOutcome::Missing);
+    };
+    identity.authenticate_basic(&username, &password).await
 }
 
 pub async fn persisted_cleanup_authentication_activity(identity: &IdentityState) -> Option<u64> {
@@ -138,4 +145,35 @@ pub async fn persisted_update_password_by_user_id(
 
 pub async fn persisted_users(identity: &IdentityState) -> Option<Vec<AuthUser>> {
     identity.persisted_users().await
+}
+
+fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())?
+        .trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    let encoded = value.strip_prefix("Basic ")?;
+    let decoded = STANDARD.decode(encoded).ok()?;
+    let credentials = String::from_utf8(decoded).ok()?;
+    credentials
+        .split_once(':')
+        .map(|(username, password)| (username.to_string(), password.to_string()))
+}
+
+fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
+    let value = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())?;
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }

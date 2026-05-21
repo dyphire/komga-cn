@@ -1,25 +1,26 @@
 use super::*;
 use axum::extract::FromRef;
 
-pub use komga_infrastructure::runtime_identity_access::{
-    IdentityAccess, KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget,
-    PersistedBookMediaFile, PersistedReadProgressRecord,
+use komga_application::identity_access::IdentityAccessPort;
+pub use komga_application::identity_access::{
+    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
+    PersistedReadProgressRecord,
 };
 
 #[derive(Clone)]
-pub struct IdentityState(Arc<IdentityAccess>);
+pub struct IdentityState(Arc<dyn IdentityAccessPort>);
 
 impl IdentityState {
-    pub fn new(access: Arc<IdentityAccess>) -> Self {
+    pub fn new(access: Arc<dyn IdentityAccessPort>) -> Self {
         Self(access)
     }
 }
 
 impl std::ops::Deref for IdentityState {
-    type Target = IdentityAccess;
+    type Target = dyn IdentityAccessPort + 'static;
 
-    fn deref(&self) -> &IdentityAccess {
-        &self.0
+    fn deref(&self) -> &(dyn IdentityAccessPort + 'static) {
+        &*self.0
     }
 }
 
@@ -38,11 +39,10 @@ pub struct IdentityAccessState {
     pub(crate) auth_db: AuthDatabaseState,
     pub(crate) operational: OperationalState,
     pub(crate) identity: IdentityState,
-    pub(crate) server_settings:
-        Arc<komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore>,
-    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
-    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
-    pub(crate) progress: komga_infrastructure::progress_writer::ProgressWriter,
+    pub(crate) server_settings: Arc<dyn komga_application::operational::ServerSettingsPort>,
+    pub(crate) reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,
+    pub(crate) content: Arc<dyn komga_application::media_assets::ContentResolverPort>,
+    pub(crate) progress: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
 }
 
 impl FromRef<Arc<HttpAppState>> for IdentityState {

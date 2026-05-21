@@ -144,8 +144,8 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     }
 
     page_resolution::load_book_thumbnail_page_source_bytes(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         book_id,
         media,
     )

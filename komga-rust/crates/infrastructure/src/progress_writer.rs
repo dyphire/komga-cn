@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+use komga_application::media_assets::ProgressWriterPort;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
@@ -15,8 +17,11 @@ impl ProgressWriter {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+}
 
-    pub async fn persist_read_progress(
+#[async_trait]
+impl ProgressWriterPort for ProgressWriter {
+    async fn persist_read_progress(
         &self,
         book_id: &str,
         user_id: &str,
@@ -29,7 +34,7 @@ impl ProgressWriter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn persist_book_progression(
+    async fn persist_book_progression(
         &self,
         book_id: &str,
         user_id: &str,
@@ -54,11 +59,11 @@ impl ProgressWriter {
         .await
     }
 
-    pub async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {
+    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {
         metadata::delete_persisted_read_progress(&self.pool, book_id, user_id).await
     }
 
-    pub async fn persist_readlist_tachiyomi_progress(
+    async fn persist_readlist_tachiyomi_progress(
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
@@ -73,7 +78,7 @@ impl ProgressWriter {
         .await
     }
 
-    pub async fn refresh_series_read_progress(
+    async fn refresh_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,
@@ -81,7 +86,7 @@ impl ProgressWriter {
         media_read_progress::refresh_series_read_progress_row(&self.pool, series_id, user_id).await
     }
 
-    pub async fn delete_series_read_progress(
+    async fn delete_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,

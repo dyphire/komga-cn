@@ -1,27 +1,22 @@
 use super::*;
 use axum::extract::FromRef;
 
-pub use komga_infrastructure::opds_catalog_access::{
+pub use komga_application::opds::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
-    OpdsCatalogAccess, OpdsReadlistEntry, OpdsSeriesEntry,
-};
-pub use komga_infrastructure::opds_persisted_access::{
-    OpdsPersistedAccess, PersistedBookAuthorRecord as OpdsPersistedBookAuthorRecord,
-    PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedLibraryRecord,
+    OpdsCatalogPort, OpdsPersistedBookAuthorRecord, OpdsPersistedPort, OpdsReadlistEntry,
+    OpdsSeriesEntry, PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedLibraryRecord,
     PersistedNamedRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
     PersistedSeriesBookRecord, PersistedSeriesRecord, PersistedSeriesSearchRecord,
 };
 
 #[derive(Clone)]
 pub struct OpdsState {
-    pub(crate) server_settings:
-        Arc<komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore>,
-    pub(crate) opds_catalog: Arc<OpdsCatalogAccess>,
-    pub(crate) opds_persisted: Arc<OpdsPersistedAccess>,
-    pub(crate) discovery_detail:
-        Arc<komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess>,
-    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
-    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
+    pub(crate) server_settings: Arc<dyn komga_application::operational::ServerSettingsPort>,
+    pub(crate) opds_catalog: Arc<dyn OpdsCatalogPort>,
+    pub(crate) opds_persisted: Arc<dyn OpdsPersistedPort>,
+    pub(crate) discovery_detail: Arc<dyn komga_application::discovery::DiscoveryDetailPort>,
+    pub(crate) reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,
+    pub(crate) content: Arc<dyn komga_application::media_assets::ContentResolverPort>,
 }
 
 impl FromRef<Arc<HttpAppState>> for OpdsState {

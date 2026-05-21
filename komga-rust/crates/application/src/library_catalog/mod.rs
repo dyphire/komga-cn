@@ -1,3 +1,4 @@
+mod catalog_port;
 mod create_library;
 mod delete_library;
 mod models;
@@ -7,6 +8,7 @@ mod task_records;
 mod task_requests;
 mod update_library;
 
+pub use catalog_port::LibraryCatalogPort;
 pub use create_library::CreateLibraryService;
 pub use delete_library::DeleteLibraryService;
 pub use models::{LibraryChangeSet, LibraryRecord};

@@ -45,8 +45,8 @@ async fn opds_manifest_variant(
     };
 
     match build_persisted_book_manifest(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         user,
         &headers,

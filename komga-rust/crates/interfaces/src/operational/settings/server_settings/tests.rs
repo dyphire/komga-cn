@@ -280,8 +280,7 @@ async fn sqlite_fixture(case: &str) -> (PathBuf, Arc<ServerSettingsStore>) {
 
 async fn cleanup_fixture(root: PathBuf) {
     let db_path = root.join("main.db");
-    let evicted =
-        komga_infrastructure::sqlite::evict_shared_pools_for_paths(&[db_path]);
+    let evicted = komga_infrastructure::sqlite::evict_shared_pools_for_paths(&[db_path]);
     for pool in evicted {
         pool.close().await;
     }

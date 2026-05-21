@@ -3,31 +3,24 @@ use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService
 
 #[derive(Clone)]
 pub struct HttpServices {
-    pub library_catalog: Arc<komga_infrastructure::library_catalog::LibraryCatalogAccess>,
+    pub library_catalog: Arc<dyn komga_application::library_catalog::LibraryCatalogPort>,
     pub task_queue: Arc<dyn TaskQueueAdmin>,
-    pub server_settings:
-        Arc<komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore>,
+    pub server_settings: Arc<dyn komga_application::operational::ServerSettingsPort>,
     pub identity: IdentityState,
-    pub operational_runtime:
-        Arc<komga_infrastructure::operational_metrics_access::OperationalMetricsAccess>,
-    pub operational_settings:
-        Arc<komga_infrastructure::operational_settings_access::OperationalSettingsAccess>,
-    pub opds_catalog: Arc<komga_infrastructure::opds_catalog_access::OpdsCatalogAccess>,
-    pub opds_persisted: Arc<komga_infrastructure::opds_persisted_access::OpdsPersistedAccess>,
+    pub operational_runtime: Arc<dyn komga_application::operational::OperationalMetricsPort>,
+    pub operational_settings: Arc<dyn komga_application::operational::OperationalSettingsPort>,
+    pub opds_catalog: Arc<dyn komga_application::opds::OpdsCatalogPort>,
+    pub opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort>,
     pub discovery_search: Arc<dyn DiscoverySearchService>,
-    pub discovery_detail: Arc<komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess>,
+    pub discovery_detail: Arc<dyn komga_application::discovery::DiscoveryDetailPort>,
     pub discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub discovery_facets: Arc<dyn DiscoveryFacetService>,
-    pub media_reader: komga_infrastructure::media_reader::MediaReader,
-    pub content_resolver: komga_infrastructure::content_resolver::ContentResolver,
-    pub thumbnail_writer: komga_infrastructure::thumbnail_writer::ThumbnailWriter,
-    pub progress_writer: komga_infrastructure::progress_writer::ProgressWriter,
+    pub media_reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,
+    pub content_resolver: Arc<dyn komga_application::media_assets::ContentResolverPort>,
+    pub thumbnail_writer: Arc<dyn komga_application::media_assets::ThumbnailWriterPort>,
+    pub progress_writer: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
     pub metadata_writer: Arc<komga_application::media_assets::MetadataWriter>,
-    pub import_service: Arc<
-        komga_application::media_assets::MediaImportService<
-            komga_infrastructure::filesystem::import::FilesystemImportPort,
-        >,
-    >,
+    pub import_service: Arc<komga_application::media_assets::MediaImportService>,
 }
 
 pub struct HttpAppState {

@@ -176,7 +176,7 @@ async fn book_protected_resource_response(
         Err(response) => return response,
     };
 
-    if !user_can_access_book_media(&app.reader, book_id, &user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -277,5 +277,6 @@ async fn book_file_response_for_user(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    media_responses::book_file_response(&app.reader, &app.content, user, book_id).await
+    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), user, book_id)
+        .await
 }

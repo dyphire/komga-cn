@@ -4,6 +4,7 @@ use crate::filesystem::import::FilesystemImportPort;
 use komga_application::media_assets::MediaImportService;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub(super) async fn try_execute(
     runtime: &JobRuntime<'_>,
@@ -43,7 +44,7 @@ async fn process_import_task<F, Fut>(
     process: F,
 ) -> Result<Vec<TaskQueueRecord>, TaskExecutionError>
 where
-    F: FnOnce(MediaImportService<FilesystemImportPort>, String, i32) -> Fut,
+    F: FnOnce(MediaImportService, String, i32) -> Fut,
     Fut: Future<Output = Result<Vec<TaskQueueRecord>, String>>,
 {
     let Some((database_file, payload, priority)) =
@@ -52,7 +53,8 @@ where
         return Ok(Vec::new());
     };
 
-    let service = MediaImportService::new(FilesystemImportPort::new(database_file.as_path()));
+    let service =
+        MediaImportService::new(Arc::new(FilesystemImportPort::new(database_file.as_path())));
     process(service, payload, priority)
         .await
         .map_err(TaskExecutionError::runtime)

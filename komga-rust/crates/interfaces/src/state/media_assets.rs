@@ -6,18 +6,13 @@ pub struct MediaAssetsState {
     pub(crate) read_progress: ReadProgressState,
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
-    pub(crate) discovery_detail:
-        Arc<komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess>,
-    pub(crate) reader: komga_infrastructure::media_reader::MediaReader,
-    pub(crate) content: komga_infrastructure::content_resolver::ContentResolver,
-    pub(crate) thumbnails: komga_infrastructure::thumbnail_writer::ThumbnailWriter,
-    pub(crate) progress: komga_infrastructure::progress_writer::ProgressWriter,
+    pub(crate) discovery_detail: Arc<dyn komga_application::discovery::DiscoveryDetailPort>,
+    pub(crate) reader: Arc<dyn komga_application::media_assets::MediaReaderPort>,
+    pub(crate) content: Arc<dyn komga_application::media_assets::ContentResolverPort>,
+    pub(crate) thumbnails: Arc<dyn komga_application::media_assets::ThumbnailWriterPort>,
+    pub(crate) progress: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
     pub(crate) metadata: Arc<komga_application::media_assets::MetadataWriter>,
-    pub(crate) import: Arc<
-        komga_application::media_assets::MediaImportService<
-            komga_infrastructure::filesystem::import::FilesystemImportPort,
-        >,
-    >,
+    pub(crate) import: Arc<komga_application::media_assets::MediaImportService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for MediaAssetsState {

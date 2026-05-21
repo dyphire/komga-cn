@@ -1,36 +1,9 @@
 use sqlx::{Row, SqlitePool};
 
-#[derive(Clone)]
-pub struct DiscoveryPersistedReadlistRecord {
-    pub id: String,
-    pub name: String,
-    pub summary: String,
-    pub ordered: bool,
-    pub created_date: String,
-    pub last_modified_date: String,
-}
-
-#[derive(Clone)]
-pub struct DiscoveryPersistedReadlistBookRecord {
-    pub book_id: String,
-    pub library_id: String,
-}
-
-#[derive(Clone)]
-pub struct PersistedComicrackMatchCandidateRecord {
-    pub series_id: String,
-    pub series_title: String,
-    pub series_release_date: Option<String>,
-    pub book_id: String,
-    pub book_title: String,
-    pub book_number: String,
-}
-
-#[derive(Clone)]
-pub struct PersistedBookAuthorRecord {
-    pub name: String,
-    pub role: String,
-}
+pub use komga_application::discovery::{
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    PersistedBookAuthorRecord, PersistedComicrackMatchCandidateRecord,
+};
 
 pub async fn persisted_readlists_exist(pool: &SqlitePool) -> Result<bool, String> {
     let row = sqlx::query(

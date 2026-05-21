@@ -125,7 +125,7 @@ fn component_status(is_up: bool) -> &'static str {
 }
 
 fn db_health_component(app: &OperationalApiState) -> HealthComponentPayload {
-    let sqlite_rw_ready = app.auth_db.db.database_file().exists();
+    let sqlite_rw_ready = app.auth_db.database_file.as_path().exists();
     let sqlite_ro_ready = sqlite_rw_ready;
     let tasks_rw_ready = app.operational.runtime.tasks_db_file.exists();
     let tasks_ro_ready = tasks_rw_ready;
@@ -206,13 +206,7 @@ fn disk_space_probe_path(app: &OperationalApiState) -> std::path::PathBuf {
     std::env::current_dir()
         .ok()
         .or_else(|| app.operational.runtime.config_dir.clone())
-        .or_else(|| {
-            app.auth_db
-                .db
-                .database_file()
-                .parent()
-                .map(Path::to_path_buf)
-        })
+        .or_else(|| app.auth_db.database_file.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| Path::new(".").to_path_buf())
 }
 
@@ -1145,7 +1139,7 @@ async fn jdbc_connections_metric(
     let samples = app
         .operational_runtime
         .load_sqlite_pool_snapshots(&[
-            app.auth_db.db.database_file().to_path_buf(),
+            app.auth_db.database_file.as_path().to_path_buf(),
             app.operational.runtime.tasks_db_file.clone(),
         ])
         .await?
@@ -1181,7 +1175,7 @@ fn datasource_pool_name(
     pool_path: &Path,
     max_connections: u32,
 ) -> String {
-    let normalized_main_path = normalized_runtime_path(app.auth_db.db.database_file());
+    let normalized_main_path = normalized_runtime_path(app.auth_db.database_file.as_path());
     let normalized_tasks_path = normalized_runtime_path(&app.operational.runtime.tasks_db_file);
     let normalized_pool_path = normalized_runtime_path(pool_path);
 

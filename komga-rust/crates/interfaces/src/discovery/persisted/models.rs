@@ -1,25 +1,6 @@
-#[derive(Clone)]
-pub struct PersistedBookBrowseEntry {
-    pub id: String,
-    pub library_id: String,
-    pub name: String,
-    pub title: String,
-}
-
-#[derive(Clone)]
-pub enum PersistedAuthorsScope {
-    All,
-    Libraries(Vec<String>),
-    Collection(String),
-    Series(String),
-    ReadList(String),
-}
-
-#[derive(Clone, serde::Serialize)]
-pub struct PersistedAuthorEntry {
-    pub name: String,
-    pub role: String,
-}
+pub use komga_application::discovery::{
+    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+};
 
 #[derive(Clone)]
 pub struct PersistedSeriesSummary {

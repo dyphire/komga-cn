@@ -1,5 +1,5 @@
 use super::*;
-use komga_infrastructure::media_reader::MediaReader;
+use komga_application::media_assets::MediaReaderPort;
 
 fn decode_epub_extension_positions_and_layout(blob: &[u8]) -> Result<(Vec<Value>, bool), String> {
     let mut decoder = GzDecoder::new(blob);
@@ -179,7 +179,7 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
 }
 
 pub(crate) async fn normalize_book_epub_locator(
-    reader: &MediaReader,
+    reader: &dyn MediaReaderPort,
     book_id: &str,
     locator: &Value,
 ) -> Result<Value, Response> {
@@ -247,7 +247,7 @@ pub(crate) async fn normalize_book_epub_locator(
 }
 
 pub(crate) async fn progression_is_older_than_existing(
-    reader: &MediaReader,
+    reader: &dyn MediaReaderPort,
     book_id: &str,
     user_id: &str,
     modified: &str,

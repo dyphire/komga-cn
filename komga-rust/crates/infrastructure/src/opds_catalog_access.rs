@@ -1,8 +1,13 @@
 use std::collections::HashSet;
 
+use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
+use komga_application::opds::{
+    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
+    OpdsCatalogPort, OpdsReadlistEntry, OpdsSeriesEntry,
+};
 
 #[derive(Clone)]
 pub struct OpdsCatalogAccess {
@@ -13,8 +18,11 @@ impl OpdsCatalogAccess {
     pub fn new(db: DatabaseHandle) -> Self {
         Self { db }
     }
+}
 
-    pub async fn load_browse_series_navigation_entries(
+#[async_trait]
+impl OpdsCatalogPort for OpdsCatalogAccess {
+    async fn load_browse_series_navigation_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         library_id: Option<&str>,
@@ -34,7 +42,7 @@ impl OpdsCatalogAccess {
         .map_err(|error| error.to_string())
     }
 
-    pub async fn load_browse_publisher_entries(
+    async fn load_browse_publisher_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         library_id: Option<&str>,
@@ -44,7 +52,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_keep_reading_books(
+    async fn load_keep_reading_books(
         &self,
         user_id: &str,
         library_id: Option<&str>,
@@ -54,7 +62,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_on_deck_books(
+    async fn load_on_deck_books(
         &self,
         user_id: &str,
         library_id: Option<&str>,
@@ -64,7 +72,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_latest_books(
+    async fn load_latest_books(
         &self,
         library_id: Option<&str>,
         limit: i64,
@@ -74,7 +82,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_latest_books_paged(
+    async fn load_latest_books_paged(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         user_id: Option<&str>,
@@ -94,7 +102,7 @@ impl OpdsCatalogAccess {
         .map_err(|error| error.to_string())
     }
 
-    pub async fn load_latest_series(
+    async fn load_latest_series(
         &self,
         library_id: Option<&str>,
         limit: i64,
@@ -104,7 +112,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_latest_series_paged(
+    async fn load_latest_series_paged(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         library_id: Option<&str>,
@@ -122,7 +130,7 @@ impl OpdsCatalogAccess {
         .map_err(|error| error.to_string())
     }
 
-    pub async fn load_library_series(
+    async fn load_library_series(
         &self,
         library_id: &str,
         offset: i64,
@@ -133,7 +141,7 @@ impl OpdsCatalogAccess {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn load_series_page(
+    async fn load_series_page(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         search: Option<&str>,
@@ -153,60 +161,11 @@ impl OpdsCatalogAccess {
         .map_err(|error| error.to_string())
     }
 
-    pub async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
+    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
         load_all_readlists(self.db.read_pool())
             .await
             .map_err(|error| error.to_string())
     }
-}
-
-pub struct BrowseSeriesNavigationEntry {
-    pub id: String,
-    pub title: String,
-}
-
-pub struct BrowsePublisherEntry {
-    pub publisher: String,
-}
-
-pub struct OpdsBookAuthorEntry {
-    pub name: String,
-    pub role: String,
-}
-
-pub struct OpdsBookFeedEntry {
-    pub id: String,
-    pub series_id: String,
-    pub title: String,
-    pub series_title: String,
-    pub number: String,
-    pub number_sort: f64,
-    pub summary: String,
-    pub isbn: Option<String>,
-    pub authors: Vec<OpdsBookAuthorEntry>,
-    pub tags: Vec<String>,
-    pub file_name: String,
-    pub file_size: i64,
-    pub media_type: String,
-    pub page_count: i64,
-    pub epub_divina_compatible: bool,
-    pub last_read: Option<i64>,
-    pub last_read_date: Option<String>,
-    pub library_id: String,
-    pub age_rating: Option<u16>,
-    pub sharing_labels: Vec<String>,
-    pub last_modified: String,
-    pub release_date: Option<String>,
-}
-
-pub struct OpdsSeriesEntry {
-    pub id: String,
-    pub library_id: String,
-    pub title: String,
-    pub one_shot: bool,
-    pub age_rating: Option<u16>,
-    pub sharing_labels: Vec<String>,
-    pub last_modified: String,
 }
 
 fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
@@ -245,12 +204,6 @@ fn parsed_book_tags(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-pub struct OpdsReadlistEntry {
-    pub id: String,
-    pub name: String,
-    pub last_modified: String,
 }
 
 fn sorted_authorized_library_ids(allowed_library_ids: Option<&HashSet<String>>) -> Vec<String> {

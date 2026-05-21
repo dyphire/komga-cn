@@ -206,7 +206,7 @@ mod tests {
                 Box::new(komga_infrastructure::event_emitter_adapter::SseBookEventEmitter),
             )),
             import: Arc::new(komga_application::media_assets::MediaImportService::new(
-                FilesystemImportPort::new("/tmp/test.db"),
+                Arc::new(FilesystemImportPort::new("/tmp/test.db")),
             )),
         }
     }

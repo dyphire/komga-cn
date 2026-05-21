@@ -1,18 +1,8 @@
 use sqlx::{Row, SqlitePool};
 
-#[derive(Clone)]
-pub struct PersistedCollectionAccessRecord {
-    pub id: String,
-    pub name: String,
-    pub ordered: bool,
-    pub created_date: String,
-    pub last_modified_date: String,
-}
-
-pub struct PersistedSeriesRestrictionRecord {
-    pub age_rating: Option<u16>,
-    pub labels: Vec<String>,
-}
+pub use komga_application::discovery::{
+    PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
+};
 
 pub async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
     let row = sqlx::query(

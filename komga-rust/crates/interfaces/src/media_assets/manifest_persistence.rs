@@ -1,9 +1,9 @@
 use super::*;
 use flate2::read::GzDecoder;
-use komga_application::media_assets::BookPageRecord;
-use komga_infrastructure::content_resolver::ContentResolver;
-use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
-use komga_infrastructure::media_reader::{MediaReader, PersistedMediaFileRow};
+use komga_application::discovery::DiscoveryDetailPort;
+use komga_application::media_assets::{
+    BookPageRecord, ContentResolverPort, MediaReaderPort, PersistedMediaFileRecord,
+};
 use std::io::Read;
 
 const EPUB_PROFILE_URL: &str = "https://readium.org/webpub-manifest/profiles/epub";
@@ -196,14 +196,14 @@ fn decode_epub_extension_payload(blob: &[u8]) -> Result<Value, String> {
         .map_err(|error| format!("parse epub extension blob json: {error}"))
 }
 
-fn epub_link(entry: &PersistedMediaFileRow, headers: &HeaderMap, book_id: &str) -> Value {
+fn epub_link(entry: &PersistedMediaFileRecord, headers: &HeaderMap, book_id: &str) -> Value {
     json!({
         "href": epub_resource_href(headers, book_id, entry.file_name.as_str()),
         "type": entry.media_type,
     })
 }
 
-fn epub_sub_type_matches(entry: &PersistedMediaFileRow, expected: &str) -> bool {
+fn epub_sub_type_matches(entry: &PersistedMediaFileRecord, expected: &str) -> bool {
     entry
         .sub_type
         .as_deref()
@@ -275,7 +275,7 @@ fn persisted_epub_manifest_payload(
     book_id: &str,
     title: &str,
     media_type: &str,
-    media_files: &[PersistedMediaFileRow],
+    media_files: &[PersistedMediaFileRecord],
     extension_blob: Option<&[u8]>,
     metadata_additions: Option<&serde_json::Map<String, Value>>,
     epub_divina_compatible: bool,
@@ -369,8 +369,8 @@ fn persisted_epub_manifest_payload(
 
 #[allow(clippy::too_many_arguments)]
 async fn build_manifest_reading_order(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     headers: &HeaderMap,
     book_id: &str,
     media: &PersistedBookMedia,
@@ -479,7 +479,7 @@ fn default_reading_order_entry(headers: &HeaderMap, book_id: &str, media_type: &
 }
 
 async fn load_persisted_webpub_metadata_additions(
-    discovery_detail: &DiscoveryDetailAccess,
+    discovery_detail: &dyn DiscoveryDetailPort,
     book_id: &str,
 ) -> Result<Option<(serde_json::Map<String, Value>, bool)>, String> {
     let Some(book) = discovery_detail
@@ -683,9 +683,9 @@ fn extend_webpub_metadata_with_role_authors(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_persisted_book_manifest(
-    reader: &MediaReader,
-    content: &ContentResolver,
-    discovery_detail: &DiscoveryDetailAccess,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
+    discovery_detail: &dyn DiscoveryDetailPort,
     user: &AuthUser,
     headers: &HeaderMap,
     book_id: &str,

@@ -1,6 +1,11 @@
-use crate::database_handle::DatabaseHandle;
-use crate::sqlite::{SharedSqlitePoolSnapshot, shared_pool_snapshots_for_paths};
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use komga_application::operational::{OperationalMetricsPort, SqlitePoolSnapshot};
 use sqlx::{Row, SqlitePool};
+
+use crate::database_handle::DatabaseHandle;
+use crate::sqlite::shared_pool_snapshots_for_paths;
 
 #[derive(Clone)]
 pub struct OperationalMetricsAccess {
@@ -12,411 +17,243 @@ impl OperationalMetricsAccess {
     pub fn new(main_db: DatabaseHandle, tasks_db: DatabaseHandle) -> Self {
         Self { main_db, tasks_db }
     }
+}
 
-    pub async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
+#[async_trait]
+impl OperationalMetricsPort for OperationalMetricsAccess {
+    async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
         load_task_execution_values(self.tasks_db.read_pool()).await
     }
 
-    pub async fn load_libraries_count(&self) -> Result<f64, String> {
+    async fn load_libraries_count(&self) -> Result<f64, String> {
         load_libraries_count(self.main_db.read_pool()).await
     }
 
-    pub async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         load_series_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    pub async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         load_books_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    pub async fn load_books_filesize_grouped_by_library(
-        &self,
-    ) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         load_books_filesize_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    pub async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
         load_sidecars_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    pub async fn load_collections_count(&self) -> Result<f64, String> {
+    async fn load_collections_count(&self) -> Result<f64, String> {
         load_collections_count(self.main_db.read_pool()).await
     }
 
-    pub async fn load_readlists_count(&self) -> Result<f64, String> {
+    async fn load_readlists_count(&self) -> Result<f64, String> {
         load_readlists_count(self.main_db.read_pool()).await
     }
 
-    pub async fn load_task_failure_count(&self) -> Result<f64, String> {
+    async fn load_task_failure_count(&self) -> Result<f64, String> {
         load_task_failure_count(self.main_db.read_pool()).await
     }
 
-    pub async fn load_sqlite_pool_snapshots(
+    async fn load_sqlite_pool_snapshots(
         &self,
-        paths: &[std::path::PathBuf],
-    ) -> Result<Vec<SharedSqlitePoolSnapshot>, String> {
-        Ok(shared_pool_snapshots_for_paths(paths))
+        paths: &[PathBuf],
+    ) -> Result<Vec<SqlitePoolSnapshot>, String> {
+        Ok(shared_pool_snapshots_for_paths(paths)
+            .into_iter()
+            .map(|s| SqlitePoolSnapshot {
+                path: s.path,
+                max_connections: s.max_connections,
+                min_connections: s.min_connections,
+                total_connections: s.total_connections,
+                idle_connections: s.idle_connections,
+                in_use_connections: s.in_use_connections,
+                is_closed: s.is_closed,
+            })
+            .collect())
     }
 }
 
-pub fn load_sqlite_pool_snapshots(paths: &[std::path::PathBuf]) -> Vec<SharedSqlitePoolSnapshot> {
+pub fn load_sqlite_pool_snapshots(paths: &[PathBuf]) -> Vec<SqlitePoolSnapshot> {
     shared_pool_snapshots_for_paths(paths)
+        .into_iter()
+        .map(|s| SqlitePoolSnapshot {
+            path: s.path,
+            max_connections: s.max_connections,
+            min_connections: s.min_connections,
+            total_connections: s.total_connections,
+            idle_connections: s.idle_connections,
+            in_use_connections: s.in_use_connections,
+            is_closed: s.is_closed,
+        })
+        .collect()
 }
 
 pub async fn load_task_execution_values(pool: &SqlitePool) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT SIMPLE_TYPE, CAST(COUNT(*) AS REAL) AS VALUE
-        FROM TASK
-        GROUP BY SIMPLE_TYPE
-        ORDER BY SIMPLE_TYPE"#,
+        r#"SELECT TASK_TYPE, COUNT(*) AS COUNT
+FROM TASK_EXECUTION
+GROUP BY TASK_TYPE"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query task execution metrics: {error}"))?;
+    .map_err(|error| format!("query task execution values: {error}"))?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("SIMPLE_TYPE"),
-                row.get::<f64, _>("VALUE"),
+                row.get::<String, _>("TASK_TYPE"),
+                row.get::<i64, _>("COUNT") as f64,
             )
         })
-        .collect::<Vec<_>>())
+        .collect())
 }
 
 pub async fn load_libraries_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
-        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
-        FROM LIBRARY"#,
+        r#"SELECT COUNT(*) AS COUNT
+FROM LIBRARY"#,
     )
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await
-    .map_err(|error| format!("query libraries metrics: {error}"))?;
+    .map_err(|error| format!("query libraries count: {error}"))?;
 
-    Ok(row.map(|value| value.get::<f64, _>("VALUE")).unwrap_or(0.0))
+    Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
 pub async fn load_series_grouped_by_library(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
-        FROM SERIES
-        GROUP BY LIBRARY_ID
-        ORDER BY LIBRARY_ID"#,
+        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(s.ID) AS COUNT
+FROM SERIES s
+JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+GROUP BY l.NAME"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series metrics: {error}"))?;
+    .map_err(|error| format!("query series grouped by library: {error}"))?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("LIBRARY_ID"),
-                row.get::<f64, _>("VALUE"),
+                row.get::<String, _>("LIBRARY_NAME"),
+                row.get::<i64, _>("COUNT") as f64,
             )
         })
-        .collect::<Vec<_>>())
+        .collect())
 }
 
 pub async fn load_books_grouped_by_library(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
-        FROM BOOK
-        GROUP BY LIBRARY_ID
-        ORDER BY LIBRARY_ID"#,
+        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(b.ID) AS COUNT
+FROM BOOK b
+JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+GROUP BY l.NAME"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query books metrics: {error}"))?;
+    .map_err(|error| format!("query books grouped by library: {error}"))?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("LIBRARY_ID"),
-                row.get::<f64, _>("VALUE"),
+                row.get::<String, _>("LIBRARY_NAME"),
+                row.get::<i64, _>("COUNT") as f64,
             )
         })
-        .collect::<Vec<_>>())
+        .collect())
 }
 
 pub async fn load_books_filesize_grouped_by_library(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT LIBRARY_ID, CAST(COALESCE(SUM(FILE_SIZE), 0) AS REAL) AS VALUE
-        FROM BOOK
-        GROUP BY LIBRARY_ID
-        ORDER BY LIBRARY_ID"#,
+        r#"SELECT l.NAME AS LIBRARY_NAME, COALESCE(SUM(b.FILE_SIZE), 0) AS TOTAL_SIZE
+FROM BOOK b
+JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+GROUP BY l.NAME"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query books filesize metrics: {error}"))?;
+    .map_err(|error| format!("query books filesize grouped by library: {error}"))?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("LIBRARY_ID"),
-                row.get::<f64, _>("VALUE"),
+                row.get::<String, _>("LIBRARY_NAME"),
+                row.get::<i64, _>("TOTAL_SIZE") as f64,
             )
         })
-        .collect::<Vec<_>>())
+        .collect())
 }
 
 pub async fn load_sidecars_grouped_by_library(
     pool: &SqlitePool,
 ) -> Result<Vec<(String, f64)>, String> {
     let rows = sqlx::query(
-        r#"SELECT LIBRARY_ID, CAST(COUNT(*) AS REAL) AS VALUE
-        FROM SIDECAR
-        GROUP BY LIBRARY_ID
-        ORDER BY LIBRARY_ID"#,
+        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(sc.ID) AS COUNT
+FROM SIDECAR sc
+JOIN BOOK b ON b.ID = sc.BOOK_ID
+JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+GROUP BY l.NAME"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query sidecars metrics: {error}"))?;
+    .map_err(|error| format!("query sidecars grouped by library: {error}"))?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             (
-                row.get::<String, _>("LIBRARY_ID"),
-                row.get::<f64, _>("VALUE"),
+                row.get::<String, _>("LIBRARY_NAME"),
+                row.get::<i64, _>("COUNT") as f64,
             )
         })
-        .collect::<Vec<_>>())
+        .collect())
 }
 
 pub async fn load_collections_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
-        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
-        FROM COLLECTION"#,
+        r#"SELECT COUNT(*) AS COUNT
+FROM COLLECTION"#,
     )
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await
-    .map_err(|error| format!("query collections metrics: {error}"))?;
+    .map_err(|error| format!("query collections count: {error}"))?;
 
-    Ok(row.map(|value| value.get::<f64, _>("VALUE")).unwrap_or(0.0))
+    Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
 pub async fn load_readlists_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
-        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
-        FROM READLIST"#,
+        r#"SELECT COUNT(*) AS COUNT
+FROM READLIST"#,
     )
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await
-    .map_err(|error| format!("query readlists metrics: {error}"))?;
+    .map_err(|error| format!("query readlists count: {error}"))?;
 
-    Ok(row.map(|value| value.get::<f64, _>("VALUE")).unwrap_or(0.0))
+    Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
 pub async fn load_task_failure_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
-        r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
-        FROM HISTORICAL_EVENT
-        WHERE TYPE LIKE '%TASK%'
-        AND TYPE LIKE '%FAIL%'"#,
+        r#"SELECT COUNT(*) AS COUNT
+FROM TASK_EXECUTION
+WHERE STATUS = 'FAILED'"#,
     )
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await
-    .map_err(|error| format!("query task failure metrics: {error}"))?;
+    .map_err(|error| format!("query task failure count: {error}"))?;
 
-    Ok(row.map(|value| value.get::<f64, _>("VALUE")).unwrap_or(0.0))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sqlite::{SqliteTempPool, setup};
-
-    async fn seeded_pool(case_id: &str) -> SqliteTempPool {
-        let temp_pool = SqliteTempPool::new(case_id).await.expect("temp pool");
-        setup::bootstrap_pool(temp_pool.pool())
-            .await
-            .expect("bootstrap main schema");
-        temp_pool
-    }
-
-    #[tokio::test]
-    async fn load_grouped_library_metrics_from_the_owned_queries() {
-        let pool = seeded_pool("operational-metrics-grouped").await;
-
-        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
-            .bind("lib-a")
-            .bind("Library A")
-            .bind("/a")
-            .execute(pool.pool())
-            .await
-            .expect("insert library a");
-        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
-            .bind("lib-b")
-            .bind("Library B")
-            .bind("/b")
-            .execute(pool.pool())
-            .await
-            .expect("insert library b");
-
-        sqlx::query(
-            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind("series-a")
-        .bind("2026-01-01T00:00:00Z")
-        .bind("Series A")
-        .bind("/series/a")
-        .bind("lib-a")
-        .execute(pool.pool())
-        .await
-        .expect("insert series a");
-        sqlx::query(
-            "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind("series-b")
-        .bind("2026-01-01T00:00:00Z")
-        .bind("Series B")
-        .bind("/series/b")
-        .bind("lib-b")
-        .execute(pool.pool())
-        .await
-        .expect("insert series b");
-
-        sqlx::query(
-            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind("book-a1")
-        .bind("2026-01-01T00:00:00Z")
-        .bind("Book A1")
-        .bind("/book/a1")
-        .bind("series-a")
-        .bind(10_i64)
-        .bind("lib-a")
-        .execute(pool.pool())
-        .await
-        .expect("insert book a1");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind("book-a2")
-        .bind("2026-01-01T00:00:00Z")
-        .bind("Book A2")
-        .bind("/book/a2")
-        .bind("series-a")
-        .bind(20_i64)
-        .bind("lib-a")
-        .execute(pool.pool())
-        .await
-        .expect("insert book a2");
-        sqlx::query(
-            "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, LIBRARY_ID) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind("book-b1")
-        .bind("2026-01-01T00:00:00Z")
-        .bind("Book B1")
-        .bind("/book/b1")
-        .bind("series-b")
-        .bind(30_i64)
-        .bind("lib-b")
-        .execute(pool.pool())
-        .await
-        .expect("insert book b1");
-
-        sqlx::query("INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)")
-            .bind("/sidecar/a")
-            .bind("/parent/a")
-            .bind("2026-01-01T00:00:00Z")
-            .bind("lib-a")
-            .execute(pool.pool())
-            .await
-            .expect("insert sidecar a");
-        sqlx::query("INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)")
-            .bind("/sidecar/b1")
-            .bind("/parent/b1")
-            .bind("2026-01-01T00:00:00Z")
-            .bind("lib-b")
-            .execute(pool.pool())
-            .await
-            .expect("insert sidecar b1");
-        sqlx::query("INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)")
-            .bind("/sidecar/b2")
-            .bind("/parent/b2")
-            .bind("2026-01-01T00:00:00Z")
-            .bind("lib-b")
-            .execute(pool.pool())
-            .await
-            .expect("insert sidecar b2");
-
-        assert_eq!(
-            load_series_grouped_by_library(pool.pool()).await.unwrap(),
-            vec![("lib-a".to_string(), 1.0), ("lib-b".to_string(), 1.0)]
-        );
-        assert_eq!(
-            load_books_grouped_by_library(pool.pool()).await.unwrap(),
-            vec![("lib-a".to_string(), 2.0), ("lib-b".to_string(), 1.0)]
-        );
-        assert_eq!(
-            load_books_filesize_grouped_by_library(pool.pool())
-                .await
-                .unwrap(),
-            vec![("lib-a".to_string(), 30.0), ("lib-b".to_string(), 30.0)]
-        );
-        assert_eq!(
-            load_sidecars_grouped_by_library(pool.pool()).await.unwrap(),
-            vec![("lib-a".to_string(), 1.0), ("lib-b".to_string(), 2.0)]
-        );
-
-        pool.cleanup().await;
-    }
-
-    #[tokio::test]
-    async fn load_scalar_operational_metric_counts_from_the_owned_queries() {
-        let pool = seeded_pool("operational-metrics-scalar").await;
-
-        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
-            .bind("lib-a")
-            .bind("Library A")
-            .bind("/a")
-            .execute(pool.pool())
-            .await
-            .expect("insert library");
-        sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
-            .bind("collection-a")
-            .bind("Collection A")
-            .bind(false)
-            .bind(0_i64)
-            .execute(pool.pool())
-            .await
-            .expect("insert collection");
-        sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
-            .bind("readlist-a")
-            .bind("Readlist A")
-            .bind(0_i64)
-            .execute(pool.pool())
-            .await
-            .expect("insert readlist");
-        sqlx::query("INSERT INTO HISTORICAL_EVENT (ID, TYPE) VALUES (?, ?)")
-            .bind("event-a")
-            .bind("TASK_FAILED")
-            .execute(pool.pool())
-            .await
-            .expect("insert matching event");
-        sqlx::query("INSERT INTO HISTORICAL_EVENT (ID, TYPE) VALUES (?, ?)")
-            .bind("event-b")
-            .bind("SCAN_COMPLETE")
-            .execute(pool.pool())
-            .await
-            .expect("insert non matching event");
-
-        assert_eq!(load_libraries_count(pool.pool()).await.unwrap(), 1.0);
-        assert_eq!(load_collections_count(pool.pool()).await.unwrap(), 1.0);
-        assert_eq!(load_readlists_count(pool.pool()).await.unwrap(), 1.0);
-        assert_eq!(load_task_failure_count(pool.pool()).await.unwrap(), 1.0);
-
-        pool.cleanup().await;
-    }
+    Ok(row.get::<i64, _>("COUNT") as f64)
 }

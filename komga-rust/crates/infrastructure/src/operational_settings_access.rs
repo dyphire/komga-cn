@@ -4,14 +4,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
-use komga_application::operational::PersistedServerSettings;
+use komga_application::operational::{
+    ClaimInitialAdminUserResult as AppClaimResult, OperationalSettingsPort,
+    PersistedServerSettings, ServerSettingsPort, TransientBookAnalysis as AppTransientBookAnalysis,
+    TransientBookFileMetadata as AppTransientBookFileMetadata,
+    TransientBookPage as AppTransientBookPage,
+};
 
 use crate::announcements_access;
 use crate::claims_access::{self, ClaimInitialAdminUserResult};
 use crate::database_handle::DatabaseHandle;
 use crate::filesystem::{
     browser, fonts,
-    transient_books::{self, TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage},
+    transient_books::{self, TransientBookPage},
 };
 use crate::page_hashes_access;
 use crate::sqlite::read_models::client_settings::{
@@ -39,118 +44,153 @@ impl OperationalSettingsAccess {
     pub fn new(db: DatabaseHandle) -> Self {
         Self { db }
     }
+}
 
-    pub async fn load_announcement_read_ids(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<String>, sqlx::Error> {
-        announcements_access::load_announcement_read_ids(self.db.read_pool(), user_id).await
+#[async_trait::async_trait]
+impl OperationalSettingsPort for OperationalSettingsAccess {
+    async fn load_announcement_read_ids(&self, user_id: &str) -> Result<Vec<String>, String> {
+        announcements_access::load_announcement_read_ids(self.db.read_pool(), user_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn save_announcements_read(
-        &self,
-        user_id: &str,
-        ids: &[String],
-    ) -> Result<(), sqlx::Error> {
-        announcements_access::save_announcements_read(self.db.write_pool(), user_id, ids).await
+    async fn save_announcements_read(&self, user_id: &str, ids: &[String]) -> Result<(), String> {
+        announcements_access::save_announcements_read(self.db.write_pool(), user_id, ids)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_claim_status(&self) -> Result<bool, sqlx::Error> {
-        claims_access::load_claim_status(self.db.read_pool()).await
+    async fn load_claim_status(&self) -> Result<bool, String> {
+        claims_access::load_claim_status(self.db.read_pool())
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn claim_initial_admin_user(
+    async fn claim_initial_admin_user(
         &self,
         user_id: &str,
         email: &str,
         password_hash: &str,
-    ) -> Result<ClaimInitialAdminUserResult, sqlx::Error> {
-        claims_access::claim_initial_admin_user(self.db.write_pool(), user_id, email, password_hash)
-            .await
+    ) -> Result<AppClaimResult, String> {
+        let result = claims_access::claim_initial_admin_user(
+            self.db.write_pool(),
+            user_id,
+            email,
+            password_hash,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(match result {
+            ClaimInitialAdminUserResult::Created(user) => {
+                AppClaimResult::Created(komga_application::operational::CreatedClaimedUser {
+                    id: user.id,
+                    email: user.email,
+                })
+            }
+            ClaimInitialAdminUserResult::AlreadyClaimed => AppClaimResult::AlreadyClaimed,
+        })
     }
 
-    pub async fn load_client_settings_global(
+    async fn load_client_settings_global(
         &self,
         allow_unauthorized_only: bool,
-    ) -> Result<Value, sqlx::Error> {
-        load_client_settings_global(self.db.read_pool(), allow_unauthorized_only).await
+    ) -> Result<Value, String> {
+        load_client_settings_global(self.db.read_pool(), allow_unauthorized_only)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, sqlx::Error> {
-        load_client_settings_user(self.db.read_pool(), user_id).await
+    async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, String> {
+        load_client_settings_user(self.db.read_pool(), user_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn upsert_client_settings_global(
+    async fn upsert_client_settings_global(
         &self,
         settings: &[(String, String, bool)],
-    ) -> Result<(), sqlx::Error> {
-        upsert_client_settings_global(self.db.write_pool(), settings).await
+    ) -> Result<(), String> {
+        upsert_client_settings_global(self.db.write_pool(), settings)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn upsert_client_settings_user(
+    async fn upsert_client_settings_user(
         &self,
         user_id: &str,
         settings: &[(String, String)],
-    ) -> Result<(), sqlx::Error> {
-        upsert_client_settings_user(self.db.write_pool(), user_id, settings).await
+    ) -> Result<(), String> {
+        upsert_client_settings_user(self.db.write_pool(), user_id, settings)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), sqlx::Error> {
-        delete_client_settings_global(self.db.write_pool(), keys).await
+    async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), String> {
+        delete_client_settings_global(self.db.write_pool(), keys)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn delete_client_settings_user(
+    async fn delete_client_settings_user(
         &self,
         user_id: &str,
         keys: &[String],
-    ) -> Result<(), sqlx::Error> {
-        delete_client_settings_user(self.db.write_pool(), user_id, keys).await
+    ) -> Result<(), String> {
+        delete_client_settings_user(self.db.write_pool(), user_id, keys)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
+    fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
         browser::list_directory_entries(path, directories_only)
     }
 
-    pub fn list_font_families(&self, path: &Path) -> Vec<String> {
+    fn list_font_families(&self, path: &Path) -> Vec<String> {
         fonts::list_font_families(path)
     }
 
-    pub fn load_font_family_css(&self, path: &Path, family: &str) -> Option<String> {
+    fn load_font_family_css(&self, path: &Path, family: &str) -> Option<String> {
         fonts::load_font_family_css(path, family)
     }
 
-    pub fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
+    fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
         fonts::load_font_file(path, family, file)
     }
 
-    pub async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), sqlx::Error> {
-        delete_syncpoints_by_user(self.db.write_pool(), user_id).await
+    async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), String> {
+        delete_syncpoints_by_user(self.db.write_pool(), user_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn delete_syncpoints_by_user_and_key_ids(
+    async fn delete_syncpoints_by_user_and_key_ids(
         &self,
         user_id: &str,
         key_ids: &[String],
-    ) -> Result<(), sqlx::Error> {
-        delete_syncpoints_by_user_and_key_ids(self.db.write_pool(), user_id, key_ids).await
+    ) -> Result<(), String> {
+        delete_syncpoints_by_user_and_key_ids(self.db.write_pool(), user_id, key_ids)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_history_page(
+    async fn load_history_page(
         &self,
         page: u64,
         size: u64,
         sorts: Vec<String>,
-    ) -> Result<Value, sqlx::Error> {
-        load_history_page(self.db.read_pool(), page, size, &sorts).await
+    ) -> Result<Value, String> {
+        load_history_page(self.db.read_pool(), page, size, &sorts)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_page_hash_matches_page(
+    async fn load_page_hash_matches_page(
         &self,
         page_hash: &str,
         page: u64,
         size: u64,
         sorts: &[String],
-    ) -> Result<Value, sqlx::Error> {
+    ) -> Result<Value, String> {
         page_hashes_access::load_page_hash_matches_page(
             self.db.read_pool(),
             page_hash,
@@ -159,62 +199,70 @@ impl OperationalSettingsAccess {
             sorts,
         )
         .await
+        .map_err(|e| e.to_string())
     }
 
-    pub async fn load_page_hash_thumbnail(
+    async fn load_page_hash_thumbnail(
         &self,
         page_hash: &str,
-    ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
-        page_hashes_access::load_page_hash_thumbnail(self.db.read_pool(), page_hash).await
+    ) -> Result<Option<PageHashThumbnail>, String> {
+        page_hashes_access::load_page_hash_thumbnail(self.db.read_pool(), page_hash)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_unknown_page_hash_thumbnail(
+    async fn load_unknown_page_hash_thumbnail(
         &self,
         page_hash: &str,
         resize_to: Option<u32>,
-    ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
+    ) -> Result<Option<PageHashThumbnail>, String> {
         page_hashes_access::load_unknown_page_hash_thumbnail(
             self.db.read_pool(),
             page_hash,
             resize_to,
         )
         .await
+        .map_err(|e| e.to_string())
     }
 
-    pub async fn load_page_hashes_page(
+    async fn load_page_hashes_page(
         &self,
         page: u64,
         size: u64,
         actions: &[String],
         sorts: &[String],
-    ) -> Result<Value, sqlx::Error> {
+    ) -> Result<Value, String> {
         page_hashes_access::load_page_hashes_page(self.db.read_pool(), page, size, actions, sorts)
             .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_page_hashes_unknown_page(
+    async fn load_page_hashes_unknown_page(
         &self,
         page: u64,
         size: u64,
         sorts: &[String],
-    ) -> Result<Value, sqlx::Error> {
+    ) -> Result<Value, String> {
         page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), page, size, sorts)
             .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn load_page_hash_delete_targets(
+    async fn load_page_hash_delete_targets(
         &self,
         hash: &str,
-    ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-        page_hashes_access::load_page_hash_delete_targets(self.db.read_pool(), hash).await
+    ) -> Result<Vec<PageHashDeleteTarget>, String> {
+        page_hashes_access::load_page_hash_delete_targets(self.db.read_pool(), hash)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    pub async fn upsert_page_hash(
+    async fn upsert_page_hash(
         &self,
         hash: &str,
         size: Option<i64>,
         action: &str,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<(), String> {
         page_hashes_access::upsert_page_hash(
             self.db.read_pool(),
             self.db.write_pool(),
@@ -223,13 +271,28 @@ impl OperationalSettingsAccess {
             action,
         )
         .await
+        .map_err(|e| e.to_string())
     }
 
-    pub fn analyze_transient_book(&self, path: &str) -> TransientBookAnalysis {
-        transient_books::analyze_transient_book(path)
+    fn analyze_transient_book(&self, path: &str) -> AppTransientBookAnalysis {
+        let result = transient_books::analyze_transient_book(path);
+        AppTransientBookAnalysis {
+            status: result.status,
+            media_type: result.media_type,
+            page_count: result.page_count,
+            pages: result
+                .pages
+                .into_iter()
+                .map(convert_transient_page)
+                .collect(),
+            files: result.files,
+            comment: result.comment,
+            number: result.number,
+            series_id: result.series_id,
+        }
     }
 
-    pub async fn infer_transient_series_and_number(
+    async fn infer_transient_series_and_number(
         &self,
         transient_name: &str,
     ) -> (Option<String>, Option<f64>) {
@@ -237,37 +300,63 @@ impl OperationalSettingsAccess {
             .await
     }
 
-    pub fn list_transient_book_entries(&self, root: &Path) -> Vec<Value> {
+    fn list_transient_book_entries(&self, root: &Path) -> Vec<Value> {
         transient_books::list_transient_book_entries(root)
     }
 
-    pub async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
+    async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
         transient_books::validate_transient_scan_root(self.db.read_pool(), Path::new(path)).await
     }
 
-    pub fn load_transient_book_file_metadata(
+    fn load_transient_book_file_metadata(
         &self,
         path: &str,
-    ) -> Option<TransientBookFileMetadata> {
-        transient_books::load_transient_book_file_metadata(path)
+    ) -> Option<AppTransientBookFileMetadata> {
+        let meta = transient_books::load_transient_book_file_metadata(path)?;
+        Some(AppTransientBookFileMetadata {
+            file_last_modified_unix_nanos: meta.file_last_modified_unix_nanos,
+            size_bytes: meta.size_bytes,
+        })
     }
 
-    pub fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>> {
+    fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>> {
         transient_books::load_transient_book_media(path)
     }
 
-    pub fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str {
+    fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str {
         transient_books::transient_book_content_type(path, media_type)
     }
 
-    pub fn transient_book_page_content(
+    fn transient_book_page_content(
         &self,
         path: &str,
         media_type: &str,
-        pages: &[TransientBookPage],
+        pages: &[AppTransientBookPage],
         page_number: u32,
     ) -> Option<(String, Vec<u8>)> {
-        transient_books::transient_book_page_content(path, media_type, pages, page_number)
+        let infra_pages: Vec<TransientBookPage> = pages
+            .iter()
+            .map(|p| TransientBookPage {
+                number: p.number,
+                file_name: p.file_name.clone(),
+                media_type: p.media_type.clone(),
+                width: p.width,
+                height: p.height,
+                size_bytes: p.size_bytes,
+            })
+            .collect();
+        transient_books::transient_book_page_content(path, media_type, &infra_pages, page_number)
+    }
+}
+
+fn convert_transient_page(page: TransientBookPage) -> AppTransientBookPage {
+    AppTransientBookPage {
+        number: page.number,
+        file_name: page.file_name,
+        media_type: page.media_type,
+        width: page.width,
+        height: page.height,
+        size_bytes: page.size_bytes,
     }
 }
 
@@ -375,7 +464,7 @@ async fn delete_syncpoint_children(
 
 pub async fn load_server_settings(
     settings_store: &ServerSettingsStore,
-) -> Result<PersistedServerSettings, sqlx::Error> {
+) -> Result<PersistedServerSettings, String> {
     let persisted = settings_store.load_map().await?;
     let normalized = normalize_server_settings(&persisted);
 
@@ -410,7 +499,7 @@ pub fn load_remember_me_runtime_settings(database_file: &Path) -> Result<(String
 pub async fn apply_server_settings_changes(
     settings_store: &ServerSettingsStore,
     changes: &[(String, Option<String>)],
-) -> Result<(), sqlx::Error> {
+) -> Result<(), String> {
     settings_store.apply_changes(changes).await
 }
 

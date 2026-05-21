@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use komga_application::operational::PersistedServerSettings;
+use async_trait::async_trait;
+use komga_application::operational::{PersistedServerSettings, ServerSettingsPort};
 use sqlx::Row;
 
 use crate::context::SqlitePersistenceContext;
@@ -39,9 +40,15 @@ impl ServerSettingsStore {
             StoreBackend::Context(context) => Ok(context.clone()),
         }
     }
+}
 
-    pub async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, sqlx::Error> {
-        let context = self.context().await?;
+#[async_trait]
+impl ServerSettingsPort for ServerSettingsStore {
+    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
+        let context = self
+            .context()
+            .await
+            .map_err(|e| format!("server settings context: {e}"))?;
         let rows = sqlx::query(
             r#"
             SELECT KEY, VALUE
@@ -49,7 +56,8 @@ impl ServerSettingsStore {
         "#,
         )
         .fetch_all(context.pool())
-        .await?
+        .await
+        .map_err(|e| format!("load server settings map: {e}"))?
         .into_iter()
         .map(|row| {
             (
@@ -61,19 +69,21 @@ impl ServerSettingsStore {
         Ok(rows)
     }
 
-    pub async fn load_settings(&self) -> Result<PersistedServerSettings, sqlx::Error> {
-        crate::operational_settings_access::load_server_settings(self).await
+    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
+        crate::operational_settings_access::load_server_settings(self)
+            .await
+            .map_err(|e| format!("load server settings: {e}"))
     }
 
-    pub async fn apply_changes(
-        &self,
-        changes: &[(String, Option<String>)],
-    ) -> Result<(), sqlx::Error> {
+    async fn apply_changes(&self, changes: &[(String, Option<String>)]) -> Result<(), String> {
         if changes.is_empty() {
             return Ok(());
         }
 
-        let context = self.context().await?;
+        let context = self
+            .context()
+            .await
+            .map_err(|e| format!("server settings context: {e}"))?;
         for (key, value) in changes {
             match value {
                 Some(value) => {
@@ -88,7 +98,8 @@ impl ServerSettingsStore {
                     .bind(key)
                     .bind(value)
                     .execute(context.pool())
-                    .await?;
+                    .await
+                    .map_err(|e| format!("apply server setting {key}: {e}"))?;
                 }
                 None => {
                     sqlx::query(
@@ -99,7 +110,8 @@ impl ServerSettingsStore {
                     )
                     .bind(key)
                     .execute(context.pool())
-                    .await?;
+                    .await
+                    .map_err(|e| format!("delete server setting {key}: {e}"))?;
                 }
             }
         }

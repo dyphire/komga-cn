@@ -15,8 +15,8 @@ pub async fn book_page(
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
     media_responses::book_page_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -37,8 +37,8 @@ pub async fn book_page_opds_v1(
     query.zero_based = true;
     query.content_negotiation = false;
     media_responses::book_page_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -56,8 +56,8 @@ pub async fn book_page_raw(
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
     media_responses::book_page_raw_response(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -116,7 +116,8 @@ pub async fn book_page_thumbnail(
 
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &resolved_book_id).await
     {
-        if !user_can_access_book_media(&app.reader, &resolved_book_id, &user, &media).await {
+        if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await
+        {
             return StatusCode::FORBIDDEN.into_response();
         }
 
@@ -125,8 +126,8 @@ pub async fn book_page_thumbnail(
         }
 
         let page_row = match page_resolution::load_book_page_row(
-            &app.reader,
-            &app.content,
+            app.reader.as_ref(),
+            app.content.as_ref(),
             &resolved_book_id,
             &media,
             page_number as u64,
@@ -140,7 +141,7 @@ pub async fn book_page_thumbnail(
         };
 
         if let Some(bytes) = page_resolution::render_book_page_thumbnail(
-            &app.content,
+            app.content.as_ref(),
             &media,
             &page_row,
             page_number as u64,
@@ -186,7 +187,7 @@ pub async fn book_pages(
         Err(error) => return internal_error_response(error),
     };
 
-    if !user_can_access_book_media(&app.reader, &resolved_book_id, &user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -201,8 +202,13 @@ pub async fn book_pages(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match page_resolution::list_book_page_rows(&app.reader, &app.content, &resolved_book_id, &media)
-        .await
+    match page_resolution::list_book_page_rows(
+        app.reader.as_ref(),
+        app.content.as_ref(),
+        &resolved_book_id,
+        &media,
+    )
+    .await
     {
         Ok(Some(page_rows)) => page_rows_response(page_rows),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -256,7 +262,7 @@ pub async fn book_positions(
         Err(error) => return internal_error_response(error),
     };
 
-    if !user_can_access_book_media(&app.reader, &resolved_book_id, &user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 

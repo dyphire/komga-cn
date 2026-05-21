@@ -6,7 +6,7 @@ use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_infrastructure::claims_access::ClaimInitialAdminUserResult;
+use komga_application::operational::ClaimInitialAdminUserResult;
 
 use crate::identity_access::auth::{AuthUser, user_payload_json};
 use crate::state::OperationalApiState;

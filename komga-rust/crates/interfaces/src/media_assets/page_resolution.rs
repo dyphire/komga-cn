@@ -1,16 +1,16 @@
 use std::path::Path;
 
-use komga_application::media_assets::{BookMediaRecord, BookPageRecord};
-use komga_infrastructure::content_resolver::ContentResolver;
-use komga_infrastructure::media_reader::MediaReader;
+use komga_application::media_assets::{
+    BookMediaRecord, BookPageRecord, ContentResolverPort, MediaReaderPort,
+};
 
 use super::media_helpers::{
     book_media_is_pdf, book_media_is_single_image, content_type_from_filename,
 };
 
 pub(crate) async fn load_book_page_row(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     book_id: &str,
     media: &BookMediaRecord,
     page_number: u64,
@@ -35,8 +35,8 @@ pub(crate) async fn load_book_page_row(
 }
 
 pub(crate) async fn list_book_page_rows(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     book_id: &str,
     media: &BookMediaRecord,
 ) -> Result<Option<Vec<BookPageRecord>>, String> {
@@ -70,7 +70,7 @@ pub(crate) async fn list_book_page_rows(
 }
 
 pub(crate) async fn render_book_page_thumbnail(
-    content: &ContentResolver,
+    content: &dyn ContentResolverPort,
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -82,8 +82,8 @@ pub(crate) async fn render_book_page_thumbnail(
 }
 
 pub(crate) async fn load_book_thumbnail_page_source_bytes(
-    reader: &MediaReader,
-    content: &ContentResolver,
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     book_id: &str,
     media: &BookMediaRecord,
 ) -> Option<Vec<u8>> {
@@ -123,7 +123,7 @@ pub(crate) fn page_row_media_type(page_row: &BookPageRecord, media: &BookMediaRe
 }
 
 async fn single_image_page_row(
-    content: &ContentResolver,
+    content: &dyn ContentResolverPort,
     media: &BookMediaRecord,
     page_number: u64,
 ) -> BookPageRecord {
@@ -144,7 +144,10 @@ async fn single_image_page_row(
     }
 }
 
-async fn read_media_image_dimensions(content: &ContentResolver, path: &Path) -> Option<(i64, i64)> {
+async fn read_media_image_dimensions(
+    content: &dyn ContentResolverPort,
+    path: &Path,
+) -> Option<(i64, i64)> {
     let bytes = content.read_media_file_bytes(path).await?;
     let image = image::load_from_memory(&bytes).ok()?;
     Some((i64::from(image.width()), i64::from(image.height())))

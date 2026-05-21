@@ -2,8 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
+use komga_application::discovery::{
+    DiscoveryBrowseService, DiscoveryDetailPort, DiscoveryFacetService, DiscoverySearchService,
+    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+};
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
+use komga_application::operational::OperationalMetricsPort;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_infrastructure::content_resolver::ContentResolver;
@@ -32,15 +36,12 @@ use komga_infrastructure::search_sync_adapter::SearchSyncAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 use komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter;
 use komga_infrastructure::thumbnail_writer::ThumbnailWriter;
-use komga_interfaces::discovery::persisted::models::{
-    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-};
 use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
-    AuthDatabaseState, BookImportSseEvent, DiscoverySearchService, HttpAppState,
-    HttpServerRequestsState, HttpServices, IdentityState, OAuth2ClientConfig,
-    OperationalBuildMetadata, OperationalState, ReadProgressState, RemoteCacheEntry,
-    RuntimeProfile, RuntimeState, SseOperationalState, StartupTimingState, TransientBooksStore,
+    AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices,
+    IdentityState, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
+    ReadProgressState, RemoteCacheEntry, RuntimeProfile, RuntimeState, SseOperationalState,
+    StartupTimingState, TransientBooksStore,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -60,8 +61,9 @@ pub fn compose_http_runtime(
         task_engine,
     } = runtime;
     let identity = IdentityState::new(Arc::new(IdentityAccess::new(db.clone())));
-    let operational_runtime_service = Arc::new(OperationalMetricsAccess::new(db.clone(), tasks_db));
-    let discovery_detail = Arc::new(DiscoveryDetailAccess::new(
+    let operational_runtime_service: Arc<dyn OperationalMetricsPort> =
+        Arc::new(OperationalMetricsAccess::new(db.clone(), tasks_db));
+    let discovery_detail: Arc<dyn DiscoveryDetailPort> = Arc::new(DiscoveryDetailAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
@@ -74,8 +76,11 @@ pub fn compose_http_runtime(
     ));
     let discovery_browse: Arc<dyn DiscoveryBrowseService> = discovery_browse_service.clone();
     let discovery_facets: Arc<dyn DiscoveryFacetService> = discovery_browse_service;
-    let opds_catalog = OpdsCatalogAccess::new(db.clone());
-    let opds_persisted = OpdsPersistedAccess::new(db.clone(), config.lucene_data_directory.clone());
+    let opds_catalog: Arc<dyn komga_application::opds::OpdsCatalogPort> =
+        Arc::new(OpdsCatalogAccess::new(db.clone()));
+    let opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort> = Arc::new(
+        OpdsPersistedAccess::new(db.clone(), config.lucene_data_directory.clone()),
+    );
     let operational_settings_service = Arc::new(OperationalSettingsAccess::new(db.clone()));
 
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
@@ -95,7 +100,7 @@ pub fn compose_http_runtime(
     let profile = runtime_profile(config);
     let discovery_auth = DiscoveryAuthState::default();
     let auth_db = AuthDatabaseState {
-        db: db.clone(),
+        database_file: db.database_file().to_path_buf(),
         demo_mode: config.demo_mode,
         session_runtime_key,
         remember_me_runtime_key: remember_me_runtime_key.clone(),
@@ -125,19 +130,19 @@ pub fn compose_http_runtime(
         identity,
         operational_runtime: operational_runtime_service,
         operational_settings: operational_settings_service,
-        opds_catalog: Arc::new(opds_catalog),
-        opds_persisted: Arc::new(opds_persisted),
+        opds_catalog,
+        opds_persisted,
         discovery_search,
         discovery_detail,
         discovery_browse,
         discovery_facets,
-        media_reader: MediaReader::new(db.read_pool().clone()),
-        content_resolver: ContentResolver,
-        thumbnail_writer: ThumbnailWriter::new(db.write_pool().clone()),
-        progress_writer: ProgressWriter::new(db.write_pool().clone()),
+        media_reader: Arc::new(MediaReader::new(db.read_pool().clone())),
+        content_resolver: Arc::new(ContentResolver),
+        thumbnail_writer: Arc::new(ThumbnailWriter::new(db.write_pool().clone())),
+        progress_writer: Arc::new(ProgressWriter::new(db.write_pool().clone())),
         metadata_writer,
-        import_service: Arc::new(MediaImportService::new(FilesystemImportPort::new(
-            db.database_file().to_path_buf(),
+        import_service: Arc::new(MediaImportService::new(Arc::new(
+            FilesystemImportPort::new(db.database_file().to_path_buf()),
         ))),
     };
     let operational = compose_operational_state(
@@ -179,7 +184,7 @@ fn runtime_identity_key(database_file: &Path) -> String {
 fn preload_remember_me_runtime_settings(
     config: &RuntimeConfig,
     remember_me_runtime_key: &str,
-    identity: &IdentityAccess,
+    identity: &IdentityState,
 ) {
     let (remember_me_key, remember_me_duration_days) =
         operational_settings_access::load_remember_me_runtime_settings(

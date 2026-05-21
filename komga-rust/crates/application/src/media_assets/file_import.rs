@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -77,15 +78,12 @@ pub trait MediaImportPort: Send + Sync {
     ) -> Result<Option<ImportBookOutcome>, String>;
 }
 
-pub struct MediaImportService<P> {
-    port: P,
+pub struct MediaImportService {
+    port: Arc<dyn MediaImportPort>,
 }
 
-impl<P> MediaImportService<P>
-where
-    P: MediaImportPort,
-{
-    pub fn new(port: P) -> Self {
+impl MediaImportService {
+    pub fn new(port: Arc<dyn MediaImportPort>) -> Self {
         Self { port }
     }
 
@@ -327,14 +325,14 @@ mod tests {
 
     #[test]
     fn process_books_payload_enqueues_local_artwork_refresh_for_imported_artwork_sidecars() {
-        let service = MediaImportService::new(StubImportPort {
+        let service = MediaImportService::new(Arc::new(StubImportPort {
             outcome: Some(ImportBookOutcome {
                 library_id: "library-1".to_string(),
                 imported_book_id: "book-1".to_string(),
                 sidecar_imported: false,
                 artwork_sidecar_imported: true,
             }),
-        });
+        }));
 
         let tasks = block_on_ready(service.process_books_payload(
             BooksImportPayload {
@@ -371,14 +369,14 @@ mod tests {
 
     #[test]
     fn process_queued_book_payload_accepts_kotlin_style_import_payload() {
-        let service = MediaImportService::new(StubImportPort {
+        let service = MediaImportService::new(Arc::new(StubImportPort {
             outcome: Some(ImportBookOutcome {
                 library_id: "library-1".to_string(),
                 imported_book_id: "book-1".to_string(),
                 sidecar_imported: false,
                 artwork_sidecar_imported: false,
             }),
-        });
+        }));
 
         let tasks = block_on_ready(
             service.process_queued_book_payload(

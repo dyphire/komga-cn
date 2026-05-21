@@ -13,7 +13,7 @@ pub async fn book_thumbnail(
     Path(book_id): Path<String>,
 ) -> Response {
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
-        if !user_can_access_book_media(&app.reader, &book_id, &user, &media).await {
+        if !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
@@ -48,7 +48,7 @@ pub async fn book_thumbnail_by_id(
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await
-        && !user_can_access_book_media(&app.reader, &book_id, &user, &media).await
+        && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
     {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -66,7 +66,7 @@ pub async fn book_thumbnails(
     Path(book_id): Path<String>,
 ) -> Response {
     if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await
-        && !user_can_access_book_media(&app.reader, &book_id, &user, &media).await
+        && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
     {
         return StatusCode::FORBIDDEN.into_response();
     }

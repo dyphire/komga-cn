@@ -1,6 +1,7 @@
+use async_trait::async_trait;
 use komga_application::media_assets::{
     CollectionThumbnailRecord, EntityThumbnailRecord, ReadlistThumbnailRecord,
-    SeriesThumbnailRecord,
+    SeriesThumbnailRecord, ThumbnailWriterPort,
 };
 use sqlx::SqlitePool;
 
@@ -18,10 +19,13 @@ impl ThumbnailWriter {
     pub fn new(write_pool: SqlitePool) -> Self {
         Self { write_pool }
     }
+}
 
+#[async_trait]
+impl ThumbnailWriterPort for ThumbnailWriter {
     // --- Book ---
 
-    pub async fn insert_book(
+    async fn insert_book(
         &self,
         book_id: &str,
         thumbnail: &[u8],
@@ -42,17 +46,17 @@ impl ThumbnailWriter {
         .await
     }
 
-    pub async fn select_book(&self, thumbnail_id: &str) -> Result<bool, String> {
+    async fn select_book(&self, thumbnail_id: &str) -> Result<bool, String> {
         metadata::select_book_thumbnail(&self.write_pool, thumbnail_id).await
     }
 
-    pub async fn delete_book(&self, thumbnail_id: &str) -> Result<bool, String> {
+    async fn delete_book(&self, thumbnail_id: &str) -> Result<bool, String> {
         metadata::delete_book_thumbnail(&self.write_pool, thumbnail_id).await
     }
 
     // --- Series ---
 
-    pub async fn insert_series(
+    async fn insert_series(
         &self,
         series_id: &str,
         thumbnail: &[u8],
@@ -73,17 +77,17 @@ impl ThumbnailWriter {
         .await
     }
 
-    pub async fn select_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
+    async fn select_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
         metadata::select_series_thumbnail(&self.write_pool, series_id, thumbnail_id).await
     }
 
-    pub async fn delete_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
+    async fn delete_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
         metadata::delete_series_thumbnail(&self.write_pool, series_id, thumbnail_id).await
     }
 
     // --- Readlist ---
 
-    pub async fn insert_readlist(
+    async fn insert_readlist(
         &self,
         readlist_id: &str,
         thumbnail: &[u8],
@@ -104,25 +108,17 @@ impl ThumbnailWriter {
         .await
     }
 
-    pub async fn select_readlist(
-        &self,
-        readlist_id: &str,
-        thumbnail_id: &str,
-    ) -> Result<bool, String> {
+    async fn select_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String> {
         metadata::select_readlist_thumbnail(&self.write_pool, readlist_id, thumbnail_id).await
     }
 
-    pub async fn delete_readlist(
-        &self,
-        readlist_id: &str,
-        thumbnail_id: &str,
-    ) -> Result<bool, String> {
+    async fn delete_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String> {
         metadata::delete_readlist_thumbnail(&self.write_pool, readlist_id, thumbnail_id).await
     }
 
     // --- Collection ---
 
-    pub async fn insert_collection(
+    async fn insert_collection(
         &self,
         collection_id: &str,
         thumbnail: &[u8],
@@ -143,11 +139,11 @@ impl ThumbnailWriter {
         .await
     }
 
-    pub async fn select_collection(&self, thumbnail_id: &str) -> Result<bool, String> {
+    async fn select_collection(&self, thumbnail_id: &str) -> Result<bool, String> {
         metadata::select_collection_thumbnail(&self.write_pool, thumbnail_id).await
     }
 
-    pub async fn delete_collection(
+    async fn delete_collection(
         &self,
         collection_id: &str,
         thumbnail_id: &str,

@@ -35,7 +35,7 @@ async fn load_accessible_book_media(
         return Err(StatusCode::NOT_FOUND.into_response());
     };
 
-    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
         return Err(StatusCode::FORBIDDEN.into_response());
     }
 
@@ -237,7 +237,7 @@ async fn book_progression_response(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -272,7 +272,7 @@ async fn book_progression_response(
             return invalid_progression_payload();
         };
         let normalized_locator =
-            match normalize_book_epub_locator(&app.reader, book_id, locator).await {
+            match normalize_book_epub_locator(app.reader.as_ref(), book_id, locator).await {
                 Ok(locator) => locator,
                 Err(response) => return response,
             };
@@ -296,13 +296,17 @@ async fn book_progression_response(
         return invalid_progression_payload();
     }
 
-    let stale_progression =
-        match progression_is_older_than_existing(&app.reader, book_id, user_id(user), modified)
-            .await
-        {
-            Ok(stale) => stale,
-            Err(error) => return internal_error_response(error),
-        };
+    let stale_progression = match progression_is_older_than_existing(
+        app.reader.as_ref(),
+        book_id,
+        user_id(user),
+        modified,
+    )
+    .await
+    {
+        Ok(stale) => stale,
+        Err(error) => return internal_error_response(error),
+    };
     if stale_progression {
         return (
             StatusCode::CONFLICT,
@@ -364,7 +368,7 @@ async fn book_progression_get_response(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !user_can_access_book_media(&app.reader, book_id, user, &media).await {
+    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 

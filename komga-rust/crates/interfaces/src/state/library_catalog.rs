@@ -1,12 +1,12 @@
 use super::*;
 use axum::extract::FromRef;
-use komga_infrastructure::library_catalog::LibraryCatalogAccess;
+use komga_application::library_catalog::LibraryCatalogPort;
 
 #[derive(Clone)]
 pub struct LibraryCatalogState {
     pub discovery_auth: DiscoveryAuthState,
     pub identity: IdentityState,
-    pub library_catalog: Arc<LibraryCatalogAccess>,
+    pub library_catalog: Arc<dyn LibraryCatalogPort>,
     pub task_queue: TaskQueueState,
 }
 

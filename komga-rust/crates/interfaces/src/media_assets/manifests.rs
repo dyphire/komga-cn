@@ -10,8 +10,8 @@ pub async fn book_manifest(
     Path(book_id): Path<String>,
 ) -> Response {
     match build_persisted_book_manifest(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -42,8 +42,8 @@ pub async fn book_manifest_epub(
     Path(book_id): Path<String>,
 ) -> Response {
     match build_persisted_book_manifest(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -74,8 +74,8 @@ pub async fn book_manifest_pdf(
     Path(book_id): Path<String>,
 ) -> Response {
     match build_persisted_book_manifest(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
@@ -106,8 +106,8 @@ pub async fn book_manifest_divina(
     Path(book_id): Path<String>,
 ) -> Response {
     match build_persisted_book_manifest(
-        &app.reader,
-        &app.content,
+        app.reader.as_ref(),
+        app.content.as_ref(),
         app.discovery_detail.as_ref(),
         &user,
         &headers,
