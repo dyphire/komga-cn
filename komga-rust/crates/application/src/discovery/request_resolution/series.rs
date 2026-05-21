@@ -6,7 +6,7 @@ use komga_domain::discovery::{
 };
 use serde_json::Value;
 
-pub(in crate::discovery) fn parse_legacy_series_sorts(
+pub(super) fn parse_legacy_series_sorts(
     sorts: &[String],
     search: Option<&str>,
     collection_ids: Option<&Vec<String>>,
@@ -675,7 +675,7 @@ fn parse_series_condition_from_json(condition: &Value) -> Result<SeriesCondition
     }
 }
 
-pub(in crate::discovery) fn parse_series_filter_from_json(
+pub fn parse_series_filter_from_json(
     condition: Option<&Value>,
 ) -> Result<SeriesFilter, DiscoveryError> {
     let Some(condition) = condition else {
@@ -688,7 +688,7 @@ pub(in crate::discovery) fn parse_series_filter_from_json(
     })
 }
 
-pub(in crate::discovery) fn parse_series_sorts_from_json(
+pub(super) fn parse_series_sorts_from_json(
     sorts: Option<&Value>,
     has_search: bool,
 ) -> Vec<SeriesSort> {
@@ -704,7 +704,7 @@ pub(in crate::discovery) fn parse_series_sorts_from_json(
     parse_series_sorts_from_json_values(&values, has_search)
 }
 
-pub(in crate::discovery) fn parse_series_sorts_from_json_values(
+pub(super) fn parse_series_sorts_from_json_values(
     sorts: &[String],
     has_search: bool,
 ) -> Vec<SeriesSort> {

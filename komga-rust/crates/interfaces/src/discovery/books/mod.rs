@@ -1,6 +1,5 @@
 mod duplicates;
 mod feeds;
-pub(in crate::discovery) mod list_query;
 mod tags;
 
 pub use duplicates::books_duplicates;

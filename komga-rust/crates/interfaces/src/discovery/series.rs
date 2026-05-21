@@ -1,10 +1,5 @@
-mod filter_parsing;
 mod payload;
 
-pub(in crate::discovery) use filter_parsing::{
-    parse_legacy_series_sorts, parse_series_filter_from_json, parse_series_sorts_from_json,
-    parse_series_sorts_from_json_values,
-};
 pub(in crate::discovery) use payload::series_read_model_page_payload;
 
 use super::persisted::common_helpers::{internal_error_response, requested_query_values};

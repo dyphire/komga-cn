@@ -272,13 +272,6 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn extract_full_text_search(payload: &Value) -> Option<String> {
-    payload
-        .get("fullTextSearch")
-        .and_then(|value| value.as_str())
-        .map(str::to_owned)
-}
-
 pub fn mark_runtime_owned(response: &mut Response) {
     response.headers_mut().insert(
         HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),

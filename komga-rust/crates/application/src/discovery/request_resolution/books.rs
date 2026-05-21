@@ -1,5 +1,3 @@
-use crate::helpers::{query_value, query_values};
-use axum::http::{StatusCode, Uri};
 use komga_domain::common_ids::{LibraryId, ReadListId, SeriesId};
 use komga_domain::discovery::{
     BookCondition, BookFilter, BookPosterCondition, BookSort, BookValueCondition,
@@ -8,13 +6,13 @@ use komga_domain::discovery::{
 };
 use serde_json::Value;
 
-use super::super::persisted::common_helpers::decode_query_component;
+use super::{DiscoveryRequestError, decode_query_component, query_value, query_values};
 
-fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, ()> {
+fn optional_query_bool(query: &str, key: &str) -> Result<Option<bool>, DiscoveryRequestError> {
     match query_value(query, key) {
         Some(value) if value.eq_ignore_ascii_case("true") => Ok(Some(true)),
         Some(value) if value.eq_ignore_ascii_case("false") => Ok(Some(false)),
-        Some(_) => Err(()),
+        Some(_) => Err(DiscoveryRequestError::BadRequest),
         None => Ok(None),
     }
 }
@@ -29,7 +27,7 @@ fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
-pub(in crate::discovery) fn normalize_release_date_date_time(raw: &str) -> Option<String> {
+pub(super) fn normalize_release_date_date_time(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -60,7 +58,7 @@ pub(in crate::discovery) fn normalize_release_date_date_time(raw: &str) -> Optio
     Some(candidate.to_string())
 }
 
-pub(in crate::discovery) fn build_legacy_books_filter(
+pub(super) fn build_legacy_books_filter(
     library_ids: Option<Vec<String>>,
     tags: Option<Vec<String>>,
     read_statuses: Option<Vec<String>>,
@@ -110,11 +108,10 @@ pub(in crate::discovery) fn build_legacy_books_filter(
     }
 }
 
-pub(in crate::discovery) fn legacy_series_books_book_filter(
+pub(super) fn legacy_series_books_book_filter(
     series_id: &str,
-    uri: &Uri,
-) -> Result<BookFilter, StatusCode> {
-    let query = uri.query().unwrap_or_default();
+    query: &str,
+) -> Result<BookFilter, DiscoveryRequestError> {
     let mut conditions = vec![BookCondition::Value(BookValueCondition::SeriesId(
         InclusionCondition::Include(vec![SeriesId::from(series_id)]),
     ))];
@@ -140,7 +137,7 @@ pub(in crate::discovery) fn legacy_series_books_book_filter(
         )));
     }
 
-    let deleted = optional_query_bool(query, "deleted").map_err(|()| StatusCode::BAD_REQUEST)?;
+    let deleted = optional_query_bool(query, "deleted")?;
     if let Some(deleted) = deleted {
         conditions.push(BookCondition::Value(BookValueCondition::Deleted(deleted)));
     }
@@ -159,8 +156,7 @@ pub(in crate::discovery) fn legacy_series_books_book_filter(
     })
 }
 
-pub(in crate::discovery) fn legacy_series_books_sort_from_query(uri: &Uri) -> Vec<BookSort> {
-    let query = uri.query().unwrap_or_default();
+pub(super) fn legacy_series_books_sort_from_query(query: &str) -> Vec<BookSort> {
     let sort_values: Vec<String> = query_values(query, "sort")
         .into_iter()
         .map(decode_query_component)
@@ -823,7 +819,7 @@ fn parse_book_condition_from_json(condition: &Value) -> Result<BookCondition, Di
     }
 }
 
-pub(in crate::discovery) fn parse_book_filter_from_json(
+pub(super) fn parse_book_filter_from_json(
     condition: Option<&Value>,
 ) -> Result<BookFilter, DiscoveryError> {
     let Some(condition) = condition else {
@@ -840,10 +836,7 @@ pub(in crate::discovery) fn parse_book_filter_from_json(
     })
 }
 
-pub(in crate::discovery) fn parse_book_sorts_from_json(
-    sorts: Option<&Value>,
-    has_search: bool,
-) -> Vec<BookSort> {
+pub(super) fn parse_book_sorts_from_json(sorts: Option<&Value>, has_search: bool) -> Vec<BookSort> {
     let Some(sort_values) = sorts.and_then(Value::as_array) else {
         return parse_book_sorts_from_json_values(&[], has_search);
     };
@@ -856,7 +849,7 @@ pub(in crate::discovery) fn parse_book_sorts_from_json(
     parse_book_sorts_from_json_values(&strs, has_search)
 }
 
-pub(in crate::discovery) fn parse_book_sorts_from_json_values(
+pub(super) fn parse_book_sorts_from_json_values(
     sorts: &[String],
     has_search: bool,
 ) -> Vec<BookSort> {

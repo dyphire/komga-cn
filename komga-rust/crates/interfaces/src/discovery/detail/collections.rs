@@ -1,7 +1,7 @@
 use super::collections_support::PersistedCollectionWriteInput;
 use super::*;
 use crate::discovery::persisted::common_helpers::decode_query_component;
-use crate::discovery::series::{parse_series_filter_from_json, series_read_model_page_payload};
+use crate::discovery::series::series_read_model_page_payload;
 use crate::discovery::series_routes::author_query_to_author_match;
 use crate::helpers::{mark_runtime_owned, to_domain_query_context, validation_error_response};
 use crate::identity_access::auth::{Admin, Authenticated};
@@ -13,7 +13,9 @@ use icu::collator::{
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
-use komga_application::discovery::{PageRequest, SeriesBrowseRequest};
+use komga_application::discovery::{
+    PageRequest, SeriesBrowseRequest, parse_series_filter_from_json,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
