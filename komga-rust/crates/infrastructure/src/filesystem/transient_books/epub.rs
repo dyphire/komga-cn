@@ -6,8 +6,11 @@ use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use zip::ZipArchive;
 
-use super::{EPUB_DIVINA_LETTER_COUNT_THRESHOLD, TransientBookAnalysis, TransientBookPage, TransientEpubManifestItem};
 use super::image_analysis::image_dimensions_from_bytes;
+use super::{
+    EPUB_DIVINA_LETTER_COUNT_THRESHOLD, TransientBookAnalysis, TransientBookPage,
+    TransientEpubManifestItem,
+};
 
 pub(super) fn analyze_transient_epub(path: &str) -> Result<TransientBookAnalysis, &'static str> {
     let file = std::fs::File::open(path).map_err(|_| "ERR_1032")?;
@@ -101,7 +104,7 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
             else {
                 return Ok(Vec::new());
             };
-// PLACEHOLDER_DIVINA_CONT
+            // PLACEHOLDER_DIVINA_CONT
             let Some(image_item) = manifest.values().find(|entry| entry.href == image_href) else {
                 return Ok(Vec::new());
             };
@@ -373,7 +376,3 @@ fn transient_xml_attribute_value(
         })?
     })
 }
-
-
-
-

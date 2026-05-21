@@ -5,7 +5,9 @@ use std::path::Path;
 use zip::ZipArchive;
 
 use super::{TransientEpubManifestItem, TransientMetadataInference, epub};
-use crate::metadata::{infer_transient_comicinfo_provider_metadata, infer_transient_epub_provider_metadata};
+use crate::metadata::{
+    infer_transient_comicinfo_provider_metadata, infer_transient_epub_provider_metadata,
+};
 use crate::rar_support::read_rar_entry_bytes;
 use detection::transient_book_media_type;
 
@@ -89,7 +91,8 @@ fn infer_transient_comicinfo_provider_metadata_from_path(
 fn infer_transient_epub_metadata_from_path(path: &str) -> Option<TransientMetadataInference> {
     let file = fs::File::open(path).ok()?;
     let mut archive = ZipArchive::new(file).ok()?;
-    let container_xml = epub::read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
+    let container_xml =
+        epub::read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
     let rootfile_path = epub::parse_transient_epub_rootfile_path(&container_xml)?;
     let package_document = epub::read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
     let manifest = epub::parse_transient_epub_manifest_items(&package_document, &rootfile_path);

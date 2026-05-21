@@ -5,7 +5,6 @@ mod image_analysis;
 mod metadata;
 mod pdf;
 
-
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -18,8 +17,8 @@ use zip::ZipArchive;
 use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_stored_path;
 
-pub use detection::{transient_book_content_type, transient_book_media_type};
 use detection::is_recognized_transient_book_file;
+pub use detection::{transient_book_content_type, transient_book_media_type};
 
 const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
 const KOTLIN_PDF_MIN_EDGE: f64 = 3200.0;
@@ -292,7 +291,6 @@ pub fn transient_book_page_content(
     None
 }
 
-
 pub fn list_transient_book_entries(path: &Path) -> Vec<Value> {
     let mut entries = Vec::new();
     collect_transient_book_entries(path, &mut entries);
@@ -304,13 +302,6 @@ pub fn list_transient_book_entries(path: &Path) -> Vec<Value> {
     });
     entries
 }
-
-
-
-
-
-
-
 
 fn to_unix_nanos(time: Option<SystemTime>) -> i128 {
     time.and_then(|value| value.duration_since(UNIX_EPOCH).ok())
@@ -371,7 +362,6 @@ fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
         }));
     }
 }
-
 
 #[cfg(test)]
 mod tests {

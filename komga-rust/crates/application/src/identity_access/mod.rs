@@ -3,6 +3,7 @@ mod device_records;
 mod device_tokens;
 mod kobo_sync;
 mod mutation_models;
+pub mod ports;
 mod principal_resolution;
 mod session_tokens;
 mod user_models;
@@ -11,6 +12,10 @@ pub use access_port::IdentityAccessPort;
 pub use device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
     PersistedReadProgressRecord,
+};
+pub use ports::{
+    AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,
+    SessionResolverPort, UserAdminPort,
 };
 
 pub use device_tokens::{

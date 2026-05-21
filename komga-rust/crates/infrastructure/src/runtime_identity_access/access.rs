@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, CreateAuthUserInput, IdentityAccessPort, KoboLibrarySyncRequest,
-    KoboLibrarySyncResponse, PersistedApiKey, PersistedApiKeyMetadata,
-    PersistedAuthenticationActivity, ResolvedAuthToken, UpdateAuthUserInput, UpdateAuthUserResult,
+    AuthActivityPort, AuthOutcome, AuthUser, AuthenticationPort, CreateAuthUserInput,
+    DeviceSyncPort, IdentityAccessPort, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
+    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity, ResolvedAuthToken,
+    SessionLifecyclePort, SessionResolverPort, UpdateAuthUserInput, UpdateAuthUserResult,
+    UserAdminPort,
 };
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -373,8 +375,28 @@ impl IdentityAccess {
     }
 }
 
+impl IdentityAccessPort for IdentityAccess {}
+
+impl SessionResolverPort for IdentityAccess {
+    fn resolve_session_user(
+        &self,
+        session_token: Option<&str>,
+        remember_me_token: Option<&str>,
+    ) -> Option<AuthUser> {
+        auth_identity::auth_token_user_from_tokens(session_token, remember_me_token)
+    }
+
+    fn resolve_auth_token(
+        &self,
+        session_token: Option<&str>,
+        remember_me_token: Option<&str>,
+    ) -> Option<ResolvedAuthToken> {
+        auth_identity::auth_token_resolution_from_tokens(session_token, remember_me_token)
+    }
+}
+
 #[async_trait]
-impl IdentityAccessPort for IdentityAccess {
+impl AuthenticationPort for IdentityAccess {
     async fn authenticate_basic(&self, username: &str, password: &str) -> Option<AuthOutcome> {
         auth_identity::authenticate_basic_credentials(self.db.read_pool(), username, password).await
     }
@@ -386,7 +408,82 @@ impl IdentityAccessPort for IdentityAccess {
     async fn api_key_metadata_by_token(&self, api_key: &str) -> Option<PersistedApiKeyMetadata> {
         auth_identity::persisted_api_key_metadata_by_token(api_key, self.db.read_pool()).await
     }
+}
 
+impl SessionLifecyclePort for IdentityAccess {
+    fn session_token_for_user(&self, user: &AuthUser, runtime_key: &str) -> String {
+        auth_identity::session_token_for_user_with_runtime_key(user, runtime_key)
+    }
+
+    fn remember_me_token_for_user(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
+        auth_identity::remember_me_token_for_user_with_runtime_key(user, runtime_key)
+    }
+
+    fn sync_session_runtime_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
+        auth_identity::sync_session_runtime_settings(runtime_key, max_inactive_seconds)
+    }
+
+    fn sync_remember_me_runtime_database_file(&self, runtime_key: &str) {
+        auth_identity::sync_remember_me_runtime_database_file(runtime_key, self.db.database_file())
+    }
+
+    fn sync_remember_me_runtime_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
+        auth_identity::sync_remember_me_runtime_settings(
+            runtime_key,
+            RememberMeRuntimeSettings {
+                key: key.to_string(),
+                duration_days,
+            },
+        )
+    }
+
+    fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
+        auth_identity::remember_me_max_age_seconds(runtime_key)
+    }
+
+    fn invalidate_user_sessions(&self, user_id: &str) {
+        auth_identity::invalidate_user_sessions(user_id)
+    }
+
+    fn invalidate_user_sessions_with_runtime_key(&self, user_id: &str, runtime_key: &str) {
+        auth_identity::invalidate_user_sessions_with_runtime_key(user_id, runtime_key)
+    }
+
+    fn invalidate_session_token(&self, token: &str) {
+        auth_identity::invalidate_session_token(token)
+    }
+
+    fn invalidate_remember_me_token(&self, token: &str) {
+        auth_identity::invalidate_remember_me_token(token)
+    }
+
+    fn store_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+        state: &str,
+    ) {
+        auth_identity::store_oauth2_authorization_state(
+            runtime_key,
+            session_token,
+            registration_id,
+            state,
+        )
+    }
+
+    fn take_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+    ) -> Option<String> {
+        auth_identity::take_oauth2_authorization_state(runtime_key, session_token, registration_id)
+    }
+}
+
+#[async_trait]
+impl UserAdminPort for IdentityAccess {
     async fn persisted_users(&self) -> Option<Vec<AuthUser>> {
         auth_identity::persisted_users(self.db.read_pool()).await
     }
@@ -434,7 +531,6 @@ impl IdentityAccessPort for IdentityAccess {
             .await
             .map_err(|e| e.to_string())
     }
-    // --- API keys ---
 
     async fn persisted_create_api_key(
         &self,
@@ -460,9 +556,10 @@ impl IdentityAccessPort for IdentityAccess {
         auth_identity::persisted_delete_api_key_by_id(self.db.write_pool(), user_id, api_key_id)
             .await
     }
+}
 
-    // --- Authentication activity ---
-
+#[async_trait]
+impl AuthActivityPort for IdentityAccess {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
@@ -526,9 +623,10 @@ impl IdentityAccessPort for IdentityAccess {
         )
         .await
     }
+}
 
-    // --- Device auth ---
-
+#[async_trait]
+impl DeviceSyncPort for IdentityAccess {
     async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String> {
         device_auth::load_book_created_timestamp(self.db.read_pool(), book_id)
             .await
@@ -547,7 +645,7 @@ impl IdentityAccessPort for IdentityAccess {
     async fn load_kobo_metadata_record(
         &self,
         book_id: &str,
-    ) -> Result<Option<komga_application::identity_access::KoboMetadataRecord>, String> {
+    ) -> Result<Option<KoboMetadataRecord>, String> {
         device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
             .await
             .map_err(|e| e.to_string())
@@ -565,10 +663,7 @@ impl IdentityAccessPort for IdentityAccess {
     async fn load_koreader_book_target(
         &self,
         book_hash: &str,
-    ) -> Result<
-        Option<komga_application::identity_access::KoreaderBookTarget>,
-        komga_application::identity_access::KoreaderBookLookupError,
-    > {
+    ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {
         device_auth::load_koreader_book_target(self.db.read_pool(), book_hash).await
     }
 
@@ -576,8 +671,7 @@ impl IdentityAccessPort for IdentityAccess {
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<komga_application::identity_access::PersistedReadProgressRecord>, String>
-    {
+    ) -> Result<Option<PersistedReadProgressRecord>, String> {
         device_auth::load_read_progress(self.db.read_pool(), book_id, user_id)
             .await
             .map_err(|e| e.to_string())
@@ -621,95 +715,5 @@ impl IdentityAccessPort for IdentityAccess {
             locator,
         )
         .await
-    }
-
-    // --- Session management ---
-
-    fn session_token_for_user(&self, user: &AuthUser, runtime_key: &str) -> String {
-        auth_identity::session_token_for_user_with_runtime_key(user, runtime_key)
-    }
-
-    fn remember_me_token_for_user(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
-        auth_identity::remember_me_token_for_user_with_runtime_key(user, runtime_key)
-    }
-
-    fn resolve_session_user(
-        &self,
-        session_token: Option<&str>,
-        remember_me_token: Option<&str>,
-    ) -> Option<AuthUser> {
-        auth_identity::auth_token_user_from_tokens(session_token, remember_me_token)
-    }
-
-    fn resolve_auth_token(
-        &self,
-        session_token: Option<&str>,
-        remember_me_token: Option<&str>,
-    ) -> Option<ResolvedAuthToken> {
-        auth_identity::auth_token_resolution_from_tokens(session_token, remember_me_token)
-    }
-
-    fn sync_session_runtime_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
-        auth_identity::sync_session_runtime_settings(runtime_key, max_inactive_seconds)
-    }
-
-    fn sync_remember_me_runtime_database_file(&self, runtime_key: &str) {
-        auth_identity::sync_remember_me_runtime_database_file(runtime_key, self.db.database_file())
-    }
-
-    fn sync_remember_me_runtime_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
-        auth_identity::sync_remember_me_runtime_settings(
-            runtime_key,
-            RememberMeRuntimeSettings {
-                key: key.to_string(),
-                duration_days,
-            },
-        )
-    }
-
-    fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
-        auth_identity::remember_me_max_age_seconds(runtime_key)
-    }
-
-    fn invalidate_user_sessions(&self, user_id: &str) {
-        auth_identity::invalidate_user_sessions(user_id)
-    }
-
-    fn invalidate_user_sessions_with_runtime_key(&self, user_id: &str, runtime_key: &str) {
-        auth_identity::invalidate_user_sessions_with_runtime_key(user_id, runtime_key)
-    }
-
-    fn invalidate_session_token(&self, token: &str) {
-        auth_identity::invalidate_session_token(token)
-    }
-
-    fn invalidate_remember_me_token(&self, token: &str) {
-        auth_identity::invalidate_remember_me_token(token)
-    }
-
-    // --- OAuth2 state ---
-
-    fn store_oauth2_authorization_state(
-        &self,
-        runtime_key: &str,
-        session_token: &str,
-        registration_id: &str,
-        state: &str,
-    ) {
-        auth_identity::store_oauth2_authorization_state(
-            runtime_key,
-            session_token,
-            registration_id,
-            state,
-        )
-    }
-
-    fn take_oauth2_authorization_state(
-        &self,
-        runtime_key: &str,
-        session_token: &str,
-        registration_id: &str,
-    ) -> Option<String> {
-        auth_identity::take_oauth2_authorization_state(runtime_key, session_token, registration_id)
     }
 }

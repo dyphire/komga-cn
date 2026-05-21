@@ -6,7 +6,9 @@ use pdfium_render::prelude::*;
 use super::{KOTLIN_PDF_MIN_EDGE, TransientBookPage};
 use crate::load_pdfium;
 
-pub(super) fn analyze_transient_pdf(path: &str) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
+pub(super) fn analyze_transient_pdf(
+    path: &str,
+) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
     let document = PdfDocument::load(path).map_err(|error| format!("open pdf: {error}"))?;
     let page_count = document.get_pages().len() as u32;
     let pages = (1..=page_count)
