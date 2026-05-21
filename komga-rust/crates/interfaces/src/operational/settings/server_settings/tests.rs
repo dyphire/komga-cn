@@ -69,7 +69,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
         Some(&Some("3".to_string()))
     );
 
-    cleanup_fixture(fixture_root);
+    cleanup_fixture(fixture_root).await;
 }
 
 #[tokio::test]
@@ -117,7 +117,7 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
         Some(&Some("true".to_string()))
     );
 
-    cleanup_fixture(fixture_root);
+    cleanup_fixture(fixture_root).await;
 }
 
 #[tokio::test]
@@ -149,7 +149,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(apply_count.load(Ordering::SeqCst), 0);
 
-    cleanup_fixture(fixture_root);
+    cleanup_fixture(fixture_root).await;
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     assert_eq!(response_body.get("serverContextPath"), Some(&placeholder));
     assert_eq!(response_body.get("kepubifyPath"), Some(&placeholder));
 
-    cleanup_fixture(fixture_root);
+    cleanup_fixture(fixture_root).await;
 }
 
 #[tokio::test]
@@ -219,7 +219,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
         }))
     );
 
-    cleanup_fixture(fixture_root);
+    cleanup_fixture(fixture_root).await;
 }
 
 struct FakeTaskQueue<F> {
@@ -278,7 +278,13 @@ async fn sqlite_fixture(case: &str) -> (PathBuf, Arc<ServerSettingsStore>) {
     (root, store)
 }
 
-fn cleanup_fixture(root: PathBuf) {
+async fn cleanup_fixture(root: PathBuf) {
+    let db_path = root.join("main.db");
+    let evicted =
+        komga_infrastructure::sqlite::evict_shared_pools_for_paths(&[db_path]);
+    for pool in evicted {
+        pool.close().await;
+    }
     std::fs::remove_dir_all(&root).expect("fixture root should be removed");
 }
 
