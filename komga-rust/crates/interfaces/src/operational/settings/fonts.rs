@@ -30,7 +30,7 @@ fn merged_font_families(app: &OperationalApiState) -> Vec<String> {
         .into_iter()
         .collect::<BTreeSet<_>>();
     families.extend(
-        app.operational_settings
+        app.fonts
             .list_font_families(&app.operational.runtime.fonts_data_directory),
     );
     families.into_iter().collect()
@@ -126,11 +126,11 @@ pub(crate) async fn get_font_file(
 
     let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
     let bytes = if filesystem_font_family_exists(&app, &font_family) {
-        app.operational_settings
+        app.fonts
             .load_font_file(&fonts_directory, &font_family, &font_file)
     } else {
         load_embedded_font_file(&font_family, &font_file).or_else(|| {
-            app.operational_settings
+            app.fonts
                 .load_font_file(&fonts_directory, &font_family, &font_file)
         })
     };
@@ -161,11 +161,11 @@ pub(crate) async fn get_font_family_css(
 
     let fonts_directory = app.operational.runtime.fonts_data_directory.clone();
     let css = if filesystem_font_family_exists(&app, &font_family) {
-        app.operational_settings
+        app.fonts
             .load_font_family_css(&fonts_directory, &font_family)
     } else {
         load_embedded_font_family_css(&font_family).or_else(|| {
-            app.operational_settings
+            app.fonts
                 .load_font_family_css(&fonts_directory, &font_family)
         })
     };

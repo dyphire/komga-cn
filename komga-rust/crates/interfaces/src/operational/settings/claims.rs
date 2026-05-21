@@ -12,11 +12,7 @@ use crate::identity_access::auth::{AuthUser, user_payload_json};
 use crate::state::OperationalApiState;
 
 pub(crate) async fn get_claim_status(State(app): State<OperationalApiState>) -> Response {
-    let is_claimed = app
-        .operational_settings
-        .load_claim_status()
-        .await
-        .unwrap_or(false);
+    let is_claimed = app.claim.load_claim_status().await.unwrap_or(false);
 
     Json(json!({ "isClaimed": is_claimed })).into_response()
 }
@@ -31,12 +27,7 @@ pub(crate) async fn post_claim(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    if app
-        .operational_settings
-        .load_claim_status()
-        .await
-        .unwrap_or(false)
-    {
+    if app.claim.load_claim_status().await.unwrap_or(false) {
         return claim_already_claimed_response();
     }
 
@@ -47,7 +38,7 @@ pub(crate) async fn post_claim(
 
     let created_user_id = generate_claimed_user_id();
     let created_user = match app
-        .operational_settings
+        .claim
         .claim_initial_admin_user(&created_user_id, &email, &hashed_password)
         .await
     {

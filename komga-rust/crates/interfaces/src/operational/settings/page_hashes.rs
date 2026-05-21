@@ -46,7 +46,7 @@ pub(crate) async fn get_page_hashes(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .operational_settings
+        .page_hashes
         .load_page_hashes_page(page, size, &actions, &sorts)
         .await
     {
@@ -124,7 +124,7 @@ pub(crate) async fn get_page_hashes_unknown(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .operational_settings
+        .page_hashes
         .load_page_hashes_unknown_page(page, size, &sorts)
         .await
     {
@@ -152,7 +152,7 @@ pub(crate) async fn get_page_hash_matches(
     let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .operational_settings
+        .page_hashes
         .load_page_hash_matches_page(&page_hash, page, size, &sorts)
         .await
     {
@@ -168,11 +168,7 @@ pub(crate) async fn get_page_hash_thumbnail(
     _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    let thumbnail = match app
-        .operational_settings
-        .load_page_hash_thumbnail(&page_hash)
-        .await
-    {
+    let thumbnail = match app.page_hashes.load_page_hash_thumbnail(&page_hash).await {
         Ok(Some(thumbnail)) => thumbnail,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -197,7 +193,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     };
 
     let thumbnail = match app
-        .operational_settings
+        .page_hashes
         .load_unknown_page_hash_thumbnail(&page_hash, resize_to)
         .await
     {
@@ -243,11 +239,7 @@ pub(crate) async fn put_page_hash(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    match app
-        .operational_settings
-        .upsert_page_hash(hash, size, action)
-        .await
-    {
+    match app.page_hashes.upsert_page_hash(hash, size, action).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -259,7 +251,7 @@ pub(crate) async fn post_page_hash_delete_all(
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
     let delete_targets = match app
-        .operational_settings
+        .page_hashes
         .load_page_hash_delete_targets(&page_hash)
         .await
     {

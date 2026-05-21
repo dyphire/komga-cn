@@ -31,11 +31,7 @@ pub(crate) async fn get_history(
         .unwrap_or(20);
     let sorts = query_values(query, "sort");
 
-    let page_data = match app
-        .operational_settings
-        .load_history_page(page, size, sorts)
-        .await
-    {
+    let page_data = match app.history.load_history_page(page, size, sorts).await {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
@@ -50,12 +46,12 @@ pub(crate) async fn delete_syncpoints_me(
 ) -> Response {
     let result = match syncpoint_delete_scope(uri.query().unwrap_or_default()) {
         SyncpointDeleteScope::All => {
-            app.operational_settings
+            app.syncpoints
                 .delete_syncpoints_by_user(user_id(&current_user))
                 .await
         }
         SyncpointDeleteScope::ApiKeys(key_ids) => {
-            app.operational_settings
+            app.syncpoints
                 .delete_syncpoints_by_user_and_key_ids(user_id(&current_user), &key_ids)
                 .await
         }

@@ -22,8 +22,11 @@ use komga_infrastructure::media_reader::MediaReader;
 use komga_infrastructure::metadata::SqliteBookMetadataPort;
 use komga_infrastructure::opds_catalog_access::OpdsCatalogAccess;
 use komga_infrastructure::opds_persisted_access::OpdsPersistedAccess;
+use komga_infrastructure::operational_access::{
+    self, AnnouncementAccess, ClaimAccess, ClientSettingsAccess, FilesystemBrowseAccess,
+    FontAccess, HistoryAccess, PageHashAccess, SyncpointAccess, TransientBookAccess,
+};
 use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
-use komga_infrastructure::operational_settings_access::{self, OperationalSettingsAccess};
 use komga_infrastructure::progress_writer::ProgressWriter;
 use komga_infrastructure::runtime_identity_access::IdentityAccess;
 use komga_infrastructure::search::index_dirs::register_discovery_index_dir;
@@ -81,8 +84,6 @@ pub fn compose_http_runtime(
     let opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort> = Arc::new(
         OpdsPersistedAccess::new(db.clone(), config.lucene_data_directory.clone()),
     );
-    let operational_settings_service = Arc::new(OperationalSettingsAccess::new(db.clone()));
-
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
     identity.sync_remember_me_runtime_database_file(remember_me_runtime_key.as_str());
     preload_remember_me_runtime_settings(config, remember_me_runtime_key.as_str(), &identity);
@@ -129,7 +130,15 @@ pub fn compose_http_runtime(
         server_settings: Arc::new(ServerSettingsStore::new(config.database_file.clone())),
         identity,
         operational_runtime: operational_runtime_service,
-        operational_settings: operational_settings_service,
+        announcements: Arc::new(AnnouncementAccess::new(db.clone())),
+        claim: Arc::new(ClaimAccess::new(db.clone())),
+        client_settings: Arc::new(ClientSettingsAccess::new(db.clone())),
+        filesystem_browse: Arc::new(FilesystemBrowseAccess),
+        fonts: Arc::new(FontAccess),
+        history: Arc::new(HistoryAccess::new(db.clone())),
+        page_hashes: Arc::new(PageHashAccess::new(db.clone())),
+        syncpoints: Arc::new(SyncpointAccess::new(db.clone())),
+        transient_books: Arc::new(TransientBookAccess::new(db.clone())),
         opds_catalog,
         opds_persisted,
         discovery_search,
@@ -190,10 +199,8 @@ fn preload_remember_me_runtime_settings(
     identity: &IdentityState,
 ) {
     let (remember_me_key, remember_me_duration_days) =
-        operational_settings_access::load_remember_me_runtime_settings(
-            config.database_file.as_path(),
-        )
-        .expect("remember-me startup settings should load");
+        operational_access::load_remember_me_runtime_settings(config.database_file.as_path())
+            .expect("remember-me startup settings should load");
     identity.sync_remember_me_runtime_settings(
         remember_me_runtime_key,
         remember_me_key.as_str(),

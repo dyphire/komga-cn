@@ -2,7 +2,8 @@ use super::*;
 use axum::extract::FromRef;
 
 use komga_application::operational::{
-    OperationalMetricsPort, OperationalSettingsPort, ServerSettingsPort,
+    AnnouncementPort, ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
+    OperationalMetricsPort, PageHashPort, ServerSettingsPort, SyncpointPort, TransientBookPort,
 };
 
 #[derive(Clone)]
@@ -12,7 +13,15 @@ pub struct OperationalApiState {
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
     pub(crate) operational_runtime: Arc<dyn OperationalMetricsPort>,
-    pub(crate) operational_settings: Arc<dyn OperationalSettingsPort>,
+    pub(crate) announcements: Arc<dyn AnnouncementPort>,
+    pub(crate) claim: Arc<dyn ClaimPort>,
+    pub(crate) client_settings: Arc<dyn ClientSettingsPort>,
+    pub(crate) filesystem_browse: Arc<dyn FilesystemBrowsePort>,
+    pub(crate) fonts: Arc<dyn FontPort>,
+    pub(crate) history: Arc<dyn HistoryPort>,
+    pub(crate) page_hashes: Arc<dyn PageHashPort>,
+    pub(crate) syncpoints: Arc<dyn SyncpointPort>,
+    pub(crate) transient_books: Arc<dyn TransientBookPort>,
 }
 
 impl FromRef<Arc<HttpAppState>> for OperationalApiState {
@@ -23,7 +32,15 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
             identity: IdentityState::from_ref(app),
             task_queue: TaskQueueState::from_ref(app),
             operational_runtime: app.services.operational_runtime.clone(),
-            operational_settings: app.services.operational_settings.clone(),
+            announcements: app.services.announcements.clone(),
+            claim: app.services.claim.clone(),
+            client_settings: app.services.client_settings.clone(),
+            filesystem_browse: app.services.filesystem_browse.clone(),
+            fonts: app.services.fonts.clone(),
+            history: app.services.history.clone(),
+            page_hashes: app.services.page_hashes.clone(),
+            syncpoints: app.services.syncpoints.clone(),
+            transient_books: app.services.transient_books.clone(),
         }
     }
 }

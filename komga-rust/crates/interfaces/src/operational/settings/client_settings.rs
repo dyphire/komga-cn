@@ -16,7 +16,7 @@ pub(crate) async fn get_client_settings_global(
 ) -> Response {
     let include_unauthorized_only = resolved_auth_user(&app.identity, &headers).is_none();
     let settings = match app
-        .operational_settings
+        .client_settings
         .load_client_settings_global(include_unauthorized_only)
         .await
     {
@@ -31,7 +31,7 @@ pub(crate) async fn get_client_settings_user(
     Authenticated(current_user): Authenticated,
 ) -> Response {
     let settings = match app
-        .operational_settings
+        .client_settings
         .load_client_settings_user(user_id(&current_user))
         .await
     {
@@ -52,7 +52,7 @@ pub(crate) async fn patch_client_settings_global(
     };
 
     match app
-        .operational_settings
+        .client_settings
         .upsert_client_settings_global(&settings)
         .await
     {
@@ -72,7 +72,7 @@ pub(crate) async fn patch_client_settings_user(
     };
 
     match app
-        .operational_settings
+        .client_settings
         .upsert_client_settings_user(user_id(&current_user), &settings)
         .await
     {
@@ -92,7 +92,7 @@ pub(crate) async fn delete_client_settings_global(
     };
 
     match app
-        .operational_settings
+        .client_settings
         .delete_client_settings_global(&keys)
         .await
     {
@@ -112,7 +112,7 @@ pub(crate) async fn delete_client_settings_user(
     };
 
     match app
-        .operational_settings
+        .client_settings
         .delete_client_settings_user(user_id(&current_user), &keys)
         .await
     {

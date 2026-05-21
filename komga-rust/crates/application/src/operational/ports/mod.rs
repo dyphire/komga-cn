@@ -19,30 +19,3 @@ pub use syncpoint_port::SyncpointPort;
 pub use transient_book_port::{
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
 };
-
-/// Supertrait aggregating all operational sub-ports for backward compatibility.
-pub trait OperationalSettingsPort:
-    AnnouncementPort
-    + ClaimPort
-    + ClientSettingsPort
-    + FilesystemBrowsePort
-    + FontPort
-    + HistoryPort
-    + PageHashPort
-    + SyncpointPort
-    + TransientBookPort
-{
-}
-
-impl<T> OperationalSettingsPort for T where
-    T: AnnouncementPort
-        + ClaimPort
-        + ClientSettingsPort
-        + FilesystemBrowsePort
-        + FontPort
-        + HistoryPort
-        + PageHashPort
-        + SyncpointPort
-        + TransientBookPort
-{
-}

@@ -55,7 +55,7 @@ pub(crate) async fn post_transient_books(
     };
 
     match app
-        .operational_settings
+        .transient_books
         .validate_transient_scan_root(requested_path)
         .await
     {
@@ -77,9 +77,7 @@ pub(crate) async fn post_transient_books(
             continue;
         };
 
-        let Some(file_metadata) = app
-            .operational_settings
-            .load_transient_book_file_metadata(path)
+        let Some(file_metadata) = app.transient_books.load_transient_book_file_metadata(path)
         else {
             continue;
         };
@@ -140,9 +138,7 @@ pub(crate) async fn post_transient_book_analyze(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let analysis = app
-        .operational_settings
-        .analyze_transient_book(&record.path);
+    let analysis = app.transient_books.analyze_transient_book(&record.path);
     let inferred_series_and_number =
         infer_transient_series_and_number(&app, record.path.as_str()).await;
 
@@ -236,7 +232,7 @@ pub(crate) async fn get_transient_book_page(
             size_bytes: page.size_bytes,
         })
         .collect::<Vec<_>>();
-    let Some((content_type, bytes)) = app.operational_settings.transient_book_page_content(
+    let Some((content_type, bytes)) = app.transient_books.transient_book_page_content(
         &record.path,
         &record.media_type,
         &pages,

@@ -14,9 +14,8 @@ pub use actuator_contract::{
 pub use metrics_port::{OperationalMetricsPort, SqlitePoolSnapshot};
 pub use ports::{
     AnnouncementPort, ClaimInitialAdminUserResult, ClaimPort, ClientSettingsPort,
-    CreatedClaimedUser, FilesystemBrowsePort, FontPort, HistoryPort, OperationalSettingsPort,
-    PageHashPort, SyncpointPort, TransientBookAnalysis, TransientBookFileMetadata,
-    TransientBookPage, TransientBookPort,
+    CreatedClaimedUser, FilesystemBrowsePort, FontPort, HistoryPort, PageHashPort, SyncpointPort,
+    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
 };
 pub use server_settings::PersistedServerSettings;
 pub use server_settings_port::ServerSettingsPort;

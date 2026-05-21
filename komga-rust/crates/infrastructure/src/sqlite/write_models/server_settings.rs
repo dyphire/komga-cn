@@ -70,7 +70,7 @@ impl ServerSettingsPort for ServerSettingsStore {
     }
 
     async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
-        crate::operational_settings_access::load_server_settings(self)
+        crate::operational_access::load_server_settings(self)
             .await
             .map_err(|e| format!("load server settings: {e}"))
     }

@@ -51,10 +51,10 @@ pub(crate) async fn post_filesystem(
     }
 
     let directories = app
-        .operational_settings
+        .filesystem_browse
         .list_directory_entries(&directory, true);
     let files = if request.show_files {
-        app.operational_settings
+        app.filesystem_browse
             .list_directory_entries(&directory, false)
     } else {
         Vec::new()

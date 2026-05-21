@@ -5,7 +5,7 @@ It is where SQLite, filesystem, auth persistence, search, OPDS backing queries, 
 
 ## Owned module groups
 
-- Persistence and storage: `sqlite`, `sql`, `read_models`, `library_catalog`, `announcements_access`, `claims_access`, `operational_settings_access`, `operational_metrics_access`, and `page_hashes_access`.
+- Persistence and storage: `sqlite`, `sql`, `read_models`, `library_catalog`, `announcements_access`, `claims_access`, `operational_access`, `operational_metrics_access`, and `page_hashes_access`.
 - Auth and identity backing services: `auth` and `runtime_identity_access`.
 - Discovery backing services: `discovery_persisted_access` and `discovery_detail_access`.
 - Media and file access: `filesystem` and `metadata`.

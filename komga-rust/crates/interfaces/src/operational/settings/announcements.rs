@@ -24,7 +24,7 @@ pub(crate) async fn get_announcements(
     };
 
     let read_ids = match app
-        .operational_settings
+        .announcements
         .load_announcement_read_ids(user_id(&admin))
         .await
     {
@@ -45,7 +45,7 @@ pub(crate) async fn put_announcements(
     };
 
     if app
-        .operational_settings
+        .announcements
         .save_announcements_read(user_id(&admin), &ids)
         .await
         .is_err()
