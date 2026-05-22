@@ -12,7 +12,7 @@ use komga_infrastructure::task_queue::RuntimeTaskEngine;
 use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
 use komga_infrastructure::task_queue::TaskRuntimeContext;
 use komga_infrastructure::task_queue::worker_runtime::{
-    RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal, process_startup_library_scans,
+    SharedTaskQueue, TaskQueueWakeSignal, prepare_task_queue, process_startup_library_scans,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -65,12 +65,20 @@ impl TaskRuntime {
         config: &RuntimeConfig,
         mode: TaskRuntimeMode,
     ) -> std::io::Result<StartedTaskRuntime> {
-        if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb) {
-            process_startup_library_scans(crate::config::task_runtime_context(config).await).await;
-        }
+        let startup_scan_runtime = if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb)
+        {
+            let runtime = crate::config::task_runtime_context(config).await;
+            process_startup_library_scans(runtime.clone()).await;
+            Some(runtime)
+        } else {
+            None
+        };
 
         let startup_search_plan = plan_startup_search_task_with_logging(config)?;
-        let runtime = crate::config::task_runtime_context(config).await;
+        let runtime = match startup_scan_runtime {
+            Some(runtime) => runtime,
+            None => crate::config::task_runtime_context(config).await,
+        };
         let background =
             prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
         let tasks_db =
@@ -119,17 +127,6 @@ impl RouterRuntimeLifecycle {
             None => router,
         }
     }
-}
-
-async fn prepare_task_queue(
-    runtime: TaskRuntimeContext,
-    startup_search_task: Option<&'static str>,
-) -> RuntimeBackgroundState {
-    komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-        runtime,
-        startup_search_task,
-    )
-    .await
 }
 
 async fn open_database_handle(
