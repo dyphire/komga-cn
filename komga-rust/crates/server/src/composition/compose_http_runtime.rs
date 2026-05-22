@@ -8,7 +8,7 @@ use komga_application::discovery::{
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
 use komga_application::operational::{
-    OperationalMetricsPort, ServerSettingsService, TransientBookService,
+    OperationalMetricsPort, PageHashService, ServerSettingsService, TransientBookService,
 };
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
@@ -126,6 +126,7 @@ pub fn compose_http_runtime(
         Box::new(SseBookEventEmitter),
     ));
     let server_settings = Arc::new(ServerSettingsStore::new(config.database_file.clone()));
+    let page_hashes = Arc::new(PageHashAccess::new(db.clone()));
     let services = HttpServices {
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
@@ -135,7 +136,7 @@ pub fn compose_http_runtime(
         server_settings: server_settings.clone(),
         server_settings_control: Arc::new(ServerSettingsService::new(
             server_settings,
-            task_engine_arc,
+            task_engine_arc.clone(),
         )),
         identity,
         operational_runtime: operational_runtime_service,
@@ -145,7 +146,8 @@ pub fn compose_http_runtime(
         filesystem_browse: Arc::new(FilesystemBrowseAccess),
         fonts: Arc::new(FontAccess),
         history: Arc::new(HistoryAccess::new(db.clone())),
-        page_hashes: Arc::new(PageHashAccess::new(db.clone())),
+        page_hashes: page_hashes.clone(),
+        page_hash_control: Arc::new(PageHashService::new(page_hashes, task_engine_arc)),
         syncpoints: Arc::new(SyncpointAccess::new(db.clone())),
         transient_books: Arc::new(TransientBookService::new(Arc::new(
             TransientBookAccess::new(db.clone()),

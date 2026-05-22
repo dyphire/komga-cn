@@ -24,6 +24,7 @@ pub use scanner_maintenance::{
 };
 pub use task_engine::{QueueStatus, SubmitUrgency, TaskQueue, TaskQueueAdmin};
 pub use task_registry::{
-    BookPayload, LibraryPayload, RefreshBookMetadataPayload, ScanLibraryPayload, SeriesPayload,
-    TaskKind, TaskParseError, TaskPayload, TaskRequest, TaskTypeMetadata,
+    BookPayload, HashedPageToDeletePayload, LibraryPayload, RefreshBookMetadataPayload,
+    RemoveHashedPagesPayload, ScanLibraryPayload, SeriesPayload, TaskKind, TaskParseError,
+    TaskPayload, TaskRequest, TaskTypeMetadata,
 };

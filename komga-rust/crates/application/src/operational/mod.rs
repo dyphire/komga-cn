@@ -1,5 +1,6 @@
 mod actuator_contract;
 mod metrics_port;
+mod page_hashes;
 pub mod ports;
 mod server_settings;
 mod server_settings_port;
@@ -13,6 +14,7 @@ pub use actuator_contract::{
     actuator_metrics_index_payload, actuator_root_payload,
 };
 pub use metrics_port::{OperationalMetricsPort, SqlitePoolSnapshot};
+pub use page_hashes::{PageHashDeleteError, PageHashDeleteMatch, PageHashService};
 pub use ports::{
     AnnouncementPort, ClaimInitialAdminUserResult, ClaimPort, ClientSettingsPort,
     CreatedClaimedUser, FilesystemBrowsePort, FontPort, HistoryPort, PageHashPort, SyncpointPort,

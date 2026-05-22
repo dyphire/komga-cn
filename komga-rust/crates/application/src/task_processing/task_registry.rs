@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json::Map;
 
 use super::TaskQueueRecord;
@@ -475,6 +476,49 @@ impl TaskPayload for ScanLibraryPayload {
 
     fn primary_key(&self) -> Option<&str> {
         Some(&self.library_id)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedPageToDeletePayload {
+    pub file_hash: String,
+    pub file_size: i64,
+    pub file_name: String,
+    pub media_type: String,
+    pub page_number: i64,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RemoveHashedPagesPayload {
+    pub book_id: String,
+    pub pages: Vec<HashedPageToDeletePayload>,
+}
+
+impl RemoveHashedPagesPayload {
+    pub fn new(book_id: impl Into<String>, pages: Vec<HashedPageToDeletePayload>) -> Self {
+        Self {
+            book_id: book_id.into(),
+            pages,
+        }
+    }
+}
+
+impl TaskPayload for RemoveHashedPagesPayload {
+    fn write_task_fields(&self, map: &mut Map<String, serde_json::Value>) {
+        map.insert(
+            "bookId".into(),
+            serde_json::Value::String(self.book_id.clone()),
+        );
+        map.insert(
+            "pages".into(),
+            serde_json::to_value(&self.pages)
+                .expect("hashed pages payload should serialize to JSON"),
+        );
+    }
+
+    fn primary_key(&self) -> Option<&str> {
+        Some(&self.book_id)
     }
 }
 

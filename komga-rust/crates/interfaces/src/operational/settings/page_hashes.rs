@@ -4,7 +4,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::task_processing::{TaskKind, TaskRequest};
+use komga_application::operational::{PageHashDeleteError, PageHashDeleteMatch};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -12,8 +12,6 @@ use crate::identity_access::auth::Admin;
 
 use super::{query_value, query_values};
 use crate::state::OperationalApiState;
-
-const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,42 +68,6 @@ fn parse_page_hash_actions(raw_values: Vec<String>) -> Result<Vec<String>, Statu
     }
 
     Ok(actions)
-}
-
-fn remove_hashed_pages_task_page(
-    file_name: String,
-    media_type: String,
-    file_hash: String,
-    file_size: i64,
-    page_number: i64,
-) -> Value {
-    serde_json::json!({
-        "fileName": file_name,
-        "mediaType": media_type,
-        "fileHash": file_hash,
-        "fileSize": file_size,
-        "pageNumber": page_number,
-    })
-}
-
-fn build_remove_hashed_pages_task(
-    book_id: String,
-    pages: Vec<Value>,
-) -> Result<komga_application::task_processing::TaskQueueRecord, StatusCode> {
-    let unique_id = format!("RemoveHashedPages_{book_id}");
-    let payload = serde_json::to_string(&serde_json::json!({
-        "bookId": book_id,
-        "pages": pages,
-        "priority": REMOVE_HASHED_PAGES_PRIORITY,
-        "groupId": Value::Null,
-        "uniqueId": unique_id.clone(),
-    }))
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(TaskRequest::new(TaskKind::RemoveHashedPages)
-        .priority(REMOVE_HASHED_PAGES_PRIORITY)
-        .into_queue_record_with_id(&book_id)
-        .with_payload(payload))
 }
 
 pub(crate) async fn get_page_hashes_unknown(
@@ -250,48 +212,9 @@ pub(crate) async fn post_page_hash_delete_all(
     _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    let delete_targets = match app
-        .page_hashes
-        .load_page_hash_delete_targets(&page_hash)
-        .await
-    {
-        Ok(targets) => targets,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    let mut task_records = Vec::with_capacity(delete_targets.len());
-    for target in delete_targets {
-        let pages = target
-            .pages
-            .into_iter()
-            .map(|page| {
-                remove_hashed_pages_task_page(
-                    page.file_name,
-                    page.media_type,
-                    page.file_hash,
-                    page.file_size,
-                    page.page_number,
-                )
-            })
-            .collect::<Vec<_>>();
-        let task_record = match build_remove_hashed_pages_task(target.book_id, pages) {
-            Ok(task_record) => task_record,
-            Err(status) => return status.into_response(),
-        };
-        task_records.push(task_record);
-    }
-
-    match app
-        .task_queue
-        .queue
-        .enqueue_records(
-            task_records,
-            komga_application::task_processing::SubmitUrgency::Immediate,
-        )
-        .await
-    {
+    match app.page_hash_control.enqueue_delete_all(&page_hash).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(error) => page_hash_delete_error_response(error),
     }
 }
 
@@ -303,7 +226,7 @@ pub(crate) async fn post_page_hash_delete_match(
 ) -> Response {
     let Ok(DeletePageHashMatchRequest {
         book_id,
-        url,
+        url: _url,
         page_number,
         file_name,
         file_size,
@@ -312,32 +235,28 @@ pub(crate) async fn post_page_hash_delete_match(
     else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    drop(url);
-
-    let task_record = match build_remove_hashed_pages_task(
-        book_id,
-        vec![remove_hashed_pages_task_page(
-            file_name,
-            media_type,
-            page_hash,
-            file_size,
-            page_number,
-        )],
-    ) {
-        Ok(task_record) => task_record,
-        Err(status) => return status.into_response(),
-    };
 
     match app
-        .task_queue
-        .queue
-        .enqueue_records(
-            vec![task_record],
-            komga_application::task_processing::SubmitUrgency::Immediate,
-        )
+        .page_hash_control
+        .enqueue_delete_match(PageHashDeleteMatch {
+            book_id,
+            page_hash,
+            page_number,
+            file_name,
+            file_size,
+            media_type,
+        })
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(error) => page_hash_delete_error_response(error),
+    }
+}
+
+fn page_hash_delete_error_response(error: PageHashDeleteError) -> Response {
+    match error {
+        PageHashDeleteError::LoadTargets(_) | PageHashDeleteError::Enqueue(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }

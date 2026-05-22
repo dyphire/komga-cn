@@ -3,7 +3,7 @@ use axum::extract::FromRef;
 
 use komga_application::operational::{
     AnnouncementPort, ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
-    OperationalMetricsPort, PageHashPort, ServerSettingsService, SyncpointPort,
+    OperationalMetricsPort, PageHashPort, PageHashService, ServerSettingsService, SyncpointPort,
     TransientBookService,
 };
 
@@ -21,6 +21,7 @@ pub struct OperationalApiState {
     pub(crate) fonts: Arc<dyn FontPort>,
     pub(crate) history: Arc<dyn HistoryPort>,
     pub(crate) page_hashes: Arc<dyn PageHashPort>,
+    pub(crate) page_hash_control: Arc<PageHashService>,
     pub(crate) syncpoints: Arc<dyn SyncpointPort>,
     pub(crate) transient_books: Arc<TransientBookService>,
 }
@@ -40,6 +41,7 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
             fonts: app.services.fonts.clone(),
             history: app.services.history.clone(),
             page_hashes: app.services.page_hashes.clone(),
+            page_hash_control: app.services.page_hash_control.clone(),
             syncpoints: app.services.syncpoints.clone(),
             transient_books: app.services.transient_books.clone(),
         }
