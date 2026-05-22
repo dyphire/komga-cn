@@ -15,18 +15,22 @@ pub async fn series_read_progress_post(
         Err(error) => return internal_error_response(error),
     }
 
-    let book_ids = match load_series_book_ids_from_services(&app, &resolved_series_id).await {
+    let book_ids = match app.reader.series_book_ids(&resolved_series_id).await {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };
 
     for book_id in book_ids {
-        let already_completed =
-            match load_read_progress_from_services(&app, &book_id, user_id(&user)).await {
-                Ok(Some(progress)) => progress.completed,
-                Ok(None) => false,
-                Err(error) => return internal_error_response(error),
-            };
+        let already_completed = match app
+            .identity
+            .device_sync()
+            .load_read_progress(&book_id, user_id(&user))
+            .await
+        {
+            Ok(Some(progress)) => progress.completed,
+            Ok(None) => false,
+            Err(error) => return internal_error_response(error),
+        };
         if already_completed {
             continue;
         }
@@ -36,22 +40,18 @@ pub async fn series_read_progress_post(
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
         };
-        if let Err(error) = persist_read_progress_from_services(
-            &app,
-            &book_id,
-            user_id(&user),
-            page_count,
-            true,
-            None,
-        )
-        .await
+        if let Err(error) = app
+            .progress
+            .persist_read_progress(&book_id, user_id(&user), page_count, true, None)
+            .await
         {
             return internal_error_response(error);
         }
     }
-    if let Err(error) =
-        refresh_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
-            .await
+    if let Err(error) = app
+        .progress
+        .refresh_series_read_progress(&resolved_series_id, user_id(&user))
+        .await
     {
         return internal_error_response(error);
     }
@@ -93,21 +93,24 @@ pub async fn series_read_progress_delete(
         }
     }
 
-    let book_ids = match load_series_book_ids_from_services(&app, &resolved_series_id).await {
+    let book_ids = match app.reader.series_book_ids(&resolved_series_id).await {
         Ok(book_ids) => book_ids,
         Err(error) => return internal_error_response(error),
     };
 
     for book_id in book_ids {
-        if let Err(error) =
-            delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user)).await
+        if let Err(error) = app
+            .progress
+            .delete_read_progress(&book_id, user_id(&user))
+            .await
         {
             return internal_error_response(error);
         }
     }
-    if let Err(error) =
-        delete_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
-            .await
+    if let Err(error) = app
+        .progress
+        .delete_series_read_progress(&resolved_series_id, user_id(&user))
+        .await
     {
         return internal_error_response(error);
     }
@@ -140,7 +143,9 @@ pub async fn series_tachiyomi_read_progress_get(
         }
     }
 
-    match load_series_tachiyomi_progress_from_services(&app, &resolved_series_id, user_id(&user))
+    match app
+        .reader
+        .series_tachiyomi_progress(&resolved_series_id, user_id(&user))
         .await
     {
         Ok(Some(payload)) => Json(payload).into_response(),
@@ -216,12 +221,16 @@ pub async fn series_tachiyomi_read_progress_put(
             continue;
         }
 
-        let already_completed =
-            match load_read_progress_from_services(&app, &book_id, user_id(&user)).await {
-                Ok(Some(progress)) => progress.completed,
-                Ok(None) => false,
-                Err(error) => return internal_error_response(error),
-            };
+        let already_completed = match app
+            .identity
+            .device_sync()
+            .load_read_progress(&book_id, user_id(&user))
+            .await
+        {
+            Ok(Some(progress)) => progress.completed,
+            Ok(None) => false,
+            Err(error) => return internal_error_response(error),
+        };
         if already_completed {
             continue;
         }
@@ -231,22 +240,18 @@ pub async fn series_tachiyomi_read_progress_put(
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
         };
-        if let Err(error) = persist_read_progress_from_services(
-            &app,
-            &book_id,
-            user_id(&user),
-            page_count,
-            true,
-            None,
-        )
-        .await
+        if let Err(error) = app
+            .progress
+            .persist_read_progress(&book_id, user_id(&user), page_count, true, None)
+            .await
         {
             return internal_error_response(error);
         }
     }
-    if let Err(error) =
-        refresh_series_read_progress_row_from_services(&app, &resolved_series_id, user_id(&user))
-            .await
+    if let Err(error) = app
+        .progress
+        .refresh_series_read_progress(&resolved_series_id, user_id(&user))
+        .await
     {
         return internal_error_response(error);
     }

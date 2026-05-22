@@ -1,7 +1,5 @@
 use super::*;
 use crate::helpers::read_progress_validation_error_response;
-use crate::state::MediaAssetsState;
-use crate::state::PersistedReadProgressRecord;
 use flate2::read::GzDecoder;
 use std::io::Read;
 use time::OffsetDateTime;
@@ -24,71 +22,3 @@ pub use series::{
     series_read_progress_delete, series_read_progress_post, series_tachiyomi_read_progress_get,
     series_tachiyomi_read_progress_put,
 };
-pub(crate) async fn load_read_progress_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-    user_id: &str,
-) -> Result<Option<PersistedReadProgressRecord>, String> {
-    app.identity
-        .device_sync()
-        .load_read_progress(book_id, user_id)
-        .await
-}
-
-pub(crate) async fn load_series_book_ids_from_services(
-    app: &MediaAssetsState,
-    series_id: &str,
-) -> Result<Vec<String>, String> {
-    app.reader.series_book_ids(series_id).await
-}
-
-pub(crate) async fn persist_read_progress_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-    user_id: &str,
-    page: u64,
-    completed: bool,
-    locator: Option<Value>,
-) -> Result<(), String> {
-    app.progress
-        .persist_read_progress(book_id, user_id, page, completed, locator)
-        .await
-}
-
-pub(crate) async fn delete_persisted_read_progress_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-    user_id: &str,
-) -> Result<(), String> {
-    app.progress.delete_read_progress(book_id, user_id).await
-}
-
-pub(crate) async fn refresh_series_read_progress_row_from_services(
-    app: &MediaAssetsState,
-    series_id: &str,
-    user_id: &str,
-) -> Result<(), String> {
-    app.progress
-        .refresh_series_read_progress(series_id, user_id)
-        .await
-}
-
-pub(crate) async fn delete_series_read_progress_row_from_services(
-    app: &MediaAssetsState,
-    series_id: &str,
-    user_id: &str,
-) -> Result<(), String> {
-    app.progress
-        .delete_series_read_progress(series_id, user_id)
-        .await
-}
-
-pub(crate) async fn load_series_tachiyomi_progress_from_services(
-    app: &MediaAssetsState,
-    series_id: &str,
-    user_id: &str,
-) -> Result<Option<Value>, String> {
-    app.reader
-        .series_tachiyomi_progress(series_id, user_id)
-        .await
-}

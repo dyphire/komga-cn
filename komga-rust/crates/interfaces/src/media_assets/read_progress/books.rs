@@ -53,7 +53,9 @@ async fn persist_and_record_read_progress(
     locator: Option<Value>,
 ) -> Response {
     if let Some(user_id) = persisted_user_id
-        && persist_read_progress_from_services(app, book_id, user_id, page, completed, locator)
+        && app
+            .progress
+            .persist_read_progress(book_id, user_id, page, completed, locator)
             .await
             .is_err()
     {
@@ -186,7 +188,9 @@ pub async fn book_read_progress_delete(
     }
 
     if supports_persisted_flow
-        && delete_persisted_read_progress_from_services(&app, &book_id, user_id(&user))
+        && app
+            .progress
+            .delete_read_progress(&book_id, user_id(&user))
             .await
             .is_err()
     {
