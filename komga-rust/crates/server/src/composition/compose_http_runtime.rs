@@ -7,7 +7,7 @@ use komga_application::discovery::{
     DiscoverySearchService, ReadlistPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
-use komga_application::operational::OperationalMetricsPort;
+use komga_application::operational::{OperationalMetricsPort, TransientBookService};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_infrastructure::content_resolver::ContentResolver;
@@ -39,7 +39,7 @@ use komga_interfaces::state::{
     AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices,
     IdentityState, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
     ReadProgressState, RemoteCacheEntry, RuntimeProfile, RuntimeState, SseOperationalState,
-    StartupTimingState, TransientBooksStore,
+    StartupTimingState,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -140,7 +140,9 @@ pub fn compose_http_runtime(
         history: Arc::new(HistoryAccess::new(db.clone())),
         page_hashes: Arc::new(PageHashAccess::new(db.clone())),
         syncpoints: Arc::new(SyncpointAccess::new(db.clone())),
-        transient_books: Arc::new(TransientBookAccess::new(db.clone())),
+        transient_books: Arc::new(TransientBookService::new(Arc::new(
+            TransientBookAccess::new(db.clone()),
+        ))),
         opds_catalog,
         opds_persisted,
         discovery_search,
@@ -260,7 +262,6 @@ fn compose_operational_state(
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        transient_books: Arc::new(Mutex::new(TransientBooksStore::default())),
         shutdown_trigger,
     }
 }

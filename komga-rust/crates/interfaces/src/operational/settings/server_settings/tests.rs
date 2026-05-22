@@ -22,7 +22,7 @@ use crate::state::OperationalState;
 use crate::state::{
     BookImportSseEvent, HttpServerRequestsState, OAuth2ClientConfig, OperationalBuildMetadata,
     RemoteCacheEntry, RuntimeState, ServerSettingsState, SseOperationalState, StartupTimingState,
-    TaskQueueState, TransientBooksStore,
+    TaskQueueState,
 };
 
 #[tokio::test]
@@ -334,9 +334,6 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
         })),
         announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        transient_books: Arc::new(Mutex::new(TransientBooksStore::with_records(
-            std::collections::HashMap::new(),
-        ))),
         shutdown_trigger: None,
     }
 }

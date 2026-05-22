@@ -18,4 +18,5 @@ pub use page_hash_port::PageHashPort;
 pub use syncpoint_port::SyncpointPort;
 pub use transient_book_port::{
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
+    TransientBookScanEntry,
 };

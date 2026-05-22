@@ -19,7 +19,7 @@ pub struct HttpServices {
     pub history: Arc<dyn komga_application::operational::HistoryPort>,
     pub page_hashes: Arc<dyn komga_application::operational::PageHashPort>,
     pub syncpoints: Arc<dyn komga_application::operational::SyncpointPort>,
-    pub transient_books: Arc<dyn komga_application::operational::TransientBookPort>,
+    pub transient_books: Arc<komga_application::operational::TransientBookService>,
     pub opds_catalog: Arc<dyn komga_application::opds::OpdsCatalogPort>,
     pub opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort>,
     pub discovery_search: Arc<dyn DiscoverySearchService>,
@@ -59,7 +59,6 @@ pub struct OperationalState {
     pub sse: Arc<Mutex<SseOperationalState>>,
     pub announcements_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
     pub releases_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
-    pub transient_books: Arc<Mutex<TransientBooksStore>>,
     pub shutdown_trigger: Option<watch::Sender<bool>>,
 }
 
@@ -120,118 +119,6 @@ impl OperationalSettings {
 pub struct RemoteCacheEntry {
     pub fetched_at_epoch_seconds: u64,
     pub payload: Value,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct TransientBooksStore {
-    pub records: HashMap<String, TransientBookRecord>,
-    #[serde(default)]
-    last_access_epoch_seconds: HashMap<String, i64>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TransientBookRecord {
-    pub id: String,
-    pub name: String,
-    pub path: String,
-    pub file_last_modified_unix_nanos: i128,
-    pub size_bytes: u64,
-    pub status: String,
-    pub media_type: String,
-    #[serde(default)]
-    pub page_count: u32,
-    #[serde(default)]
-    pub pages: Vec<TransientBookPageRecord>,
-    #[serde(default)]
-    pub files: Vec<String>,
-    #[serde(default)]
-    pub comment: String,
-    #[serde(default)]
-    pub number: Option<f64>,
-    #[serde(default)]
-    pub series_id: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TransientBookPageRecord {
-    pub number: u32,
-    pub file_name: String,
-    pub media_type: String,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    pub size_bytes: Option<u64>,
-}
-
-impl TransientBooksStore {
-    pub fn with_records(records: HashMap<String, TransientBookRecord>) -> Self {
-        let last_access_epoch_seconds = records
-            .keys()
-            .cloned()
-            .map(|id| (id, current_unix_epoch_seconds()))
-            .collect();
-        Self {
-            records,
-            last_access_epoch_seconds,
-        }
-    }
-
-    pub fn get_cloned(&mut self, id: &str) -> Option<TransientBookRecord> {
-        self.prune_expired();
-        self.touch(id)?;
-        self.records.get(id).cloned()
-    }
-
-    pub fn get_mut(&mut self, id: &str) -> Option<&mut TransientBookRecord> {
-        self.prune_expired();
-        self.touch(id)?;
-        self.records.get_mut(id)
-    }
-
-    pub fn insert(&mut self, record: TransientBookRecord) {
-        self.prune_expired();
-        let id = record.id.clone();
-        self.last_access_epoch_seconds
-            .insert(id.clone(), current_unix_epoch_seconds());
-        self.records.insert(id, record);
-    }
-
-    fn prune_expired(&mut self) {
-        let now = current_unix_epoch_seconds();
-        let expired_ids = self
-            .last_access_epoch_seconds
-            .iter()
-            .filter(|(_, last_access)| {
-                now.saturating_sub(**last_access)
-                    >= TRANSIENT_BOOKS_EXPIRE_AFTER_ACCESS.as_secs() as i64
-            })
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>();
-
-        for id in expired_ids {
-            self.last_access_epoch_seconds.remove(&id);
-            self.records.remove(&id);
-        }
-    }
-
-    fn touch(&mut self, id: &str) -> Option<()> {
-        if !self.records.contains_key(id) {
-            self.last_access_epoch_seconds.remove(id);
-            return None;
-        }
-
-        self.last_access_epoch_seconds
-            .insert(id.to_string(), current_unix_epoch_seconds());
-        Some(())
-    }
-}
-
-const TRANSIENT_BOOKS_EXPIRE_AFTER_ACCESS: Duration = Duration::from_secs(60 * 60);
-
-fn current_unix_epoch_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 #[derive(Clone, Default)]

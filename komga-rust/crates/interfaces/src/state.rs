@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 pub use komga_application::task_processing::{TaskQueue, TaskQueueAdmin};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::watch;
 

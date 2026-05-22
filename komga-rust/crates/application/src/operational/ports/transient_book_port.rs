@@ -1,7 +1,12 @@
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use async_trait::async_trait;
-use serde_json::Value;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransientBookScanEntry {
+    pub path: String,
+    pub name: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct TransientBookFileMetadata {
@@ -21,7 +26,7 @@ pub struct TransientBookAnalysis {
     pub series_id: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct TransientBookPage {
     pub number: u32,
     pub file_name: String,
@@ -38,11 +43,10 @@ pub trait TransientBookPort: Send + Sync {
         &self,
         transient_name: &str,
     ) -> (Option<String>, Option<f64>);
-    fn list_transient_book_entries(&self, root: &Path) -> Vec<Value>;
+    fn list_transient_book_entries(&self, root: &Path) -> Vec<TransientBookScanEntry>;
     async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String>;
     fn load_transient_book_file_metadata(&self, path: &str) -> Option<TransientBookFileMetadata>;
-    fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>>;
-    fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str;
+    fn transient_book_exists(&self, path: &str) -> bool;
     fn transient_book_page_content(
         &self,
         path: &str,

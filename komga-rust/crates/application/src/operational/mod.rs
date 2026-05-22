@@ -3,6 +3,7 @@ mod metrics_port;
 pub mod ports;
 mod server_settings;
 mod server_settings_port;
+mod transient_books;
 
 pub use actuator_contract::{
     ActuatorBuildInfo, ActuatorDiskSpaceSnapshot, ActuatorHealthSnapshot,
@@ -16,6 +17,11 @@ pub use ports::{
     AnnouncementPort, ClaimInitialAdminUserResult, ClaimPort, ClientSettingsPort,
     CreatedClaimedUser, FilesystemBrowsePort, FontPort, HistoryPort, PageHashPort, SyncpointPort,
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
+    TransientBookScanEntry,
 };
 pub use server_settings::PersistedServerSettings;
 pub use server_settings_port::ServerSettingsPort;
+pub use transient_books::{
+    TransientBookPageContent, TransientBookPageError, TransientBookRecord, TransientBookScanError,
+    TransientBookService, TransientBooksStore,
+};

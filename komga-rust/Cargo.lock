@@ -2423,6 +2423,7 @@ dependencies = [
  "sha2 0.11.0",
  "time",
  "tokio",
+ "tsid",
 ]
 
 [[package]]
@@ -2527,7 +2528,6 @@ dependencies = [
  "tokio-stream",
  "tower-http",
  "tracing",
- "tsid",
  "unicode-normalization",
  "windows-sys 0.61.2",
  "zip",

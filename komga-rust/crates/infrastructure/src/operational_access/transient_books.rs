@@ -3,9 +3,8 @@ use std::path::Path;
 use komga_application::operational::{
     TransientBookAnalysis as AppTransientBookAnalysis,
     TransientBookFileMetadata as AppTransientBookFileMetadata,
-    TransientBookPage as AppTransientBookPage, TransientBookPort,
+    TransientBookPage as AppTransientBookPage, TransientBookPort, TransientBookScanEntry,
 };
-use serde_json::Value;
 
 use crate::database_handle::DatabaseHandle;
 use crate::filesystem::transient_books::{self, TransientBookPage};
@@ -49,8 +48,16 @@ impl TransientBookPort for TransientBookAccess {
             .await
     }
 
-    fn list_transient_book_entries(&self, root: &Path) -> Vec<Value> {
+    fn list_transient_book_entries(&self, root: &Path) -> Vec<TransientBookScanEntry> {
         transient_books::list_transient_book_entries(root)
+            .into_iter()
+            .filter_map(|entry| {
+                Some(TransientBookScanEntry {
+                    path: entry.get("path")?.as_str()?.to_string(),
+                    name: entry.get("name")?.as_str()?.to_string(),
+                })
+            })
+            .collect()
     }
 
     async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
@@ -68,12 +75,8 @@ impl TransientBookPort for TransientBookAccess {
         })
     }
 
-    fn load_transient_book_media(&self, path: &str) -> Option<Vec<u8>> {
-        transient_books::load_transient_book_media(path)
-    }
-
-    fn transient_book_content_type(&self, path: &str, media_type: &str) -> &'static str {
-        transient_books::transient_book_content_type(path, media_type)
+    fn transient_book_exists(&self, path: &str) -> bool {
+        transient_books::transient_book_exists(path)
     }
 
     fn transient_book_page_content(

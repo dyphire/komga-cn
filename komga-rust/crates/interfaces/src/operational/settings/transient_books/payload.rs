@@ -1,14 +1,8 @@
+use komga_application::operational::{TransientBookPage, TransientBookRecord};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
-use tsid::create_tsid_256;
 
 use crate::helpers::api_file_path;
-
-use super::{TransientBookPageRecord, TransientBookRecord};
-
-pub(super) fn transient_book_id() -> String {
-    create_tsid_256().to_string()
-}
 
 pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
     json!({
@@ -71,7 +65,7 @@ fn format_local_datetime(unix_nanos: i128) -> String {
     formatted
 }
 
-fn transient_page_payload(page: &TransientBookPageRecord) -> Value {
+fn transient_page_payload(page: &TransientBookPage) -> Value {
     json!({
         "number": page.number,
         "fileName": page.file_name,
@@ -88,19 +82,7 @@ fn transient_page_payload(page: &TransientBookPageRecord) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_local_datetime, transient_book_id};
-
-    #[test]
-    fn transient_book_id_uses_kotlin_compatible_tsid_shape() {
-        let id = transient_book_id();
-
-        assert_eq!(id.len(), 13);
-        assert!(matches!(id.chars().next(), Some('0'..='9' | 'A'..='F')));
-        assert!(
-            id.chars()
-                .all(|ch| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(ch))
-        );
-    }
+    use super::format_local_datetime;
 
     #[test]
     fn format_local_datetime_preserves_subsecond_precision() {
