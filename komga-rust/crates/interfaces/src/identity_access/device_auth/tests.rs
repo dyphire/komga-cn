@@ -1,6 +1,9 @@
 use super::*;
 use axum::http::{HeaderMap, StatusCode};
-use base64::engine::general_purpose::STANDARD;
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+};
 use komga_application::identity_access::{
     KoboSyncBookSnapshot, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
     build_kobo_sync_events, generated_kobo_api_token, sanitize_identifier,

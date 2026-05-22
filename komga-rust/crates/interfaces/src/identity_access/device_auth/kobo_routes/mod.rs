@@ -7,11 +7,9 @@ use crate::media_assets::read_progress::{
 use crate::state::IdentityAccessState;
 use axum::extract::State;
 mod common;
-mod metadata_helpers;
 mod proxy;
 
 use common::*;
-use metadata_helpers::*;
 use proxy::proxied_missing_kobo_book_response;
 
 fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
@@ -203,22 +201,19 @@ pub async fn kobo_library_sync(
         Ok(response) => response,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let encoded_sync_token = format!(
-        "KOMGA.{}",
-        STANDARD_NO_PAD.encode(sync_response.sync_token_payload)
-    );
+    let sync_payload = build_kobo_library_sync_payload(sync_response);
 
     let mut response = (
         StatusCode::OK,
         [(
             HeaderName::from_static("x-kobo-synctoken"),
-            HeaderValue::from_str(encoded_sync_token.as_str())
+            HeaderValue::from_str(sync_payload.encoded_sync_token.as_str())
                 .unwrap_or_else(|_| HeaderValue::from_static("")),
         )],
-        Json(Value::Array(sync_response.events)),
+        Json(Value::Array(sync_payload.events)),
     )
         .into_response();
-    if sync_response.should_continue {
+    if sync_payload.should_continue {
         response.headers_mut().insert(
             HeaderName::from_static("x-kobo-sync"),
             HeaderValue::from_static("continue"),
@@ -270,94 +265,12 @@ pub async fn kobo_library_book_metadata(
     };
 
     let base_url = kobo_request_base_url(&app, &headers).await;
-    let (format, convert_kepub) = if metadata.is_pre_paginated {
-        ("EPUB3FL", false)
-    } else {
-        ("KEPUB", !metadata.is_kepub)
-    };
-    let contributor_roles = metadata
-        .contributor_names
-        .iter()
-        .map(|name| json!({ "Name": name }))
-        .collect::<Vec<_>>();
-    let contributors = metadata
-        .contributor_names
-        .iter()
-        .map(|name| Value::String(name.clone()))
-        .collect::<Vec<_>>();
-    let publication_date = metadata
-        .release_date
-        .as_deref()
-        .or(metadata.created_date.as_deref())
-        .and_then(kobo_publication_date_value)
-        .unwrap_or(Value::Null);
-    let publisher = metadata
-        .publisher_name
-        .as_ref()
-        .map(|name| json!({ "Imprint": "", "Name": name }))
-        .unwrap_or(Value::Null);
-    let series = if metadata.oneshot {
-        Value::Null
-    } else if let (
-        Some(series_id),
-        Some(series_name),
-        Some(series_number),
-        Some(series_number_float),
-    ) = (
-        metadata.series_id.as_ref(),
-        metadata.series_name.as_ref(),
-        metadata.series_number.as_ref(),
-        metadata.series_number_float,
-    ) {
-        json!({
-            "Id": series_id,
-            "Name": series_name,
-            "Number": series_number,
-            "NumberFloat": series_number_float,
-        })
-    } else {
-        Value::Null
-    };
-
-    Json(json!([
-        {
-            "Categories": ["00000000-0000-0000-0000-000000000001"],
-            "ContributorRoles": contributor_roles,
-            "Contributors": contributors,
-            "CoverImageId": metadata.cover_image_id,
-            "CrossRevisionId": book_id,
-            "CurrentDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
-            "CurrentLoveDisplayPrice": {"CurrencyCode": "USD", "TotalAmount": 0},
-            "Description": kobo_description(&metadata.summary),
-            "DownloadUrls": [
-                {
-                    "DrmType": "None",
-                    "Format": format,
-                    "Platform": "Generic",
-                    "Size": metadata.file_size,
-                    "Url": format!("{base_url}/kobo/{auth_token}/v1/books/{book_id}/file/epub?convert_kepub={convert_kepub}"),
-                }
-            ],
-            "EntitlementId": book_id,
-            "ExternalIds": [],
-            "Genre": "00000000-0000-0000-0000-000000000001",
-            "IsEligibleForKoboLove": false,
-            "IsInternetArchive": false,
-            "IsPreOrder": false,
-            "IsSocialEnabled": true,
-            "ISBN": metadata.isbn,
-            "Language": kobo_language(&metadata.language),
-            "PhoneticPronunciations": {},
-            "PublicationDate": publication_date,
-            "Publisher": publisher,
-            "RevisionId": book_id,
-            "Series": series,
-            "Slug": Value::Null,
-            "SubTitle": Value::Null,
-            "Title": metadata.title,
-            "WorkId": book_id,
-        }
-    ]))
+    Json(build_kobo_book_metadata_payload(
+        &book_id,
+        &metadata,
+        base_url.as_str(),
+        auth_token.as_str(),
+    ))
     .into_response()
 }
 

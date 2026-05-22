@@ -4,9 +4,9 @@ use axum::extract::{Extension, Path, Query};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::CookieJar;
-use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest,
+    build_kobo_book_metadata_payload, build_kobo_library_sync_payload,
     decode_or_passthrough_sync_token, generated_kobo_token_triplet, now_sync_marker, user_id,
 };
 use oauth2::{AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient};

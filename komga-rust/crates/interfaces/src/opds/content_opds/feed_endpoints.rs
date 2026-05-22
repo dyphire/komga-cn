@@ -72,7 +72,7 @@ pub(super) async fn opds_v2_keep_reading_feed(
     let publications = page_result
         .books
         .iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
+        .map(|book| opds_publication_for_feed_entry(&headers, book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
@@ -148,7 +148,7 @@ pub(super) async fn opds_v2_on_deck_feed(
     let publications = page_result
         .books
         .iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, &book))
+        .map(|book| opds_publication_for_feed_entry(&headers, book))
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();

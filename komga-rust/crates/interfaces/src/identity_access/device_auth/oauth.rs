@@ -2,6 +2,7 @@ use super::*;
 use crate::state::IdentityAccessState;
 use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, SameSite};
+use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};

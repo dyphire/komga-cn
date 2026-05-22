@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use time::OffsetDateTime;
 
+use super::device_records::KoboMetadataRecord;
 use super::user_models::AuthUser;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,6 +34,13 @@ pub struct KoboLibrarySyncRequest {
 pub struct KoboLibrarySyncResponse {
     pub events: Vec<Value>,
     pub sync_token_payload: String,
+    pub should_continue: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboLibrarySyncPayload {
+    pub events: Vec<Value>,
+    pub encoded_sync_token: String,
     pub should_continue: bool,
 }
 
@@ -368,6 +376,56 @@ pub fn build_kobo_sync_events(
     events
 }
 
+pub fn build_kobo_library_sync_payload(
+    response: KoboLibrarySyncResponse,
+) -> KoboLibrarySyncPayload {
+    KoboLibrarySyncPayload {
+        events: response.events,
+        encoded_sync_token: format!(
+            "KOMGA.{}",
+            STANDARD_NO_PAD.encode(response.sync_token_payload)
+        ),
+        should_continue: response.should_continue,
+    }
+}
+
+pub fn build_kobo_book_metadata_payload(
+    book_id: &str,
+    metadata: &KoboMetadataRecord,
+    base_url: &str,
+    auth_token: &str,
+) -> Value {
+    let (format, convert_kepub) = if metadata.is_pre_paginated {
+        ("EPUB3FL", false)
+    } else {
+        ("KEPUB", !metadata.is_kepub)
+    };
+
+    Value::Array(vec![kobo_book_metadata_wire(KoboBookMetadataWireInput {
+        id: book_id,
+        title: &metadata.title,
+        summary: &metadata.summary,
+        publication_date: metadata.release_date.as_deref(),
+        publication_fallback_date: metadata.created_date.as_deref(),
+        language: &metadata.language,
+        file_size: metadata.file_size,
+        contributor_names: &metadata.contributor_names,
+        isbn: metadata.isbn.as_deref(),
+        publisher_name: metadata.publisher_name.as_deref(),
+        cover_image_id: metadata.cover_image_id.as_deref(),
+        series_id: metadata.series_id.as_deref(),
+        series_name: metadata.series_name.as_deref(),
+        series_number: metadata.series_number.as_deref(),
+        series_number_float: metadata.series_number_float,
+        oneshot: metadata.oneshot,
+        download_format: format,
+        download_url: format!(
+            "{base_url}/kobo/{auth_token}/v1/books/{book_id}/file/epub?convert_kepub={convert_kepub}"
+        ),
+        include_standalone_fields: true,
+    })])
+}
+
 pub fn build_kobo_new_entitlement(
     book: &KoboSyncBookSnapshot,
     progress: Option<&KoboSyncReadProgressSnapshot>,
@@ -584,11 +642,29 @@ fn kobo_reading_state_from_snapshot(
     }
 }
 
-fn kobo_book_metadata_from_snapshot(
-    book: &KoboSyncBookSnapshot,
-    base_url: &str,
-    auth_token: &str,
-) -> Value {
+struct KoboBookMetadataWireInput<'a> {
+    id: &'a str,
+    title: &'a str,
+    summary: &'a str,
+    publication_date: Option<&'a str>,
+    publication_fallback_date: Option<&'a str>,
+    language: &'a str,
+    file_size: u64,
+    contributor_names: &'a [String],
+    isbn: Option<&'a str>,
+    publisher_name: Option<&'a str>,
+    cover_image_id: Option<&'a str>,
+    series_id: Option<&'a str>,
+    series_name: Option<&'a str>,
+    series_number: Option<&'a str>,
+    series_number_float: Option<f64>,
+    oneshot: bool,
+    download_format: &'a str,
+    download_url: String,
+    include_standalone_fields: bool,
+}
+
+fn kobo_book_metadata_wire(input: KoboBookMetadataWireInput<'_>) -> Value {
     let mut metadata = serde_json::Map::new();
     metadata.insert(
         "Categories".to_string(),
@@ -599,7 +675,8 @@ fn kobo_book_metadata_from_snapshot(
     metadata.insert(
         "ContributorRoles".to_string(),
         Value::Array(
-            book.contributor_names
+            input
+                .contributor_names
                 .iter()
                 .map(|name| json!({ "Name": name }))
                 .collect(),
@@ -608,7 +685,8 @@ fn kobo_book_metadata_from_snapshot(
     metadata.insert(
         "Contributors".to_string(),
         Value::Array(
-            book.contributor_names
+            input
+                .contributor_names
                 .iter()
                 .map(|name| Value::String(name.clone()))
                 .collect(),
@@ -616,14 +694,14 @@ fn kobo_book_metadata_from_snapshot(
     );
     metadata.insert(
         "CoverImageId".to_string(),
-        book.cover_image_id
-            .as_ref()
-            .map(|value| Value::String(value.clone()))
+        input
+            .cover_image_id
+            .map(|value| Value::String(value.to_string()))
             .unwrap_or(Value::Null),
     );
     metadata.insert(
         "CrossRevisionId".to_string(),
-        Value::String(book.id.clone()),
+        Value::String(input.id.to_string()),
     );
     metadata.insert(
         "CurrentDisplayPrice".to_string(),
@@ -633,20 +711,23 @@ fn kobo_book_metadata_from_snapshot(
         "CurrentLoveDisplayPrice".to_string(),
         json!({"CurrencyCode": "USD", "TotalAmount": 0}),
     );
-    metadata.insert("Description".to_string(), kobo_description(&book.summary));
+    metadata.insert("Description".to_string(), kobo_description(input.summary));
     metadata.insert(
         "DownloadUrls".to_string(),
         json!([
             {
                 "DrmType": "None",
-                "Format": "EPUB",
+                "Format": input.download_format,
                 "Platform": "Generic",
-                "Size": book.file_size,
-                "Url": format!("{base_url}/kobo/{auth_token}/v1/books/{}/file/epub", book.id),
+                "Size": input.file_size,
+                "Url": input.download_url,
             }
         ]),
     );
-    metadata.insert("EntitlementId".to_string(), Value::String(book.id.clone()));
+    metadata.insert(
+        "EntitlementId".to_string(),
+        Value::String(input.id.to_string()),
+    );
     metadata.insert("ExternalIds".to_string(), Value::Array(vec![]));
     metadata.insert(
         "Genre".to_string(),
@@ -658,14 +739,14 @@ fn kobo_book_metadata_from_snapshot(
     metadata.insert("IsSocialEnabled".to_string(), Value::Bool(true));
     metadata.insert(
         "ISBN".to_string(),
-        book.isbn
-            .as_ref()
-            .map(|value| Value::String(value.clone()))
+        input
+            .isbn
+            .map(|value| Value::String(value.to_string()))
             .unwrap_or(Value::Null),
     );
     metadata.insert(
         "Language".to_string(),
-        Value::String(kobo_language(&book.language)),
+        Value::String(kobo_language(input.language)),
     );
     metadata.insert(
         "PhoneticPronunciations".to_string(),
@@ -673,23 +754,26 @@ fn kobo_book_metadata_from_snapshot(
     );
     metadata.insert(
         "PublicationDate".to_string(),
-        book.release_date
-            .as_deref()
-            .or(Some(book.created.as_str()))
+        input
+            .publication_date
+            .or(input.publication_fallback_date)
             .and_then(kobo_publication_date_value)
             .unwrap_or(Value::Null),
     );
     metadata.insert(
         "Publisher".to_string(),
-        book.publisher_name
-            .as_ref()
+        input
+            .publisher_name
             .map(|name| json!({ "Imprint": "", "Name": name }))
             .unwrap_or(Value::Null),
     );
-    metadata.insert("RevisionId".to_string(), Value::String(book.id.clone()));
+    metadata.insert(
+        "RevisionId".to_string(),
+        Value::String(input.id.to_string()),
+    );
     metadata.insert(
         "Series".to_string(),
-        if book.oneshot {
+        if input.oneshot {
             Value::Null
         } else if let (
             Some(series_id),
@@ -697,10 +781,10 @@ fn kobo_book_metadata_from_snapshot(
             Some(series_number),
             Some(series_number_float),
         ) = (
-            book.series_id.as_ref(),
-            book.series_name.as_ref(),
-            book.series_number.as_ref(),
-            book.series_number_float,
+            input.series_id,
+            input.series_name,
+            input.series_number,
+            input.series_number_float,
         ) {
             json!({
                 "Id": series_id,
@@ -712,9 +796,44 @@ fn kobo_book_metadata_from_snapshot(
             Value::Null
         },
     );
-    metadata.insert("Title".to_string(), Value::String(book.title.clone()));
-    metadata.insert("WorkId".to_string(), Value::String(book.id.clone()));
+    if input.include_standalone_fields {
+        metadata.insert("Slug".to_string(), Value::Null);
+        metadata.insert("SubTitle".to_string(), Value::Null);
+    }
+    metadata.insert("Title".to_string(), Value::String(input.title.to_string()));
+    metadata.insert("WorkId".to_string(), Value::String(input.id.to_string()));
     Value::Object(metadata)
+}
+
+fn kobo_book_metadata_from_snapshot(
+    book: &KoboSyncBookSnapshot,
+    base_url: &str,
+    auth_token: &str,
+) -> Value {
+    kobo_book_metadata_wire(KoboBookMetadataWireInput {
+        id: &book.id,
+        title: &book.title,
+        summary: &book.summary,
+        publication_date: book.release_date.as_deref(),
+        publication_fallback_date: Some(book.created.as_str()),
+        language: &book.language,
+        file_size: book.file_size,
+        contributor_names: &book.contributor_names,
+        isbn: book.isbn.as_deref(),
+        publisher_name: book.publisher_name.as_deref(),
+        cover_image_id: book.cover_image_id.as_deref(),
+        series_id: book.series_id.as_deref(),
+        series_name: book.series_name.as_deref(),
+        series_number: book.series_number.as_deref(),
+        series_number_float: book.series_number_float,
+        oneshot: book.oneshot,
+        download_format: "EPUB",
+        download_url: format!(
+            "{base_url}/kobo/{auth_token}/v1/books/{}/file/epub",
+            book.id
+        ),
+        include_standalone_fields: false,
+    })
 }
 
 fn kobo_entitlement_from_snapshot(book: &KoboSyncBookSnapshot, is_removed: bool) -> Value {
@@ -815,4 +934,99 @@ fn parse_locator_payload(locator: Option<&[u8]>) -> Value {
     locator
         .and_then(|blob| serde_json::from_slice::<Value>(blob).ok())
         .unwrap_or_else(|| json!({}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity_access::KoboMetadataRecord;
+
+    #[test]
+    fn kobo_protocol_payload_encodes_library_sync_token() {
+        let payload = build_kobo_library_sync_payload(KoboLibrarySyncResponse {
+            events: vec![json!({ "NewTag": {} })],
+            sync_token_payload: r#"{"version":1,"rawKoboSyncToken":""}"#.to_string(),
+            should_continue: true,
+        });
+
+        assert_eq!(
+            payload.encoded_sync_token,
+            format!(
+                "KOMGA.{}",
+                STANDARD_NO_PAD.encode(r#"{"version":1,"rawKoboSyncToken":""}"#)
+            )
+        );
+        assert_eq!(payload.events, vec![json!({ "NewTag": {} })]);
+        assert!(payload.should_continue);
+    }
+
+    #[test]
+    fn kobo_protocol_payload_builds_standalone_book_metadata() {
+        let metadata = KoboMetadataRecord {
+            title: "Book One".to_string(),
+            summary: String::new(),
+            release_date: Some("2026-02-03".to_string()),
+            created_date: Some("2026-01-01T00:00:00Z".to_string()),
+            language: "FR-ca".to_string(),
+            file_size: 1234,
+            file_name: "book.epub".to_string(),
+            media_type: "application/epub+zip".to_string(),
+            contributor_names: vec!["Jane Writer".to_string()],
+            isbn: Some("9781234567890".to_string()),
+            publisher_name: Some("PubHouse".to_string()),
+            cover_image_id: Some("cover-1".to_string()),
+            series_id: Some("series-1".to_string()),
+            series_name: Some("Series One".to_string()),
+            series_number: Some("1".to_string()),
+            series_number_float: Some(1.0),
+            oneshot: false,
+            is_kepub: false,
+            is_pre_paginated: false,
+        };
+
+        let payload = build_kobo_book_metadata_payload(
+            "book-1",
+            &metadata,
+            "http://localhost:8080",
+            "token-1",
+        );
+        let book = payload
+            .as_array()
+            .and_then(|items| items.first())
+            .expect("metadata item expected");
+
+        assert_eq!(
+            book.get("Description"),
+            Some(&Value::String(" ".to_string()))
+        );
+        assert_eq!(book.get("Language"), Some(&Value::String("fr".to_string())));
+        assert_eq!(
+            book.get("PublicationDate"),
+            Some(&Value::String("2026-02-03T00:00:00Z".to_string()))
+        );
+        assert_eq!(
+            book.get("DownloadUrls")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|download| download.get("Format")),
+            Some(&Value::String("KEPUB".to_string()))
+        );
+        assert_eq!(
+            book.get("DownloadUrls")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|download| download.get("Url")),
+            Some(&Value::String(
+                "http://localhost:8080/kobo/token-1/v1/books/book-1/file/epub?convert_kepub=true"
+                    .to_string()
+            ))
+        );
+        assert_eq!(
+            book.get("Series")
+                .and_then(|series| series.get("NumberFloat")),
+            Some(&json!(1.0))
+        );
+        assert_eq!(book.get("Slug"), Some(&Value::Null));
+        assert_eq!(book.get("SubTitle"), Some(&Value::Null));
+    }
 }
