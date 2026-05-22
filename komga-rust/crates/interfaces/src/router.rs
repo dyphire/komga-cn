@@ -203,34 +203,34 @@ pub fn build_router(app: HttpAppState) -> Router {
             "/api/v1/libraries/{library_id}/empty-trash",
             post(library_catalog::handlers::library_empty_trash_route),
         )
-        .route("/api/v1/authors", get(discovery::authors_route))
-        .route("/api/v1/authors/names", get(discovery::authors_names_route))
-        .route("/api/v1/authors/roles", get(discovery::authors_roles_route))
-        .route("/api/v1/genres", get(discovery::genres_route))
-        .route("/api/v1/tags", get(discovery::tags_route))
-        .route("/api/v1/tags/series", get(discovery::series_tags_route))
-        .route("/api/v1/languages", get(discovery::languages_route))
-        .route("/api/v1/publishers", get(discovery::publishers_route))
-        .route("/api/v1/age-ratings", get(discovery::age_ratings_route))
-        .route("/api/v1/sharing-labels", get(discovery::sharing_labels_route))
-        .route("/api/v1/series", get(discovery::series_route))
-        .route("/api/v1/series/new", get(discovery::series_new_route))
-        .route("/api/v1/series/updated", get(discovery::series_updated_route))
+        .route("/api/v1/authors", get(discovery::facets::authors_deprecated_get))
+        .route("/api/v1/authors/names", get(discovery::facets::authors_names))
+        .route("/api/v1/authors/roles", get(discovery::facets::authors_roles))
+        .route("/api/v1/genres", get(discovery::facets::genres))
+        .route("/api/v1/tags", get(discovery::facets::tags))
+        .route("/api/v1/tags/series", get(discovery::facets::series_tags))
+        .route("/api/v1/languages", get(discovery::facets::languages))
+        .route("/api/v1/publishers", get(discovery::facets::publishers))
+        .route("/api/v1/age-ratings", get(discovery::facets::age_ratings))
+        .route("/api/v1/sharing-labels", get(discovery::facets::sharing_labels))
+        .route("/api/v1/series", get(discovery::series::series_deprecated_get))
+        .route("/api/v1/series/new", get(discovery::series::series_new))
+        .route("/api/v1/series/updated", get(discovery::series::series_updated))
         .route(
             "/api/v1/series/release-dates",
-            get(discovery::series_release_dates_route),
+            get(discovery::facets::series_release_dates),
         )
-        .route("/api/v1/series/latest", get(discovery::series_latest_route))
+        .route("/api/v1/series/latest", get(discovery::series::series_latest))
         .route("/api/v1/tags/book", get(discovery::books::book_tags))
-        .route("/api/v1/series/{series_id}", get(discovery::series_detail_route))
-        .route("/api/v1/series/{series_id}/", get(discovery::series_detail_route))
+        .route("/api/v1/series/{series_id}", get(discovery::detail::series_detail))
+        .route("/api/v1/series/{series_id}/", get(discovery::detail::series_detail))
         .route(
             "/api/v1/series/{series_id}/collections",
-            get(discovery::series_collections_route),
+            get(discovery::detail::series_collections),
         )
         .route(
             "/api/v1/series/{series_id}/books",
-            get(discovery::series_books_route),
+            get(discovery::books::series_books_deprecated),
         )
         .route(
             "/api/v1/series/{series_id}/thumbnail",
@@ -250,7 +250,7 @@ pub fn build_router(app: HttpAppState) -> Router {
         )
         .route(
             "/api/v1/series/{series_id}/metadata",
-            patch(discovery::series_metadata_update_route),
+            patch(discovery::detail::series_metadata_update),
         )
         .route(
             "/api/v1/series/{series_id}/metadata/refresh",
@@ -272,9 +272,9 @@ pub fn build_router(app: HttpAppState) -> Router {
         .route("/api/v1/series/list", post(discovery::series::series_list))
         .route(
             "/api/v1/series/list/alphabetical-groups",
-            post(discovery::series_alphabetical_groups_route),
+            post(discovery::series::series_alphabetical_groups),
         )
-        .route("/api/v1/books", get(discovery::books_route))
+        .route("/api/v1/books", get(discovery::books::books_deprecated_get))
         .route("/api/v1/books/list", post(discovery::books::books_list))
         .route("/api/v1/books/latest", get(discovery::books::books_latest))
         .route("/api/v1/books/ondeck", get(discovery::books::books_ondeck))
@@ -514,7 +514,7 @@ pub fn build_router(app: HttpAppState) -> Router {
             "/api/v2/users/{id}/password",
             patch(identity_access::content_auth::users_by_id_password_route),
         )
-        .route("/api/v2/authors", get(discovery::authors_v2_route))
+        .route("/api/v2/authors", get(discovery::facets::authors_v2))
         .route("/opds/v1.2/catalog", get(opds::content_opds::opds_v1_catalog_route))
         .route("/opds/v1.2/search", get(opds::content_opds::opds_v1_search_route))
         .route("/opds/v1.2/ondeck", get(opds::content_opds::opds_v1_on_deck_route))
