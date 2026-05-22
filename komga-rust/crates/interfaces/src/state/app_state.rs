@@ -9,6 +9,7 @@ pub struct HttpServices {
     pub library_catalog: Arc<dyn komga_application::library_catalog::LibraryCatalogPort>,
     pub task_queue: Arc<dyn TaskQueueAdmin>,
     pub server_settings: Arc<dyn komga_application::operational::ServerSettingsPort>,
+    pub server_settings_control: Arc<komga_application::operational::ServerSettingsService>,
     pub identity: IdentityState,
     pub operational_runtime: Arc<dyn komga_application::operational::OperationalMetricsPort>,
     pub announcements: Arc<dyn komga_application::operational::AnnouncementPort>,
@@ -82,37 +83,6 @@ pub struct BookImportSseEvent {
 pub struct SessionExpiredSseEvent {
     pub id: u64,
     pub user_id: String,
-}
-
-#[derive(Clone)]
-pub struct OperationalSettings {
-    pub delete_empty_collections: bool,
-    pub delete_empty_read_lists: bool,
-    pub remember_me_key: String,
-    pub remember_me_duration_days: u64,
-    pub thumbnail_size: &'static str,
-    pub task_pool_size: u64,
-    pub server_port: Option<u16>,
-    pub server_context_path: Option<String>,
-    pub kobo_proxy: bool,
-    pub kobo_port: Option<u16>,
-}
-
-impl OperationalSettings {
-    pub fn from_runtime() -> Self {
-        Self {
-            delete_empty_collections: false,
-            delete_empty_read_lists: false,
-            remember_me_key: String::new(),
-            remember_me_duration_days: 365,
-            thumbnail_size: "DEFAULT",
-            task_pool_size: 1,
-            server_port: None,
-            server_context_path: None,
-            kobo_proxy: false,
-            kobo_port: None,
-        }
-    }
 }
 
 #[derive(Clone)]

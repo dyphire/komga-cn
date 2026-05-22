@@ -7,7 +7,9 @@ use komga_application::discovery::{
     DiscoverySearchService, ReadlistPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
-use komga_application::operational::{OperationalMetricsPort, TransientBookService};
+use komga_application::operational::{
+    OperationalMetricsPort, ServerSettingsService, TransientBookService,
+};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_infrastructure::content_resolver::ContentResolver;
@@ -123,13 +125,18 @@ pub fn compose_http_runtime(
         Box::new(TaskEnqueueAdapter::new(task_engine_arc.clone())),
         Box::new(SseBookEventEmitter),
     ));
+    let server_settings = Arc::new(ServerSettingsStore::new(config.database_file.clone()));
     let services = HttpServices {
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
             db.write_pool().clone(),
         )),
-        task_queue: task_engine_arc,
-        server_settings: Arc::new(ServerSettingsStore::new(config.database_file.clone())),
+        task_queue: task_engine_arc.clone(),
+        server_settings: server_settings.clone(),
+        server_settings_control: Arc::new(ServerSettingsService::new(
+            server_settings,
+            task_engine_arc,
+        )),
         identity,
         operational_runtime: operational_runtime_service,
         announcements: Arc::new(AnnouncementAccess::new(db.clone())),

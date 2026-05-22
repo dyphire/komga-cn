@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::AuthUser;
-use komga_application::operational::ServerSettingsPort;
+use komga_application::operational::{ServerSettingsPort, ServerSettingsService};
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,
@@ -22,7 +22,6 @@ use crate::state::OperationalState;
 use crate::state::{
     BookImportSseEvent, HttpServerRequestsState, OAuth2ClientConfig, OperationalBuildMetadata,
     RemoteCacheEntry, RuntimeState, ServerSettingsState, SseOperationalState, StartupTimingState,
-    TaskQueueState,
 };
 
 #[tokio::test]
@@ -295,8 +294,7 @@ fn test_app_state(
 ) -> ServerSettingsState {
     ServerSettingsState {
         runtime: operational.runtime,
-        server_settings,
-        task_queue: TaskQueueState { queue: task_queue },
+        server_settings: Arc::new(ServerSettingsService::new(server_settings, task_queue)),
     }
 }
 

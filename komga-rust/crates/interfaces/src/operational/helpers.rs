@@ -45,20 +45,3 @@ pub(super) fn invalid_settings_payload(message: &str) -> Response {
     )
         .into_response()
 }
-
-pub(super) fn is_valid_context_path(value: &str) -> bool {
-    if value.is_empty() || !value.starts_with('/') || value.ends_with('/') {
-        return false;
-    }
-
-    let Some(last) = value.chars().last() else {
-        return false;
-    };
-    if !last.is_ascii_alphanumeric() {
-        return false;
-    }
-
-    value
-        .chars()
-        .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
-}

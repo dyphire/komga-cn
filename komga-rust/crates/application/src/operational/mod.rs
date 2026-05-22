@@ -19,7 +19,10 @@ pub use ports::{
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
     TransientBookScanEntry,
 };
-pub use server_settings::PersistedServerSettings;
+pub use server_settings::{
+    PersistedServerSettings, ServerSettingPatch, ServerSettingsLoadError, ServerSettingsService,
+    ServerSettingsUpdateCommand, ServerSettingsUpdateError,
+};
 pub use server_settings_port::ServerSettingsPort;
 pub use transient_books::{
     TransientBookPageContent, TransientBookPageError, TransientBookRecord, TransientBookScanError,

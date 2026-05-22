@@ -3,7 +3,8 @@ use axum::extract::FromRef;
 
 use komga_application::operational::{
     AnnouncementPort, ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
-    OperationalMetricsPort, PageHashPort, ServerSettingsPort, SyncpointPort, TransientBookService,
+    OperationalMetricsPort, PageHashPort, ServerSettingsService, SyncpointPort,
+    TransientBookService,
 };
 
 #[derive(Clone)]
@@ -48,16 +49,14 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
 #[derive(Clone)]
 pub struct ServerSettingsState {
     pub runtime: RuntimeState,
-    pub(crate) server_settings: Arc<dyn ServerSettingsPort>,
-    pub(crate) task_queue: TaskQueueState,
+    pub(crate) server_settings: Arc<ServerSettingsService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for ServerSettingsState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
             runtime: app.operational.runtime.clone(),
-            server_settings: app.services.server_settings.clone(),
-            task_queue: TaskQueueState::from_ref(app),
+            server_settings: app.services.server_settings_control.clone(),
         }
     }
 }
