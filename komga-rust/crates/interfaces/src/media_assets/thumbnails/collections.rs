@@ -19,14 +19,16 @@ pub async fn collection_thumbnail(
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(&app, &collection_id)
+    if !app
+        .reader
+        .collection_exists(&collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
+    match app.reader.collection_thumbnails(&collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -60,14 +62,16 @@ pub async fn collection_thumbnails(
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(&app, &collection_id)
+    if !app
+        .reader
+        .collection_exists(&collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
+    match app.reader.collection_thumbnails(&collection_id).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -100,14 +104,16 @@ pub async fn collection_thumbnail_by_id(
         Err(error) => return internal_error_response(error),
     }
 
-    if !persisted_collection_exists_from_services(&app, &collection_id)
+    if !app
+        .reader
+        .collection_exists(&collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match load_persisted_collection_thumbnails_from_services(&app, &collection_id).await {
+    match app.reader.collection_thumbnails(&collection_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 asset_ok_response(
@@ -130,7 +136,9 @@ pub async fn collection_thumbnail_upload(
     Path(collection_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !persisted_collection_exists_from_services(&app, &collection_id)
+    if !app
+        .reader
+        .collection_exists(&collection_id)
         .await
         .unwrap_or(false)
     {
@@ -146,16 +154,17 @@ pub async fn collection_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_collection_thumbnail_from_services(
-        &app,
-        &collection_id,
-        &thumbnail_bytes,
-        media_type.as_str(),
-        width,
-        height,
-        selected,
-    )
-    .await
+    match app
+        .thumbnails
+        .insert_collection(
+            &collection_id,
+            &thumbnail_bytes,
+            media_type.as_str(),
+            width,
+            height,
+            selected,
+        )
+        .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
@@ -177,14 +186,16 @@ pub async fn collection_thumbnail_select(
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if !persisted_collection_exists_from_services(&app, &collection_id)
+    if !app
+        .reader
+        .collection_exists(&collection_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match select_collection_thumbnail_from_services(&app, &thumbnail_id).await {
+    match app.thumbnails.select_collection(&thumbnail_id).await {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -195,7 +206,11 @@ pub async fn collection_thumbnail_delete(
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match delete_collection_thumbnail_from_services(&app, &collection_id, &thumbnail_id).await {
+    match app
+        .thumbnails
+        .delete_collection(&collection_id, &thumbnail_id)
+        .await
+    {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

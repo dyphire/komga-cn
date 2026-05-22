@@ -133,7 +133,7 @@ pub async fn book_positions(
 ) -> Response {
     let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
 
-    let media = match load_persisted_book_media_from_services(&app, &resolved_book_id).await {
+    let media = match app.reader.book_media(&resolved_book_id).await {
         Ok(Some(media)) => media,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),

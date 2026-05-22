@@ -12,12 +12,12 @@ pub async fn book_thumbnail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await {
+    if let Ok(Some(media)) = app.reader.book_media(&book_id).await {
         if !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await {
             return StatusCode::FORBIDDEN.into_response();
         }
 
-        match load_selected_book_thumbnail_from_services(&app, &book_id).await {
+        match app.reader.selected_book_thumbnail(&book_id).await {
             Ok(Some(thumbnail)) => {
                 let etag = asset_etag(thumbnail.thumbnail.as_slice());
                 if if_none_match_matches(&headers, etag.as_str()) {
@@ -47,13 +47,13 @@ pub async fn book_thumbnail_by_id(
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await
+    if let Ok(Some(media)) = app.reader.book_media(&book_id).await
         && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
     {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_thumbnail_by_id_from_services(&app, &thumbnail_id).await {
+    match app.reader.book_thumbnail_by_id(&thumbnail_id).await {
         Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -65,19 +65,16 @@ pub async fn book_thumbnails(
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &book_id).await
+    if let Ok(Some(media)) = app.reader.book_media(&book_id).await
         && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
     {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_persisted_book_thumbnails_from_services(&app, &book_id).await {
+    match app.reader.book_thumbnails(&book_id).await {
         Ok(rows) => {
             if rows.is_empty() {
-                if persisted_book_exists_from_services(&app, &book_id)
-                    .await
-                    .unwrap_or(false)
-                {
+                if app.reader.book_exists(&book_id).await.unwrap_or(false) {
                     return Json(json!([])).into_response();
                 }
 
@@ -114,10 +111,7 @@ pub async fn book_thumbnail_upload(
     Path(book_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !persisted_book_exists_from_services(&app, &book_id)
-        .await
-        .unwrap_or(false)
-    {
+    if !app.reader.book_exists(&book_id).await.unwrap_or(false) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
@@ -130,16 +124,17 @@ pub async fn book_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_book_thumbnail_from_services(
-        &app,
-        &book_id,
-        &thumbnail_bytes,
-        media_type.as_str(),
-        width,
-        height,
-        selected,
-    )
-    .await
+    match app
+        .thumbnails
+        .insert_book(
+            &book_id,
+            &thumbnail_bytes,
+            media_type.as_str(),
+            width,
+            height,
+            selected,
+        )
+        .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
@@ -161,7 +156,7 @@ pub async fn book_thumbnail_select(
     _: Admin,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match select_book_thumbnail_from_services(&app, &thumbnail_id).await {
+    match app.thumbnails.select_book(&thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);
@@ -177,7 +172,7 @@ pub async fn book_thumbnail_delete(
     _: Admin,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match delete_book_thumbnail_from_services(&app, &thumbnail_id).await {
+    match app.thumbnails.delete_book(&thumbnail_id).await {
         Ok(true) => {
             let mut response = StatusCode::ACCEPTED.into_response();
             mark_runtime_owned(&mut response);

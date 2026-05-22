@@ -19,7 +19,7 @@ pub async fn readlist_thumbnail(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
+    match app.reader.readlist_thumbnails(&readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -38,7 +38,9 @@ pub async fn readlist_thumbnail(
                 Err(error) => return internal_error_response(error),
             }
 
-            if persisted_readlist_exists_from_services(&app, &readlist_id)
+            if app
+                .reader
+                .readlist_exists(&readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -62,7 +64,7 @@ pub async fn readlist_thumbnails(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
+    match app.reader.readlist_thumbnails(&readlist_id).await {
         Ok(rows) => {
             if !rows.is_empty() {
                 return Json(
@@ -84,7 +86,9 @@ pub async fn readlist_thumbnails(
                 .into_response();
             }
 
-            if persisted_readlist_exists_from_services(&app, &readlist_id)
+            if app
+                .reader
+                .readlist_exists(&readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -108,7 +112,7 @@ pub async fn readlist_thumbnail_by_id(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_readlist_thumbnails_from_services(&app, &readlist_id).await {
+    match app.reader.readlist_thumbnails(&readlist_id).await {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 return asset_ok_response(
@@ -119,7 +123,9 @@ pub async fn readlist_thumbnail_by_id(
                 );
             }
 
-            if persisted_readlist_exists_from_services(&app, &readlist_id)
+            if app
+                .reader
+                .readlist_exists(&readlist_id)
                 .await
                 .unwrap_or(false)
             {
@@ -138,7 +144,9 @@ pub async fn readlist_thumbnail_upload(
     Path(readlist_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !persisted_readlist_exists_from_services(&app, &readlist_id)
+    if !app
+        .reader
+        .readlist_exists(&readlist_id)
         .await
         .unwrap_or(false)
     {
@@ -154,16 +162,17 @@ pub async fn readlist_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_readlist_thumbnail_from_services(
-        &app,
-        &readlist_id,
-        &thumbnail_bytes,
-        media_type.as_str(),
-        width,
-        height,
-        selected,
-    )
-    .await
+    match app
+        .thumbnails
+        .insert_readlist(
+            &readlist_id,
+            &thumbnail_bytes,
+            media_type.as_str(),
+            width,
+            height,
+            selected,
+        )
+        .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
@@ -185,14 +194,20 @@ pub async fn readlist_thumbnail_select(
     _: Admin,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if !persisted_readlist_exists_from_services(&app, &readlist_id)
+    if !app
+        .reader
+        .readlist_exists(&readlist_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    match select_readlist_thumbnail_from_services(&app, &readlist_id, &thumbnail_id).await {
+    match app
+        .thumbnails
+        .select_readlist(&readlist_id, &thumbnail_id)
+        .await
+    {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -203,7 +218,11 @@ pub async fn readlist_thumbnail_delete(
     _: Admin,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    match delete_readlist_thumbnail_from_services(&app, &readlist_id, &thumbnail_id).await {
+    match app
+        .thumbnails
+        .delete_readlist(&readlist_id, &thumbnail_id)
+        .await
+    {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

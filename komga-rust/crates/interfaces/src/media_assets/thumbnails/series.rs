@@ -15,7 +15,9 @@ pub async fn series_thumbnail(
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
 
-    if !persisted_series_exists_from_services(&app, &resolved_series_id)
+    if !app
+        .reader
+        .series_exists(&resolved_series_id)
         .await
         .unwrap_or(false)
     {
@@ -49,7 +51,9 @@ pub async fn series_thumbnails(
     Path(series_id): Path<String>,
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    if !persisted_series_exists_from_services(&app, &resolved_series_id)
+    if !app
+        .reader
+        .series_exists(&resolved_series_id)
         .await
         .unwrap_or(false)
     {
@@ -61,7 +65,7 @@ pub async fn series_thumbnails(
         Err(error) => return internal_error_response(error),
     }
 
-    match load_persisted_series_thumbnails_from_services(&app, &resolved_series_id).await {
+    match app.reader.series_thumbnails(&resolved_series_id).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -93,7 +97,9 @@ pub async fn series_thumbnail_by_id(
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if !unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
@@ -107,7 +113,7 @@ pub async fn series_thumbnail_by_id(
         }
     }
 
-    match load_series_thumbnail_by_id_from_services(&app, &thumbnail_id).await {
+    match app.reader.series_thumbnail_by_id(&thumbnail_id).await {
         Ok(Some(thumbnail)) => asset_ok_response(
             thumbnail.media_type.as_str(),
             thumbnail.thumbnail,
@@ -126,13 +132,15 @@ pub async fn series_thumbnail_upload(
     multipart: Multipart,
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    if !persisted_series_exists_from_services(&app, &resolved_series_id)
+    if !app
+        .reader
+        .series_exists(&resolved_series_id)
         .await
         .unwrap_or(false)
     {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match load_persisted_series_oneshot_from_services(&app, &resolved_series_id).await {
+    match app.reader.series_oneshot(&resolved_series_id).await {
         Ok(Some(true)) => return StatusCode::BAD_REQUEST.into_response(),
         Ok(Some(false)) => {}
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -148,16 +156,17 @@ pub async fn series_thumbnail_upload(
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
-    match insert_series_thumbnail_from_services(
-        &app,
-        &resolved_series_id,
-        &thumbnail_bytes,
-        media_type.as_str(),
-        width,
-        height,
-        selected,
-    )
-    .await
+    match app
+        .thumbnails
+        .insert_series(
+            &resolved_series_id,
+            &thumbnail_bytes,
+            media_type.as_str(),
+            width,
+            height,
+            selected,
+        )
+        .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
@@ -180,7 +189,11 @@ pub async fn series_thumbnail_select(
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    match select_series_thumbnail_from_services(&app, &resolved_series_id, &thumbnail_id).await {
+    match app
+        .thumbnails
+        .select_series(&resolved_series_id, &thumbnail_id)
+        .await
+    {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -193,11 +206,10 @@ pub async fn series_thumbnail_delete(
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let thumbnail =
-        match load_persisted_series_thumbnails_from_services(&app, &resolved_series_id).await {
-            Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
-            Err(error) => return internal_error_response(error),
-        };
+    let thumbnail = match app.reader.series_thumbnails(&resolved_series_id).await {
+        Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
+        Err(error) => return internal_error_response(error),
+    };
     let Some(thumbnail) = thumbnail else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -205,7 +217,11 @@ pub async fn series_thumbnail_delete(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    match delete_series_thumbnail_from_services(&app, &resolved_series_id, &thumbnail_id).await {
+    match app
+        .thumbnails
+        .delete_series(&resolved_series_id, &thumbnail_id)
+        .await
+    {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),

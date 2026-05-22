@@ -28,7 +28,7 @@ async fn load_accessible_book_media(
     book_id: &str,
     user: &AuthUser,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
+    let Some(media) = (match app.reader.book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
@@ -71,9 +71,7 @@ pub async fn book_read_progress(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
-        .await
-        .unwrap_or(false);
+    let supports_persisted_flow = app.reader.book_exists(&book_id).await.unwrap_or(false);
 
     if !supports_persisted_flow {
         return StatusCode::NOT_FOUND.into_response();
@@ -87,7 +85,7 @@ pub async fn book_read_progress(
         return response;
     }
     let persisted_user_id = Some(user_id(&user));
-    let page_count = match load_book_page_count_from_services(&app, &book_id).await {
+    let page_count = match app.reader.book_page_count(&book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
@@ -165,9 +163,7 @@ pub async fn book_read_progress_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let supports_persisted_flow = persisted_book_exists_from_services(&app, &book_id)
-        .await
-        .unwrap_or(false);
+    let supports_persisted_flow = app.reader.book_exists(&book_id).await.unwrap_or(false);
 
     if !supports_persisted_flow {
         return StatusCode::NOT_FOUND.into_response();
@@ -224,14 +220,11 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
-    if !persisted_book_exists_from_services(app, book_id)
-        .await
-        .unwrap_or(false)
-    {
+    if !app.reader.book_exists(book_id).await.unwrap_or(false) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
+    let Some(media) = (match app.reader.book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -355,14 +348,11 @@ async fn book_progression_get_response(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if !persisted_book_exists_from_services(app, book_id)
-        .await
-        .unwrap_or(false)
-    {
+    if !app.reader.book_exists(book_id).await.unwrap_or(false) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
+    let Some(media) = (match app.reader.book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -372,7 +362,7 @@ async fn book_progression_get_response(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    match load_book_progression_from_services(app, book_id, user_id(user)).await {
+    match app.reader.book_progression(book_id, user_id(user)).await {
         Ok(Some(progression)) => (
             [(
                 header::CONTENT_TYPE,

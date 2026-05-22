@@ -21,23 +21,20 @@ pub async fn readlist_file(
         Err(error) => return internal_error_response(error),
     };
 
-    match load_persisted_readlist_name_from_services(&app, &readlist_id).await {
+    match app.reader.readlist_name(&readlist_id).await {
         Ok(Some(name)) => {
             let file_name = format!("{name}.zip");
             let content_disposition = attachment_disposition(&file_name);
 
             let mut archive_entries = Vec::new();
             for (index, book) in visible_books.into_iter().enumerate() {
-                let Some(media) =
-                    (match load_persisted_book_media_from_services(&app, &book.id).await {
-                        Ok(media) => media,
-                        Err(error) => return internal_error_response(error),
-                    })
-                else {
+                let Some(media) = (match app.reader.book_media(&book.id).await {
+                    Ok(media) => media,
+                    Err(error) => return internal_error_response(error),
+                }) else {
                     continue;
                 };
-                let Some(bytes) = read_media_file_bytes_from_services(&app, &media.file_path).await
-                else {
+                let Some(bytes) = app.content.read_media_file_bytes(&media.file_path).await else {
                     continue;
                 };
                 archive_entries.push((readlist_archive_entry_name(index, &media.file_name), bytes));
@@ -70,7 +67,7 @@ pub async fn series_file(
     FileDownload(user): FileDownload,
     Path(series_id): Path<String>,
 ) -> Response {
-    match load_series_archive_entries_from_services(&app, &series_id).await {
+    match app.reader.series_archive_entries(&series_id).await {
         Ok(Some((series_title, _library_id, entries))) => {
             match user_can_access_series_media(&app, &series_id, &user).await {
                 Ok(true) => {}
@@ -80,7 +77,7 @@ pub async fn series_file(
 
             let mut archive_entries = Vec::new();
             for (file_name, file_path) in entries {
-                if let Some(bytes) = read_media_file_bytes_from_services(&app, &file_path).await {
+                if let Some(bytes) = app.content.read_media_file_bytes(&file_path).await {
                     archive_entries.push((file_name, bytes));
                 }
             }
@@ -135,7 +132,7 @@ async fn book_resource_response_for_route(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    if is_font_resource_from_services(app, resource_name) {
+    if app.content.is_font_resource(resource_name) {
         return book_font_resource_response(app, &headers, &book_id, resource_name).await;
     }
 
@@ -187,7 +184,7 @@ async fn load_epub_book_media(
     app: &MediaAssetsState,
     book_id: &str,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match load_persisted_book_media_from_services(app, book_id).await {
+    let Some(media) = (match app.reader.book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
@@ -213,8 +210,10 @@ async fn book_resource_response(
     media: &PersistedBookMedia,
     resource_name: &str,
 ) -> Response {
-    let Some(bytes) =
-        read_epub_resource_bytes_from_services(app, media.file_path.as_path(), resource_name).await
+    let Some(bytes) = app
+        .content
+        .read_epub_resource_bytes(media.file_path.as_path(), resource_name)
+        .await
     else {
         return StatusCode::NOT_FOUND.into_response();
     };

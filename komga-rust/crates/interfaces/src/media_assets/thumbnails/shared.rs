@@ -131,14 +131,16 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     book_id: &str,
     media: &PersistedBookMedia,
 ) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = load_selected_book_thumbnail_from_services(app, book_id).await
+    if let Ok(Some(thumbnail)) = app.reader.selected_book_thumbnail(book_id).await
         && thumbnail.thumbnail_type != "GENERATED"
     {
         return Some(thumbnail.thumbnail);
     }
 
     if book_media_is_epub(media) {
-        return load_epub_cover_bytes_from_services(app, media)
+        return app
+            .content
+            .epub_cover_bytes(media)
             .await
             .map(|(bytes, _)| bytes);
     }
@@ -156,11 +158,13 @@ pub(super) async fn load_series_thumbnail(
     app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if let Some(thumbnail) = load_selected_series_thumbnail_from_services(app, series_id).await? {
+    if let Some(thumbnail) = app.reader.selected_series_thumbnail(series_id).await? {
         return Ok(Some(thumbnail));
     }
 
-    let Some(book_id) = load_series_book_ids_from_media_services(app, series_id)
+    let Some(book_id) = app
+        .reader
+        .series_book_ids(series_id)
         .await?
         .into_iter()
         .next()
@@ -168,7 +172,7 @@ pub(super) async fn load_series_thumbnail(
         return Ok(None);
     };
 
-    load_selected_book_thumbnail_from_services(app, &book_id).await
+    app.reader.selected_book_thumbnail(&book_id).await
 }
 
 pub(super) async fn load_series_thumbnail_source_bytes(
@@ -199,7 +203,7 @@ pub(super) async fn load_readlist_mosaic_bytes(
 
     let mut images = Vec::new();
     for book_id in book_ids {
-        if let Ok(Some(media)) = load_persisted_book_media_from_services(app, &book_id).await
+        if let Ok(Some(media)) = app.reader.book_media(&book_id).await
             && let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id, &media).await
         {
             images.push(bytes);

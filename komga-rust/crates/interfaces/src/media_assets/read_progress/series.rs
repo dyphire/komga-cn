@@ -31,7 +31,7 @@ pub async fn series_read_progress_post(
             continue;
         }
 
-        let page_count = match load_book_page_count_from_services(&app, &book_id).await {
+        let page_count = match app.reader.book_page_count(&book_id).await {
             Ok(Some(value)) => value,
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
@@ -69,14 +69,18 @@ pub async fn series_read_progress_delete(
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NO_CONTENT.into_response();
         }
     } else {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
@@ -121,7 +125,9 @@ pub async fn series_tachiyomi_read_progress_get(
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if !unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
@@ -172,14 +178,18 @@ pub async fn series_tachiyomi_read_progress_put(
         && principal_from_user_payload(&user_payload_json(&user))
             .is_none_or(|principal| !principal.restrictions.is_restricted());
     if unrestricted_all_libraries {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
             return StatusCode::NO_CONTENT.into_response();
         }
     } else {
-        if !persisted_series_exists_from_services(&app, &resolved_series_id)
+        if !app
+            .reader
+            .series_exists(&resolved_series_id)
             .await
             .unwrap_or(false)
         {
@@ -192,11 +202,14 @@ pub async fn series_tachiyomi_read_progress_put(
         }
     }
 
-    let book_numbers =
-        match load_series_book_number_sorts_from_services(&app, &resolved_series_id).await {
-            Ok(book_numbers) => book_numbers,
-            Err(error) => return internal_error_response(error),
-        };
+    let book_numbers = match app
+        .reader
+        .series_book_number_sorts(&resolved_series_id)
+        .await
+    {
+        Ok(book_numbers) => book_numbers,
+        Err(error) => return internal_error_response(error),
+    };
 
     for (book_id, number_sort) in book_numbers {
         if number_sort > last_number_sort_read {
@@ -213,7 +226,7 @@ pub async fn series_tachiyomi_read_progress_put(
             continue;
         }
 
-        let page_count = match load_book_page_count_from_services(&app, &book_id).await {
+        let page_count = match app.reader.book_page_count(&book_id).await {
             Ok(Some(value)) => value,
             Ok(None) => 1,
             Err(error) => return internal_error_response(error),
