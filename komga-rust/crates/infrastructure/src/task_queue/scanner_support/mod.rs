@@ -14,9 +14,7 @@ use sqlx::SqlitePool;
 use komga_application::task_processing::TaskProcessingError;
 
 use scan_diff::scan_library;
-use scan_persist::{
-    library_empty_trash_after_scan, load_changed_sidecars, persist_scanned_library,
-};
+use scan_persist::ScannedLibraryPersistence;
 
 /// Owns the "scan a library" capability.
 /// Single entry point hides FS walking, DB diffing, persistence, SSE emission,
@@ -40,33 +38,22 @@ impl LibraryScanner {
             .await
             .map_err(|error| TaskProcessingError::runtime(format!("scan library: {error}")))?;
 
-        let changed_sidecar_urls = load_changed_sidecars(&self.pool, library_id, &scan.sidecars)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load changed sidecars: {error}"))
-            })?;
-
-        let outcome = persist_scanned_library(&self.pool, library_id, &scan)
+        let persistence = ScannedLibraryPersistence::new(&self.pool, library_id, &scan)
+            .execute()
             .await
             .map_err(|error| {
                 TaskProcessingError::runtime(format!("persist scanned library: {error}"))
-            })?;
-
-        let should_empty_trash = library_empty_trash_after_scan(&self.pool, library_id)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load post-scan trash state: {error}"))
             })?;
 
         Ok(LibraryScanResult {
             book_ids: scan.book_ids,
             series_rows: scan.series_rows,
             sidecars: scan.sidecars,
-            changed_sidecar_urls,
-            renumbered_book_ids: outcome.renumbered_book_ids,
-            changed_series_ids: outcome.changed_series_ids,
-            book_metadata_refreshes: outcome.book_metadata_refreshes,
-            should_empty_trash,
+            changed_sidecar_urls: persistence.changed_sidecar_urls,
+            renumbered_book_ids: persistence.renumbered_book_ids,
+            changed_series_ids: persistence.changed_series_ids,
+            book_metadata_refreshes: persistence.book_metadata_refreshes,
+            should_empty_trash: persistence.should_empty_trash,
         })
     }
 }

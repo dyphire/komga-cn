@@ -13,7 +13,51 @@ use super::scan_sse::{
     record_book_runtime_sse_event, record_series_runtime_sse_event,
 };
 
-pub(crate) async fn library_empty_trash_after_scan(
+pub(super) struct ScannedLibraryPersistence<'a> {
+    pool: &'a SqlitePool,
+    library_id: &'a str,
+    scanned: &'a ScannedLibrary,
+}
+
+pub(super) struct ScannedLibraryPersistenceResult {
+    pub(super) changed_sidecar_urls: Vec<String>,
+    pub(super) renumbered_book_ids: Vec<String>,
+    pub(super) changed_series_ids: Vec<String>,
+    pub(super) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
+    pub(super) should_empty_trash: bool,
+}
+
+impl<'a> ScannedLibraryPersistence<'a> {
+    pub(super) fn new(
+        pool: &'a SqlitePool,
+        library_id: &'a str,
+        scanned: &'a ScannedLibrary,
+    ) -> Self {
+        Self {
+            pool,
+            library_id,
+            scanned,
+        }
+    }
+
+    pub(super) async fn execute(self) -> Result<ScannedLibraryPersistenceResult, String> {
+        let changed_sidecar_urls =
+            load_changed_sidecars(self.pool, self.library_id, &self.scanned.sidecars).await?;
+        let outcome = persist_scanned_library(self.pool, self.library_id, self.scanned).await?;
+        let should_empty_trash = library_empty_trash_after_scan(self.pool, self.library_id).await?;
+        emit_scanned_library_runtime_sse_events(self.library_id, &outcome);
+
+        Ok(ScannedLibraryPersistenceResult {
+            changed_sidecar_urls,
+            renumbered_book_ids: outcome.renumbered_book_ids,
+            changed_series_ids: outcome.changed_series_ids,
+            book_metadata_refreshes: outcome.book_metadata_refreshes,
+            should_empty_trash,
+        })
+    }
+}
+
+async fn library_empty_trash_after_scan(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<bool, String> {
@@ -35,7 +79,7 @@ LIMIT 1"#,
     Ok(value)
 }
 
-pub(crate) async fn persist_scanned_library(
+async fn persist_scanned_library(
     pool: &SqlitePool,
     library_id: &str,
     scanned: &ScannedLibrary,
@@ -98,127 +142,15 @@ WHERE ID = ?"#,
         }
 
         let discovered_series_ids = scanned.discovered_series_ids.clone();
-        let discovered_book_ids = scanned.discovered_book_ids.clone();
-        let mut active_book_ids = HashSet::<String>::new();
-
-        if scanned.root_available {
-            let existing_series = sqlx::query(
-                r#"SELECT ID
-FROM SERIES
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL"#,
-            )
-            .bind(&library_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|error| {
-                format!("failed to query existing SERIES rows for '{library_id}': {error}")
-            })?;
-            let existing_books = sqlx::query(
-                r#"SELECT ID, SERIES_ID
-FROM BOOK
-WHERE LIBRARY_ID = ?
-  AND DELETED_DATE IS NULL"#,
-            )
-            .bind(&library_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|error| {
-                format!("failed to query existing BOOK rows for '{library_id}': {error}")
-            })?
-            .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("ID"),
-                    row.get::<String, _>("SERIES_ID"),
-                )
-            })
-            .collect::<Vec<_>>();
-            active_book_ids = existing_books
-                .iter()
-                .map(|(book_id, _)| book_id.clone())
-                .collect::<HashSet<_>>();
-            let missing_series_ids = existing_series
-                .into_iter()
-                .map(|row| row.get::<String, _>("ID"))
-                .filter(|series_id| !discovered_series_ids.contains(series_id))
-                .collect::<Vec<_>>();
-            let missing_series_id_set = missing_series_ids.iter().cloned().collect::<HashSet<_>>();
-
-            for (book_id, series_id) in &existing_books {
-                if discovered_book_ids.contains(book_id)
-                    || !missing_series_id_set.contains(series_id)
-                {
-                    continue;
-                }
-                sqlx::query(
-                    r#"UPDATE BOOK
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-                )
-                .bind(book_id)
-                .execute(pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to soft-delete missing BOOK '{book_id}': {error}")
-                })?;
-                record_book_runtime_sse_event(
-                    &mut runtime_events,
-                    book_id,
-                    series_id,
-                    &library_id,
-                    RuntimeSseMutationKind::Changed,
-                );
-                changed_series_ids.insert(series_id.clone());
-            }
-
-            for series_id in &missing_series_ids {
-                sqlx::query(
-                    r#"UPDATE SERIES
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-                )
-                .bind(series_id)
-                .execute(pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to soft-delete missing SERIES '{series_id}': {error}")
-                })?;
-                record_series_runtime_sse_event(
-                    &mut runtime_events,
-                    series_id,
-                    &library_id,
-                    RuntimeSseMutationKind::Changed,
-                );
-            }
-
-            for (book_id, series_id) in &existing_books {
-                if discovered_book_ids.contains(book_id)
-                    || missing_series_id_set.contains(series_id)
-                {
-                    continue;
-                }
-                sqlx::query(
-                    r#"UPDATE BOOK
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-                )
-                .bind(book_id)
-                .execute(pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to soft-delete missing BOOK '{book_id}': {error}")
-                })?;
-                record_book_runtime_sse_event(
-                    &mut runtime_events,
-                    book_id,
-                    series_id,
-                    &library_id,
-                    RuntimeSseMutationKind::Changed,
-                );
-                changed_series_ids.insert(series_id.clone());
-            }
-        }
+        let active_book_ids = soft_delete_missing_scan_rows(
+            pool,
+            &library_id,
+            &discovered_series_ids,
+            &scanned.discovered_book_ids,
+            &mut runtime_events,
+            &mut changed_series_ids,
+        )
+        .await?;
 
         for series in &scanned.series_rows {
             let mut inserted_in_series = Vec::<InsertedBookCandidate>::new();
@@ -445,59 +377,7 @@ WHERE BOOK_ID = ?"#,
             })?;
         }
 
-        for sidecar in &scanned.sidecars {
-            let sidecar_updated = sqlx::query(
-                r#"UPDATE SIDECAR
-SET PARENT_URL = ?, LAST_MODIFIED_TIME = datetime(?, 'unixepoch')
-WHERE URL = ?
-  AND LIBRARY_ID = ?"#,
-            )
-            .bind(&sidecar.parent_url)
-            .bind(sidecar.last_modified_unix_seconds)
-            .bind(&sidecar.url)
-            .bind(&library_id)
-            .execute(pool)
-            .await
-            .map_err(|error| format!("failed to update SIDECAR rows: {error}"))?
-            .rows_affected();
-
-            if sidecar_updated == 0 {
-                sqlx::query(
-                        r#"INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID)
-VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
-                    )
-                    .bind(&sidecar.url)
-                    .bind(&sidecar.parent_url)
-                    .bind(sidecar.last_modified_unix_seconds)
-                    .bind(&library_id)
-                    .execute(pool)
-                    .await
-                    .map_err(|error| format!("failed to insert SIDECAR rows: {error}"))?;
-            }
-        }
-
-        let scanned_sidecar_urls = scanned
-            .sidecars
-            .iter()
-            .map(|sidecar| sidecar.url.clone())
-            .collect::<HashSet<_>>();
-        let existing_sidecar_urls = sqlx::query(r#"SELECT URL FROM SIDECAR WHERE LIBRARY_ID = ?"#)
-            .bind(&library_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|error| format!("failed to load SIDECAR rows for cleanup: {error}"))?;
-        for row in existing_sidecar_urls {
-            let url = row.get::<String, _>("URL");
-            if scanned_sidecar_urls.contains(&url) {
-                continue;
-            }
-            sqlx::query(r#"DELETE FROM SIDECAR WHERE LIBRARY_ID = ? AND URL = ?"#)
-                .bind(&library_id)
-                .bind(&url)
-                .execute(pool)
-                .await
-                .map_err(|error| format!("failed to delete stale SIDECAR row: {error}"))?;
-        }
+        persist_scanned_sidecars(pool, &library_id, &scanned.sidecars).await?;
 
         sqlx::query(
             r#"UPDATE SERIES
@@ -522,72 +402,15 @@ WHERE LIBRARY_ID = ?"#,
                         )
                     },
                 )?;
-        let library_root = resolve_stored_path(
-            sqlx::query("SELECT ROOT FROM LIBRARY WHERE ID = ? LIMIT 1")
-                .bind(&library_id)
-                .fetch_one(pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to resolve library root for restore in '{library_id}': {error}")
-                })?
-                .get::<String, _>("ROOT")
-                .as_str(),
-        );
-        let restored_series_matches =
-            try_restore_deleted_series(pool, library_root.as_path(), &inserted_series).await?;
-        for restored in &restored_series_matches {
-            changed_series_ids.insert(restored.inserted_series_id.clone());
-        }
-        let (restored_series_ids, restored_book_metadata_refreshes) =
-            try_restore_deleted_books(pool, library_root.as_path(), &inserted_books).await?;
-        changed_series_ids.extend(restored_series_ids);
-        book_metadata_refreshes.extend(restored_book_metadata_refreshes);
-        for restored in &restored_series_matches {
-            changed_series_ids.insert(restored.inserted_series_id.clone());
-            let deleted_book_ids =
-                sqlx::query("SELECT ID FROM BOOK WHERE SERIES_ID = ? ORDER BY ID ASC")
-                    .bind(&restored.deleted_series_id)
-                    .fetch_all(pool)
-                    .await
-                    .map_err(|error| {
-                        format!("failed to load restored legacy series books for cleanup: {error}")
-                    })?;
-            for deleted_book_row in deleted_book_ids {
-                let deleted_book_id = deleted_book_row.get::<String, _>("ID");
-                for sql in DELETE_BOOK_DEPENDENCY_SQL {
-                    sqlx::query(*sql)
-                        .bind(&deleted_book_id)
-                        .execute(pool)
-                        .await
-                        .map_err(|error| {
-                            format!(
-                                "failed to delete restored legacy series book dependencies: {error}"
-                            )
-                        })?;
-                }
-            }
-            sqlx::query("DELETE FROM BOOK WHERE SERIES_ID = ?")
-                .bind(&restored.deleted_series_id)
-                .execute(pool)
-                .await
-                .map_err(|error| {
-                    format!("failed to delete restored legacy series BOOK rows: {error}")
-                })?;
-            for sql in DELETE_SERIES_DEPENDENCY_SQL {
-                sqlx::query(*sql)
-                    .bind(&restored.deleted_series_id)
-                    .execute(pool)
-                    .await
-                    .map_err(|error| {
-                        format!("failed to delete restored legacy series dependencies: {error}")
-                    })?;
-            }
-            sqlx::query("DELETE FROM SERIES WHERE ID = ?")
-                .bind(&restored.deleted_series_id)
-                .execute(pool)
-                .await
-                .map_err(|error| format!("failed to delete restored legacy SERIES row: {error}"))?;
-        }
+        restore_deleted_scan_matches(
+            pool,
+            &library_id,
+            &inserted_series,
+            &inserted_books,
+            &mut changed_series_ids,
+            &mut book_metadata_refreshes,
+        )
+        .await?;
 
         break 'outcome PersistScannedLibraryOutcome {
             renumbered_book_ids,
@@ -597,7 +420,6 @@ WHERE LIBRARY_ID = ?"#,
             runtime_events: runtime_events.events,
         };
     };
-    emit_scanned_library_runtime_sse_events(&library_id, &outcome);
     Ok(outcome)
 }
 
@@ -685,7 +507,262 @@ WHERE BOOK_ID = ?"#,
     Ok(renumbered_book_ids)
 }
 
-pub(crate) async fn load_changed_sidecars(
+async fn soft_delete_missing_scan_rows(
+    pool: &SqlitePool,
+    library_id: &str,
+    discovered_series_ids: &HashSet<String>,
+    discovered_book_ids: &HashSet<String>,
+    runtime_events: &mut RuntimeSseEventBuffer,
+    changed_series_ids: &mut HashSet<String>,
+) -> Result<HashSet<String>, String> {
+    let existing_series = sqlx::query(
+        r#"SELECT ID
+FROM SERIES
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("failed to query existing SERIES rows for '{library_id}': {error}"))?;
+    let existing_books = sqlx::query(
+        r#"SELECT ID, SERIES_ID
+FROM BOOK
+WHERE LIBRARY_ID = ?
+  AND DELETED_DATE IS NULL"#,
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("failed to query existing BOOK rows for '{library_id}': {error}"))?
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<String, _>("ID"),
+            row.get::<String, _>("SERIES_ID"),
+        )
+    })
+    .collect::<Vec<_>>();
+    let active_book_ids = existing_books
+        .iter()
+        .map(|(book_id, _)| book_id.clone())
+        .collect::<HashSet<_>>();
+    let missing_series_ids = existing_series
+        .into_iter()
+        .map(|row| row.get::<String, _>("ID"))
+        .filter(|series_id| !discovered_series_ids.contains(series_id))
+        .collect::<Vec<_>>();
+    let missing_series_id_set = missing_series_ids.iter().cloned().collect::<HashSet<_>>();
+
+    for (book_id, series_id) in &existing_books {
+        if discovered_book_ids.contains(book_id) || !missing_series_id_set.contains(series_id) {
+            continue;
+        }
+        soft_delete_missing_book(pool, book_id).await?;
+        record_book_runtime_sse_event(
+            runtime_events,
+            book_id,
+            series_id,
+            library_id,
+            RuntimeSseMutationKind::Changed,
+        );
+        changed_series_ids.insert(series_id.clone());
+    }
+
+    for series_id in &missing_series_ids {
+        sqlx::query(
+            r#"UPDATE SERIES
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+        )
+        .bind(series_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to soft-delete missing SERIES '{series_id}': {error}"))?;
+        record_series_runtime_sse_event(
+            runtime_events,
+            series_id,
+            library_id,
+            RuntimeSseMutationKind::Changed,
+        );
+    }
+
+    for (book_id, series_id) in &existing_books {
+        if discovered_book_ids.contains(book_id) || missing_series_id_set.contains(series_id) {
+            continue;
+        }
+        soft_delete_missing_book(pool, book_id).await?;
+        record_book_runtime_sse_event(
+            runtime_events,
+            book_id,
+            series_id,
+            library_id,
+            RuntimeSseMutationKind::Changed,
+        );
+        changed_series_ids.insert(series_id.clone());
+    }
+
+    Ok(active_book_ids)
+}
+
+async fn soft_delete_missing_book(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
+    sqlx::query(
+        r#"UPDATE BOOK
+SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+WHERE ID = ?"#,
+    )
+    .bind(book_id)
+    .execute(pool)
+    .await
+    .map_err(|error| format!("failed to soft-delete missing BOOK '{book_id}': {error}"))?;
+
+    Ok(())
+}
+
+async fn persist_scanned_sidecars(
+    pool: &SqlitePool,
+    library_id: &str,
+    sidecars: &[ScannedSidecarRow],
+) -> Result<(), String> {
+    for sidecar in sidecars {
+        let sidecar_updated = sqlx::query(
+            r#"UPDATE SIDECAR
+SET PARENT_URL = ?, LAST_MODIFIED_TIME = datetime(?, 'unixepoch')
+WHERE URL = ?
+  AND LIBRARY_ID = ?"#,
+        )
+        .bind(&sidecar.parent_url)
+        .bind(sidecar.last_modified_unix_seconds)
+        .bind(&sidecar.url)
+        .bind(library_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to update SIDECAR rows: {error}"))?
+        .rows_affected();
+
+        if sidecar_updated == 0 {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID)
+VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
+            )
+            .bind(&sidecar.url)
+            .bind(&sidecar.parent_url)
+            .bind(sidecar.last_modified_unix_seconds)
+            .bind(library_id)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to insert SIDECAR rows: {error}"))?;
+        }
+    }
+
+    let scanned_sidecar_urls = sidecars
+        .iter()
+        .map(|sidecar| sidecar.url.clone())
+        .collect::<HashSet<_>>();
+    let existing_sidecar_urls = sqlx::query(r#"SELECT URL FROM SIDECAR WHERE LIBRARY_ID = ?"#)
+        .bind(library_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("failed to load SIDECAR rows for cleanup: {error}"))?;
+    for row in existing_sidecar_urls {
+        let url = row.get::<String, _>("URL");
+        if scanned_sidecar_urls.contains(&url) {
+            continue;
+        }
+        sqlx::query(r#"DELETE FROM SIDECAR WHERE LIBRARY_ID = ? AND URL = ?"#)
+            .bind(library_id)
+            .bind(&url)
+            .execute(pool)
+            .await
+            .map_err(|error| format!("failed to delete stale SIDECAR row: {error}"))?;
+    }
+
+    Ok(())
+}
+
+async fn restore_deleted_scan_matches(
+    pool: &SqlitePool,
+    library_id: &str,
+    inserted_series: &[InsertedSeriesCandidate],
+    inserted_books: &[InsertedBookCandidate],
+    changed_series_ids: &mut HashSet<String>,
+    book_metadata_refreshes: &mut Vec<BookMetadataRefreshRequest>,
+) -> Result<(), String> {
+    let library_root = resolve_stored_path(
+        sqlx::query("SELECT ROOT FROM LIBRARY WHERE ID = ? LIMIT 1")
+            .bind(library_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|error| {
+                format!("failed to resolve library root for restore in '{library_id}': {error}")
+            })?
+            .get::<String, _>("ROOT")
+            .as_str(),
+    );
+    let restored_series_matches =
+        try_restore_deleted_series(pool, library_root.as_path(), inserted_series).await?;
+    for restored in &restored_series_matches {
+        changed_series_ids.insert(restored.inserted_series_id.clone());
+    }
+    let (restored_series_ids, restored_book_metadata_refreshes) =
+        try_restore_deleted_books(pool, library_root.as_path(), inserted_books).await?;
+    changed_series_ids.extend(restored_series_ids);
+    book_metadata_refreshes.extend(restored_book_metadata_refreshes);
+    for restored in &restored_series_matches {
+        changed_series_ids.insert(restored.inserted_series_id.clone());
+        delete_restored_legacy_series(pool, &restored.deleted_series_id).await?;
+    }
+
+    Ok(())
+}
+
+async fn delete_restored_legacy_series(
+    pool: &SqlitePool,
+    deleted_series_id: &str,
+) -> Result<(), String> {
+    let deleted_book_ids = sqlx::query("SELECT ID FROM BOOK WHERE SERIES_ID = ? ORDER BY ID ASC")
+        .bind(deleted_series_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| {
+            format!("failed to load restored legacy series books for cleanup: {error}")
+        })?;
+    for deleted_book_row in deleted_book_ids {
+        let deleted_book_id = deleted_book_row.get::<String, _>("ID");
+        for sql in DELETE_BOOK_DEPENDENCY_SQL {
+            sqlx::query(*sql)
+                .bind(&deleted_book_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    format!("failed to delete restored legacy series book dependencies: {error}")
+                })?;
+        }
+    }
+    sqlx::query("DELETE FROM BOOK WHERE SERIES_ID = ?")
+        .bind(deleted_series_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to delete restored legacy series BOOK rows: {error}"))?;
+    for sql in DELETE_SERIES_DEPENDENCY_SQL {
+        sqlx::query(*sql)
+            .bind(deleted_series_id)
+            .execute(pool)
+            .await
+            .map_err(|error| {
+                format!("failed to delete restored legacy series dependencies: {error}")
+            })?;
+    }
+    sqlx::query("DELETE FROM SERIES WHERE ID = ?")
+        .bind(deleted_series_id)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("failed to delete restored legacy SERIES row: {error}"))?;
+
+    Ok(())
+}
+
+async fn load_changed_sidecars(
     pool: &SqlitePool,
     library_id: &str,
     scanned_sidecars: &[ScannedSidecarRow],
