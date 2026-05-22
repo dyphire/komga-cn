@@ -5,13 +5,13 @@ use image::ImageFormat;
 use serde_json::json;
 
 use crate::cache::{
-    asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
-    if_modified_since_matches,
+    asset_etag, asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
+    if_modified_since_matches, if_none_match_matches,
 };
 use crate::identity_access::auth::{AuthUser, user_has_role, user_is_admin};
 use crate::media_assets::access_control::user_can_access_book_media;
 use crate::media_assets::http_helpers::{
-    attachment_disposition, inline_disposition, internal_error_response,
+    attachment_disposition, format_size_bytes, inline_disposition, internal_error_response,
 };
 use crate::media_assets::media_helpers::{
     book_media_is_epub, book_media_is_pdf, book_media_supports_page_api,
@@ -22,7 +22,9 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
 use komga_application::discovery::BookDetailPort;
-use komga_application::media_assets::{BookMediaRecord, ContentResolverPort, MediaReaderPort};
+use komga_application::media_assets::{
+    BookMediaRecord, BookPageRecord, ContentResolverPort, MediaReaderPort,
+};
 use komga_application::operational::ServerSettingsPort;
 
 #[derive(Clone, Debug)]
@@ -303,6 +305,117 @@ pub(crate) async fn book_page_raw_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
+pub(crate) async fn book_page_thumbnail_response(
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
+    discovery_detail: &dyn BookDetailPort,
+    user: &AuthUser,
+    headers: &HeaderMap,
+    book_id: &str,
+    page_number: u32,
+) -> Response {
+    if page_number == 0 {
+        return page_number_does_not_exist_response();
+    }
+
+    let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
+
+    if let Ok(Some(media)) = reader.book_media(&resolved_book_id).await {
+        if !user_can_access_book_media(reader, &resolved_book_id, user, &media).await {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+
+        if !book_media_supports_page_api(&media) {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+
+        let page_row = match page_resolution::load_book_page_row(
+            reader,
+            content,
+            &resolved_book_id,
+            &media,
+            page_number as u64,
+            true,
+        )
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return page_number_does_not_exist_response(),
+            Err(error) => return internal_error_response(error),
+        };
+
+        if let Some(bytes) = page_resolution::render_book_page_thumbnail(
+            content,
+            &media,
+            &page_row,
+            page_number as u64,
+            300,
+        )
+        .await
+        {
+            let content_type = "image/jpeg".to_string();
+
+            let etag = asset_etag(bytes.as_slice());
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if if_none_match_matches(headers, etag.as_str()) {
+                return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
+            }
+            if let Some(last_modified) = last_modified.as_deref()
+                && if_modified_since_matches(headers, last_modified)
+            {
+                return asset_not_modified_response(Some(etag.as_str()), Some(last_modified));
+            }
+
+            return asset_ok_response(
+                content_type.as_str(),
+                bytes,
+                Some(etag.as_str()),
+                last_modified.as_deref(),
+            );
+        }
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
+pub(crate) async fn book_pages_response(
+    reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
+    discovery_detail: &dyn BookDetailPort,
+    user: &AuthUser,
+    book_id: &str,
+) -> Response {
+    let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
+
+    let media = match reader.book_media(&resolved_book_id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    };
+
+    if !user_can_access_book_media(reader, &resolved_book_id, user, &media).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if !reader
+        .book_media_is_ready(&resolved_book_id)
+        .await
+        .unwrap_or(false)
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if !book_media_supports_page_api(&media) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    match page_resolution::list_book_page_rows(reader, content, &resolved_book_id, &media).await {
+        Ok(Some(page_rows)) => page_rows_response(page_rows),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
 pub(crate) async fn book_thumbnail_opds_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
@@ -472,6 +585,38 @@ fn json_error_response(status: StatusCode, error: &str) -> Response {
 
 fn page_number_does_not_exist_response() -> Response {
     json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist")
+}
+
+fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
+    Json(
+        page_rows
+            .into_iter()
+            .map(page_row_payload)
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+fn page_row_payload(page: BookPageRecord) -> serde_json::Value {
+    let size_bytes = if page.file_size < 0 {
+        serde_json::Value::Null
+    } else {
+        json!(page.file_size)
+    };
+    let size = if page.file_size < 0 {
+        serde_json::Value::String(String::new())
+    } else {
+        serde_json::Value::String(format_size_bytes(page.file_size as u64))
+    };
+    json!({
+        "number": page.number,
+        "fileName": page.file_name,
+        "mediaType": page.media_type,
+        "width": page.width,
+        "height": page.height,
+        "sizeBytes": size_bytes,
+        "size": size,
+    })
 }
 
 fn accept_header_prefers_pdf(headers: &HeaderMap) -> bool {

@@ -53,12 +53,8 @@ use self::access_control::{
 };
 use self::archive_payload::{build_stored_zip_archive, readlist_archive_entry_name};
 use self::epub_positions::load_persisted_epub_positions;
-use self::http_helpers::{
-    attachment_disposition, format_size_bytes, inline_disposition, internal_error_response,
-};
-use self::media_helpers::{
-    book_media_is_epub, book_media_supports_page_api, content_type_from_filename,
-};
+use self::http_helpers::{attachment_disposition, inline_disposition, internal_error_response};
+use self::media_helpers::{book_media_is_epub, content_type_from_filename};
 #[cfg(test)]
 use self::media_helpers::{
     normalize_epub_resource_href, parse_epub_fixed_layout, parse_epub_kobo_spans,
@@ -194,13 +190,6 @@ async fn delete_readlist_thumbnail_from_services(
     app.thumbnails
         .delete_readlist(readlist_id, thumbnail_id)
         .await
-}
-
-async fn book_media_is_ready_status_from_services(
-    app: &MediaAssetsState,
-    book_id: &str,
-) -> Result<bool, String> {
-    app.reader.book_media_is_ready(book_id).await
 }
 
 async fn load_series_book_ids_from_media_services(

@@ -47,7 +47,7 @@ fn content_disposition_filename_star(file_name: &str) -> String {
         .collect()
 }
 
-pub(super) fn format_size_bytes(size_bytes: u64) -> String {
+pub(crate) fn format_size_bytes(size_bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
 
     if size_bytes < 1024 {

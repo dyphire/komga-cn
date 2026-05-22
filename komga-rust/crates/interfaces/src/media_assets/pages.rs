@@ -1,11 +1,9 @@
 use super::*;
 use crate::identity_access::auth::Authenticated;
-use crate::media_assets::page_resolution;
 use crate::media_responses::{self, BookPageResponseOptions};
 use crate::opds::content_opds::OpdsV1Authenticated;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
-use komga_application::media_assets::BookPageRecord;
 
 pub async fn book_page(
     State(app): State<MediaAssetsState>,
@@ -94,84 +92,22 @@ fn book_page_content_negotiation_default() -> bool {
     true
 }
 
-fn json_error_response(status: StatusCode, error: &str) -> Response {
-    (status, Json(json!({ "error": error }))).into_response()
-}
-
-fn page_number_does_not_exist_response() -> Response {
-    json_error_response(StatusCode::BAD_REQUEST, "Page number does not exist")
-}
-
 pub async fn book_page_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    if page_number == 0 {
-        return page_number_does_not_exist_response();
-    }
-
-    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
-
-    if let Ok(Some(media)) = load_persisted_book_media_from_services(&app, &resolved_book_id).await
-    {
-        if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await
-        {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-
-        if !book_media_supports_page_api(&media) {
-            return StatusCode::NOT_FOUND.into_response();
-        }
-
-        let page_row = match page_resolution::load_book_page_row(
-            app.reader.as_ref(),
-            app.content.as_ref(),
-            &resolved_book_id,
-            &media,
-            page_number as u64,
-            true,
-        )
-        .await
-        {
-            Ok(Some(row)) => row,
-            Ok(None) => return page_number_does_not_exist_response(),
-            Err(error) => return internal_error_response(error),
-        };
-
-        if let Some(bytes) = page_resolution::render_book_page_thumbnail(
-            app.content.as_ref(),
-            &media,
-            &page_row,
-            page_number as u64,
-            300,
-        )
-        .await
-        {
-            let content_type = "image/jpeg".to_string();
-
-            let etag = asset_etag(bytes.as_slice());
-            let last_modified = file_last_modified_header_value(media.file_path.as_path());
-            if if_none_match_matches(&headers, etag.as_str()) {
-                return asset_not_modified_response(Some(etag.as_str()), last_modified.as_deref());
-            }
-            if let Some(last_modified) = last_modified.as_deref()
-                && if_modified_since_matches(&headers, last_modified)
-            {
-                return asset_not_modified_response(Some(etag.as_str()), Some(last_modified));
-            }
-
-            return asset_ok_response(
-                content_type.as_str(),
-                bytes,
-                Some(etag.as_str()),
-                last_modified.as_deref(),
-            );
-        }
-    }
-
-    StatusCode::NOT_FOUND.into_response()
+    media_responses::book_page_thumbnail_response(
+        app.reader.as_ref(),
+        app.content.as_ref(),
+        app.book_detail.as_ref(),
+        &user,
+        &headers,
+        &book_id,
+        page_number,
+    )
+    .await
 }
 
 pub async fn book_pages(
@@ -179,73 +115,14 @@ pub async fn book_pages(
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
-
-    let media = match load_persisted_book_media_from_services(&app, &resolved_book_id).await {
-        Ok(Some(media)) => media,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
-    };
-
-    if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-
-    if !book_media_is_ready_status_from_services(&app, &resolved_book_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    if !book_media_supports_page_api(&media) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    match page_resolution::list_book_page_rows(
+    media_responses::book_pages_response(
         app.reader.as_ref(),
         app.content.as_ref(),
-        &resolved_book_id,
-        &media,
+        app.book_detail.as_ref(),
+        &user,
+        &book_id,
     )
     .await
-    {
-        Ok(Some(page_rows)) => page_rows_response(page_rows),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
-    }
-}
-
-fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
-    Json(
-        page_rows
-            .into_iter()
-            .map(page_row_payload)
-            .collect::<Vec<_>>(),
-    )
-    .into_response()
-}
-
-fn page_row_payload(page: BookPageRecord) -> Value {
-    let size_bytes = if page.file_size < 0 {
-        Value::Null
-    } else {
-        json!(page.file_size)
-    };
-    let size = if page.file_size < 0 {
-        Value::String(String::new())
-    } else {
-        Value::String(format_size_bytes(page.file_size as u64))
-    };
-    json!({
-        "number": page.number,
-        "fileName": page.file_name,
-        "mediaType": page.media_type,
-        "width": page.width,
-        "height": page.height,
-        "sizeBytes": size_bytes,
-        "size": size,
-    })
 }
 
 pub async fn book_positions(
