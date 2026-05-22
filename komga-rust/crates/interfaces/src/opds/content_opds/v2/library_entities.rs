@@ -1,290 +1,8 @@
-use super::super::types::{
-    PersistedBookFeedItem, PersistedBookSearchResult, PersistedCollection,
-    PersistedCollectionSearchResult, PersistedReadlist, PersistedReadlistBook,
-    PersistedReadlistSearchResult, PersistedSeries, PersistedSeriesBook,
-    PersistedSeriesSearchResult,
-};
+use super::super::types::{PersistedBookSearchResult, PersistedReadlistBook, PersistedSeriesBook};
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::state::OpdsState;
 use serde_json::Value;
-
-async fn load_collection_from_services(
-    app: &OpdsState,
-    collection_id: &str,
-) -> Result<Option<PersistedCollection>, String> {
-    Ok(app
-        .opds_persisted
-        .load_collection(collection_id)
-        .await?
-        .map(|row| PersistedCollection {
-            id: row.id,
-            name: row.name,
-            last_modified: row.last_modified,
-            ordered: row.ordered,
-        }))
-}
-
-async fn load_collection_series_from_services(
-    app: &OpdsState,
-    collection_id: &str,
-    ordered: bool,
-) -> Result<Vec<PersistedSeries>, String> {
-    Ok(app
-        .opds_persisted
-        .load_collection_series(collection_id, ordered)
-        .await?
-        .into_iter()
-        .map(|row| PersistedSeries {
-            id: row.id,
-            library_id: row.library_id,
-            title: row.title,
-            summary: row.summary,
-            age_rating: row.age_rating,
-            sharing_labels: row.sharing_labels,
-            last_modified: row.last_modified,
-        })
-        .collect())
-}
-
-async fn load_series_from_services(
-    app: &OpdsState,
-    series_id: &str,
-) -> Result<Option<PersistedSeries>, String> {
-    Ok(app
-        .opds_persisted
-        .load_series(series_id)
-        .await?
-        .map(|row| PersistedSeries {
-            id: row.id,
-            library_id: row.library_id,
-            title: row.title,
-            summary: row.summary,
-            age_rating: row.age_rating,
-            sharing_labels: row.sharing_labels,
-            last_modified: row.last_modified,
-        }))
-}
-
-async fn load_series_books_paged_from_services(
-    app: &OpdsState,
-    series_id: &str,
-    user_id: &str,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<PersistedSeriesBook>, String> {
-    Ok(app
-        .opds_persisted
-        .load_series_books_paged(series_id, user_id, offset, limit)
-        .await?
-        .into_iter()
-        .map(|row| PersistedSeriesBook {
-            id: row.id,
-            series_id: row.series_id,
-            title: row.title,
-            series_title: row.series_title,
-            number: row.number,
-            number_sort: row.number_sort,
-            summary: row.summary,
-            isbn: row.isbn,
-            authors: row
-                .authors
-                .into_iter()
-                .map(|author| crate::state::OpdsBookAuthorEntry {
-                    name: author.name,
-                    role: author.role,
-                })
-                .collect(),
-            tags: row.tags,
-            file_name: row.file_name,
-            file_size: row.file_size,
-            media_type: row.media_type,
-            page_count: row.page_count,
-            epub_divina_compatible: row.epub_divina_compatible,
-            last_read: row.last_read,
-            last_read_date: row.last_read_date,
-            library_id: row.library_id,
-            age_rating: row.age_rating,
-            sharing_labels: row.sharing_labels,
-            last_modified: row.last_modified,
-            release_date: row.release_date,
-        })
-        .collect())
-}
-
-async fn load_series_tags_from_services(
-    app: &OpdsState,
-    series_id: &str,
-) -> Result<Vec<String>, String> {
-    app.opds_persisted.load_series_tags(series_id).await
-}
-
-async fn load_readlist_from_services(
-    app: &OpdsState,
-    readlist_id: &str,
-) -> Result<Option<PersistedReadlist>, String> {
-    Ok(app
-        .opds_persisted
-        .load_readlist(readlist_id)
-        .await?
-        .map(|row| PersistedReadlist {
-            id: row.id,
-            name: row.name,
-            last_modified: row.last_modified,
-            ordered: row.ordered,
-        }))
-}
-
-async fn load_readlist_books_from_services(
-    app: &OpdsState,
-    readlist_id: &str,
-) -> Result<Vec<PersistedReadlistBook>, String> {
-    Ok(app
-        .opds_persisted
-        .load_readlist_books(readlist_id)
-        .await?
-        .into_iter()
-        .map(|row| PersistedReadlistBook {
-            id: row.id,
-            series_id: row.series_id,
-            title: row.title,
-            series_title: row.series_title,
-            number: row.number,
-            number_sort: row.number_sort,
-            summary: row.summary,
-            isbn: row.isbn,
-            authors: row
-                .authors
-                .into_iter()
-                .map(|author| crate::state::OpdsBookAuthorEntry {
-                    name: author.name,
-                    role: author.role,
-                })
-                .collect(),
-            tags: row.tags,
-            file_name: row.file_name,
-            file_size: row.file_size,
-            media_type: row.media_type,
-            media_status: row.media_status,
-            page_count: row.page_count,
-            epub_divina_compatible: row.epub_divina_compatible,
-            library_id: row.library_id,
-            age_rating: row.age_rating,
-            sharing_labels: row.sharing_labels,
-            last_modified: row.last_modified,
-            release_date: row.release_date,
-        })
-        .collect())
-}
-
-async fn load_collection_books_from_services(
-    app: &OpdsState,
-    collection_id: &str,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    Ok(app
-        .opds_persisted
-        .load_collection_books(collection_id)
-        .await?
-        .into_iter()
-        .map(|row| PersistedBookFeedItem {
-            id: row.id,
-            title: row.title,
-            series_title: String::new(),
-            number: String::new(),
-            summary: String::new(),
-            authors: vec![],
-            file_name: row.file_name,
-            file_size: 0,
-            media_type: row.media_type,
-            page_count: 0,
-            epub_divina_compatible: false,
-            last_read: None,
-            last_read_date: None,
-            library_id: row.library_id,
-            age_rating: row.age_rating,
-            sharing_labels: row.sharing_labels,
-            last_modified: row.last_modified,
-        })
-        .collect())
-}
-
-async fn load_unified_search_results_from_services(
-    app: &OpdsState,
-    query: &str,
-) -> Result<
-    (
-        Vec<PersistedSeriesSearchResult>,
-        Vec<PersistedBookSearchResult>,
-        Vec<PersistedCollectionSearchResult>,
-        Vec<PersistedReadlistSearchResult>,
-    ),
-    String,
-> {
-    let (series_rows, book_rows, collection_rows, readlist_rows) = app
-        .opds_persisted
-        .load_unified_search_results(query)
-        .await?;
-
-    Ok((
-        series_rows
-            .into_iter()
-            .map(|row| PersistedSeriesSearchResult {
-                id: row.id,
-                title: row.title,
-                library_id: row.library_id,
-                age_rating: row.age_rating,
-                sharing_labels: row.sharing_labels,
-                last_modified: row.last_modified,
-            })
-            .collect(),
-        book_rows
-            .into_iter()
-            .map(|row| PersistedBookSearchResult {
-                id: row.id,
-                series_id: row.series_id,
-                title: row.title,
-                series_title: row.series_title,
-                number: row.number,
-                number_sort: row.number_sort,
-                summary: row.summary,
-                isbn: row.isbn,
-                authors: row
-                    .authors
-                    .into_iter()
-                    .map(|author| crate::state::OpdsBookAuthorEntry {
-                        name: author.name,
-                        role: author.role,
-                    })
-                    .collect(),
-                tags: row.tags,
-                file_name: row.file_name,
-                file_size: row.file_size,
-                media_type: row.media_type,
-                page_count: row.page_count,
-                epub_divina_compatible: row.epub_divina_compatible,
-                library_id: row.library_id,
-                age_rating: row.age_rating,
-                sharing_labels: row.sharing_labels,
-                last_modified: row.last_modified,
-                release_date: row.release_date,
-            })
-            .collect(),
-        collection_rows
-            .into_iter()
-            .map(|row| PersistedCollectionSearchResult {
-                id: row.id,
-                name: row.name,
-            })
-            .collect(),
-        readlist_rows
-            .into_iter()
-            .map(|row| PersistedReadlistSearchResult {
-                id: row.id,
-                name: row.name,
-            })
-            .collect(),
-    ))
-}
 
 pub(crate) async fn opds_v2_libraries_collections(
     headers: HeaderMap,
@@ -314,7 +32,8 @@ pub(crate) async fn opds_v2_collection(
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let Some(collection) = (match load_collection_from_services(app, collection_id).await {
+    let Some(collection) = (match load_collection(app.opds_persisted.as_ref(), collection_id).await
+    {
         Ok(collection) => collection,
         Err(error) => {
             return (
@@ -328,17 +47,22 @@ pub(crate) async fn opds_v2_collection(
     };
 
     let restrictions = opds_restrictions_for_user(user);
-    let series =
-        match load_collection_series_from_services(app, collection_id, collection.ordered).await {
-            Ok(series) => series,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS collection series: {error}") })),
-                )
-                    .into_response();
-            }
-        };
+    let series = match load_collection_series(
+        app.opds_persisted.as_ref(),
+        collection_id,
+        collection.ordered,
+    )
+    .await
+    {
+        Ok(series) => series,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("load OPDS collection series: {error}") })),
+            )
+                .into_response();
+        }
+    };
 
     let visible_series = series
         .into_iter()
@@ -486,7 +210,7 @@ pub(crate) async fn opds_v2_series(
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let Some(series) = (match load_series_from_services(app, series_id).await {
+    let Some(series) = (match load_series(app.opds_persisted.as_ref(), series_id).await {
         Ok(series) => series,
         Err(error) => {
             return (
@@ -521,19 +245,24 @@ pub(crate) async fn opds_v2_series(
     });
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
-    let books =
-        match load_series_books_paged_from_services(app, &series.id, &current_user_id, 0, i64::MAX)
-            .await
-        {
-            Ok(books) => books,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS series books: {error}") })),
-                )
-                    .into_response();
-            }
-        };
+    let books = match load_series_books_paged(
+        app.opds_persisted.as_ref(),
+        &series.id,
+        &current_user_id,
+        0,
+        i64::MAX,
+    )
+    .await
+    {
+        Ok(books) => books,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("load OPDS series books: {error}") })),
+            )
+                .into_response();
+        }
+    };
 
     let visible_books = books
         .into_iter()
@@ -547,7 +276,7 @@ pub(crate) async fn opds_v2_series(
         })
         .collect::<Vec<_>>();
 
-    let series_tags = match load_series_tags_from_services(app, &series.id).await {
+    let series_tags = match load_series_tags(app.opds_persisted.as_ref(), &series.id).await {
         Ok(tags) => tags,
         Err(error) => {
             return (
@@ -720,7 +449,7 @@ pub(crate) async fn opds_v2_readlist(
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
-    let Some(readlist) = (match load_readlist_from_services(app, readlist_id).await {
+    let Some(readlist) = (match load_readlist(app.opds_persisted.as_ref(), readlist_id).await {
         Ok(readlist) => readlist,
         Err(error) => {
             return (
@@ -734,7 +463,7 @@ pub(crate) async fn opds_v2_readlist(
     };
     let restrictions = opds_restrictions_for_user(user);
 
-    let books = match load_readlist_books_from_services(app, &readlist.id).await {
+    let books = match load_readlist_books(app.opds_persisted.as_ref(), &readlist.id).await {
         Ok(books) => books,
         Err(error) => {
             return (
@@ -855,7 +584,7 @@ pub(crate) async fn opds_v2_search(
     let search_query = query.unwrap_or_default().trim();
 
     let (series, books, collections, readlists) =
-        match load_unified_search_results_from_services(app, search_query).await {
+        match load_unified_search_results(app.opds_persisted.as_ref(), search_query).await {
             Ok(results) => results,
             Err(error) => {
                 return (
@@ -902,7 +631,7 @@ pub(crate) async fn opds_v2_search(
 
     let mut collections_navigation = Vec::new();
     for item in collections {
-        let books = match load_collection_books_from_services(app, &item.id).await {
+        let books = match load_collection_books(app.opds_persisted.as_ref(), &item.id).await {
             Ok(books) => books,
             Err(_) => continue,
         };
@@ -925,7 +654,7 @@ pub(crate) async fn opds_v2_search(
 
     let mut readlist_navigation = Vec::new();
     for item in readlists {
-        let books = match load_readlist_books_from_services(app, &item.id).await {
+        let books = match load_readlist_books(app.opds_persisted.as_ref(), &item.id).await {
             Ok(books) => books,
             Err(_) => continue,
         };

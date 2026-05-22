@@ -23,7 +23,8 @@ async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() 
 
     for (uri, expected_group_titles, context) in expectations {
         let response = ctx
-            .app().clone()
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -67,7 +68,8 @@ async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
     let auth_token = ctx.login_admin().await;
 
     let response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -163,7 +165,8 @@ async fn router_opds_v2_search_excludes_one_shot_series_for_blank_and_ranked_que
 
     for (uri, context) in expectations {
         let response = ctx
-            .app().clone()
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()
@@ -224,7 +227,8 @@ async fn router_opds_v2_search_books_group_uses_shared_publication_shape() {
     let auth_token = ctx.login_admin().await;
 
     let response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -372,7 +376,8 @@ async fn router_opds_v2_search_hides_unauthorized_library_results() {
         .await;
 
     let response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -420,7 +425,8 @@ async fn router_opds_v2_search_hides_results_for_age_exclude_restricted_user() {
 
     for uri in ["/opds/v2/search?query=1", "/opds/v2/search"] {
         let restricted_response = ctx
-            .app().clone()
+            .app()
+            .clone()
             .clone()
             .oneshot(
                 Request::builder()

@@ -1,5 +1,7 @@
 use super::*;
 
+mod v2;
+
 #[tokio::test]
 async fn router_opds_v2_latest_books_feed_hides_books_for_age_exclude_restricted_user() {
     let ctx = TestFixture::builder("router-opds-v2-latest-books-age-restricted")

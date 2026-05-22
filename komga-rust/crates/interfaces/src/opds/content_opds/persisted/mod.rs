@@ -16,13 +16,13 @@ use crate::identity_access::auth::{
     AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::{
-    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord,
-    PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
-    PersistedSeriesRecord,
+    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedBookFeedRecord,
+    PersistedLibraryRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
+    PersistedSeriesBookRecord, PersistedSeriesRecord,
 };
 
 use super::types::{
-    OpdsRestrictions, PersistedBookSearchResult, PersistedCollection,
+    OpdsRestrictions, PersistedBookFeedItem, PersistedBookSearchResult, PersistedCollection,
     PersistedCollectionSearchResult, PersistedLibrary, PersistedReadlist, PersistedReadlistBook,
     PersistedReadlistSearchResult, PersistedSeries, PersistedSeriesBook,
     PersistedSeriesSearchResult,
@@ -171,6 +171,13 @@ pub(super) async fn load_series_books_paged(
         .load_series_books_paged(series_id, user_id, offset, limit)
         .await?;
     Ok(records.into_iter().map(map_series_book_record).collect())
+}
+
+pub(super) async fn load_series_tags(
+    backend: &dyn OpdsPersistedPort,
+    series_id: &str,
+) -> Result<Vec<String>, String> {
+    backend.load_series_tags(series_id).await
 }
 
 pub(super) async fn load_readlist(
@@ -479,6 +486,14 @@ pub(super) async fn load_collection_series(
     Ok(rows.into_iter().map(map_series_record).collect())
 }
 
+pub(super) async fn load_collection_books(
+    backend: &dyn OpdsPersistedPort,
+    collection_id: &str,
+) -> Result<Vec<PersistedBookFeedItem>, String> {
+    let rows = backend.load_collection_books(collection_id).await?;
+    Ok(rows.into_iter().map(map_book_feed_record).collect())
+}
+
 fn map_library_record(row: PersistedLibraryRecord) -> PersistedLibrary {
     PersistedLibrary {
         id: row.id,
@@ -572,6 +587,28 @@ fn map_readlist_book_record(row: PersistedReadlistBookRecord) -> PersistedReadli
         sharing_labels: row.sharing_labels,
         last_modified: row.last_modified,
         release_date: row.release_date,
+    }
+}
+
+fn map_book_feed_record(row: PersistedBookFeedRecord) -> PersistedBookFeedItem {
+    PersistedBookFeedItem {
+        id: row.id,
+        title: row.title,
+        series_title: String::new(),
+        number: String::new(),
+        summary: String::new(),
+        authors: vec![],
+        file_name: row.file_name,
+        file_size: 0,
+        media_type: row.media_type,
+        page_count: 0,
+        epub_divina_compatible: false,
+        last_read: None,
+        last_read_date: None,
+        library_id: row.library_id,
+        age_rating: row.age_rating,
+        sharing_labels: row.sharing_labels,
+        last_modified: row.last_modified,
     }
 }
 
