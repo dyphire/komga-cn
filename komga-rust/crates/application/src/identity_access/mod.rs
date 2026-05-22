@@ -8,8 +8,7 @@ mod session_tokens;
 mod user_models;
 
 pub use device_records::{
-    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
-    PersistedReadProgressRecord,
+    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 pub use ports::{
     AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,

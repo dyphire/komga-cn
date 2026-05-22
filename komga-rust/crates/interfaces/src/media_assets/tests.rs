@@ -10,6 +10,7 @@ use quick_xml::events::Event as XmlEvent;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, Write};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::ZipArchive;
 

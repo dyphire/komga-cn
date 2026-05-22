@@ -1,14 +1,3 @@
-use std::path::PathBuf;
-
-/// Lightweight projection of a media file row needed by device-auth flows
-/// (KOReader/Kobo content/thumbnail handlers).
-#[derive(Clone)]
-pub struct PersistedBookMediaFile {
-    pub file_name: String,
-    pub media_type: String,
-    pub file_path: PathBuf,
-}
-
 /// Read progress entry surfaced to KOReader/Kobo device handlers.
 ///
 /// `locator` carries the raw stored locator blob; callers decode it lazily.

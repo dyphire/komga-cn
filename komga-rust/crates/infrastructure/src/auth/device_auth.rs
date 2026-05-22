@@ -6,11 +6,10 @@ use flate2::read::GzDecoder;
 use serde_json::Value;
 use sqlx::{Row, SqlitePool};
 
-use crate::{resolve_library_item_path, resolve_optional_library_item_path};
+use crate::resolve_optional_library_item_path;
 
 pub use komga_application::identity_access::{
-    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
-    PersistedReadProgressRecord,
+    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 
 fn decode_epub_extension_is_fixed_layout(blob: &[u8]) -> bool {
@@ -110,39 +109,6 @@ pub async fn load_kobo_metadata_record(
             .get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB")
             .as_deref()
             .is_some_and(decode_epub_extension_is_fixed_layout),
-    }))
-}
-
-pub async fn load_book_media_file(
-    pool: &SqlitePool,
-    book_id: &str,
-) -> Result<Option<PersistedBookMediaFile>, sqlx::Error> {
-    let row = sqlx::query(
-        r#"SELECT b.NAME AS FILE_NAME, b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT,
-       COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE
- FROM BOOK b
- JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
- LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
- WHERE b.ID = ?
-   AND b.DELETED_DATE IS NULL
- LIMIT 1"#,
-    )
-    .bind(book_id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.map(|row| {
-        let file_name = row.get::<String, _>("FILE_NAME");
-        let book_url = row.get::<String, _>("BOOK_URL");
-        let library_root = row.get::<String, _>("LIBRARY_ROOT");
-        PersistedBookMediaFile {
-            file_name: file_name.clone(),
-            media_type: content_type_from_filename(
-                &file_name,
-                row.get::<String, _>("MEDIA_TYPE").as_str(),
-            ),
-            file_path: resolve_library_item_path(library_root.as_str(), book_url.as_str()),
-        }
     }))
 }
 
@@ -396,23 +362,4 @@ pub async fn load_koreader_book_target(
         page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
         media_type: row.get::<String, _>("MEDIA_TYPE"),
     }))
-}
-
-fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
-    match file_name
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("cbz") => "application/vnd.comicbook+zip".to_string(),
-        Some("cbr") => "application/vnd.comicbook-rar".to_string(),
-        Some("epub") => "application/epub+zip".to_string(),
-        Some("pdf") => "application/pdf".to_string(),
-        Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
-        Some("png") => "image/png".to_string(),
-        Some("gif") => "image/gif".to_string(),
-        Some("webp") => "image/webp".to_string(),
-        Some("avif") => "image/avif".to_string(),
-        _ => default_mime_type.to_string(),
-    }
 }

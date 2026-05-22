@@ -6,8 +6,7 @@ use komga_application::identity_access::{
     SessionResolverPort, UserAdminPort,
 };
 pub use komga_application::identity_access::{
-    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedBookMediaFile,
-    PersistedReadProgressRecord,
+    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 
 #[derive(Clone)]
