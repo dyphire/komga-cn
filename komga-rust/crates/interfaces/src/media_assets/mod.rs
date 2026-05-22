@@ -57,7 +57,8 @@ use self::http_helpers::{attachment_disposition, inline_disposition, internal_er
 use self::media_helpers::{book_media_is_epub, content_type_from_filename};
 #[cfg(test)]
 use self::media_helpers::{
-    normalize_epub_resource_href, parse_epub_fixed_layout, parse_epub_kobo_spans,
+    book_media_supports_page_api, normalize_epub_resource_href, parse_epub_fixed_layout,
+    parse_epub_kobo_spans,
 };
 use self::types::PersistedBookMedia;
 
