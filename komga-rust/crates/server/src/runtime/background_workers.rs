@@ -12,7 +12,7 @@ use komga_infrastructure::task_queue::RuntimeTaskEngine;
 use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
 use komga_infrastructure::task_queue::TaskRuntimeContext;
 use komga_infrastructure::task_queue::worker_runtime::{
-    RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal,
+    RuntimeBackgroundState, SharedTaskQueue, TaskQueueWakeSignal, process_startup_library_scans,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,7 +66,7 @@ impl TaskRuntime {
         mode: TaskRuntimeMode,
     ) -> std::io::Result<StartedTaskRuntime> {
         if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb) {
-            crate::runtime::startup_scan::bootstrap_library_scan(config).await;
+            process_startup_library_scans(crate::config::task_runtime_context(config).await).await;
         }
 
         let startup_search_plan = plan_startup_search_task_with_logging(config)?;
