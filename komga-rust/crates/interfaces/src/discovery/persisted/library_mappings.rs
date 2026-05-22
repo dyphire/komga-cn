@@ -6,12 +6,6 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
     }
 }
 
-pub async fn load_persisted_library_ids(
-    backend: &dyn DiscoverySearchService,
-) -> Result<Vec<String>, String> {
-    backend.load_persisted_library_ids().await
-}
-
 pub async fn remap_requested_library_ids_for_persisted(
     backend: &dyn DiscoverySearchService,
     requested: Option<&Vec<String>>,
@@ -22,7 +16,7 @@ pub async fn remap_requested_library_ids_for_persisted(
         return None;
     }
 
-    let persisted_ids = match load_persisted_library_ids(backend).await {
+    let persisted_ids = match backend.load_persisted_library_ids().await {
         Ok(ids) => ids,
         Err(_) => return None,
     };
