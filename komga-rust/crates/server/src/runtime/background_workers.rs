@@ -25,12 +25,6 @@ pub(crate) enum TaskRuntimeMode {
     WorkersDisabled,
 }
 
-pub(crate) struct TaskRuntime;
-
-pub(crate) struct StartedTaskRuntime {
-    router_parts: TaskRouterParts,
-}
-
 pub(crate) struct TaskRouterParts {
     pub(crate) http: HttpRuntimeParts,
     pub(crate) lifecycle: RouterRuntimeLifecycle,
@@ -60,64 +54,52 @@ struct StartupSearchPlan {
 
 type WorkerRuntimeGuard = Arc<WorkerRuntimeLifecycleGuard>;
 
-impl TaskRuntime {
-    pub(crate) async fn start(
-        config: &RuntimeConfig,
-        mode: TaskRuntimeMode,
-    ) -> std::io::Result<StartedTaskRuntime> {
-        let startup_scan_runtime = if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb)
-        {
-            let runtime = crate::config::task_runtime_context(config).await;
-            process_startup_library_scans(runtime.clone()).await;
-            Some(runtime)
-        } else {
-            None
-        };
+pub(crate) async fn start_task_runtime(
+    config: &RuntimeConfig,
+    mode: TaskRuntimeMode,
+) -> std::io::Result<TaskRouterParts> {
+    let startup_scan_runtime = if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb) {
+        let runtime = crate::config::task_runtime_context(config).await;
+        process_startup_library_scans(runtime.clone()).await;
+        Some(runtime)
+    } else {
+        None
+    };
 
-        let startup_search_plan = plan_startup_search_task_with_logging(config)?;
-        let runtime = match startup_scan_runtime {
-            Some(runtime) => runtime,
-            None => crate::config::task_runtime_context(config).await,
-        };
-        let background =
-            prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
-        let tasks_db =
-            open_database_handle(runtime.worker().tasks_db_file().to_path_buf(), "tasks").await?;
-        let worker_runtime_guard = match mode {
-            TaskRuntimeMode::WorkersEnabled { shutdown_rx } => Some(spawn_runtime_workers(
-                background.task_queue.clone(),
-                background.task_execution_pool.clone(),
-                runtime.clone(),
-                background.task_wakeup.clone(),
-                shutdown_rx,
-            )),
-            TaskRuntimeMode::WorkersDisabled => None,
-        };
-        let task_engine = Box::new(RuntimeTaskEngine::new(
-            background.task_queue,
-            background.task_execution_pool,
-            background.task_wakeup,
-        ));
+    let startup_search_plan = plan_startup_search_task_with_logging(config)?;
+    let runtime = match startup_scan_runtime {
+        Some(runtime) => runtime,
+        None => crate::config::task_runtime_context(config).await,
+    };
+    let background = prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
+    let tasks_db =
+        open_database_handle(runtime.worker().tasks_db_file().to_path_buf(), "tasks").await?;
+    let worker_runtime_guard = match mode {
+        TaskRuntimeMode::WorkersEnabled { shutdown_rx } => Some(spawn_runtime_workers(
+            background.task_queue.clone(),
+            background.task_execution_pool.clone(),
+            runtime.clone(),
+            background.task_wakeup.clone(),
+            shutdown_rx,
+        )),
+        TaskRuntimeMode::WorkersDisabled => None,
+    };
+    let task_engine = Box::new(RuntimeTaskEngine::new(
+        background.task_queue,
+        background.task_execution_pool,
+        background.task_wakeup,
+    ));
 
-        Ok(StartedTaskRuntime {
-            router_parts: TaskRouterParts {
-                http: HttpRuntimeParts {
-                    main_db: runtime.job().database().main_db().clone(),
-                    tasks_db,
-                    task_engine,
-                },
-                lifecycle: RouterRuntimeLifecycle {
-                    worker_runtime_guard,
-                },
-            },
-        })
-    }
-}
-
-impl StartedTaskRuntime {
-    pub(crate) fn into_router_parts(self) -> TaskRouterParts {
-        self.router_parts
-    }
+    Ok(TaskRouterParts {
+        http: HttpRuntimeParts {
+            main_db: runtime.job().database().main_db().clone(),
+            tasks_db,
+            task_engine,
+        },
+        lifecycle: RouterRuntimeLifecycle {
+            worker_runtime_guard,
+        },
+    })
 }
 
 impl RouterRuntimeLifecycle {

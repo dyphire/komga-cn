@@ -9,7 +9,7 @@ It wires configuration, installs interface backends, prepares background workers
 - `bootstrap`: startup flows for admin and noclaim initialization.
 - `composition`: HTTP/runtime backend installation and server assembly.
 - `config`: runtime configuration loading, path resolution, CLI parsing, and writer/runtime profile decisions.
-- `runtime`: thin runtime wrappers for startup scan bootstrap and background worker startup.
+- `runtime`: task queue preparation, startup scan handling, background worker startup, and router lifecycle guards.
 
 ## Boundaries
 

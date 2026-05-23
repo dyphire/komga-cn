@@ -30,8 +30,11 @@ jobs:
       - uses: actions/checkout@v6
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
 
-      - name: Run cargo test
+      - name: Run cargo nextest
         env:
+          CARGO_TERM_COLOR: always
           RUST_BACKTRACE: "1"
-        run: cargo test --workspace
+        run: cargo nextest run --workspace

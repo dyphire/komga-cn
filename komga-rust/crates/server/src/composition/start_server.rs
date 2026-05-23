@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 use crate::composition::compose_http_runtime::compose_http_runtime;
-use crate::runtime::{TaskRuntime, TaskRuntimeMode};
+use crate::runtime::{TaskRuntimeMode, start_task_runtime};
 use komga_config::env_config::RuntimeConfig;
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
@@ -23,8 +23,7 @@ pub(crate) async fn build_router(
     shutdown_trigger: Option<watch::Sender<bool>>,
     startup_timing: StartupTimingState,
 ) -> std::io::Result<Router> {
-    let task_runtime = TaskRuntime::start(config, mode).await?;
-    let router_parts = task_runtime.into_router_parts();
+    let router_parts = start_task_runtime(config, mode).await?;
     let app = compose_http_runtime(
         config,
         router_parts.http,
