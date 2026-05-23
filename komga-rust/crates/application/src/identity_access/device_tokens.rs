@@ -109,3 +109,25 @@ pub fn random_uuid_like() -> String {
         bytes[15],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_identifier_normalizes_and_replaces_non_alnum() {
+        assert_eq!(sanitize_identifier("Ab C_1?"), "ab-c-1-");
+    }
+
+    #[test]
+    fn generated_kobo_api_token_is_non_hardcoded_and_identity_scoped() {
+        let token = generated_kobo_api_token("auth-token-a", "user-a");
+        assert_ne!(token, "e30=");
+        assert!(token.starts_with("KOMGA."));
+
+        let changed_auth_token = generated_kobo_api_token("auth-token-b", "user-a");
+        let changed_user_token = generated_kobo_api_token("auth-token-a", "user-b");
+        assert_ne!(token, changed_auth_token);
+        assert_ne!(token, changed_user_token);
+    }
+}
