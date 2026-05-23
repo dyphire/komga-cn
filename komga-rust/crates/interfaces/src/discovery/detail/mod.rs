@@ -21,7 +21,9 @@ use crate::state::{
     PersistedSeriesDetailRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
     SeriesMetadataUpdateRecord,
 };
-use komga_application::discovery::{BookMetadataAuthorReadModel, BookReadModel, ReadListReadModel};
+use komga_application::discovery::{
+    BookMetadataAuthorReadModel, BookReadModel, ReadListReadModel, ReadlistVisibilityService,
+};
 
 mod books_detail;
 mod books_persistence;
@@ -60,17 +62,8 @@ pub use readlists::{
     readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlist_create,
     readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update, readlists,
 };
-pub use readlists_support::{
-    PersistedReadlistBooksQuery, decode_query_component, delete_persisted_readlist,
-    delete_readlist_search_document, match_comicrack_readlist, parse_comicrack_readlist,
-    parse_persisted_readlist_books_query, persist_readlist_create, persist_readlist_update,
-    upsert_readlist_search_document,
-};
-use readlists_support::{
-    load_persisted_readlist_detail, load_persisted_readlists,
-    load_visible_persisted_readlist_books, paginate_persisted_readlist_books, readlist_payload,
-    readlists_page_payload, sort_visible_persisted_readlist_books,
-};
+use readlists_support::{load_persisted_readlist_detail, readlist_payload, readlists_page_payload};
+pub use readlists_support::{match_comicrack_readlist, parse_comicrack_readlist};
 pub use series_detail::{series_collections, series_detail, series_metadata_update};
 pub use series_persistence::{
     load_existing_series_metadata, load_persisted_series_resource, persist_series_metadata_update,

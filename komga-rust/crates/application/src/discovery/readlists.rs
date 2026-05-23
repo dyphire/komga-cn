@@ -1,5 +1,8 @@
 use std::collections::HashMap;
+use std::io::Read;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::runtime_sse::register_runtime_sse_event;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -9,6 +12,7 @@ use komga_domain::common_ids::LibraryId;
 use komga_domain::discovery::{
     DiscoveryError, DiscoveryQueryContext, PageEnvelope, content_allowed_by_restrictions,
 };
+use serde_json::json;
 
 use super::{
     BookDetailPort, BookMetadataAuthorReadModel, BookReadModel, DiscoveryPersistedReadlistRecord,
@@ -56,6 +60,36 @@ pub struct ReadListBooksQuery {
 pub struct ReadListDetailQuery {
     pub readlist_id: String,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadlistMutationInput {
+    pub name: String,
+    pub summary: String,
+    pub ordered: bool,
+    pub book_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadlistCreateResult {
+    pub readlist_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReadlistMutationError {
+    DuplicateName,
+    Persistence(String),
+}
+
+impl std::fmt::Display for ReadlistMutationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadlistMutationError::DuplicateName => write!(f, "Read list name already exists"),
+            ReadlistMutationError::Persistence(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for ReadlistMutationError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReadListBooksOwnership {
@@ -147,6 +181,40 @@ pub fn resolve_readlists_query(query: &str) -> ReadListsQuery {
     }
 }
 
+pub fn resolve_readlist_books_query(
+    readlist_id: impl Into<String>,
+    query: &str,
+) -> ReadListBooksQuery {
+    let page = query_value(query, "page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let size = query_value(query, "size")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(20);
+    let library_ids = {
+        let values = query_values(query, "library_id")
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        (!values.is_empty()).then_some(values)
+    };
+
+    ReadListBooksQuery {
+        readlist_id: readlist_id.into(),
+        page,
+        size,
+        unpaged: query_bool(query, "unpaged"),
+        library_ids,
+        deleted: query_value(query, "deleted").map(|value| value.eq_ignore_ascii_case("true")),
+        tags: decoded_query_values(query, "tag"),
+        read_statuses: decoded_query_values(query, "read_status"),
+        media_statuses: decoded_query_values(query, "media_status"),
+        authors: decoded_query_values(query, "author"),
+    }
+}
+
 pub struct ReadlistListService<'a> {
     readlists: &'a dyn ReadlistPort,
     books: &'a dyn BookDetailPort,
@@ -172,9 +240,10 @@ impl<'a> ReadlistListService<'a> {
         visibility_context: &DiscoveryQueryContext,
         query: ReadListsQuery,
     ) -> Result<PageEnvelope<ReadListReadModel>, String> {
+        let visibility = ReadlistVisibilityService::new(self.readlists, self.books);
         let requested_library_ids =
             library_ids_to_strings(requested_context.authorized_library_ids.as_ref());
-        let mut content = self
+        let mut content = visibility
             .load_readlists(requested_library_ids.as_deref())
             .await?;
 
@@ -186,28 +255,20 @@ impl<'a> ReadlistListService<'a> {
             content.retain(|readlist| search_ranks.contains_key(readlist.id.as_str()));
         }
 
-        let visibility_query = readlist_books_visibility_query(None);
-        let requested_library_query = query
-            .library_ids
-            .clone()
-            .map(|library_ids| readlist_books_visibility_query(Some(library_ids)));
-
         let mut visible_content = Vec::with_capacity(content.len());
         for readlist in content {
-            let Some(mut visible_readlist) = self
+            let Some(mut visible_readlist) = visibility
                 .load_readlist_detail(&readlist.id, visibility_context)
                 .await?
             else {
                 continue;
             };
 
-            if let Some(requested_library_query) = requested_library_query.as_ref() {
-                let Some(requested_library_books) = self
-                    .visible_readlist_books(
-                        &readlist.id,
-                        visibility_context,
-                        requested_library_query,
-                    )
+            if let Some(library_ids) = query.library_ids.as_ref() {
+                let requested_library_query =
+                    readlist_books_visibility_query(readlist.id.clone(), Some(library_ids.clone()));
+                let Some(requested_library_books) = visibility
+                    .visible_readlist_books(visibility_context, &requested_library_query)
                     .await?
                 else {
                     continue;
@@ -218,8 +279,9 @@ impl<'a> ReadlistListService<'a> {
                 }
             }
 
-            let Some(visible_books) = self
-                .visible_readlist_books(&readlist.id, visibility_context, &visibility_query)
+            let visibility_query = readlist_books_visibility_query(readlist.id.clone(), None);
+            let Some(visible_books) = visibility
+                .visible_readlist_books(visibility_context, &visibility_query)
                 .await?
             else {
                 continue;
@@ -246,6 +308,164 @@ impl<'a> ReadlistListService<'a> {
         Ok(paginate_readlists(visible_content, &query))
     }
 
+    async fn search_ranks(&self, search: &str) -> Result<Option<HashMap<String, usize>>, String> {
+        let search_groups = search
+            .split(',')
+            .map(str::trim)
+            .filter(|group| !group.is_empty())
+            .collect::<Vec<_>>();
+        if search_groups.is_empty() {
+            return Ok(None);
+        }
+
+        let mut next_rank = 0_usize;
+        let mut ranks = HashMap::new();
+        for search_group in search_groups {
+            let ranked_hits = self
+                .search
+                .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
+                .await?;
+            for (_score, id) in ranked_hits {
+                if let std::collections::hash_map::Entry::Vacant(entry) = ranks.entry(id) {
+                    entry.insert(next_rank);
+                    next_rank += 1;
+                }
+            }
+        }
+
+        Ok(Some(ranks))
+    }
+}
+
+pub struct ReadlistMutationService<'a> {
+    readlists: &'a dyn ReadlistPort,
+}
+
+pub struct ReadlistVisibilityService<'a> {
+    readlists: &'a dyn ReadlistPort,
+    books: &'a dyn BookDetailPort,
+}
+
+impl<'a> ReadlistVisibilityService<'a> {
+    pub fn new(readlists: &'a dyn ReadlistPort, books: &'a dyn BookDetailPort) -> Self {
+        Self { readlists, books }
+    }
+
+    pub async fn list_readlists(
+        &self,
+        library_ids: Option<&[String]>,
+    ) -> Result<Vec<ReadListReadModel>, String> {
+        self.load_readlists(library_ids).await
+    }
+
+    pub async fn readlist_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+    ) -> Result<Option<ReadListReadModel>, String> {
+        let Some(mut readlist) = self.load_readlist_detail(readlist_id, context).await? else {
+            return Ok(None);
+        };
+        let query = readlist_books_visibility_query(readlist_id, None);
+        let Some(visible_books) = self.visible_readlist_books(context, &query).await? else {
+            return Ok(None);
+        };
+        let visible_book_ids = visible_books
+            .into_iter()
+            .map(|book| book.id)
+            .collect::<Vec<_>>();
+        if visible_book_ids.is_empty() {
+            return Ok(None);
+        }
+
+        readlist.filtered = readlist.book_ids != visible_book_ids;
+        readlist.book_ids = visible_book_ids;
+        Ok(Some(readlist))
+    }
+
+    pub async fn list_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: ReadListBooksQuery,
+    ) -> Result<Option<PageEnvelope<BookReadModel>>, String> {
+        let Some(readlist) = self
+            .load_readlist_detail(&query.readlist_id, context)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let Some(mut visible_books) = self.visible_readlist_books(context, &query).await? else {
+            return Ok(None);
+        };
+
+        sort_readlist_books(&mut visible_books, readlist.ordered);
+        Ok(Some(paginate_readlist_books(visible_books, &query)))
+    }
+
+    pub async fn readlist_book_sibling(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+        book_id: &str,
+        next: bool,
+    ) -> Result<Option<BookReadModel>, String> {
+        let query = readlist_books_visibility_query(readlist_id, None);
+        let Some(readlist) = self.load_readlist_detail(readlist_id, context).await? else {
+            return Ok(None);
+        };
+        let Some(mut visible_books) = self.visible_readlist_books(context, &query).await? else {
+            return Ok(None);
+        };
+
+        sort_readlist_books(&mut visible_books, readlist.ordered);
+        let Some(current_index) = visible_books.iter().position(|book| book.id == book_id) else {
+            return Ok(None);
+        };
+        let sibling_index = if next {
+            current_index + 1
+        } else if current_index == 0 {
+            return Ok(None);
+        } else {
+            current_index - 1
+        };
+
+        Ok(visible_books.get(sibling_index).cloned())
+    }
+
+    pub async fn readlists_for_book(
+        &self,
+        candidate_library_ids: Option<&[String]>,
+        visibility_context: &DiscoveryQueryContext,
+        book_id: &str,
+    ) -> Result<Vec<ReadListReadModel>, String> {
+        let mut readlists = self.load_readlists(candidate_library_ids).await?;
+        readlists.retain(|readlist| readlist.book_ids.iter().any(|id| id == book_id));
+
+        let mut visible_readlists = Vec::with_capacity(readlists.len());
+        for mut readlist in readlists {
+            let query = readlist_books_visibility_query(readlist.id.clone(), None);
+            let Some(visible_books) = self
+                .visible_readlist_books(visibility_context, &query)
+                .await?
+            else {
+                continue;
+            };
+            let visible_book_ids = visible_books
+                .into_iter()
+                .map(|book| book.id)
+                .collect::<Vec<_>>();
+            if !visible_book_ids.iter().any(|id| id == book_id) {
+                continue;
+            }
+
+            readlist.filtered = readlist.book_ids != visible_book_ids;
+            readlist.book_ids = visible_book_ids;
+            visible_readlists.push(readlist);
+        }
+
+        Ok(visible_readlists)
+    }
+
     async fn load_readlists(
         &self,
         library_ids: Option<&[String]>,
@@ -255,7 +475,8 @@ impl<'a> ReadlistListService<'a> {
         let mut readlists = Vec::with_capacity(rows.len());
         for row in rows {
             let id = row.id.clone();
-            let (book_ids, filtered) = self.load_readlist_book_ids(&id, library_ids).await?;
+            let (book_ids, filtered) =
+                load_readlist_book_ids(self.readlists, &id, library_ids).await?;
             if library_ids.is_some() && book_ids.is_empty() {
                 continue;
             }
@@ -281,40 +502,25 @@ impl<'a> ReadlistListService<'a> {
 
         let authorized_library_ids =
             library_ids_to_strings(context.authorized_library_ids.as_ref());
-        let (book_ids, filtered) = self
-            .load_readlist_book_ids(readlist_id, authorized_library_ids.as_deref())
-            .await?;
+        let (book_ids, filtered) = load_readlist_book_ids(
+            self.readlists,
+            readlist_id,
+            authorized_library_ids.as_deref(),
+        )
+        .await?;
 
         Ok(Some(readlist_from_record(row, book_ids, filtered)))
     }
 
-    async fn load_readlist_book_ids(
-        &self,
-        readlist_id: &str,
-        library_ids: Option<&[String]>,
-    ) -> Result<(Vec<String>, bool), String> {
-        let rows = self
-            .readlists
-            .load_persisted_readlist_book_rows(readlist_id)
-            .await?;
-
-        let total_count = rows.len();
-        let book_ids = rows
-            .into_iter()
-            .filter(|row| library_ids.is_none_or(|ids| contains_id(ids, &row.library_id)))
-            .map(|row| row.book_id)
-            .collect::<Vec<_>>();
-
-        Ok((book_ids.clone(), book_ids.len() < total_count))
-    }
-
     async fn visible_readlist_books(
         &self,
-        readlist_id: &str,
         context: &DiscoveryQueryContext,
         query: &ReadListBooksQuery,
     ) -> Result<Option<Vec<BookReadModel>>, String> {
-        let Some(readlist) = self.load_readlist_detail(readlist_id, context).await? else {
+        let Some(readlist) = self
+            .load_readlist_detail(&query.readlist_id, context)
+            .await?
+        else {
             return Ok(None);
         };
         if context.authorized_library_ids.is_some() && readlist.book_ids.is_empty() {
@@ -326,7 +532,7 @@ impl<'a> ReadlistListService<'a> {
         let user_id = context.user_id.as_ref().map(|user_id| user_id.as_str());
         let rows = self
             .readlists
-            .load_persisted_readlist_book_rows(readlist_id)
+            .load_persisted_readlist_book_rows(&query.readlist_id)
             .await?;
         let mut visible = Vec::new();
 
@@ -374,33 +580,157 @@ impl<'a> ReadlistListService<'a> {
 
         Ok(Some(visible))
     }
+}
 
-    async fn search_ranks(&self, search: &str) -> Result<Option<HashMap<String, usize>>, String> {
-        let search_groups = search
-            .split(',')
-            .map(str::trim)
-            .filter(|group| !group.is_empty())
-            .collect::<Vec<_>>();
-        if search_groups.is_empty() {
+impl<'a> ReadlistMutationService<'a> {
+    pub fn new(readlists: &'a dyn ReadlistPort) -> Self {
+        Self { readlists }
+    }
+
+    pub async fn create_readlist(
+        &self,
+        input: ReadlistMutationInput,
+    ) -> Result<ReadlistCreateResult, ReadlistMutationError> {
+        self.ensure_unique_readlist_name(&input.name, None).await?;
+
+        let readlist_id = generated_readlist_id();
+        self.readlists
+            .persist_readlist_create(
+                &readlist_id,
+                &input.name,
+                &input.summary,
+                input.ordered,
+                &input.book_ids,
+            )
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+
+        register_runtime_sse_event(
+            "ReadListAdded",
+            json!({
+                "readListId": readlist_id,
+                "bookIds": input.book_ids,
+            }),
+            false,
+            None,
+        );
+        self.readlists
+            .upsert_readlist_search_document(&readlist_id)
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+
+        Ok(ReadlistCreateResult { readlist_id })
+    }
+
+    pub async fn update_readlist(
+        &self,
+        readlist_id: &str,
+        input: ReadlistMutationInput,
+    ) -> Result<bool, ReadlistMutationError> {
+        self.ensure_unique_readlist_name(&input.name, Some(readlist_id))
+            .await?;
+
+        let updated = self
+            .readlists
+            .persist_readlist_update(
+                readlist_id,
+                &input.name,
+                &input.summary,
+                input.ordered,
+                &input.book_ids,
+            )
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+        if !updated {
+            return Ok(false);
+        }
+
+        register_runtime_sse_event(
+            "ReadListChanged",
+            json!({
+                "readListId": readlist_id,
+                "bookIds": input.book_ids,
+            }),
+            false,
+            None,
+        );
+        self.readlists
+            .upsert_readlist_search_document(readlist_id)
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+
+        Ok(true)
+    }
+
+    pub async fn delete_readlist(&self, readlist_id: &str) -> Result<bool, ReadlistMutationError> {
+        let existing = self
+            .load_readlist_for_mutation(readlist_id)
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+        let deleted = self
+            .readlists
+            .delete_persisted_readlist(readlist_id)
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+        if !deleted {
+            return Ok(false);
+        }
+
+        if let Some(readlist) = existing {
+            register_runtime_sse_event(
+                "ReadListDeleted",
+                json!({
+                    "readListId": readlist_id,
+                    "bookIds": readlist.book_ids,
+                }),
+                false,
+                None,
+            );
+        }
+        self.readlists
+            .delete_readlist_search_document(readlist_id)
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+
+        Ok(true)
+    }
+
+    async fn ensure_unique_readlist_name(
+        &self,
+        name: &str,
+        allowed_readlist_id: Option<&str>,
+    ) -> Result<(), ReadlistMutationError> {
+        let readlists = self
+            .readlists
+            .load_persisted_readlists()
+            .await
+            .map_err(ReadlistMutationError::Persistence)?;
+        let duplicate = readlists.iter().any(|readlist| {
+            allowed_readlist_id != Some(readlist.id.as_str())
+                && readlist.name.eq_ignore_ascii_case(name)
+        });
+        if duplicate {
+            return Err(ReadlistMutationError::DuplicateName);
+        }
+
+        Ok(())
+    }
+
+    async fn load_readlist_for_mutation(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Option<ReadListReadModel>, String> {
+        let Some(row) = self
+            .readlists
+            .load_persisted_readlist_detail(readlist_id)
+            .await?
+        else {
             return Ok(None);
-        }
+        };
+        let (book_ids, filtered) =
+            load_readlist_book_ids(self.readlists, readlist_id, None).await?;
 
-        let mut next_rank = 0_usize;
-        let mut ranks = HashMap::new();
-        for search_group in search_groups {
-            let ranked_hits = self
-                .search
-                .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
-                .await?;
-            for (_score, id) in ranked_hits {
-                if let std::collections::hash_map::Entry::Vacant(entry) = ranks.entry(id) {
-                    entry.insert(next_rank);
-                    next_rank += 1;
-                }
-            }
-        }
-
-        Ok(Some(ranks))
+        Ok(Some(readlist_from_record(row, book_ids, filtered)))
     }
 }
 
@@ -421,9 +751,31 @@ fn readlist_from_record(
     }
 }
 
-fn readlist_books_visibility_query(library_ids: Option<Vec<String>>) -> ReadListBooksQuery {
+async fn load_readlist_book_ids(
+    readlists: &dyn ReadlistPort,
+    readlist_id: &str,
+    library_ids: Option<&[String]>,
+) -> Result<(Vec<String>, bool), String> {
+    let rows = readlists
+        .load_persisted_readlist_book_rows(readlist_id)
+        .await?;
+
+    let total_count = rows.len();
+    let book_ids = rows
+        .into_iter()
+        .filter(|row| library_ids.is_none_or(|ids| contains_id(ids, &row.library_id)))
+        .map(|row| row.book_id)
+        .collect::<Vec<_>>();
+
+    Ok((book_ids.clone(), book_ids.len() < total_count))
+}
+
+fn readlist_books_visibility_query(
+    readlist_id: impl Into<String>,
+    library_ids: Option<Vec<String>>,
+) -> ReadListBooksQuery {
     ReadListBooksQuery {
-        readlist_id: String::new(),
+        readlist_id: readlist_id.into(),
         page: 0,
         size: 20,
         unpaged: false,
@@ -540,6 +892,14 @@ fn persisted_read_status(book: &BookReadModel) -> &'static str {
     }
 }
 
+fn sort_readlist_books(books: &mut [BookReadModel], ordered: bool) {
+    if ordered {
+        return;
+    }
+
+    books.sort_by(|left, right| left.metadata_release_date.cmp(&right.metadata_release_date));
+}
+
 fn sort_readlists(
     content: &mut [ReadListReadModel],
     sort: ReadListsSort,
@@ -622,6 +982,24 @@ fn paginate_readlists(
     PageEnvelope::from_slice(page_content, page_number, page_size, total_elements)
 }
 
+fn paginate_readlist_books(
+    books: Vec<BookReadModel>,
+    query: &ReadListBooksQuery,
+) -> PageEnvelope<BookReadModel> {
+    let total_elements = books.len();
+    if query.unpaged {
+        return PageEnvelope::from_slice(books, 0, total_elements.max(1), total_elements);
+    }
+
+    let offset = query.page.saturating_mul(query.size);
+    let content = if offset >= total_elements {
+        Vec::new()
+    } else {
+        books.into_iter().skip(offset).take(query.size).collect()
+    };
+    PageEnvelope::from_slice(content, query.page, query.size, total_elements)
+}
+
 fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query.split('&').find_map(|pair| {
         let mut parts = pair.splitn(2, '=');
@@ -651,6 +1029,16 @@ fn query_bool(query: &str, key: &str) -> bool {
     query_value(query, key)
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
+}
+
+fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
+    let values = query_values(query, key)
+        .into_iter()
+        .map(decode_query_component)
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+
+    (!values.is_empty()).then_some(values)
 }
 
 fn decode_query_component(value: &str) -> String {
@@ -698,12 +1086,33 @@ fn parse_csv_values(raw: &str) -> Vec<String> {
         .collect()
 }
 
+fn generated_readlist_id() -> String {
+    format!("readlist-{}", random_hex_token(12))
+}
+
+fn random_hex_token(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
+        }
+    }
+
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
     use komga_domain::common_ids::LibraryId;
     use komga_domain::discovery::DiscoveryQueryContext;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Mutex};
 
     use crate::discovery::{
         BookDetailPort, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
@@ -715,7 +1124,9 @@ mod tests {
 
     use super::{
         ReadListBooksOwnership, ReadListBooksQuery, ReadListsQuery, ReadListsSort,
-        ReadlistListService, classify_readlist_books_query, normalize_readlists_search,
+        ReadlistListService, ReadlistMutationInput, ReadlistMutationService,
+        ReadlistVisibilityService, classify_readlist_books_query, normalize_readlists_search,
+        resolve_readlist_books_query,
     };
 
     #[test]
@@ -795,6 +1206,88 @@ mod tests {
         assert!(!readlist.filtered);
     }
 
+    #[tokio::test]
+    async fn readlist_mutation_service_create_persists_sse_and_search_sync_as_one_boundary() {
+        let ports = TestReadlistPorts::new();
+        let service = ReadlistMutationService::new(&ports);
+        let result = service
+            .create_readlist(ReadlistMutationInput {
+                name: "New ReadList".to_string(),
+                summary: "Created from service".to_string(),
+                ordered: true,
+                book_ids: vec!["book-a".to_string()],
+            })
+            .await
+            .expect("readlist create should complete");
+
+        assert!(result.readlist_id.starts_with("readlist-"));
+        assert_eq!(ports.created_readlists().len(), 1);
+        assert_eq!(
+            ports.search_upserts(),
+            vec![result.readlist_id],
+            "search sync belongs to the mutation boundary",
+        );
+    }
+
+    #[tokio::test]
+    async fn readlist_visibility_service_sorts_unordered_books_before_pagination() {
+        let mut ports = TestReadlistPorts::new();
+        ports.readlists.push(readlist_record_with_ordered(
+            "readlist-unordered",
+            "Unordered",
+            false,
+        ));
+        ports.readlist_books.insert(
+            "readlist-unordered".to_string(),
+            vec![
+                readlist_book_record("book-late", "library-a"),
+                readlist_book_record("book-early", "library-a"),
+                readlist_book_record("book-middle", "library-a"),
+            ],
+        );
+        ports.books.insert(
+            "book-late".to_string(),
+            sample_book_with_release_date("book-late", Some("2024-03-01")),
+        );
+        ports.books.insert(
+            "book-early".to_string(),
+            sample_book_with_release_date("book-early", Some("2024-01-01")),
+        );
+        ports.books.insert(
+            "book-middle".to_string(),
+            sample_book_with_release_date("book-middle", Some("2024-02-01")),
+        );
+        for book_id in ["book-late", "book-early", "book-middle"] {
+            ports.book_resources.insert(
+                book_id.to_string(),
+                PersistedBookResourceRecord {
+                    library_id: "library-a".to_string(),
+                    age_rating: None,
+                    sharing_labels: String::new(),
+                },
+            );
+        }
+
+        let service = ReadlistVisibilityService::new(&ports, &ports);
+        let page = service
+            .list_readlist_books(
+                &context_with_libraries(["library-a"]),
+                resolve_readlist_books_query("readlist-unordered", "page=0&size=2"),
+            )
+            .await
+            .expect("readlist books should resolve")
+            .expect("readlist should be visible");
+
+        assert_eq!(page.total_elements, 3);
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-early", "book-middle"],
+        );
+    }
+
     fn context_with_libraries<const N: usize>(libraries: [&str; N]) -> DiscoveryQueryContext {
         DiscoveryQueryContext {
             user_id: None,
@@ -810,6 +1303,11 @@ mod tests {
         books: HashMap<String, BookReadModel>,
         book_resources: HashMap<String, PersistedBookResourceRecord>,
         search_hits: HashMap<String, Vec<(f32, String)>>,
+        created_readlists: Mutex<Vec<String>>,
+        updated_readlists: Mutex<Vec<String>>,
+        deleted_readlists: Mutex<Vec<String>>,
+        search_upserts: Mutex<Vec<String>>,
+        search_deletes: Mutex<Vec<String>>,
     }
 
     impl TestReadlistPorts {
@@ -818,22 +1316,13 @@ mod tests {
             readlist_books.insert(
                 "readlist-1".to_string(),
                 vec![
-                    DiscoveryPersistedReadlistBookRecord {
-                        book_id: "book-a".to_string(),
-                        library_id: "library-a".to_string(),
-                    },
-                    DiscoveryPersistedReadlistBookRecord {
-                        book_id: "book-b".to_string(),
-                        library_id: "library-b".to_string(),
-                    },
+                    readlist_book_record("book-a", "library-a"),
+                    readlist_book_record("book-b", "library-b"),
                 ],
             );
             readlist_books.insert(
                 "readlist-2".to_string(),
-                vec![DiscoveryPersistedReadlistBookRecord {
-                    book_id: "book-c".to_string(),
-                    library_id: "library-b".to_string(),
-                }],
+                vec![readlist_book_record("book-c", "library-b")],
             );
 
             let books = ["book-a", "book-b", "book-c"]
@@ -867,14 +1356,33 @@ mod tests {
 
             Self {
                 readlists: vec![
-                    readlist_record("readlist-1", "Visible"),
-                    readlist_record("readlist-2", "Library B Only"),
+                    readlist_record_with_ordered("readlist-1", "Visible", true),
+                    readlist_record_with_ordered("readlist-2", "Library B Only", true),
                 ],
                 readlist_books,
                 books,
                 book_resources,
                 search_hits,
+                created_readlists: Mutex::new(Vec::new()),
+                updated_readlists: Mutex::new(Vec::new()),
+                deleted_readlists: Mutex::new(Vec::new()),
+                search_upserts: Mutex::new(Vec::new()),
+                search_deletes: Mutex::new(Vec::new()),
             }
+        }
+
+        fn created_readlists(&self) -> Vec<String> {
+            self.created_readlists
+                .lock()
+                .expect("created readlists lock should not be poisoned")
+                .clone()
+        }
+
+        fn search_upserts(&self) -> Vec<String> {
+            self.search_upserts
+                .lock()
+                .expect("search upserts lock should not be poisoned")
+                .clone()
         }
     }
 
@@ -916,39 +1424,62 @@ mod tests {
 
         async fn persist_readlist_create(
             &self,
-            _readlist_id: &str,
+            readlist_id: &str,
             _name: &str,
             _summary: &str,
             _ordered: bool,
             _book_ids: &[String],
         ) -> Result<(), String> {
-            unimplemented!("not used by readlist list service tests")
+            self.created_readlists
+                .lock()
+                .expect("created readlists lock should not be poisoned")
+                .push(readlist_id.to_string());
+            Ok(())
         }
 
         async fn persist_readlist_update(
             &self,
-            _readlist_id: &str,
+            readlist_id: &str,
             _name: &str,
             _summary: &str,
             _ordered: bool,
             _book_ids: &[String],
         ) -> Result<bool, String> {
-            unimplemented!("not used by readlist list service tests")
+            self.updated_readlists
+                .lock()
+                .expect("updated readlists lock should not be poisoned")
+                .push(readlist_id.to_string());
+            Ok(self
+                .readlists
+                .iter()
+                .any(|readlist| readlist.id == readlist_id))
         }
 
-        async fn delete_persisted_readlist(&self, _readlist_id: &str) -> Result<bool, String> {
-            unimplemented!("not used by readlist list service tests")
+        async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+            self.deleted_readlists
+                .lock()
+                .expect("deleted readlists lock should not be poisoned")
+                .push(readlist_id.to_string());
+            Ok(self
+                .readlists
+                .iter()
+                .any(|readlist| readlist.id == readlist_id))
         }
 
-        async fn upsert_readlist_search_document(
-            &self,
-            _readlist_id: &str,
-        ) -> Result<bool, String> {
-            unimplemented!("not used by readlist list service tests")
+        async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
+            self.search_upserts
+                .lock()
+                .expect("search upserts lock should not be poisoned")
+                .push(readlist_id.to_string());
+            Ok(true)
         }
 
-        async fn delete_readlist_search_document(&self, _readlist_id: &str) -> Result<(), String> {
-            unimplemented!("not used by readlist list service tests")
+        async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
+            self.search_deletes
+                .lock()
+                .expect("search deletes lock should not be poisoned")
+                .push(readlist_id.to_string());
+            Ok(())
         }
     }
 
@@ -1049,18 +1580,36 @@ mod tests {
         }
     }
 
-    fn readlist_record(id: &str, name: &str) -> DiscoveryPersistedReadlistRecord {
+    fn readlist_record_with_ordered(
+        id: &str,
+        name: &str,
+        ordered: bool,
+    ) -> DiscoveryPersistedReadlistRecord {
         DiscoveryPersistedReadlistRecord {
             id: id.to_string(),
             name: name.to_string(),
             summary: String::new(),
-            ordered: true,
+            ordered,
             created_date: "2024-01-01 00:00:00".to_string(),
             last_modified_date: "2024-01-01 00:00:00".to_string(),
         }
     }
 
+    fn readlist_book_record(
+        book_id: &str,
+        library_id: &str,
+    ) -> DiscoveryPersistedReadlistBookRecord {
+        DiscoveryPersistedReadlistBookRecord {
+            book_id: book_id.to_string(),
+            library_id: library_id.to_string(),
+        }
+    }
+
     fn sample_book(id: &str) -> BookReadModel {
+        sample_book_with_release_date(id, None)
+    }
+
+    fn sample_book_with_release_date(id: &str, release_date: Option<&str>) -> BookReadModel {
         BookReadModel {
             id: id.to_string(),
             series_id: "series-1".to_string(),
@@ -1088,7 +1637,7 @@ mod tests {
             metadata_number_lock: false,
             metadata_number_sort: 1.0,
             metadata_number_sort_lock: false,
-            metadata_release_date: None,
+            metadata_release_date: release_date.map(str::to_string),
             metadata_release_date_lock: false,
             metadata_authors: vec![],
             metadata_authors_lock: false,

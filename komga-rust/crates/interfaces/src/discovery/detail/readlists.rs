@@ -1,12 +1,14 @@
-use super::readlists_support::{
-    PersistedReadlistBooksQuery, PersistedReadlistWriteInput, merge_readlist_write_input,
-};
+use super::readlists_support::merge_readlist_write_input;
 use super::*;
 use crate::helpers::validation_error_response;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
 use axum::extract::State;
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
+use komga_application::discovery::{
+    ReadlistMutationError, ReadlistMutationInput, ReadlistMutationService,
+    ReadlistVisibilityService, resolve_readlist_books_query,
+};
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -69,28 +71,13 @@ pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: 
         Err(response) => return response,
     };
 
-    match load_persisted_readlists(&app, None).await {
-        Ok(readlists)
-            if readlists
-                .iter()
-                .any(|readlist| readlist.name.eq_ignore_ascii_case(&input.name)) =>
-        {
-            return readlist_create_bad_request("Read list name already exists");
-        }
-        Ok(_) => {}
-        Err(error) => return internal_error_response(error),
-    }
-
-    let created_id = match persist_readlist_create(&app, &input).await {
-        Ok(id) => id,
-        Err(error) => return internal_error_response(error),
+    let service = ReadlistMutationService::new(app.readlist.as_ref());
+    let created = match service.create_readlist(input).await {
+        Ok(created) => created,
+        Err(error) => return readlist_mutation_error_response(error, "/api/v1/readlists"),
     };
 
-    if let Err(error) = upsert_readlist_search_document(&app, &created_id).await {
-        return internal_error_response(error);
-    }
-
-    match load_persisted_readlist_detail(&app, &created_id, None).await {
+    match load_persisted_readlist_detail(&app, &created.readlist_id, None).await {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -98,7 +85,7 @@ pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: 
 }
 
 #[allow(clippy::result_large_err)]
-fn parse_readlist_create_input(payload: &Value) -> Result<PersistedReadlistWriteInput, Response> {
+fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput, Response> {
     let Some(payload) = payload.as_object() else {
         return Err(readlist_create_bad_request(
             "Request body must be a JSON object",
@@ -184,7 +171,7 @@ fn parse_readlist_create_input(payload: &Value) -> Result<PersistedReadlistWrite
         return Err(validation_error_response(violations));
     }
 
-    Ok(PersistedReadlistWriteInput {
+    Ok(ReadlistMutationInput {
         name: name.to_string(),
         summary: summary.to_string(),
         ordered,
@@ -193,12 +180,16 @@ fn parse_readlist_create_input(payload: &Value) -> Result<PersistedReadlistWrite
 }
 
 fn readlist_create_bad_request(message: &str) -> Response {
+    readlist_bad_request(message, "/api/v1/readlists")
+}
+
+fn readlist_bad_request(message: &str, path: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(json!({
             "error": "Bad Request",
             "message": message,
-            "path": "/api/v1/readlists",
+            "path": path,
             "status": 400,
             "timestamp": SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -207,6 +198,15 @@ fn readlist_create_bad_request(message: &str) -> Response {
         })),
     )
         .into_response()
+}
+
+fn readlist_mutation_error_response(error: ReadlistMutationError, path: &str) -> Response {
+    match error {
+        ReadlistMutationError::DuplicateName => {
+            readlist_bad_request("Read list name already exists", path)
+        }
+        ReadlistMutationError::Persistence(error) => internal_error_response(error),
+    }
 }
 
 pub async fn readlist_match_comicrack(
@@ -262,15 +262,12 @@ pub async fn readlist_update(
     };
     let input = merge_readlist_write_input(&existing, &payload);
 
-    match persist_readlist_update(&app, &readlist_id, &input).await {
-        Ok(true) => {
-            if let Err(error) = upsert_readlist_search_document(&app, &readlist_id).await {
-                return internal_error_response(error);
-            }
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let service = ReadlistMutationService::new(app.readlist.as_ref());
+    let path = format!("/api/v1/readlists/{readlist_id}");
+    match service.update_readlist(&readlist_id, input).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => readlist_mutation_error_response(error, path.as_str()),
     }
 }
 
@@ -279,15 +276,11 @@ pub async fn readlist_delete(
     _: Admin,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match delete_persisted_readlist(&app, &readlist_id).await {
-        Ok(true) => {
-            if let Err(error) = delete_readlist_search_document(&app, &readlist_id).await {
-                return internal_error_response(error);
-            }
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let service = ReadlistMutationService::new(app.readlist.as_ref());
+    match service.delete_readlist(&readlist_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => internal_error_response(error.to_string()),
     }
 }
 
@@ -298,17 +291,8 @@ pub async fn readlist_books(
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    let query = parse_persisted_readlist_books_query(uri.query().unwrap_or_default());
-    let Some(mut visible_books) =
-        (match load_visible_persisted_readlist_books(&app, &headers, &readlist_id, &query).await {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let Some(context) = app
+    let query = resolve_readlist_books_query(readlist_id, uri.query().unwrap_or_default());
+    let Some(response_context) = app
         .discovery_auth
         .resolve_query_context_with_persistence(
             &app.identity,
@@ -319,25 +303,29 @@ pub async fn readlist_books(
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(readlist) = (match load_persisted_readlist_detail(
-        &app,
-        &readlist_id,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
-    {
-        Ok(readlist) => readlist,
-        Err(error) => return internal_error_response(error),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
+    let Some(visibility_context) = app
+        .discovery_auth
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
+        .await
+    else {
+        return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    sort_visible_persisted_readlist_books(&mut visible_books, readlist.ordered);
+    let paged = !query.unpaged;
+    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let page = match service
+        .list_readlist_books(&to_domain_query_context(visibility_context), query)
+        .await
+    {
+        Ok(Some(page)) => page,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    };
 
     Json(book_details_page_payload(
-        paginate_persisted_readlist_books(visible_books, &query),
-        context.is_admin,
-        !query.unpaged,
+        page,
+        response_context.is_admin,
+        paged,
     ))
     .into_response()
 }
@@ -356,57 +344,16 @@ pub async fn readlist_detail(
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-    let detail_query = PersistedReadlistBooksQuery {
-        page: 0,
-        size: 20,
-        unpaged: true,
-        library_ids: None,
-        deleted: None,
-        tags: Vec::new(),
-        read_statuses: Vec::new(),
-        media_statuses: Vec::new(),
-        authors: Vec::new(),
-    };
 
-    match load_persisted_readlist_detail(
-        &app,
-        &readlist_id,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    match service
+        .readlist_detail(&to_domain_query_context(context), &readlist_id)
+        .await
     {
-        Ok(Some(mut readlist)) => {
-            let Some(visible_books) = (match load_visible_persisted_readlist_books(
-                &app,
-                &headers,
-                &readlist_id,
-                &detail_query,
-            )
-            .await
-            {
-                Ok(books) => books,
-                Err(error) => return internal_error_response(error),
-            }) else {
-                return StatusCode::NOT_FOUND.into_response();
-            };
-
-            let visible_book_ids = visible_books
-                .into_iter()
-                .map(|book| book.id)
-                .collect::<Vec<_>>();
-            if visible_book_ids.is_empty() {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-
-            readlist.filtered = readlist.book_ids != visible_book_ids;
-            readlist.book_ids = visible_book_ids;
-            return Json(readlist_payload(&readlist)).into_response();
-        }
-        Ok(None) => {}
+        Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
-
-    StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn readlist_book_sibling_previous(
@@ -434,72 +381,30 @@ async fn sibling_response(
     book_id: &str,
     next: bool,
 ) -> Response {
-    let auth_state = &app.discovery_auth;
-    let query = PersistedReadlistBooksQuery {
-        page: 0,
-        size: 20,
-        unpaged: true,
-        library_ids: None,
-        deleted: None,
-        tags: Vec::new(),
-        read_statuses: Vec::new(),
-        media_statuses: Vec::new(),
-        authors: Vec::new(),
-    };
-
-    let Some(mut visible_books) =
-        (match load_visible_persisted_readlist_books(app, headers, readlist_id, &query).await {
-            Ok(books) => books,
-            Err(error) => return internal_error_response(error),
-        })
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let Some(context) = auth_state
+    let Some(context) = app
+        .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, headers, None)
         .await
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let Some(readlist) = (match load_persisted_readlist_detail(
-        app,
-        readlist_id,
-        context.authorized_library_ids.as_deref(),
-    )
-    .await
+    let is_admin = context.is_admin;
+    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let sibling = match service
+        .readlist_book_sibling(
+            &to_domain_query_context(context),
+            readlist_id,
+            book_id,
+            next,
+        )
+        .await
     {
-        Ok(readlist) => readlist,
+        Ok(Some(sibling)) => sibling,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
     };
 
-    sort_visible_persisted_readlist_books(&mut visible_books, readlist.ordered);
-
-    let visible_book_ids = visible_books
-        .iter()
-        .map(|book| book.id.as_str())
-        .collect::<Vec<_>>();
-    let Some(current_index) = visible_book_ids
-        .iter()
-        .position(|candidate| *candidate == book_id)
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let sibling_index = if next {
-        current_index + 1
-    } else if current_index == 0 {
-        return StatusCode::NOT_FOUND.into_response();
-    } else {
-        current_index - 1
-    };
-
-    let Some(sibling) = visible_books.get(sibling_index) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    Json(book_detail_payload(sibling, context.is_admin)).into_response()
+    Json(book_detail_payload(&sibling, is_admin)).into_response()
 }
 
 fn book_details_page_payload(

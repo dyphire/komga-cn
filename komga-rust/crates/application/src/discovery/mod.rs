@@ -35,8 +35,10 @@ pub use read_models::{
 };
 pub use readlists::{
     ReadListBooksOwnership, ReadListBooksQuery, ReadListDetailQuery, ReadListsQuery, ReadListsSort,
-    ReadlistListService, classify_readlist_books_query, normalize_readlists_search,
-    parse_readlists_sort, resolve_readlists_query,
+    ReadlistCreateResult, ReadlistListService, ReadlistMutationError, ReadlistMutationInput,
+    ReadlistMutationService, ReadlistVisibilityService, classify_readlist_books_query,
+    normalize_readlists_search, parse_readlists_sort, resolve_readlist_books_query,
+    resolve_readlists_query,
 };
 pub use request_resolution::{
     BrowseResponseMetadata, DiscoveryRequestError, ResolvedBooksBrowseRequest,

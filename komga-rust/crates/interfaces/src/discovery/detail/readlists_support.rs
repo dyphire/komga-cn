@@ -1,18 +1,11 @@
 use super::*;
-use komga_application::runtime_sse::register_runtime_sse_event;
 
 use crate::helpers::normalized_date_time;
 use crate::state::DiscoveryState;
+use komga_application::discovery::ReadlistMutationInput;
 use quick_xml::Reader as XmlReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
-
-pub struct PersistedReadlistWriteInput {
-    pub name: String,
-    pub summary: String,
-    pub ordered: bool,
-    pub book_ids: Vec<String>,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComicRackReadListRequestBook {
@@ -24,19 +17,6 @@ pub struct ComicRackReadListRequestBook {
 pub struct ComicRackReadListRequest {
     pub name: String,
     pub books: Vec<ComicRackReadListRequestBook>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PersistedReadlistBooksQuery {
-    pub page: usize,
-    pub size: usize,
-    pub unpaged: bool,
-    pub library_ids: Option<Vec<String>>,
-    pub deleted: Option<bool>,
-    pub tags: Vec<String>,
-    pub read_statuses: Vec<String>,
-    pub media_statuses: Vec<String>,
-    pub authors: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,9 +39,7 @@ pub struct ComicRackRequestMatchGroup {
     pub books: Vec<ComicRackMatchBook>,
 }
 
-pub type PersistedVisibleReadlistBook = BookDetailReadModel;
-
-pub(super) async fn load_persisted_readlists(
+async fn load_persisted_readlists(
     app: &DiscoveryState,
     library_ids: Option<&[String]>,
 ) -> Result<Vec<ReadListReadModel>, String> {
@@ -94,13 +72,6 @@ pub async fn load_comicrack_match_candidates(
     app: &DiscoveryState,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
     app.readlist.load_comicrack_match_candidates().await
-}
-
-pub async fn load_persisted_book_authors(
-    app: &DiscoveryState,
-    book_id: &str,
-) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
-    app.book_detail.load_persisted_book_authors(book_id).await
 }
 
 pub(super) async fn load_persisted_readlist_detail(
@@ -159,7 +130,7 @@ async fn load_persisted_readlist_book_ids(
 pub fn merge_readlist_write_input(
     existing: &ReadListReadModel,
     payload: &Value,
-) -> PersistedReadlistWriteInput {
+) -> ReadlistMutationInput {
     let name = payload
         .get("name")
         .and_then(Value::as_str)
@@ -186,111 +157,12 @@ pub fn merge_readlist_write_input(
         })
         .unwrap_or_else(|| existing.book_ids.clone());
 
-    PersistedReadlistWriteInput {
+    ReadlistMutationInput {
         name,
         summary,
         ordered,
         book_ids,
     }
-}
-
-pub async fn persist_readlist_create(
-    app: &DiscoveryState,
-    input: &PersistedReadlistWriteInput,
-) -> Result<String, String> {
-    let readlist_id = generated_readlist_id();
-    app.readlist
-        .persist_readlist_create(
-            &readlist_id,
-            &input.name,
-            &input.summary,
-            input.ordered,
-            &input.book_ids,
-        )
-        .await?;
-
-    register_runtime_sse_event(
-        "ReadListAdded",
-        json!({
-            "readListId": readlist_id,
-            "bookIds": input.book_ids,
-        }),
-        false,
-        None,
-    );
-
-    Ok(readlist_id)
-}
-
-pub async fn persist_readlist_update(
-    app: &DiscoveryState,
-    readlist_id: &str,
-    input: &PersistedReadlistWriteInput,
-) -> Result<bool, String> {
-    let updated = app
-        .readlist
-        .persist_readlist_update(
-            readlist_id,
-            &input.name,
-            &input.summary,
-            input.ordered,
-            &input.book_ids,
-        )
-        .await?;
-    if updated {
-        register_runtime_sse_event(
-            "ReadListChanged",
-            json!({
-                "readListId": readlist_id,
-                "bookIds": input.book_ids,
-            }),
-            false,
-            None,
-        );
-    }
-    Ok(updated)
-}
-
-pub async fn delete_persisted_readlist(
-    app: &DiscoveryState,
-    readlist_id: &str,
-) -> Result<bool, String> {
-    let existing = load_persisted_readlist_detail(app, readlist_id, None).await?;
-    let deleted = app.readlist.delete_persisted_readlist(readlist_id).await?;
-    if deleted && let Some(readlist) = existing {
-        register_runtime_sse_event(
-            "ReadListDeleted",
-            json!({
-                "readListId": readlist_id,
-                "bookIds": readlist.book_ids,
-            }),
-            false,
-            None,
-        );
-    }
-    Ok(deleted)
-}
-
-pub async fn upsert_readlist_search_document(
-    app: &DiscoveryState,
-    readlist_id: &str,
-) -> Result<bool, String> {
-    app.readlist
-        .upsert_readlist_search_document(readlist_id)
-        .await
-}
-
-pub async fn delete_readlist_search_document(
-    app: &DiscoveryState,
-    readlist_id: &str,
-) -> Result<(), String> {
-    app.readlist
-        .delete_readlist_search_document(readlist_id)
-        .await
-}
-
-fn generated_readlist_id() -> String {
-    format!("readlist-{}", random_hex_token(12))
 }
 
 pub fn parse_comicrack_readlist(bytes: &[u8]) -> Result<ComicRackReadListRequest, &'static str> {
@@ -501,261 +373,6 @@ fn normalized_comicrack_number(value: &str) -> String {
     }
 }
 
-pub fn parse_persisted_readlist_books_query(query: &str) -> PersistedReadlistBooksQuery {
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let library_ids = {
-        let values = query_values(query, "library_id")
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then_some(values)
-    };
-
-    PersistedReadlistBooksQuery {
-        page,
-        size,
-        unpaged: query_bool(query, "unpaged"),
-        library_ids,
-        deleted: query_value(query, "deleted").map(|value| value.eq_ignore_ascii_case("true")),
-        tags: decoded_query_values(query, "tag"),
-        read_statuses: decoded_query_values(query, "read_status"),
-        media_statuses: decoded_query_values(query, "media_status"),
-        authors: decoded_query_values(query, "author"),
-    }
-}
-
-fn decoded_query_values(query: &str, key: &str) -> Vec<String> {
-    query_values(query, key)
-        .into_iter()
-        .map(decode_query_component)
-        .filter(|value| !value.trim().is_empty())
-        .collect()
-}
-
-pub(super) async fn load_visible_persisted_readlist_books(
-    app: &DiscoveryState,
-    headers: &HeaderMap,
-    readlist_id: &str,
-    query: &PersistedReadlistBooksQuery,
-) -> Result<Option<Vec<PersistedVisibleReadlistBook>>, String> {
-    let auth_state = &app.discovery_auth;
-    let Some(context) = auth_state
-        .resolve_query_context_with_persistence(&app.identity, headers, None)
-        .await
-    else {
-        return Ok(None);
-    };
-
-    let Some(readlist) =
-        load_persisted_readlist_detail(app, readlist_id, context.authorized_library_ids.as_deref())
-            .await?
-    else {
-        return Ok(None);
-    };
-    if context.authorized_library_ids.is_some() && readlist.book_ids.is_empty() {
-        return Ok(None);
-    }
-
-    let rows = app
-        .readlist
-        .load_persisted_readlist_book_rows(readlist_id)
-        .await?;
-    let mut visible = Vec::new();
-
-    for row in rows {
-        if context
-            .authorized_library_ids
-            .as_ref()
-            .is_some_and(|allowed| !allowed.iter().any(|candidate| candidate == &row.library_id))
-        {
-            continue;
-        }
-        if query.library_ids.as_ref().is_some_and(|requested| {
-            !requested
-                .iter()
-                .any(|candidate| candidate == &row.library_id)
-        }) {
-            continue;
-        }
-
-        let Some(resource) = load_persisted_book_resource(app, &row.book_id).await? else {
-            continue;
-        };
-        let detail_context = DetailResourceContext {
-            library_id: Some(resource.library_id),
-            content: Some(DetailContentContext {
-                age_rating: resource.age_rating.map(u32::from),
-                sharing_labels: resource.sharing_labels,
-            }),
-        };
-        let detail_query_context = match auth_state
-            .resolve_detail_query_context_with_persistence(&app.identity, headers, &detail_context)
-            .await
-        {
-            Ok(context) => context,
-            Err(_) => continue,
-        };
-        let Some(detail) =
-            load_persisted_book_detail(app, &row.book_id, detail_query_context.user_id.as_deref())
-                .await?
-        else {
-            continue;
-        };
-
-        let book_authors = load_persisted_book_authors(app, &row.book_id).await?;
-
-        if !matches_persisted_readlist_book_filters(&detail, &book_authors, query) {
-            continue;
-        }
-
-        visible.push(detail);
-    }
-
-    Ok(Some(visible))
-}
-
-pub(super) fn sort_visible_persisted_readlist_books(
-    books: &mut [PersistedVisibleReadlistBook],
-    ordered: bool,
-) {
-    if ordered {
-        return;
-    }
-
-    books.sort_by(|left, right| left.metadata_release_date.cmp(&right.metadata_release_date));
-}
-
-fn matches_persisted_readlist_book_filters(
-    book: &BookDetailReadModel,
-    book_authors: &[BookMetadataAuthorReadModel],
-    query: &PersistedReadlistBooksQuery,
-) -> bool {
-    if query.deleted.is_some_and(|deleted| deleted != book.deleted) {
-        return false;
-    }
-    if !query.tags.is_empty()
-        && !query.tags.iter().any(|tag| {
-            book.metadata_tags
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(tag))
-        })
-    {
-        return false;
-    }
-    if !query.media_statuses.is_empty()
-        && !query
-            .media_statuses
-            .iter()
-            .any(|status| book.media_status.eq_ignore_ascii_case(status))
-    {
-        return false;
-    }
-    if !query.read_statuses.is_empty() {
-        let read_status = persisted_read_status(book);
-        if !query
-            .read_statuses
-            .iter()
-            .any(|status| read_status.eq_ignore_ascii_case(status))
-        {
-            return false;
-        }
-    }
-    if !query.authors.is_empty() {
-        let mut has_author_filters = false;
-        let matches_author_filter = query
-            .authors
-            .iter()
-            .filter_map(|author| parse_author_filter(author))
-            .any(|(requested_name, requested_role)| {
-                has_author_filters = true;
-                book_authors.iter().any(|author| {
-                    author.name.eq_ignore_ascii_case(&requested_name)
-                        && author.role.eq_ignore_ascii_case(&requested_role)
-                })
-            });
-        if has_author_filters && !matches_author_filter {
-            return false;
-        }
-    }
-
-    true
-}
-
-fn parse_author_filter(value: &str) -> Option<(String, String)> {
-    let (name, role) = value.rsplit_once(',')?;
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return None;
-    }
-    Some((name, role.trim().to_ascii_lowercase()))
-}
-
-fn persisted_read_status(book: &BookDetailReadModel) -> &'static str {
-    match book.read_progress.as_ref() {
-        Some(progress) if progress.completed => "READ",
-        Some(progress) if progress.page > 0 => "IN_PROGRESS",
-        _ => "UNREAD",
-    }
-}
-
-pub(super) fn paginate_persisted_readlist_books(
-    books: Vec<PersistedVisibleReadlistBook>,
-    query: &PersistedReadlistBooksQuery,
-) -> PageEnvelope<BookDetailReadModel> {
-    let total_elements = books.len();
-    if query.unpaged {
-        return PageEnvelope::from_slice(books, 0, total_elements.max(1), total_elements);
-    }
-
-    let offset = query.page.saturating_mul(query.size);
-    let content = if offset >= total_elements {
-        Vec::new()
-    } else {
-        books.into_iter().skip(offset).take(query.size).collect()
-    };
-    PageEnvelope::from_slice(content, query.page, query.size, total_elements)
-}
-
-pub fn decode_query_component(value: &str) -> String {
-    let mut decoded = Vec::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => {
-                decoded.push(b' ');
-                index += 1;
-            }
-            b'%' if index + 2 < bytes.len() => {
-                let first = (bytes[index + 1] as char).to_digit(16);
-                let second = (bytes[index + 2] as char).to_digit(16);
-
-                if let (Some(first), Some(second)) = (first, second) {
-                    decoded.push((first * 16 + second) as u8);
-                    index += 3;
-                } else {
-                    decoded.push(bytes[index]);
-                    index += 1;
-                }
-            }
-            byte => {
-                decoded.push(byte);
-                index += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&decoded).into_owned()
-}
-
 pub(super) fn readlists_page_payload(page: PageEnvelope<ReadListReadModel>) -> Value {
     let content = page
         .content
@@ -812,18 +429,11 @@ pub(super) fn readlist_payload(readlist: &ReadListReadModel) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::super::BookDetailReadModel;
     use super::{
         ComicRackReadListRequest, ComicRackReadListRequestBook, comicrack_payload,
-        decode_query_component, parse_comicrack_readlist, sort_visible_persisted_readlist_books,
+        parse_comicrack_readlist,
     };
-    use komga_application::discovery::{BookMetadataAuthorReadModel, BookMetadataLinkReadModel};
     use serde_json::json;
-
-    #[test]
-    fn decode_query_component_decodes_percent_encoded_utf8_sequences() {
-        assert_eq!(decode_query_component("caf%C3%A9+au+lait"), "café au lait");
-    }
 
     #[test]
     fn parse_comicrack_readlist_rejects_invalid_xml() {
@@ -916,21 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn unordered_readlist_book_sort_uses_release_date_only() {
-        let mut books = vec![
-            sample_readlist_book("book-b", Some("2024-01-01"), "Zeta", 2),
-            sample_readlist_book("book-a", Some("2024-01-01"), "Alpha", 1),
-            sample_readlist_book("book-c", Some("2024-01-02"), "Gamma", 3),
-        ];
-
-        sort_visible_persisted_readlist_books(&mut books, false);
-
-        assert_eq!(books[0].id, "book-b");
-        assert_eq!(books[1].id, "book-a");
-        assert_eq!(books[2].id, "book-c");
-    }
-
-    #[test]
     fn readlist_payload_normalizes_datetime_fields() {
         let payload = super::readlist_payload(&super::ReadListReadModel {
             id: "readlist-1".to_string(),
@@ -951,63 +546,5 @@ mod tests {
             payload.get("lastModifiedDate"),
             Some(&json!("2024-01-02T00:00:00Z"))
         );
-    }
-
-    fn sample_readlist_book(
-        id: &str,
-        release_date: Option<&str>,
-        series_title: &str,
-        number: i32,
-    ) -> BookDetailReadModel {
-        BookDetailReadModel {
-            id: id.to_string(),
-            series_id: "series-1".to_string(),
-            series_title: series_title.to_string(),
-            series_title_sort: series_title.to_string(),
-            library_id: "lib-1".to_string(),
-            name: format!("Book {id}"),
-            url: format!("/books/{id}.cbz"),
-            number,
-            created: "2024-01-01T00:00:00Z".to_string(),
-            last_modified: "2024-01-01T00:00:00Z".to_string(),
-            file_last_modified: "2024-01-01T00:00:00Z".to_string(),
-            size_bytes: 1,
-            media_status: "READY".to_string(),
-            media_type: "application/vnd.comicbook+zip".to_string(),
-            media_pages_count: 1,
-            media_comment: String::new(),
-            metadata_title: format!("Meta {id}"),
-            metadata_summary: String::new(),
-            metadata_number: number.to_string(),
-            metadata_number_sort: f64::from(number),
-            metadata_release_date: release_date.map(str::to_string),
-            metadata_title_lock: false,
-            metadata_summary_lock: false,
-            metadata_number_lock: false,
-            metadata_number_sort_lock: false,
-            metadata_release_date_lock: false,
-            metadata_authors: vec![BookMetadataAuthorReadModel {
-                name: "Author".to_string(),
-                role: "Writer".to_string(),
-            }],
-            metadata_authors_lock: false,
-            metadata_tags: vec![],
-            metadata_tags_lock: false,
-            metadata_isbn: String::new(),
-            metadata_isbn_lock: false,
-            metadata_links: vec![BookMetadataLinkReadModel {
-                label: "Site".to_string(),
-                url: "https://example.com".to_string(),
-            }],
-            metadata_links_lock: false,
-            metadata_created: "2024-01-01T00:00:00Z".to_string(),
-            metadata_last_modified: "2024-01-01T00:00:00Z".to_string(),
-            media_epub_divina_compatible: false,
-            media_epub_is_kepub: false,
-            read_progress: None,
-            deleted: false,
-            file_hash: String::new(),
-            oneshot: false,
-        }
     }
 }
