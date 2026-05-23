@@ -119,7 +119,6 @@ pub fn compose_http_runtime(
         )),
         Box::new(SearchSyncAdapter::new(
             db.write_pool().clone(),
-            config.database_file.clone(),
             config.lucene_data_directory.clone(),
         )),
         Box::new(TaskEnqueueAdapter::new(task_engine_arc.clone())),

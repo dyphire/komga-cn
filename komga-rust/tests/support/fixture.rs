@@ -291,12 +291,8 @@ async fn rebuild_search_index(paths: &RuntimeDbPaths, config: &RuntimeConfig) {
     let pool = connect_task_write_pool(paths.main_db.as_path())
         .await
         .expect("search-ready fixture should open pool");
-    rebuild_index_from_database(
-        &pool,
-        paths.main_db.as_path(),
-        config.lucene_data_directory.as_path(),
-    )
-    .await
-    .expect("search-ready fixture should rebuild the search index");
+    rebuild_index_from_database(&pool, config.lucene_data_directory.as_path())
+        .await
+        .expect("search-ready fixture should rebuild the search index");
     pool.close().await;
 }

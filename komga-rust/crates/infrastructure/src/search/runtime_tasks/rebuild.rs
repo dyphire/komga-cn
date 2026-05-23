@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 
-use super::loaders;
+use super::super::documents;
 use crate::search::index_lifecycle::{SearchDocument, SearchEntityType, SearchIndexLifecycle};
 
 pub(super) async fn rebuild_index_from_database(
@@ -20,9 +20,9 @@ pub(super) async fn rebuild_index_from_database_for_entities(
     let index_dir = index_dir.to_path_buf();
     let entity_types = entity_types.map(|entities| entities.to_vec());
     let docs = if let Some(entity_types) = &entity_types {
-        loaders::load_rebuild_search_documents_for_entities(pool.clone(), entity_types).await?
+        documents::load_rebuild_search_documents_for_entities(pool.clone(), entity_types).await?
     } else {
-        loaders::load_rebuild_search_documents(pool.clone()).await?
+        documents::load_rebuild_search_documents(pool.clone()).await?
     };
 
     rebuild_index_with_documents(index_dir, entity_types, docs)

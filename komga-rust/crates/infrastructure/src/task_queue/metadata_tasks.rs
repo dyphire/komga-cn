@@ -2,7 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::runtime_tasks::{
+use crate::search::sync::{
     sync_entity_upsert_from_database, sync_series_and_oneshot_books_after_metadata_update,
 };
 
@@ -26,7 +26,6 @@ pub(super) async fn refresh_book_metadata(
     if runtime.search().owns_search_index() {
         sync_entity_upsert_from_database(
             runtime.database().read_pool(),
-            runtime.database().main_db().database_file(),
             runtime.search().lucene_data_directory(),
             SearchEntityType::Book,
             book_id,
@@ -36,7 +35,6 @@ pub(super) async fn refresh_book_metadata(
         for readlist_id in &outcome.changed_readlist_ids {
             sync_entity_upsert_from_database(
                 runtime.database().read_pool(),
-                runtime.database().main_db().database_file(),
                 runtime.search().lucene_data_directory(),
                 SearchEntityType::ReadList,
                 readlist_id,
@@ -64,7 +62,6 @@ pub(super) async fn refresh_series_metadata(
     if runtime.search().owns_search_index() {
         sync_series_and_oneshot_books_after_metadata_update(
             runtime.database().read_pool(),
-            runtime.database().main_db().database_file(),
             runtime.search().lucene_data_directory(),
             series_id,
         )
@@ -90,7 +87,6 @@ pub(super) async fn aggregate_series_metadata(
     if runtime.search().owns_search_index() {
         sync_entity_upsert_from_database(
             runtime.database().read_pool(),
-            runtime.database().main_db().database_file(),
             runtime.search().lucene_data_directory(),
             SearchEntityType::Series,
             series_id,

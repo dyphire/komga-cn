@@ -17,7 +17,7 @@ use crate::discovery_persisted_access::{
     runtime_queries, series as infrastructure_discovery_series,
 };
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::runtime_tasks::{
+use crate::search::sync::{
     sync_entity_delete_from_index, sync_entity_upsert_from_database,
     sync_series_and_oneshot_books_after_metadata_update,
 };
@@ -198,7 +198,6 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
 
         sync_series_and_oneshot_books_after_metadata_update(
             self.db.write_pool(),
-            self.db.database_file(),
             self.index_dir.as_path(),
             series_id,
         )
@@ -273,7 +272,6 @@ impl CollectionPort for DiscoveryDetailAccess {
     async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
         sync_entity_upsert_from_database(
             self.db.write_pool(),
-            self.db.database_file(),
             self.index_dir.as_path(),
             SearchEntityType::Collection,
             collection_id,
@@ -365,7 +363,6 @@ impl ReadlistPort for DiscoveryDetailAccess {
     async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
         sync_entity_upsert_from_database(
             self.db.write_pool(),
-            self.db.database_file(),
             self.index_dir.as_path(),
             SearchEntityType::ReadList,
             readlist_id,

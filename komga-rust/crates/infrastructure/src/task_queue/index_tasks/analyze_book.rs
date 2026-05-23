@@ -1,6 +1,8 @@
 use super::super::media_helpers::media_updates::adjust_analyzed_book_read_progress;
 use super::*;
 use crate::resolve_library_item_path;
+use crate::search::index_lifecycle::SearchEntityType;
+use crate::search::sync::sync_entity_upsert_from_database;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::task_queue) struct AnalyzeBookOutcome {
@@ -56,16 +58,20 @@ pub(in crate::task_queue) async fn analyze_book(
     };
     let current_page_count = persisted.pages.len() as i64;
 
-    persist_book_analysis(
-        runtime.database().write_pool(),
-        runtime.database().main_db().database_file(),
-        runtime.search().lucene_data_directory(),
-        &book_id,
-        &persisted,
-        runtime.search().owns_search_index(),
-    )
-    .await
-    .map_err(TaskProcessingError::runtime)?;
+    persist_book_analysis(runtime.database().write_pool(), &book_id, &persisted)
+        .await
+        .map_err(TaskProcessingError::runtime)?;
+
+    if runtime.search().owns_search_index() {
+        sync_entity_upsert_from_database(
+            runtime.database().read_pool(),
+            runtime.search().lucene_data_directory(),
+            SearchEntityType::Book,
+            &book_id,
+        )
+        .await
+        .map_err(TaskProcessingError::runtime)?;
+    }
 
     adjust_analyzed_book_read_progress(
         runtime.database().write_pool(),

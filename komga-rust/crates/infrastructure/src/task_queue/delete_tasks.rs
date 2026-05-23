@@ -9,7 +9,7 @@ use tokio::fs;
 
 use super::*;
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::runtime_tasks::sync_entity_delete_from_index;
+use crate::search::sync::sync_entity_delete_from_index;
 
 pub(super) async fn delete_book_task(
     runtime: &JobRuntime<'_>,

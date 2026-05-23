@@ -1,14 +1,8 @@
-use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
 
 use sqlx::SqlitePool;
 
-use super::index_lifecycle::{
-    SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle, prepare_for_rebuild,
-};
-mod loaders;
+use super::index_lifecycle::SearchEntityType;
 mod rebuild;
 
 #[cfg(test)]
@@ -41,95 +35,19 @@ pub struct AnalyzedBookMedia {
     pub pages: Vec<AnalyzedBookPage>,
 }
 
-fn runtime_index_database_mappings() -> &'static RwLock<HashMap<PathBuf, PathBuf>> {
-    static RUNTIME_INDEX_DATABASE_MAPPINGS: OnceLock<RwLock<HashMap<PathBuf, PathBuf>>> =
-        OnceLock::new();
-    RUNTIME_INDEX_DATABASE_MAPPINGS.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
-fn register_runtime_owned_index_database(database_file: &Path, index_dir: &Path) {
-    let mappings = runtime_index_database_mappings();
-    let mut guard = mappings
-        .write()
-        .expect("runtime index/database mapping write lock should not be poisoned");
-    guard.insert(index_dir.to_path_buf(), database_file.to_path_buf());
-}
-
 pub async fn rebuild_index_from_database(
     pool: &SqlitePool,
-    database_file: &Path,
     index_dir: &Path,
 ) -> Result<(), String> {
-    register_runtime_owned_index_database(database_file, index_dir);
     rebuild::rebuild_index_from_database(pool, index_dir).await
 }
 
 pub async fn rebuild_index_from_database_for_entities(
     pool: &SqlitePool,
-    database_file: &Path,
     index_dir: &Path,
     entity_types: Option<&[SearchEntityType]>,
 ) -> Result<(), String> {
-    register_runtime_owned_index_database(database_file, index_dir);
     rebuild::rebuild_index_from_database_for_entities(pool, index_dir, entity_types).await
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SearchEventAttempt {
-    Applied,
-    RebuildRequired,
-}
-
-async fn recover_search_index(pool: &SqlitePool, index_dir: &Path) -> Result<(), String> {
-    prepare_for_rebuild(index_dir)
-        .map_err(|error| format!("failed to prepare search index rebuild: {error}"))?;
-
-    rebuild::rebuild_index_from_database(pool, index_dir).await
-}
-
-async fn try_apply_search_event(
-    index_dir: &Path,
-    event: SearchEvent,
-) -> Result<SearchEventAttempt, String> {
-    match SearchIndexLifecycle::bootstrap(index_dir) {
-        Ok(index) => {
-            index
-                .apply_event(event)
-                .map_err(|error| format!("failed to apply search event: {error}"))?;
-            index
-                .shutdown()
-                .map_err(|error| format!("failed to finalize search event writer: {error}"))?;
-            Ok(SearchEventAttempt::Applied)
-        }
-        Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
-            Ok(SearchEventAttempt::RebuildRequired)
-        }
-        Err(error) => Err(format!("failed to bootstrap search index: {error}")),
-    }
-}
-
-async fn apply_search_event(
-    pool: Option<&SqlitePool>,
-    index_dir: &Path,
-    event: SearchEvent,
-) -> Result<(), String> {
-    match try_apply_search_event(index_dir, event.clone()).await? {
-        SearchEventAttempt::Applied => Ok(()),
-        SearchEventAttempt::RebuildRequired => {
-            let pool = pool.ok_or_else(|| {
-                "failed to recover search index: no pool available for rebuild".to_string()
-            })?;
-            recover_search_index(pool, index_dir).await?;
-
-            match try_apply_search_event(index_dir, event).await? {
-                SearchEventAttempt::Applied => Ok(()),
-                SearchEventAttempt::RebuildRequired => Err(format!(
-                    "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
-                    index_dir.display()
-                )),
-            }
-        }
-    }
 }
 
 pub async fn analyze_book_input(
@@ -171,14 +89,9 @@ pub async fn analyze_book_input(
 
 pub async fn persist_book_analysis(
     pool: &SqlitePool,
-    database_file: &Path,
-    index_dir: &Path,
     book_id: &str,
     analysis: &AnalyzedBookMedia,
-    update_search_index: bool,
 ) -> Result<(), String> {
-    register_runtime_owned_index_database(database_file, index_dir);
-    let index_dir = index_dir.to_path_buf();
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start analyze-book transaction for '{book_id}': {error}")
     })?;
@@ -247,109 +160,5 @@ pub async fn persist_book_analysis(
         format!("failed to commit analyze-book transaction for '{book_id}': {error}")
     })?;
 
-    let document = if update_search_index {
-        loaders::load_book_search_document(pool.clone(), book_id).await?
-    } else {
-        None
-    };
-
-    if let Some(document) = document {
-        apply_search_event(
-            Some(pool),
-            index_dir.as_path(),
-            SearchEvent::Upsert(document),
-        )
-        .await?;
-    }
-
     Ok(())
-}
-
-pub async fn sync_entity_upsert_from_database(
-    pool: &SqlitePool,
-    database_file: &Path,
-    index_dir: &Path,
-    entity_type: SearchEntityType,
-    entity_id: &str,
-) -> Result<bool, String> {
-    register_runtime_owned_index_database(database_file, index_dir);
-    let index_dir = index_dir.to_path_buf();
-    let entity_id = entity_id.to_string();
-    let document = match entity_type {
-        SearchEntityType::Book => {
-            loaders::load_book_search_document(pool.clone(), &entity_id).await?
-        }
-        SearchEntityType::Series => {
-            loaders::load_series_search_document(pool.clone(), &entity_id).await?
-        }
-        SearchEntityType::Collection => {
-            loaders::load_collection_search_document(pool.clone(), &entity_id).await?
-        }
-        SearchEntityType::ReadList => {
-            loaders::load_readlist_search_document(pool.clone(), &entity_id).await?
-        }
-    };
-
-    let Some(document) = document else {
-        return Ok(false);
-    };
-
-    apply_search_event(
-        Some(pool),
-        index_dir.as_path(),
-        SearchEvent::Upsert(document),
-    )
-    .await?;
-    Ok(true)
-}
-
-pub async fn sync_series_and_oneshot_books_after_metadata_update(
-    pool: &SqlitePool,
-    database_file: &Path,
-    index_dir: &Path,
-    series_id: &str,
-) -> Result<(), String> {
-    register_runtime_owned_index_database(database_file, index_dir);
-    let index_dir = index_dir.to_path_buf();
-    let series_id = series_id.to_string();
-    let series_document = loaders::load_series_search_document(pool.clone(), &series_id).await?;
-    let oneshot_documents =
-        loaders::load_oneshot_book_search_documents(pool.clone(), &series_id).await?;
-
-    if let Some(document) = series_document {
-        apply_search_event(
-            Some(pool),
-            index_dir.as_path(),
-            SearchEvent::Upsert(document),
-        )
-        .await?;
-    }
-
-    for document in oneshot_documents {
-        apply_search_event(
-            Some(pool),
-            index_dir.as_path(),
-            SearchEvent::Upsert(document),
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
-pub async fn sync_entity_delete_from_index(
-    pool: &SqlitePool,
-    index_dir: &Path,
-    entity_type: SearchEntityType,
-    entity_id: &str,
-) -> Result<(), String> {
-    apply_search_event(
-        Some(pool),
-        index_dir,
-        SearchEvent::Delete {
-            entity_type,
-            id: entity_id.to_string(),
-        },
-    )
-    .await
 }
