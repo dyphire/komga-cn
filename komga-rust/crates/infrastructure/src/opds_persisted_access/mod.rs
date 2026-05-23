@@ -72,6 +72,12 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
+    async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+        load_all_readlists(self.db.read_pool())
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
         load_series(self.db.read_pool(), series_id)
             .await
@@ -391,6 +397,32 @@ WHERE b.LIBRARY_ID = ?
 ORDER BY rl.NAME COLLATE NOCASE ASC, rl.ID ASC"#,
     )
     .bind(library_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedReadlistRecord {
+            id: row.get::<String, _>("ID"),
+            name: row.get::<String, _>("NAME"),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
+        })
+        .collect())
+}
+
+pub async fn load_all_readlists(
+    pool: &SqlitePool,
+) -> Result<Vec<PersistedReadlistRecord>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT
+    ID,
+    NAME,
+    ORDERED,
+    COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
+FROM READLIST
+ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
+    )
     .fetch_all(pool)
     .await?;
 

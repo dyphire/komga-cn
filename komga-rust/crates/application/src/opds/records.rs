@@ -1,19 +1,23 @@
 // Record types for OPDS catalog and persisted access, migrated from infrastructure.
 
+#[derive(Clone)]
 pub struct BrowseSeriesNavigationEntry {
     pub id: String,
     pub title: String,
 }
 
+#[derive(Clone)]
 pub struct BrowsePublisherEntry {
     pub publisher: String,
 }
 
+#[derive(Clone)]
 pub struct OpdsBookAuthorEntry {
     pub name: String,
     pub role: String,
 }
 
+#[derive(Clone)]
 pub struct OpdsBookFeedEntry {
     pub id: String,
     pub series_id: String,
@@ -39,6 +43,7 @@ pub struct OpdsBookFeedEntry {
     pub release_date: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct OpdsSeriesEntry {
     pub id: String,
     pub library_id: String,
@@ -46,12 +51,6 @@ pub struct OpdsSeriesEntry {
     pub one_shot: bool,
     pub age_rating: Option<u16>,
     pub sharing_labels: Vec<String>,
-    pub last_modified: String,
-}
-
-pub struct OpdsReadlistEntry {
-    pub id: String,
-    pub name: String,
     pub last_modified: String,
 }
 
@@ -64,6 +63,7 @@ pub struct PersistedLibraryRecord {
     pub last_modified: String,
 }
 
+#[derive(Clone)]
 pub struct PersistedSeriesRecord {
     pub id: String,
     pub library_id: String,
@@ -74,6 +74,7 @@ pub struct PersistedSeriesRecord {
     pub last_modified: String,
 }
 
+#[derive(Clone)]
 pub struct PersistedSeriesBookRecord {
     pub id: String,
     pub series_id: String,
@@ -100,6 +101,7 @@ pub struct PersistedSeriesBookRecord {
     pub release_date: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct PersistedReadlistRecord {
     pub id: String,
     pub name: String,
@@ -107,11 +109,13 @@ pub struct PersistedReadlistRecord {
     pub ordered: bool,
 }
 
+#[derive(Clone)]
 pub struct PersistedBookAuthorRecord {
     pub name: String,
     pub role: String,
 }
 
+#[derive(Clone)]
 pub struct PersistedReadlistBookRecord {
     pub id: String,
     pub series_id: String,
@@ -136,6 +140,7 @@ pub struct PersistedReadlistBookRecord {
     pub release_date: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct PersistedSeriesSearchRecord {
     pub id: String,
     pub title: String,
@@ -145,6 +150,7 @@ pub struct PersistedSeriesSearchRecord {
     pub last_modified: String,
 }
 
+#[derive(Clone)]
 pub struct PersistedBookSearchRecord {
     pub id: String,
     pub series_id: String,
@@ -168,6 +174,7 @@ pub struct PersistedBookSearchRecord {
     pub release_date: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct PersistedNamedRecord {
     pub id: String,
     pub name: String,
@@ -175,6 +182,7 @@ pub struct PersistedNamedRecord {
     pub ordered: bool,
 }
 
+#[derive(Clone)]
 pub struct PersistedBookFeedRecord {
     pub id: String,
     pub title: String,

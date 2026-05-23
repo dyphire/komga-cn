@@ -81,7 +81,7 @@ impl OpdsFeedUserContext {
         content_allowed_by_restrictions(&restrictions, age_rating, sharing_labels)
     }
 
-    fn allowed_library_ids(&self) -> Option<&HashSet<String>> {
+    pub fn allowed_library_ids(&self) -> Option<&HashSet<String>> {
         self.allowed_library_ids.as_ref()
     }
 }
@@ -340,7 +340,7 @@ mod tests {
     use super::*;
     use crate::opds::{
         BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedEntry, OpdsCatalogPort,
-        OpdsReadlistEntry, OpdsSeriesEntry,
+        OpdsSeriesEntry,
     };
 
     #[derive(Default)]
@@ -464,10 +464,6 @@ mod tests {
             _offset: i64,
             _limit: i64,
         ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
             unimplemented!()
         }
     }

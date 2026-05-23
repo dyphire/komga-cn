@@ -23,6 +23,8 @@ pub trait OpdsPersistedPort: Send + Sync {
         library_id: &str,
     ) -> Result<Vec<PersistedReadlistRecord>, String>;
 
+    async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String>;
+
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String>;
 
     async fn load_series_books_paged(

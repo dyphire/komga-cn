@@ -6,7 +6,7 @@ use sqlx::{Row, SqlitePool};
 use crate::database_handle::DatabaseHandle;
 use komga_application::opds::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
-    OpdsCatalogPort, OpdsReadlistEntry, OpdsSeriesEntry,
+    OpdsCatalogPort, OpdsSeriesEntry,
 };
 
 #[derive(Clone)]
@@ -159,12 +159,6 @@ impl OpdsCatalogPort for OpdsCatalogAccess {
         )
         .await
         .map_err(|error| error.to_string())
-    }
-
-    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String> {
-        load_all_readlists(self.db.read_pool())
-            .await
-            .map_err(|error| error.to_string())
     }
 }
 
@@ -957,28 +951,6 @@ OFFSET ?"#,
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
                 .collect(),
-            last_modified: row.get::<String, _>("LAST_MODIFIED"),
-        })
-        .collect())
-}
-
-pub async fn load_all_readlists(pool: &SqlitePool) -> Result<Vec<OpdsReadlistEntry>, sqlx::Error> {
-    let rows = sqlx::query(
-        r#"SELECT
-    ID,
-    NAME,
-    COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
-FROM READLIST
-ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
-    )
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| OpdsReadlistEntry {
-            id: row.get::<String, _>("ID"),
-            name: row.get::<String, _>("NAME"),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())

@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::identity_access::auth::AuthUser;
 use crate::request_urls::app_absolute_url;
-use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsState};
+use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsState};
 
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
@@ -13,10 +13,7 @@ use super::feeds::{
     parse_page_size,
 };
 use super::persisted::{
-    allowed_library_ids_for_user, has_visible_collections_for_scope,
-    has_visible_readlists_for_scope, library_visible, load_all_readlists, load_collection_series,
-    load_collections, load_libraries, load_library, load_readlist_books,
-    load_readlists_for_library, opds_restrictions_for_user, validate_library_scope,
+    allowed_library_ids_for_user, load_libraries, load_library, validate_library_scope,
 };
 
 pub(super) async fn opds_v2_keep_reading_feed(
@@ -358,10 +355,14 @@ pub(super) async fn opds_v2_collections_feed(
     };
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
 
-    let collections = match load_collections(app.opds_persisted.as_ref(), library_id).await {
+    let collections = match persisted_service
+        .all_collections(&feed_user, library_id, false)
+        .await
+    {
         Ok(collections) => collections,
         Err(error) => {
             return (
@@ -372,27 +373,8 @@ pub(super) async fn opds_v2_collections_feed(
         }
     };
 
-    let mut visible_collections = Vec::new();
-    for collection in collections {
-        let series = match load_collection_series(
-            app.opds_persisted.as_ref(),
-            &collection.id,
-            collection.ordered,
-        )
-        .await
-        {
-            Ok(series) => series,
-            Err(_) => continue,
-        };
-        if series
-            .iter()
-            .any(|series| library_visible(&allowed_library_ids, &series.library_id))
-        {
-            visible_collections.push(collection);
-        }
-    }
-    let total_visible_collections = visible_collections.len();
-    let (paged_collections, has_next) = paginate_vec(visible_collections, page, size);
+    let total_visible_collections = collections.len();
+    let (paged_collections, has_next) = paginate_vec(collections, page, size);
     let collection_navigation = paged_collections
         .into_iter()
         .map(|collection| {
@@ -406,21 +388,12 @@ pub(super) async fn opds_v2_collections_feed(
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let self_path = format!("/opds/v2/libraries{library_segment}/collections");
-    let has_visible_collections = has_visible_collections_for_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-    )
-    .await;
-    let has_visible_readlists = has_visible_readlists_for_scope(
-        app.opds_catalog.as_ref(),
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-    )
-    .await;
+    let has_visible_collections = persisted_service
+        .has_visible_collections_for_scope(&feed_user, library_id)
+        .await;
+    let has_visible_readlists = persisted_service
+        .has_visible_readlists_for_scope(&feed_user, library_id)
+        .await;
 
     let mut navigation = vec![
         json!({
@@ -556,12 +529,13 @@ pub(super) async fn opds_v2_readlists_feed(
         None
     };
 
-    let restrictions = opds_restrictions_for_user(user);
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let readlists = match match library_id {
-        Some(id) => load_readlists_for_library(app.opds_persisted.as_ref(), id).await,
-        None => load_all_readlists(app.opds_catalog.as_ref()).await,
-    } {
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let readlists = match persisted_service
+        .all_readlists(&feed_user, library_id)
+        .await
+    {
         Ok(readlists) => readlists,
         Err(error) => {
             return (
@@ -572,28 +546,8 @@ pub(super) async fn opds_v2_readlists_feed(
         }
     };
 
-    let visible_readlists = if library_id.is_some() {
-        readlists
-    } else {
-        let mut visible = Vec::new();
-        for readlist in readlists {
-            let readlist_books =
-                match load_readlist_books(app.opds_persisted.as_ref(), &readlist.id).await {
-                    Ok(books) => books,
-                    Err(_) => continue,
-                };
-            if readlist_books
-                .iter()
-                .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-            {
-                visible.push(readlist);
-            }
-        }
-        visible
-    };
-
-    let total_readlists = visible_readlists.len();
-    let readlist_navigation = visible_readlists
+    let total_readlists = readlists.len();
+    let readlist_navigation = readlists
         .into_iter()
         .skip(page.saturating_mul(size))
         .take(size)
@@ -607,21 +561,12 @@ pub(super) async fn opds_v2_readlists_feed(
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let has_visible_collections = has_visible_collections_for_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-    )
-    .await;
-    let has_visible_readlists = has_visible_readlists_for_scope(
-        app.opds_catalog.as_ref(),
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
-        restrictions.as_ref(),
-        library_id,
-    )
-    .await;
+    let has_visible_collections = persisted_service
+        .has_visible_collections_for_scope(&feed_user, library_id)
+        .await;
+    let has_visible_readlists = persisted_service
+        .has_visible_readlists_for_scope(&feed_user, library_id)
+        .await;
     let mut navigation = vec![
         opds_subsection_navigation_link(
             &headers,

@@ -4,11 +4,9 @@ use axum::http::HeaderMap;
 use serde_json::{Value, json};
 
 use crate::request_urls::app_absolute_url;
-use crate::state::{
-    BrowseSeriesNavigationEntry, OpdsCatalogPort, OpdsReadlistEntry, OpdsSeriesEntry,
-};
+use crate::state::{BrowseSeriesNavigationEntry, OpdsCatalogPort, OpdsSeriesEntry};
 
-use super::{PersistedReadlist, PersistedSeries};
+use super::PersistedSeries;
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
@@ -19,15 +17,6 @@ fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
         age_rating: entry.age_rating,
         sharing_labels: entry.sharing_labels,
         last_modified: entry.last_modified,
-    }
-}
-
-fn persisted_readlist(entry: OpdsReadlistEntry) -> PersistedReadlist {
-    PersistedReadlist {
-        id: entry.id,
-        name: entry.name,
-        last_modified: entry.last_modified,
-        ordered: false,
     }
 }
 
@@ -118,13 +107,4 @@ pub(super) async fn load_series_page(
         )
         .await
         .map(|entries| entries.into_iter().map(persisted_series).collect())
-}
-
-pub(super) async fn load_all_readlists(
-    backend: &dyn OpdsCatalogPort,
-) -> Result<Vec<PersistedReadlist>, String> {
-    backend
-        .load_all_readlists()
-        .await
-        .map(|entries| entries.into_iter().map(persisted_readlist).collect())
 }

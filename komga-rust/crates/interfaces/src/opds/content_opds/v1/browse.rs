@@ -2,7 +2,9 @@ use super::helpers::{nav_entry_with_content, publisher_entry_id, series_feed_sel
 use super::streaming::{build_book_feed_acquisition_entries, localized_opds_updated};
 use super::*;
 use crate::identity_access::auth::AuthUser;
-use crate::state::{OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsState};
+use crate::state::{
+    OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsState,
+};
 
 fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
@@ -23,9 +25,6 @@ fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
         epub_divina_compatible: entry.epub_divina_compatible,
         last_read: entry.last_read,
         last_read_date: entry.last_read_date,
-        library_id: entry.library_id,
-        age_rating: entry.age_rating,
-        sharing_labels: entry.sharing_labels,
         last_modified: entry.last_modified,
     }
 }
@@ -286,15 +285,13 @@ pub(crate) async fn opds_v1_libraries(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
 
-    let rows = load_libraries(app.opds_persisted.as_ref())
+    let rows = persisted_service
+        .visible_libraries(&feed_user)
         .await
         .unwrap_or_default()
-        .into_iter()
-        .filter(|library| library_visible(&allowed_library_ids, &library.id))
-        .collect::<Vec<_>>();
-    let rows = rows
         .into_iter()
         .map(|library| OpdsV1NavigationEntry {
             id: library.id.clone(),
@@ -321,36 +318,24 @@ pub(crate) async fn opds_v1_collections(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let mut rows = Vec::new();
-    for collection in load_collections(app.opds_persisted.as_ref(), None)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let rows = persisted_service
+        .all_collections(&feed_user, None, true)
         .await
         .unwrap_or_default()
-    {
-        let series = load_collection_series(
-            app.opds_persisted.as_ref(),
-            &collection.id,
-            collection.ordered,
-        )
-        .await
-        .unwrap_or_default();
-        let has_visible_series = series
-            .iter()
-            .any(|series| library_visible(&allowed_library_ids, &series.library_id));
-        let keep_empty_collection_visible = series.is_empty() && allowed_library_ids.is_none();
-        let visible = has_visible_series || keep_empty_collection_visible;
-        if visible {
+        .into_iter()
+        .map(|collection| {
             let updated = localized_opds_updated(&collection.last_modified);
-            rows.push(OpdsV1NavigationEntry {
+            OpdsV1NavigationEntry {
                 id: collection.id.clone(),
                 title: collection.name,
                 content: String::new(),
                 href_path: format!("/opds/v1.2/collections/{}", collection.id),
                 updated,
-            });
-        }
-    }
+            }
+        })
+        .collect::<Vec<_>>();
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let (rows, has_next) = paginate_vec(rows, page, size);
@@ -371,31 +356,21 @@ pub(crate) async fn opds_v1_readlists(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let mut rows = Vec::new();
-    for readlist in app
-        .opds_catalog
-        .load_all_readlists()
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let rows = persisted_service
+        .all_readlists(&feed_user, None)
         .await
         .unwrap_or_default()
-    {
-        let books = load_readlist_books(app.opds_persisted.as_ref(), &readlist.id)
-            .await
-            .unwrap_or_default();
-        if books
-            .iter()
-            .any(|book| library_visible(&allowed_library_ids, &book.library_id))
-        {
-            rows.push(OpdsV1NavigationEntry {
-                id: readlist.id.clone(),
-                title: readlist.name,
-                content: String::new(),
-                href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
-                updated: Some(readlist.last_modified),
-            });
-        }
-    }
+        .into_iter()
+        .map(|readlist| OpdsV1NavigationEntry {
+            id: readlist.id.clone(),
+            title: readlist.name,
+            content: String::new(),
+            href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
+            updated: Some(readlist.last_modified),
+        })
+        .collect::<Vec<_>>();
 
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let (rows, has_next) = paginate_vec(rows, page, size);
@@ -416,9 +391,10 @@ pub(crate) async fn opds_v1_publishers(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let publishers = load_publishers(app.opds_persisted.as_ref(), &allowed_library_ids)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let publishers = persisted_service
+        .publishers(&feed_user)
         .await
         .unwrap_or_default();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());

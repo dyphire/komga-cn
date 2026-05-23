@@ -1,7 +1,7 @@
-use super::super::types::{PersistedBookSearchResult, PersistedReadlistBook, PersistedSeriesBook};
+use super::super::types::PersistedSeriesBook;
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::OpdsState;
+use crate::state::{OpdsBookFeedEntry, OpdsFeedUserContext, OpdsPersistedService, OpdsState};
 use serde_json::Value;
 
 pub(crate) async fn opds_v2_libraries_collections(
@@ -30,11 +30,13 @@ pub(crate) async fn opds_v2_collection(
     collection_id: &str,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let Some(collection) = (match load_collection(app.opds_persisted.as_ref(), collection_id).await
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let Some(detail) = (match persisted_service
+        .collection_detail(&feed_user, collection_id)
+        .await
     {
-        Ok(collection) => collection,
+        Ok(detail) => detail,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -45,47 +47,11 @@ pub(crate) async fn opds_v2_collection(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-
-    let restrictions = opds_restrictions_for_user(user);
-    let series = match load_collection_series(
-        app.opds_persisted.as_ref(),
-        collection_id,
-        collection.ordered,
-    )
-    .await
-    {
-        Ok(series) => series,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS collection series: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let visible_series = series
-        .into_iter()
-        .filter(|series| library_visible(&allowed_library_ids, &series.library_id))
-        .collect::<Vec<_>>();
-
-    if visible_series.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let filtered_series = visible_series
-        .into_iter()
-        .filter(|series| {
-            content_allowed_by_restrictions(
-                restrictions.as_ref(),
-                series.age_rating,
-                &series.sharing_labels,
-            )
-        })
-        .collect::<Vec<_>>();
-    let total_filtered_series = filtered_series.len();
+    let collection = detail.collection;
+    let total_filtered_series = detail.series.len();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let navigation = filtered_series
+    let navigation = detail
+        .series
         .into_iter()
         .skip(page.saturating_mul(size))
         .take(size)
@@ -447,10 +413,13 @@ pub(crate) async fn opds_v2_readlist(
     readlist_id: &str,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let Some(readlist) = (match load_readlist(app.opds_persisted.as_ref(), readlist_id).await {
-        Ok(readlist) => readlist,
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let Some(detail) = (match persisted_service
+        .readlist_detail(&feed_user, readlist_id)
+        .await
+    {
+        Ok(detail) => detail,
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -461,49 +430,18 @@ pub(crate) async fn opds_v2_readlist(
     }) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let restrictions = opds_restrictions_for_user(user);
-
-    let books = match load_readlist_books(app.opds_persisted.as_ref(), &readlist.id).await {
-        Ok(books) => books,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS readlist books: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let visible_books = books
-        .into_iter()
-        .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
-        .collect::<Vec<_>>();
-    if visible_books.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let mut filtered_books = visible_books
-        .into_iter()
-        .filter(|book| {
-            book.media_status.as_deref() == Some("READY")
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    if !readlist.ordered {
-        filtered_books.sort_by_key(|book| book.release_date.clone());
-    }
-
-    let total_visible_books = filtered_books.len();
+    let readlist = detail.readlist;
+    let total_visible_books = detail.books.len();
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let publications = filtered_books
+    let publications = detail
+        .books
         .into_iter()
         .skip(page.saturating_mul(size))
         .take(size)
-        .map(|book| opds_publication_for_feed_entry(&headers, &readlist_book_feed_entry(book)))
+        .map(|book| {
+            let entry = OpdsBookFeedEntry::from(book);
+            opds_publication_for_feed_entry(&headers, &entry)
+        })
         .collect::<Vec<_>>();
 
     opds_publications_response_with_paging(
@@ -518,93 +456,32 @@ pub(crate) async fn opds_v2_readlist(
     )
 }
 
-fn readlist_book_feed_entry(book: PersistedReadlistBook) -> crate::state::OpdsBookFeedEntry {
-    crate::state::OpdsBookFeedEntry {
-        id: book.id,
-        series_id: book.series_id,
-        title: book.title,
-        series_title: book.series_title,
-        number: book.number,
-        number_sort: book.number_sort,
-        summary: book.summary,
-        isbn: book.isbn,
-        authors: book.authors,
-        tags: book.tags,
-        file_name: book.file_name,
-        file_size: book.file_size,
-        media_type: book.media_type,
-        page_count: book.page_count,
-        epub_divina_compatible: book.epub_divina_compatible,
-        last_read: None,
-        last_read_date: None,
-        library_id: book.library_id,
-        age_rating: book.age_rating,
-        sharing_labels: book.sharing_labels,
-        last_modified: book.last_modified,
-        release_date: book.release_date,
-    }
-}
-
-fn search_book_feed_entry(book: PersistedBookSearchResult) -> crate::state::OpdsBookFeedEntry {
-    crate::state::OpdsBookFeedEntry {
-        id: book.id,
-        series_id: book.series_id,
-        title: book.title,
-        series_title: book.series_title,
-        number: book.number,
-        number_sort: book.number_sort,
-        summary: book.summary,
-        isbn: book.isbn,
-        authors: book.authors,
-        tags: book.tags,
-        file_name: book.file_name,
-        file_size: book.file_size,
-        media_type: book.media_type,
-        page_count: book.page_count,
-        epub_divina_compatible: book.epub_divina_compatible,
-        last_read: None,
-        last_read_date: None,
-        library_id: book.library_id,
-        age_rating: book.age_rating,
-        sharing_labels: book.sharing_labels,
-        last_modified: book.last_modified,
-        release_date: book.release_date,
-    }
-}
-
 pub(crate) async fn opds_v2_search(
     headers: HeaderMap,
     app: &OpdsState,
     query: Option<&str>,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let restrictions = opds_restrictions_for_user(user);
-
     let search_query = query.unwrap_or_default().trim();
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let results = match persisted_service
+        .unified_search(&feed_user, search_query)
+        .await
+    {
+        Ok(results) => results,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("load OPDS search results: {error}") })),
+            )
+                .into_response();
+        }
+    };
 
-    let (series, books, collections, readlists) =
-        match load_unified_search_results(app.opds_persisted.as_ref(), search_query).await {
-            Ok(results) => results,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS search results: {error}") })),
-                )
-                    .into_response();
-            }
-        };
-
-    let mut series_navigation = series
+    let series_navigation = results
+        .series
         .into_iter()
-        .filter(|item| {
-            library_visible(&allowed_library_ids, &item.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    item.age_rating,
-                    &item.sharing_labels,
-                )
-        })
         .map(|item| {
             json!({
                 "title": item.title,
@@ -613,67 +490,39 @@ pub(crate) async fn opds_v2_search(
             })
         })
         .collect::<Vec<_>>();
-    series_navigation.truncate(20);
 
-    let mut book_publications = books
+    let book_publications = results
+        .books
         .into_iter()
-        .filter(|item| {
-            library_visible(&allowed_library_ids, &item.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    item.age_rating,
-                    &item.sharing_labels,
-                )
+        .map(|item| {
+            let entry = OpdsBookFeedEntry::from(item);
+            opds_publication_for_feed_entry(&headers, &entry)
         })
-        .map(|item| opds_publication_for_feed_entry(&headers, &search_book_feed_entry(item)))
         .collect::<Vec<_>>();
-    book_publications.truncate(20);
 
-    let mut collections_navigation = Vec::new();
-    for item in collections {
-        let books = match load_collection_books(app.opds_persisted.as_ref(), &item.id).await {
-            Ok(books) => books,
-            Err(_) => continue,
-        };
-        if books.iter().any(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        }) {
-            collections_navigation.push(json!({
+    let collections_navigation = results
+        .collections
+        .into_iter()
+        .map(|item| {
+            json!({
                 "title": item.name,
                 "href": app_absolute_url(&headers, format!("/opds/v2/collections/{}", item.id).as_str()),
                 "type": "application/opds+json",
-            }));
-        }
-    }
-    collections_navigation.truncate(20);
+            })
+        })
+        .collect::<Vec<_>>();
 
-    let mut readlist_navigation = Vec::new();
-    for item in readlists {
-        let books = match load_readlist_books(app.opds_persisted.as_ref(), &item.id).await {
-            Ok(books) => books,
-            Err(_) => continue,
-        };
-        if books.iter().any(|book| {
-            library_visible(&allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        }) {
-            readlist_navigation.push(json!({
+    let readlist_navigation = results
+        .readlists
+        .into_iter()
+        .map(|item| {
+            json!({
                 "title": item.name,
                 "href": app_absolute_url(&headers, format!("/opds/v2/readlists/{}", item.id).as_str()),
                 "type": "application/opds+json",
-            }));
-        }
-    }
-    readlist_navigation.truncate(20);
+            })
+        })
+        .collect::<Vec<_>>();
 
     let mut groups = Vec::new();
     if !series_navigation.is_empty() {

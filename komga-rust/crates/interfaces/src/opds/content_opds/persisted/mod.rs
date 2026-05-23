@@ -16,15 +16,12 @@ use crate::identity_access::auth::{
     AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::{
-    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedBookFeedRecord,
-    PersistedLibraryRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
+    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord,
     PersistedSeriesBookRecord, PersistedSeriesRecord,
 };
 
 use super::types::{
-    OpdsRestrictions, PersistedBookFeedItem, PersistedBookSearchResult, PersistedCollection,
-    PersistedCollectionSearchResult, PersistedLibrary, PersistedReadlist, PersistedReadlistBook,
-    PersistedReadlistSearchResult, PersistedSeries, PersistedSeriesBook,
+    OpdsRestrictions, PersistedLibrary, PersistedSeries, PersistedSeriesBook,
     PersistedSeriesSearchResult,
 };
 
@@ -144,14 +141,6 @@ pub(super) async fn load_library(
     Ok(record.map(map_library_record))
 }
 
-pub(super) async fn load_readlists_for_library(
-    backend: &dyn OpdsPersistedPort,
-    library_id: &str,
-) -> Result<Vec<PersistedReadlist>, String> {
-    let records = backend.load_readlists_for_library(library_id).await?;
-    Ok(records.into_iter().map(map_readlist_record).collect())
-}
-
 pub(super) async fn load_series(
     backend: &dyn OpdsPersistedPort,
     series_id: &str,
@@ -180,98 +169,6 @@ pub(super) async fn load_series_tags(
     backend.load_series_tags(series_id).await
 }
 
-pub(super) async fn load_readlist(
-    backend: &dyn OpdsPersistedPort,
-    readlist_id: &str,
-) -> Result<Option<PersistedReadlist>, String> {
-    let record = backend.load_readlist(readlist_id).await?;
-    Ok(record.map(map_readlist_record))
-}
-
-pub(super) async fn load_readlist_books(
-    backend: &dyn OpdsPersistedPort,
-    readlist_id: &str,
-) -> Result<Vec<PersistedReadlistBook>, String> {
-    let records = backend.load_readlist_books(readlist_id).await?;
-    Ok(records.into_iter().map(map_readlist_book_record).collect())
-}
-
-pub(super) async fn load_unified_search_results(
-    backend: &dyn OpdsPersistedPort,
-    query: &str,
-) -> Result<
-    (
-        Vec<PersistedSeriesSearchResult>,
-        Vec<PersistedBookSearchResult>,
-        Vec<PersistedCollectionSearchResult>,
-        Vec<PersistedReadlistSearchResult>,
-    ),
-    String,
-> {
-    let (series_rows, book_rows, collection_rows, readlist_rows) =
-        backend.load_unified_search_results(query).await?;
-
-    Ok((
-        series_rows
-            .into_iter()
-            .map(|row| PersistedSeriesSearchResult {
-                id: row.id,
-                title: row.title,
-                library_id: row.library_id,
-                age_rating: row.age_rating,
-                sharing_labels: row.sharing_labels,
-                last_modified: row.last_modified,
-            })
-            .collect(),
-        book_rows
-            .into_iter()
-            .map(|row| PersistedBookSearchResult {
-                id: row.id,
-                series_id: row.series_id,
-                title: row.title,
-                series_title: row.series_title,
-                number: row.number,
-                number_sort: row.number_sort,
-                summary: row.summary,
-                isbn: row.isbn,
-                authors: row
-                    .authors
-                    .into_iter()
-                    .map(|author| OpdsBookAuthorEntry {
-                        name: author.name,
-                        role: author.role,
-                    })
-                    .collect(),
-                tags: row.tags,
-                file_name: row.file_name,
-                file_size: row.file_size,
-                media_type: row.media_type,
-                page_count: row.page_count,
-                epub_divina_compatible: row.epub_divina_compatible,
-                library_id: row.library_id,
-                age_rating: row.age_rating,
-                sharing_labels: row.sharing_labels,
-                last_modified: row.last_modified,
-                release_date: row.release_date,
-            })
-            .collect(),
-        collection_rows
-            .into_iter()
-            .map(|row| PersistedCollectionSearchResult {
-                id: row.id,
-                name: row.name,
-            })
-            .collect(),
-        readlist_rows
-            .into_iter()
-            .map(|row| PersistedReadlistSearchResult {
-                id: row.id,
-                name: row.name,
-            })
-            .collect(),
-    ))
-}
-
 pub(super) async fn load_opds_v1_series_search_results(
     persisted_backend: &dyn OpdsPersistedPort,
     catalog_backend: &dyn OpdsCatalogPort,
@@ -279,7 +176,20 @@ pub(super) async fn load_opds_v1_series_search_results(
     search: &str,
     publishers: &[String],
 ) -> Result<Vec<PersistedSeriesSearchResult>, String> {
-    let (series, _, _, _) = load_unified_search_results(persisted_backend, search).await?;
+    let (series_rows, _, _, _) = persisted_backend
+        .load_unified_search_results(search)
+        .await?;
+    let series = series_rows
+        .into_iter()
+        .map(|row| PersistedSeriesSearchResult {
+            id: row.id,
+            title: row.title,
+            library_id: row.library_id,
+            age_rating: row.age_rating,
+            sharing_labels: row.sharing_labels,
+            last_modified: row.last_modified,
+        })
+        .collect::<Vec<_>>();
 
     if publishers.is_empty() {
         return Ok(series
@@ -320,95 +230,6 @@ pub(super) async fn load_opds_v1_series_search_results(
         .collect())
 }
 
-pub(super) async fn load_publishers(
-    backend: &dyn OpdsPersistedPort,
-    allowed_library_ids: &Option<HashSet<String>>,
-) -> Result<Vec<String>, String> {
-    backend.load_publishers(allowed_library_ids.as_ref()).await
-}
-
-pub(super) async fn has_visible_collections_for_scope(
-    backend: &dyn OpdsPersistedPort,
-    allowed_library_ids: &Option<HashSet<String>>,
-    restrictions: Option<&OpdsRestrictions>,
-    library_id: Option<&str>,
-) -> bool {
-    let collections = match load_collections(backend, library_id).await {
-        Ok(collections) => collections,
-        Err(_) => return false,
-    };
-    for collection in collections {
-        let series = match load_collection_series(backend, &collection.id, collection.ordered).await
-        {
-            Ok(series) => series,
-            Err(_) => continue,
-        };
-        if series.iter().any(|series| {
-            library_visible(allowed_library_ids, &series.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    series.age_rating,
-                    &series.sharing_labels,
-                )
-        }) {
-            return true;
-        }
-    }
-    false
-}
-
-pub(super) async fn has_visible_readlists_for_scope(
-    catalog_backend: &dyn OpdsCatalogPort,
-    persisted_backend: &dyn OpdsPersistedPort,
-    allowed_library_ids: &Option<HashSet<String>>,
-    restrictions: Option<&OpdsRestrictions>,
-    library_id: Option<&str>,
-) -> bool {
-    if let Some(id) = library_id {
-        for readlist in load_readlists_for_library(persisted_backend, id)
-            .await
-            .unwrap_or_default()
-        {
-            let books = match load_readlist_books(persisted_backend, &readlist.id).await {
-                Ok(books) => books,
-                Err(_) => continue,
-            };
-            if books.iter().any(|book| {
-                library_visible(allowed_library_ids, &book.library_id)
-                    && content_allowed_by_restrictions(
-                        restrictions,
-                        book.age_rating,
-                        &book.sharing_labels,
-                    )
-            }) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    for readlist in load_all_readlists(catalog_backend)
-        .await
-        .unwrap_or_default()
-    {
-        let books = match load_readlist_books(persisted_backend, &readlist.id).await {
-            Ok(books) => books,
-            Err(_) => continue,
-        };
-        if books.iter().any(|book| {
-            library_visible(allowed_library_ids, &book.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions,
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        }) {
-            return true;
-        }
-    }
-    false
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
     backend: &dyn OpdsCatalogPort,
@@ -444,54 +265,6 @@ pub(super) async fn load_browse_publisher_navigation(
         library_id,
     )
     .await
-}
-
-pub(super) async fn load_collections(
-    backend: &dyn OpdsPersistedPort,
-    library_id: Option<&str>,
-) -> Result<Vec<PersistedCollection>, String> {
-    let rows = backend.load_collections(library_id).await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| PersistedCollection {
-            id: row.id,
-            name: row.name,
-            last_modified: row.last_modified,
-            ordered: row.ordered,
-        })
-        .collect())
-}
-
-pub(super) async fn load_collection(
-    backend: &dyn OpdsPersistedPort,
-    collection_id: &str,
-) -> Result<Option<PersistedCollection>, String> {
-    let row = backend.load_collection(collection_id).await?;
-    Ok(row.map(|row| PersistedCollection {
-        id: row.id,
-        name: row.name,
-        last_modified: row.last_modified,
-        ordered: row.ordered,
-    }))
-}
-
-pub(super) async fn load_collection_series(
-    backend: &dyn OpdsPersistedPort,
-    collection_id: &str,
-    ordered: bool,
-) -> Result<Vec<PersistedSeries>, String> {
-    let rows = backend
-        .load_collection_series(collection_id, ordered)
-        .await?;
-    Ok(rows.into_iter().map(map_series_record).collect())
-}
-
-pub(super) async fn load_collection_books(
-    backend: &dyn OpdsPersistedPort,
-    collection_id: &str,
-) -> Result<Vec<PersistedBookFeedItem>, String> {
-    let rows = backend.load_collection_books(collection_id).await?;
-    Ok(rows.into_iter().map(map_book_feed_record).collect())
 }
 
 fn map_library_record(row: PersistedLibraryRecord) -> PersistedLibrary {
@@ -548,70 +321,6 @@ fn map_series_book_record(row: PersistedSeriesBookRecord) -> PersistedSeriesBook
     }
 }
 
-fn map_readlist_record(row: PersistedReadlistRecord) -> PersistedReadlist {
-    PersistedReadlist {
-        id: row.id,
-        name: row.name,
-        last_modified: row.last_modified,
-        ordered: row.ordered,
-    }
-}
-
-fn map_readlist_book_record(row: PersistedReadlistBookRecord) -> PersistedReadlistBook {
-    PersistedReadlistBook {
-        id: row.id,
-        series_id: row.series_id,
-        title: row.title,
-        series_title: row.series_title,
-        number: row.number,
-        number_sort: row.number_sort,
-        summary: row.summary,
-        isbn: row.isbn,
-        authors: row
-            .authors
-            .into_iter()
-            .map(|author| OpdsBookAuthorEntry {
-                name: author.name,
-                role: author.role,
-            })
-            .collect(),
-        tags: row.tags,
-        file_name: row.file_name,
-        file_size: row.file_size,
-        media_type: row.media_type,
-        media_status: row.media_status,
-        page_count: row.page_count,
-        epub_divina_compatible: row.epub_divina_compatible,
-        library_id: row.library_id,
-        age_rating: row.age_rating,
-        sharing_labels: row.sharing_labels,
-        last_modified: row.last_modified,
-        release_date: row.release_date,
-    }
-}
-
-fn map_book_feed_record(row: PersistedBookFeedRecord) -> PersistedBookFeedItem {
-    PersistedBookFeedItem {
-        id: row.id,
-        title: row.title,
-        series_title: String::new(),
-        number: String::new(),
-        summary: String::new(),
-        authors: vec![],
-        file_name: row.file_name,
-        file_size: 0,
-        media_type: row.media_type,
-        page_count: 0,
-        epub_divina_compatible: false,
-        last_read: None,
-        last_read_date: None,
-        library_id: row.library_id,
-        age_rating: row.age_rating,
-        sharing_labels: row.sharing_labels,
-        last_modified: row.last_modified,
-    }
-}
-
 pub(super) async fn load_series_page(
     backend: &dyn OpdsCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
@@ -629,12 +338,6 @@ pub(super) async fn load_series_page(
         limit,
     )
     .await
-}
-
-pub(super) async fn load_all_readlists(
-    backend: &dyn OpdsCatalogPort,
-) -> Result<Vec<PersistedReadlist>, String> {
-    catalog_queries::load_all_readlists(backend).await
 }
 
 pub(super) async fn validate_library_scope(

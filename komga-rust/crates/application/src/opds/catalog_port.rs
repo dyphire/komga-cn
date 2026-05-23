@@ -3,8 +3,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 
 use super::records::{
-    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedEntry, OpdsReadlistEntry,
-    OpdsSeriesEntry,
+    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedEntry, OpdsSeriesEntry,
 };
 
 /// Port for OPDS catalog browsing operations.
@@ -81,6 +80,4 @@ pub trait OpdsCatalogPort: Send + Sync {
         offset: i64,
         limit: i64,
     ) -> Result<Vec<OpdsSeriesEntry>, String>;
-
-    async fn load_all_readlists(&self) -> Result<Vec<OpdsReadlistEntry>, String>;
 }

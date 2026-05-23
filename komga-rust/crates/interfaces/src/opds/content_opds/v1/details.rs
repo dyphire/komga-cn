@@ -2,7 +2,7 @@ use super::streaming::{localized_opds_updated, series_book_page_streaming_links}
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::opds::content_opds::types::PersistedSeries;
-use crate::state::{OpdsSeriesEntry, OpdsState};
+use crate::state::{OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry, OpdsState};
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
@@ -194,41 +194,18 @@ pub(crate) async fn opds_v1_collection_detail(
     collection_id: &str,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let Some(collection) = load_collection(app.opds_persisted.as_ref(), collection_id)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let Some(detail) = persisted_service
+        .collection_detail(&feed_user, collection_id)
         .await
         .unwrap_or(None)
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let restrictions = opds_restrictions_for_user(user);
-
-    let visible_series = load_collection_series(
-        app.opds_persisted.as_ref(),
-        collection_id,
-        collection.ordered,
-    )
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .filter(|series| library_visible(&allowed_library_ids, &series.library_id))
-    .collect::<Vec<_>>();
-    if visible_series.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let series = visible_series
-        .into_iter()
-        .filter(|series| {
-            content_allowed_by_restrictions(
-                restrictions.as_ref(),
-                series.age_rating,
-                &series.sharing_labels,
-            )
-        })
-        .collect::<Vec<_>>();
+    let collection = detail.collection;
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let (series, has_next) = paginate_vec(series, page, size);
+    let (series, has_next) = paginate_vec(detail.series, page, size);
 
     let entries = series
         .into_iter()
@@ -262,41 +239,19 @@ pub(crate) async fn opds_v1_readlist_detail(
     readlist_id: &str,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    let Some(readlist) = load_readlist(app.opds_persisted.as_ref(), readlist_id)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let Some(detail) = persisted_service
+        .readlist_detail(&feed_user, readlist_id)
         .await
         .unwrap_or(None)
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let restrictions = opds_restrictions_for_user(user);
+    let readlist = detail.readlist;
 
-    let visible_books = load_readlist_books(app.opds_persisted.as_ref(), readlist_id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
-        .collect::<Vec<_>>();
-    if visible_books.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let mut filtered_books = visible_books
-        .into_iter()
-        .filter(|book| {
-            book.media_status.as_deref() == Some("READY")
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    book.age_rating,
-                    &book.sharing_labels,
-                )
-        })
-        .collect::<Vec<_>>();
-    if !readlist.ordered {
-        filtered_books.sort_by_key(|book| book.release_date.clone());
-    }
-
-    let entries = filtered_books
+    let entries = detail
+        .books
         .into_iter()
         .map(|book| {
             let extension = std::path::Path::new(book.file_name.as_str())
