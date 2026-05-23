@@ -3,13 +3,8 @@ use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(in crate::task_queue) async fn execute_repair_extension(
     runtime: &JobRuntime<'_>,
-    task_target: Option<&str>,
+    book_id: &str,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "RepairExtension task must include a book id",
-        ));
-    };
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
@@ -21,14 +16,9 @@ pub(in crate::task_queue) async fn execute_repair_extension(
 
 pub(in crate::task_queue) async fn execute_find_books_to_convert(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
+    library_id: &str,
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let Some(library_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "FindBooksToConvert task must include a library id",
-        ));
-    };
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
@@ -39,7 +29,7 @@ pub(in crate::task_queue) async fn execute_find_books_to_convert(
         .into_iter()
         .map(|book| {
             TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book.book_id))
-                .priority(task.priority + 1)
+                .priority(priority + 1)
                 .group(book.series_id)
                 .into_queue_record()
         })
@@ -49,13 +39,8 @@ pub(in crate::task_queue) async fn execute_find_books_to_convert(
 
 pub(in crate::task_queue) async fn execute_convert_book(
     runtime: &JobRuntime<'_>,
-    task_target: Option<&str>,
+    book_id: &str,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "ConvertBook task must include a book id",
-        ));
-    };
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }

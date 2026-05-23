@@ -1,5 +1,4 @@
 use super::TaskRuntimeContext;
-use crate::task_queue::task_executor;
 use futures_util::future::BoxFuture;
 use komga_application::task_processing::{
     TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError, TaskQueueRecord,
@@ -58,7 +57,9 @@ impl TaskExecutionPoolHandle {
             Arc::new(|runtime, task| {
                 Box::pin(async move {
                     let job = runtime.job();
-                    task_executor::execute_task(&job, &task).await
+                    super::task_job_pipeline::TaskJobPipeline::new(job)
+                        .execute(&task)
+                        .await
                 })
             }),
         )

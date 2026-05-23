@@ -4,7 +4,7 @@ use komga_application::task_processing::{
 
 use super::JobRuntime;
 use super::queue_scheduler::TaskQueueScheduler;
-use super::task_executor;
+use super::task_job_pipeline::TaskJobPipeline;
 
 pub(super) async fn process_available_serial(
     scheduler: &TaskQueueScheduler,
@@ -29,7 +29,7 @@ pub(super) async fn process_available_serial(
         }
 
         scheduler.log_task_start(&task);
-        let outcome = task_executor::execute_task(runtime, &task).await;
+        let outcome = TaskJobPipeline::new(*runtime).execute(&task).await;
         if let Err(error) = finalize_task_result(
             scheduler,
             TaskExecutionResult { task, outcome },

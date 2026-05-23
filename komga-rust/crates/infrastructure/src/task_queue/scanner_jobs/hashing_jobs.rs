@@ -3,17 +3,12 @@ use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
 
 pub(in crate::task_queue) async fn execute_hash_book_pages(
     runtime: &JobRuntime<'_>,
-    task_target: Option<&str>,
+    book_id: &str,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "HashBookPages task must include a book id",
-        ));
-    };
     super::super::hash_book_pages(runtime, book_id)
         .await
         .map(|()| TaskExecutionOutcome::completed())
@@ -21,20 +16,9 @@ pub(in crate::task_queue) async fn execute_hash_book_pages(
 
 pub(in crate::task_queue) async fn execute_hash_book(
     runtime: &JobRuntime<'_>,
-    task_target: Option<&str>,
+    book_id: &str,
     koreader: bool,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let task_name = if koreader {
-        "HashBookKoreader"
-    } else {
-        "HashBook"
-    };
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(&format!(
-            "{task_name} task must include a book id",
-        )));
-    };
-
     super::super::hash_book(runtime, book_id, koreader).await?;
 
     Ok(TaskExecutionOutcome::completed())
@@ -42,18 +26,13 @@ pub(in crate::task_queue) async fn execute_hash_book(
 
 pub(in crate::task_queue) async fn execute_find_books_with_missing_page_hash(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
+    library_id: &str,
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let Some(library_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "FindBooksWithMissingPageHash task must include a library id",
-        ));
-    };
     let hashing_flags = load_library_hashing_flags(runtime, library_id).await?;
     if !hashing_flags.hash_pages {
         return Ok(TaskExecutionOutcome::completed());
@@ -63,7 +42,7 @@ pub(in crate::task_queue) async fn execute_find_books_with_missing_page_hash(
     let follow_up_tasks = book_ids
         .into_iter()
         .map(|book_id| {
-            let priority = task.priority.saturating_add(1);
+            let priority = priority.saturating_add(1);
             TaskRequest::with_payload(TaskKind::HashBookPages, BookPayload::new(book_id))
                 .priority(priority)
                 .into_queue_record()
@@ -74,22 +53,17 @@ pub(in crate::task_queue) async fn execute_find_books_with_missing_page_hash(
 
 pub(in crate::task_queue) async fn execute_find_duplicate_pages_to_delete(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
+    library_id: &str,
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let Some(library_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "FindDuplicatePagesToDelete task must include a library id",
-        ));
-    };
     let targets = find_duplicate_pages_to_delete(runtime, library_id).await?;
     let mut follow_up_tasks = Vec::new();
     for (book_id, pages) in targets {
-        let priority = task.priority.saturating_add(1);
+        let priority = priority.saturating_add(1);
         let payload = serde_json::to_string(&super::super::RemoveHashedPagesPayload::new(
             book_id.clone(),
             pages,
@@ -112,48 +86,20 @@ pub(in crate::task_queue) async fn execute_find_duplicate_pages_to_delete(
 
 pub(in crate::task_queue) async fn execute_remove_hashed_pages(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
+    book_id: &str,
+    pages: &[HashedPageToDelete],
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if !runtime.database().owns_main_database() {
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "RemoveHashedPages task must include a book id",
-        ));
-    };
-    let Some(payload) = task.payload.as_deref() else {
-        return Err(TaskProcessingError::invalid_task(
-            "RemoveHashedPages task requires serialized payload",
-        ));
-    };
-    let parsed = serde_json::from_str::<super::super::RemoveHashedPagesPayload>(payload).map_err(
-        |error| {
-            TaskProcessingError::runtime(format!(
-                "failed to parse RemoveHashedPages payload: {error}",
-            ))
-        },
-    )?;
-    if parsed.book_id != book_id {
-        return Err(TaskProcessingError::invalid_task(
-            "RemoveHashedPages payload book id must match task id",
-        ));
-    }
-    if parsed.unique_id != task.id {
-        return Err(TaskProcessingError::invalid_task(
-            "RemoveHashedPages payload unique id must match task id",
-        ));
-    }
-
     let book_id = book_id.to_string();
-    let pages = parsed.pages;
-    let regenerate_thumbnail = remove_hashed_pages(runtime, &book_id, &pages).await?;
+    let regenerate_thumbnail = remove_hashed_pages(runtime, &book_id, pages).await?;
     let follow_up_tasks = if regenerate_thumbnail {
         vec![
             TaskRequest::new(TaskKind::GenerateBookThumbnail)
-                .priority(task.priority.saturating_add(1))
+                .priority(priority.saturating_add(1))
                 .into_queue_record_with_id(&book_id),
         ]
     } else {

@@ -62,12 +62,10 @@ impl SqliteFilesystemLibraryScanPipeline {
         }
     }
 
-    pub(crate) async fn execute_scan_task(
+    pub(crate) async fn execute_scan(
         &self,
-        task: &TaskQueueRecord,
-        task_target: Option<&str>,
+        request: ScanOneLibrary,
     ) -> Result<ScanOneLibraryResult, TaskProcessingError> {
-        let request = resolve_scan_task_request(task, task_target)?;
         if !self.owns_filesystem_scan_output {
             return Ok(ScanOneLibraryResult::skipped_external_owned(
                 request.library_id,
@@ -459,60 +457,6 @@ impl SqliteFilesystemLibraryScanPipeline {
     }
 }
 
-fn resolve_scan_task_request(
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
-) -> Result<ScanOneLibrary, TaskProcessingError> {
-    let payload = task.payload.as_deref().and_then(scan_task_payload_fields);
-    let library_id = payload
-        .as_ref()
-        .and_then(|fields| fields.library_id.clone())
-        .or_else(|| task_target.map(scan_task_legacy_target_library_id));
-    let Some(library_id) = library_id else {
-        return Err(TaskProcessingError::invalid_task(
-            "ScanLibrary task must include a library id",
-        ));
-    };
-
-    let deep_scan = payload
-        .and_then(|fields| fields.deep_scan)
-        .or_else(|| task_target.and_then(scan_task_legacy_target_deep_scan))
-        .unwrap_or(false);
-
-    Ok(ScanOneLibrary::new(library_id, deep_scan))
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct ScanTaskPayloadFields {
-    library_id: Option<String>,
-    deep_scan: Option<bool>,
-}
-
-fn scan_task_payload_fields(payload: &str) -> Option<ScanTaskPayloadFields> {
-    let payload = serde_json::from_str::<serde_json::Value>(payload).ok()?;
-    Some(ScanTaskPayloadFields {
-        library_id: payload.get("libraryId")?.as_str().map(str::to_string),
-        deep_scan: payload
-            .get("scanDeep")
-            .or_else(|| payload.get("deep"))
-            .and_then(|value| value.as_bool()),
-    })
-}
-
-fn scan_task_legacy_target_library_id(task_target: &str) -> String {
-    task_target
-        .split_once("_DEEP_")
-        .map(|(id, _)| id)
-        .unwrap_or(task_target)
-        .to_string()
-}
-
-fn scan_task_legacy_target_deep_scan(task_target: &str) -> Option<bool> {
-    task_target
-        .rsplit_once("_DEEP_")
-        .and_then(|(_, deep_scan)| deep_scan.parse::<bool>().ok())
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -564,7 +508,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_scan_task_prefers_payload_and_skips_external_owned_output() {
+    async fn execute_scan_skips_external_owned_output() {
         let db_path = temp_db_path("library-scan-pipeline-task-resolution");
         let root = std::env::temp_dir().join(format!(
             "komga-rust-task-resolution-{}",
@@ -597,16 +541,10 @@ mod tests {
             .expect("temporary sqlite db should open for pipeline");
         let pipeline = SqliteFilesystemLibraryScanPipeline::from_pools(read_pool.clone())
             .with_filesystem_scan_output_ownership(false);
-        let task = TaskQueueRecord::new("ScanLibrary_missing-library_DEEP_true", 900, None)
-            .with_simple_type("ScanLibrary")
-            .with_payload(
-                r#"{"libraryId":"library-1","scanDeep":false,"priority":900,"groupId":null,"uniqueId":"ScanLibrary_missing-library_DEEP_true"}"#,
-            );
-
         let result = pipeline
-            .execute_scan_task(&task, Some("missing-library_DEEP_true"))
+            .execute_scan(ScanOneLibrary::new("library-1", false))
             .await
-            .expect("external-owned scan task should be handled by pipeline");
+            .expect("external-owned scan should be handled by pipeline");
 
         assert_eq!(result.library_id, "library-1");
         assert_eq!(

@@ -3,10 +3,7 @@ use crate::search::index_lifecycle::SearchEntityType;
 use crate::sqlite::write_models::server_settings::ServerSettingsStore;
 use crate::task_queue::JobRuntime;
 use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
-use komga_application::task_processing::{
-    TaskExecutionOutcome, TaskProcessingError, TaskQueueRecord,
-};
-use serde_json::Value;
+use komga_application::task_processing::{TaskExecutionOutcome, TaskProcessingError};
 
 fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
     match thumbnail_size {
@@ -19,20 +16,14 @@ fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
 
 pub(in crate::task_queue) async fn execute_analyze_book(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
-    task_target: Option<&str>,
+    book_id: &str,
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let Some(book_id) = task_target else {
-        return Err(TaskProcessingError::invalid_task(
-            "AnalyzeBook task must include a book id",
-        ));
-    };
-
     let book_id = book_id.to_string();
     let outcome = super::index_tasks::analyze_book(runtime, &book_id).await?;
 
     if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
-        let follow_up_priority = task.priority.saturating_add(1);
+        let follow_up_priority = priority.saturating_add(1);
         return Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
             TaskRequest::new(TaskKind::GenerateBookThumbnail)
                 .priority(follow_up_priority)
@@ -52,19 +43,18 @@ pub(in crate::task_queue) async fn execute_analyze_book(
 
 pub(in crate::task_queue) async fn execute_rebuild_index(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
+    entity_types: Option<&[SearchEntityType]>,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let entity_types = parse_rebuild_index_entities(task.payload.as_deref())?;
-    super::index_tasks::rebuild_index(runtime, entity_types.as_deref()).await?;
+    super::index_tasks::rebuild_index(runtime, entity_types).await?;
 
     Ok(TaskExecutionOutcome::completed())
 }
 
 pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
     runtime: &JobRuntime<'_>,
-    task: &TaskQueueRecord,
+    for_bigger_result_only: bool,
+    priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let for_bigger_result_only = parse_for_bigger_result_only(task.payload.as_deref());
     let book_ids = if for_bigger_result_only {
         let settings_store =
             ServerSettingsStore::new(runtime.database().main_db().database_file().to_path_buf());
@@ -84,78 +74,15 @@ pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
         .into_iter()
         .map(|book_id| {
             TaskRequest::new(TaskKind::GenerateBookThumbnail)
-                .priority(task.priority)
+                .priority(priority)
                 .into_queue_record_with_id(&book_id)
         })
         .collect();
     Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
 }
 
-fn parse_rebuild_index_entities(
-    payload: Option<&str>,
-) -> Result<Option<Vec<SearchEntityType>>, TaskProcessingError> {
-    let Some(payload) = payload else {
-        return Ok(None);
-    };
-    let payload = serde_json::from_str::<Value>(payload).map_err(|error| {
-        TaskProcessingError::runtime(format!("RebuildIndex payload must be valid JSON: {error}"))
-    })?;
-    let Some(entities) = payload.get("entities") else {
-        return Ok(None);
-    };
-    if entities.is_null() {
-        return Ok(None);
-    }
-    let entity_values = entities.as_array().ok_or_else(|| {
-        TaskProcessingError::invalid_task("RebuildIndex payload field 'entities' must be an array")
-    })?;
-
-    let mut parsed = Vec::new();
-    for entity in entity_values {
-        let entity_type = parse_rebuild_index_entity(entity).ok_or_else(|| {
-            TaskProcessingError::runtime(format!(
-                "RebuildIndex payload contains unsupported entity selector: {entity}"
-            ))
-        })?;
-        if !parsed.contains(&entity_type) {
-            parsed.push(entity_type);
-        }
-    }
-
-    Ok(Some(parsed))
-}
-
-fn parse_rebuild_index_entity(value: &Value) -> Option<SearchEntityType> {
-    let raw = match value {
-        Value::String(value) => Some(value.as_str()),
-        Value::Object(value) => value.get("type").and_then(Value::as_str),
-        _ => None,
-    }?;
-
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "book" => Some(SearchEntityType::Book),
-        "series" => Some(SearchEntityType::Series),
-        "collection" => Some(SearchEntityType::Collection),
-        "readlist" => Some(SearchEntityType::ReadList),
-        _ => None,
-    }
-}
-
-fn parse_for_bigger_result_only(payload: Option<&str>) -> bool {
-    payload
-        .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
-        .and_then(|payload| {
-            payload
-                .get("for_bigger_result_only")
-                .or_else(|| payload.get("forBiggerResultOnly"))
-                .and_then(Value::as_bool)
-        })
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::database_handle::DatabaseHandle;
     use crate::sqlite::{
         connect_main_write_context, connect_task_pool, connect_task_write_pool, connect_test_pool,
@@ -165,6 +92,7 @@ mod tests {
     use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
     use crate::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
     use image::{ImageBuffer, Rgba};
+    use komga_application::task_processing::TaskQueueRecord;
     use sqlx::{Row, SqlitePool};
     use std::fs::File;
     use std::io::Write;
@@ -1040,21 +968,5 @@ mod tests {
 
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
-    }
-
-    #[test]
-    fn thumbnail_finder_payload_accepts_kotlin_camel_case_flag() {
-        assert!(parse_for_bigger_result_only(Some(
-            r#"{"forBiggerResultOnly":true}"#
-        )));
-    }
-
-    #[test]
-    fn rebuild_index_payload_accepts_kotlin_entity_names() {
-        assert_eq!(
-            parse_rebuild_index_entities(Some(r#"{"entities":["Collection","Series"]}"#))
-                .expect("rebuild index payload should parse"),
-            Some(vec![SearchEntityType::Collection, SearchEntityType::Series])
-        );
     }
 }

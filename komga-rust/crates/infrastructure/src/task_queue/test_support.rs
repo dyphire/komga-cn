@@ -128,7 +128,9 @@ pub(crate) async fn execute_and_enqueue(
     runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
 ) -> Option<Result<(), TaskProcessingError>> {
-    let outcome = super::task_executor::execute_task(&runtime.job(), task).await;
+    let outcome = super::task_job_pipeline::TaskJobPipeline::new(runtime.job())
+        .execute(task)
+        .await;
     Some(
         finalize_task_execution(
             scheduler,
