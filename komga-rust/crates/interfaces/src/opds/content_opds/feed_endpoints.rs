@@ -5,7 +5,11 @@ use serde_json::json;
 
 use crate::identity_access::auth::AuthUser;
 use crate::request_urls::app_absolute_url;
-use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsState};
+use crate::state::{
+    OpdsFeedUserContext, OpdsLibraryScopeError, OpdsPersistedService, OpdsState,
+    OpdsV2FeedCompositionService, OpdsV2FeedContent, OpdsV2FeedKind, OpdsV2FeedPage,
+    OpdsV2FeedPageError,
+};
 
 use super::feeds::{
     normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
@@ -23,73 +27,15 @@ pub(super) async fn opds_v2_keep_reading_feed(
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
+    opds_v2_feed(
+        headers,
+        uri,
+        app,
         library_id,
+        user,
+        OpdsV2FeedKind::KeepReading,
     )
     .await
-    {
-        return response;
-    }
-
-    let selected_library = if let Some(id) = library_id {
-        match load_library(app.opds_persisted.as_ref(), id).await {
-            Ok(library) => library,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS keep-reading library scope: {error}") })),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        None
-    };
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-
-    let page_result = match feed_service
-        .keep_reading_page(&feed_user, None, page, size)
-        .await
-    {
-        Ok(page_result) => page_result,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS keep-reading books: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let publications = page_result
-        .books
-        .iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, book))
-        .collect::<Vec<_>>();
-
-    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let self_path = format!("/opds/v2/libraries{library_segment}/keep-reading");
-    let title = selected_library
-        .as_ref()
-        .map(|library| format!("{} - Keep Reading", library.name))
-        .unwrap_or_else(|| "All libraries - Keep Reading".to_string());
-    opds_publications_response_with_paging(
-        &headers,
-        title.as_str(),
-        self_path.as_str(),
-        selected_library
-            .as_ref()
-            .map(|library| library.last_modified.as_str()),
-        publications,
-        page,
-        size,
-        page_result.total_visible_books,
-    )
 }
 
 pub(super) async fn opds_v2_on_deck_feed(
@@ -99,73 +45,7 @@ pub(super) async fn opds_v2_on_deck_feed(
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
-        library_id,
-    )
-    .await
-    {
-        return response;
-    }
-
-    let selected_library = if let Some(id) = library_id {
-        match load_library(app.opds_persisted.as_ref(), id).await {
-            Ok(library) => library,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS on-deck library scope: {error}") })),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        None
-    };
-
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = match feed_service
-        .on_deck_page(&feed_user, library_id, page, size)
-        .await
-    {
-        Ok(page_result) => page_result,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS on-deck books: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let publications = page_result
-        .books
-        .iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, book))
-        .collect::<Vec<_>>();
-
-    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let self_path = format!("/opds/v2/libraries{library_segment}/on-deck");
-    let title = selected_library
-        .as_ref()
-        .map(|library| format!("{} - On Deck", library.name))
-        .unwrap_or_else(|| "All libraries - On Deck".to_string());
-    opds_publications_response_with_paging(
-        &headers,
-        title.as_str(),
-        self_path.as_str(),
-        selected_library
-            .as_ref()
-            .map(|library| library.last_modified.as_str()),
-        publications,
-        page,
-        size,
-        page_result.total_visible_books,
-    )
+    opds_v2_feed(headers, uri, app, library_id, user, OpdsV2FeedKind::OnDeck).await
 }
 
 pub(super) async fn opds_v2_latest_books_feed(
@@ -175,73 +55,15 @@ pub(super) async fn opds_v2_latest_books_feed(
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
+    opds_v2_feed(
+        headers,
+        uri,
+        app,
         library_id,
+        user,
+        OpdsV2FeedKind::LatestBooks,
     )
     .await
-    {
-        return response;
-    }
-
-    let selected_library = if let Some(id) = library_id {
-        match load_library(app.opds_persisted.as_ref(), id).await {
-            Ok(library) => library,
-            Err(error) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS latest-books library scope: {error}") })),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        None
-    };
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-
-    let page_result = match feed_service
-        .latest_books_page(&feed_user, None, page, size)
-        .await
-    {
-        Ok(page_result) => page_result,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS latest books: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let publications = page_result
-        .books
-        .iter()
-        .map(|book| opds_publication_for_feed_entry(&headers, book))
-        .collect::<Vec<_>>();
-
-    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let self_path = format!("/opds/v2/libraries{library_segment}/books/latest");
-    let title = selected_library
-        .as_ref()
-        .map(|library| format!("{} - Latest Books", library.name))
-        .unwrap_or_else(|| "All libraries - Latest Books".to_string());
-    opds_publications_response_with_paging(
-        &headers,
-        title.as_str(),
-        self_path.as_str(),
-        selected_library
-            .as_ref()
-            .map(|library| library.last_modified.as_str()),
-        publications,
-        page,
-        size,
-        page_result.total_visible_books,
-    )
 }
 
 pub(super) async fn opds_v2_latest_series_feed(
@@ -251,78 +73,127 @@ pub(super) async fn opds_v2_latest_series_feed(
     library_id: Option<&str>,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-    if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
-        &allowed_library_ids,
+    opds_v2_feed(
+        headers,
+        uri,
+        app,
         library_id,
+        user,
+        OpdsV2FeedKind::LatestSeries,
     )
     .await
-    {
-        return response;
-    }
+}
 
-    let libraries = match load_libraries(app.opds_persisted.as_ref()).await {
-        Ok(libraries) => libraries,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS libraries: {error}") })),
-            )
-                .into_response();
-        }
-    };
-    let selected_library =
-        library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
-
+async fn opds_v2_feed(
+    headers: HeaderMap,
+    uri: Uri,
+    app: &OpdsState,
+    library_id: Option<&str>,
+    user: &AuthUser,
+    kind: OpdsV2FeedKind,
+) -> Response {
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = match feed_service
-        .latest_series_page(&feed_user, library_id, page, size)
+    let service =
+        OpdsV2FeedCompositionService::new(app.opds_catalog.as_ref(), app.opds_persisted.as_ref());
+
+    match service
+        .feed_page(&feed_user, kind, library_id, page, size)
         .await
     {
-        Ok(page_result) => page_result,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS latest series: {error}") })),
-            )
-                .into_response();
-        }
-    };
+        Ok(page) => render_opds_v2_feed_page(&headers, page),
+        Err(error) => opds_v2_feed_error_response(kind, error),
+    }
+}
 
-    let navigation = page_result
-        .series
-        .into_iter()
-        .map(|series| {
-            json!({
-                "title": series.title,
-                "href": app_absolute_url(&headers, format!("/opds/v2/series/{}", series.id).as_str()),
-                "type": "application/opds+json",
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let self_path = format!("/opds/v2/libraries{library_segment}/series/latest");
-    let modified = selected_library
-        .map(|library| library.last_modified.as_str())
-        .filter(|value| !value.is_empty());
-    let title = selected_library
-        .map(|library| format!("{} - Latest Series", library.name))
-        .unwrap_or_else(|| "All libraries - Latest Series".to_string());
-
-    opds_navigation_response_with_paging(
-        &headers,
-        title.as_str(),
-        self_path.as_str(),
+fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> Response {
+    let OpdsV2FeedPage {
+        title,
+        self_path,
         modified,
-        navigation,
         page,
         size,
-        page_result.total_visible_series,
-    )
+        total,
+        content,
+    } = feed_page;
+    let modified = modified.as_deref().filter(|value| !value.is_empty());
+
+    match content {
+        OpdsV2FeedContent::Publications(books) => {
+            let publications = books
+                .iter()
+                .map(|book| opds_publication_for_feed_entry(headers, book))
+                .collect::<Vec<_>>();
+            opds_publications_response_with_paging(
+                headers,
+                title.as_str(),
+                self_path.as_str(),
+                modified,
+                publications,
+                page,
+                size,
+                total,
+            )
+        }
+        OpdsV2FeedContent::Navigation(series) => {
+            let navigation = series
+                .into_iter()
+                .map(|series| {
+                    json!({
+                        "title": series.title,
+                        "href": app_absolute_url(headers, format!("/opds/v2/series/{}", series.id).as_str()),
+                        "type": "application/opds+json",
+                    })
+                })
+                .collect::<Vec<_>>();
+            opds_navigation_response_with_paging(
+                headers,
+                title.as_str(),
+                self_path.as_str(),
+                modified,
+                navigation,
+                page,
+                size,
+                total,
+            )
+        }
+    }
+}
+
+fn opds_v2_feed_error_response(kind: OpdsV2FeedKind, error: OpdsV2FeedPageError) -> Response {
+    match error {
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::NotFound) => {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Forbidden) => {
+            StatusCode::FORBIDDEN.into_response()
+        }
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Load(error)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("load OPDS {} library scope: {error}", kind.error_label()) })),
+        )
+            .into_response(),
+        OpdsV2FeedPageError::Load(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("load OPDS {}: {error}", kind.error_label()) })),
+        )
+            .into_response(),
+    }
+}
+
+trait OpdsV2FeedKindErrorLabel {
+    fn error_label(self) -> &'static str;
+}
+
+impl OpdsV2FeedKindErrorLabel for OpdsV2FeedKind {
+    fn error_label(self) -> &'static str {
+        match self {
+            Self::KeepReading => "keep-reading books",
+            Self::OnDeck => "on-deck books",
+            Self::LatestBooks => "latest books",
+            Self::LatestSeries => "latest series",
+        }
+    }
 }
 
 pub(super) async fn opds_v2_collections_feed(

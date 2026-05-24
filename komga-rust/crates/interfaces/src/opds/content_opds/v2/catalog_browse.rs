@@ -1,6 +1,10 @@
 use super::*;
 use crate::identity_access::auth::AuthUser;
-use crate::state::{OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsState};
+use crate::state::{
+    OpdsFeedUserContext, OpdsLibraryScopeError, OpdsPersistedService, OpdsState,
+    OpdsV2FeedCompositionService, OpdsV2FeedPageError, OpdsV2RecommendedGroup,
+    OpdsV2RecommendedGroupContent, OpdsV2RecommendedPage,
+};
 use axum::extract::State;
 
 pub(crate) async fn opds_catalog(
@@ -8,7 +12,7 @@ pub(crate) async fn opds_catalog(
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    opds_v2_recommended(headers, &app, None, "/opds/v2/libraries".to_string(), &user).await
+    opds_v2_recommended(headers, &app, None, &user).await
 }
 
 pub(crate) async fn opds_v2_libraries(
@@ -16,7 +20,7 @@ pub(crate) async fn opds_v2_libraries(
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     headers: HeaderMap,
 ) -> Response {
-    opds_v2_recommended(headers, &app, None, "/opds/v2/libraries".to_string(), &user).await
+    opds_v2_recommended(headers, &app, None, &user).await
 }
 
 pub(crate) async fn opds_v2_library(
@@ -25,241 +29,36 @@ pub(crate) async fn opds_v2_library(
     library_id: &str,
     user: &AuthUser,
 ) -> Response {
-    opds_v2_recommended(
-        headers,
-        app,
-        Some(library_id),
-        format!("/opds/v2/libraries/{library_id}"),
-        user,
-    )
-    .await
+    opds_v2_recommended(headers, app, Some(library_id), user).await
 }
 
 async fn opds_v2_recommended(
     headers: HeaderMap,
     app: &OpdsState,
     library_id: Option<&str>,
-    self_path: String,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let libraries = match load_libraries(app.opds_persisted.as_ref()).await {
-        Ok(libraries) => libraries,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS libraries: {error}") })),
-            )
-                .into_response();
-        }
-    };
-
-    let selected_library = if let Some(id) = library_id {
-        let Some(library) = libraries.iter().find(|library| library.id == id).cloned() else {
-            return StatusCode::NOT_FOUND.into_response();
-        };
-        if !library_visible(&allowed_library_ids, id) {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        Some(library)
-    } else {
-        None
-    };
-
-    let library_segment = selected_library
-        .as_ref()
-        .map(|library| format!("/{}", library.id))
-        .unwrap_or_default();
-    let recommended_path = format!("/opds/v2/libraries{library_segment}");
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let service =
+        OpdsV2FeedCompositionService::new(app.opds_catalog.as_ref(), app.opds_persisted.as_ref());
+    let page = match service.recommended_page(&feed_user, library_id).await {
+        Ok(page) => page,
+        Err(error) => return opds_v2_recommended_error_response(error),
+    };
 
-    let keep_reading = feed_service
-        .keep_reading_page(&feed_user, library_id, 0, 5)
-        .await
-        .ok();
-    let keep_reading_publications = keep_reading
-        .as_ref()
-        .map(|page| {
-            page.books
-                .iter()
-                .map(|book| opds_publication_for_feed_entry(&headers, book))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let total_keep_reading = keep_reading
-        .as_ref()
-        .map(|page| page.total_visible_books)
-        .unwrap_or_default();
+    render_opds_v2_recommended(&headers, page)
+}
 
-    let on_deck = feed_service
-        .on_deck_page(&feed_user, library_id, 0, 5)
-        .await
-        .ok();
-    let on_deck_publications = on_deck
-        .as_ref()
-        .map(|page| {
-            page.books
-                .iter()
-                .map(|book| opds_publication_for_feed_entry(&headers, book))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let total_on_deck = on_deck
-        .as_ref()
-        .map(|page| page.total_visible_books)
-        .unwrap_or_default();
-
-    let latest_books = feed_service
-        .latest_books_page_with_read_progress(&feed_user, library_id, 0, 5)
-        .await
-        .ok();
-    let latest_books_publications = latest_books
-        .as_ref()
-        .map(|page| {
-            page.books
-                .iter()
-                .map(|book| opds_publication_for_feed_entry(&headers, book))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let total_latest_books = latest_books
-        .as_ref()
-        .map(|page| page.total_visible_books)
-        .unwrap_or_default();
-
-    let latest_series = feed_service
-        .latest_series_page(&feed_user, library_id, 0, 5)
-        .await
-        .ok();
-    let latest_series_navigation = latest_series
-        .as_ref()
-        .map(|page| {
-            page.series
-                .iter()
-                .map(|series| {
-                    json!({
-                        "title": series.title,
-                        "href": app_absolute_url(&headers, format!("/opds/v2/series/{}", series.id).as_str()),
-                        "type": "application/opds+json",
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let total_latest_series = latest_series
-        .as_ref()
-        .map(|page| page.total_visible_series)
-        .unwrap_or_default();
-
-    let has_visible_collections = persisted_service
-        .has_visible_collections_for_scope(&feed_user, library_id)
-        .await;
-    let has_visible_readlists = persisted_service
-        .has_visible_readlists_for_scope(&feed_user, library_id)
-        .await;
-
-    let mut navigation = vec![
-        opds_subsection_navigation_link(&headers, "Recommended", recommended_path.as_str()),
-        opds_subsection_navigation_link(
-            &headers,
-            "Browse",
-            format!("/opds/v2/libraries{library_segment}/browse").as_str(),
-        ),
-    ];
-    if has_visible_collections {
-        navigation.push(opds_subsection_navigation_link(
-            &headers,
-            "Collections",
-            format!("/opds/v2/libraries{library_segment}/collections").as_str(),
-        ));
-    }
-    if has_visible_readlists {
-        navigation.push(opds_subsection_navigation_link(
-            &headers,
-            "Read lists",
-            format!("/opds/v2/libraries{library_segment}/readlists").as_str(),
-        ));
-    }
-
-    let mut groups = Vec::new();
-    if selected_library.is_none() {
-        let libraries_navigation = libraries
-            .into_iter()
-            .filter(|library| library_visible(&allowed_library_ids, &library.id))
-            .map(|library| {
-                opds_navigation_link(
-                    &headers,
-                    library.name.as_str(),
-                    format!("/opds/v2/libraries/{}", library.id).as_str(),
-                )
-            })
-            .collect::<Vec<_>>();
-        if !libraries_navigation.is_empty() {
-            groups.push(json!({
-                "metadata": { "title": "Libraries" },
-                "links": [{
-                    "rel": "self",
-                    "href": app_absolute_url(&headers, "/opds/v2/libraries"),
-                }],
-                "navigation": libraries_navigation,
-            }));
-        }
-    }
-    if !keep_reading_publications.is_empty() {
-        groups.push(json!({
-            "metadata": recommended_group_metadata("Keep Reading", 5, total_keep_reading),
-            "links": [{
-                "title": "Keep Reading",
-                "rel": "self",
-                "href": app_absolute_url(&headers, format!("/opds/v2/libraries{library_segment}/keep-reading").as_str()),
-                "type": "application/opds+json",
-            }],
-            "publications": keep_reading_publications,
-        }));
-    }
-    if !on_deck_publications.is_empty() {
-        groups.push(json!({
-            "metadata": recommended_group_metadata("On Deck", 5, total_on_deck),
-            "links": [{
-                "title": "On Deck",
-                "rel": "self",
-                "href": app_absolute_url(&headers, format!("/opds/v2/libraries{library_segment}/on-deck").as_str()),
-                "type": "application/opds+json",
-            }],
-            "publications": on_deck_publications,
-        }));
-    }
-    if !latest_books_publications.is_empty() {
-        groups.push(json!({
-            "metadata": recommended_group_metadata("Latest Books", 5, total_latest_books),
-            "links": [{
-                "title": "Latest Books",
-                "rel": "self",
-                "href": app_absolute_url(&headers, format!("/opds/v2/libraries{library_segment}/books/latest").as_str()),
-                "type": "application/opds+json",
-            }],
-            "publications": latest_books_publications,
-        }));
-    }
-    if !latest_series_navigation.is_empty() {
-        groups.push(json!({
-            "metadata": recommended_group_metadata("Latest Series", 5, total_latest_series),
-            "links": [{
-                "title": "Latest Series",
-                "rel": "self",
-                "href": app_absolute_url(&headers, format!("/opds/v2/libraries{library_segment}/series/latest").as_str()),
-                "type": "application/opds+json",
-            }],
-            "navigation": latest_series_navigation,
-        }));
-    }
-
-    let modified = selected_library
-        .as_ref()
-        .map(|library| library.last_modified.as_str())
+fn render_opds_v2_recommended(headers: &HeaderMap, page: OpdsV2RecommendedPage) -> Response {
+    let navigation = opds_v2_recommended_navigation(headers, &page);
+    let groups = page
+        .groups
+        .into_iter()
+        .map(|group| opds_v2_recommended_group(headers, group))
+        .collect::<Vec<_>>();
+    let modified = page
+        .modified
+        .as_deref()
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or_else(opds_now_timestamp);
@@ -272,27 +71,24 @@ async fn opds_v2_recommended(
         )],
         Json(json!({
             "metadata": {
-                "title": selected_library
-                    .as_ref()
-                    .map(|library| format!("{} - Recommended", library.name))
-                    .unwrap_or_else(|| "All libraries - Recommended".to_string()),
+                "title": page.title,
                 "modified": modified,
             },
             "links": [
                 {
                     "rel": "self",
-                    "href": app_absolute_url(&headers, self_path.as_str()),
+                    "href": app_absolute_url(headers, page.self_path.as_str()),
                 },
                 {
                     "title": "Home",
                     "rel": "start",
-                    "href": app_absolute_url(&headers, "/opds/v2/catalog"),
+                    "href": app_absolute_url(headers, "/opds/v2/catalog"),
                     "type": "application/opds+json",
                 },
                 {
                     "title": "Search",
                     "rel": "search",
-                    "href": app_absolute_url(&headers, "/opds/v2/search{?query}"),
+                    "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
                     "type": "application/opds+json",
                     "templated": true,
                 }
@@ -302,6 +98,114 @@ async fn opds_v2_recommended(
         })),
     )
         .into_response()
+}
+
+fn opds_v2_recommended_navigation(
+    headers: &HeaderMap,
+    page: &OpdsV2RecommendedPage,
+) -> Vec<serde_json::Value> {
+    let mut navigation = vec![
+        opds_subsection_navigation_link(headers, "Recommended", page.recommended_path.as_str()),
+        opds_subsection_navigation_link(headers, "Browse", page.browse_path.as_str()),
+    ];
+    if page.has_visible_collections {
+        navigation.push(opds_subsection_navigation_link(
+            headers,
+            "Collections",
+            page.collections_path.as_str(),
+        ));
+    }
+    if page.has_visible_readlists {
+        navigation.push(opds_subsection_navigation_link(
+            headers,
+            "Read lists",
+            page.readlists_path.as_str(),
+        ));
+    }
+    navigation
+}
+
+fn opds_v2_recommended_group(
+    headers: &HeaderMap,
+    group: OpdsV2RecommendedGroup,
+) -> serde_json::Value {
+    match group.content {
+        OpdsV2RecommendedGroupContent::Libraries(libraries) => {
+            let navigation = libraries
+                .into_iter()
+                .map(|library| {
+                    opds_navigation_link(
+                        headers,
+                        library.name.as_str(),
+                        format!("/opds/v2/libraries/{}", library.id).as_str(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "metadata": { "title": group.title },
+                "links": [{
+                    "rel": "self",
+                    "href": app_absolute_url(headers, group.self_path.as_str()),
+                }],
+                "navigation": navigation,
+            })
+        }
+        OpdsV2RecommendedGroupContent::Publications(books) => {
+            let publications = books
+                .iter()
+                .map(|book| opds_publication_for_feed_entry(headers, book))
+                .collect::<Vec<_>>();
+            json!({
+                "metadata": recommended_group_metadata(group.title.as_str(), 5, group.total),
+                "links": [{
+                    "title": group.title,
+                    "rel": "self",
+                    "href": app_absolute_url(headers, group.self_path.as_str()),
+                    "type": "application/opds+json",
+                }],
+                "publications": publications,
+            })
+        }
+        OpdsV2RecommendedGroupContent::Navigation(series) => {
+            let navigation = series
+                .into_iter()
+                .map(|series| {
+                    json!({
+                        "title": series.title,
+                        "href": app_absolute_url(headers, format!("/opds/v2/series/{}", series.id).as_str()),
+                        "type": "application/opds+json",
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "metadata": recommended_group_metadata(group.title.as_str(), 5, group.total),
+                "links": [{
+                    "title": group.title,
+                    "rel": "self",
+                    "href": app_absolute_url(headers, group.self_path.as_str()),
+                    "type": "application/opds+json",
+                }],
+                "navigation": navigation,
+            })
+        }
+    }
+}
+
+fn opds_v2_recommended_error_response(error: OpdsV2FeedPageError) -> Response {
+    match error {
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::NotFound) => {
+            StatusCode::NOT_FOUND.into_response()
+        }
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Forbidden) => {
+            StatusCode::FORBIDDEN.into_response()
+        }
+        OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Load(error))
+        | OpdsV2FeedPageError::Load(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("load OPDS libraries: {error}") })),
+        )
+            .into_response(),
+    }
 }
 
 fn recommended_group_metadata(

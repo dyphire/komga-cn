@@ -3,11 +3,14 @@ use axum::extract::FromRef;
 
 pub use komga_application::opds::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
-    OpdsCatalogPort, OpdsFeedService, OpdsFeedUserContext, OpdsPersistedBookAuthorRecord,
-    OpdsPersistedPort, OpdsPersistedService, OpdsSeriesEntry, PersistedBookFeedRecord,
-    PersistedBookSearchRecord, PersistedLibraryRecord, PersistedNamedRecord,
-    PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
-    PersistedSeriesRecord, PersistedSeriesSearchRecord,
+    OpdsCatalogPort, OpdsFeedService, OpdsFeedUserContext, OpdsLibraryScopeError,
+    OpdsPersistedBookAuthorRecord, OpdsPersistedPort, OpdsPersistedService, OpdsSeriesEntry,
+    OpdsV2FeedCompositionService, OpdsV2FeedContent, OpdsV2FeedKind, OpdsV2FeedPage,
+    OpdsV2FeedPageError, OpdsV2RecommendedGroup, OpdsV2RecommendedGroupContent,
+    OpdsV2RecommendedPage, PersistedBookFeedRecord, PersistedBookSearchRecord,
+    PersistedLibraryRecord, PersistedNamedRecord, PersistedReadlistBookRecord,
+    PersistedReadlistRecord, PersistedSeriesBookRecord, PersistedSeriesRecord,
+    PersistedSeriesSearchRecord,
 };
 
 #[derive(Clone)]
