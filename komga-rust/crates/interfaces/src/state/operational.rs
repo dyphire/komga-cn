@@ -2,9 +2,9 @@ use super::*;
 use axum::extract::FromRef;
 
 use komga_application::operational::{
-    AnnouncementPort, ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
-    OperationalMetricsPort, PageHashPort, PageHashService, ServerSettingsService, SyncpointPort,
-    TransientBookService,
+    ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
+    OperationalMetricsPort, PageHashPort, PageHashService, RemoteFeedService,
+    ServerSettingsService, SyncpointPort, TransientBookService,
 };
 
 #[derive(Clone)]
@@ -14,7 +14,7 @@ pub struct OperationalApiState {
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
     pub(crate) operational_runtime: Arc<dyn OperationalMetricsPort>,
-    pub(crate) announcements: Arc<dyn AnnouncementPort>,
+    pub(crate) remote_feeds: Arc<RemoteFeedService>,
     pub(crate) claim: Arc<dyn ClaimPort>,
     pub(crate) client_settings: Arc<dyn ClientSettingsPort>,
     pub(crate) filesystem_browse: Arc<dyn FilesystemBrowsePort>,
@@ -34,7 +34,7 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
             identity: IdentityState::from_ref(app),
             task_queue: TaskQueueState::from_ref(app),
             operational_runtime: app.services.operational_runtime.clone(),
-            announcements: app.services.announcements.clone(),
+            remote_feeds: app.services.remote_feeds.clone(),
             claim: app.services.claim.clone(),
             client_settings: app.services.client_settings.clone(),
             filesystem_browse: app.services.filesystem_browse.clone(),

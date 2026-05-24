@@ -8,7 +8,8 @@ use komga_application::discovery::{
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter};
 use komga_application::operational::{
-    OperationalMetricsPort, PageHashService, ServerSettingsService, TransientBookService,
+    OperationalMetricsPort, PageHashService, RemoteFeedService, ServerSettingsService,
+    TransientBookService,
 };
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
@@ -26,7 +27,8 @@ use komga_infrastructure::opds_catalog_access::OpdsCatalogAccess;
 use komga_infrastructure::opds_persisted_access::OpdsPersistedAccess;
 use komga_infrastructure::operational_access::{
     self, AnnouncementAccess, ClaimAccess, ClientSettingsAccess, FilesystemBrowseAccess,
-    FontAccess, HistoryAccess, PageHashAccess, SyncpointAccess, TransientBookAccess,
+    FontAccess, HistoryAccess, PageHashAccess, RemoteFeedAccess, SyncpointAccess,
+    TransientBookAccess,
 };
 use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
 use komga_infrastructure::progress_writer::ProgressWriter;
@@ -40,8 +42,7 @@ use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
     AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices,
     IdentityState, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
-    ReadProgressState, RemoteCacheEntry, RuntimeProfile, RuntimeState, SseOperationalState,
-    StartupTimingState,
+    ReadProgressState, RuntimeProfile, RuntimeState, SseOperationalState, StartupTimingState,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -126,6 +127,11 @@ pub fn compose_http_runtime(
     ));
     let server_settings = Arc::new(ServerSettingsStore::new(config.database_file.clone()));
     let page_hashes = Arc::new(PageHashAccess::new(db.clone()));
+    let announcement_access = Arc::new(AnnouncementAccess::new(db.clone()));
+    let remote_feeds = Arc::new(RemoteFeedService::new(
+        Arc::new(RemoteFeedAccess),
+        announcement_access,
+    ));
     let services = HttpServices {
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
@@ -139,7 +145,7 @@ pub fn compose_http_runtime(
         )),
         identity,
         operational_runtime: operational_runtime_service,
-        announcements: Arc::new(AnnouncementAccess::new(db.clone())),
+        remote_feeds,
         claim: Arc::new(ClaimAccess::new(db.clone())),
         client_settings: Arc::new(ClientSettingsAccess::new(db.clone())),
         filesystem_browse: Arc::new(FilesystemBrowseAccess),
@@ -268,8 +274,6 @@ fn compose_operational_state(
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
         })),
-        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         shutdown_trigger,
     }
 }

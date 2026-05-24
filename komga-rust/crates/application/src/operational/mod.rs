@@ -2,6 +2,7 @@ mod actuator_contract;
 mod metrics_port;
 mod page_hashes;
 pub mod ports;
+mod remote_feeds;
 mod server_settings;
 mod server_settings_port;
 mod transient_books;
@@ -21,6 +22,7 @@ pub use ports::{
     TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
     TransientBookScanEntry,
 };
+pub use remote_feeds::{RemoteFeedPort, RemoteFeedService, SaveAnnouncementsReadError};
 pub use server_settings::{
     PersistedServerSettings, ServerSettingPatch, ServerSettingsLoadError, ServerSettingsService,
     ServerSettingsUpdateCommand, ServerSettingsUpdateError,

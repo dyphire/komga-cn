@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use komga_application::task_processing::{TaskQueue, TaskQueueAdmin};
-use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::discovery_auth::state::DiscoveryAuthState;

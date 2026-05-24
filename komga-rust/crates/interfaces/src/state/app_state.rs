@@ -12,7 +12,7 @@ pub struct HttpServices {
     pub server_settings_control: Arc<komga_application::operational::ServerSettingsService>,
     pub identity: IdentityState,
     pub operational_runtime: Arc<dyn komga_application::operational::OperationalMetricsPort>,
-    pub announcements: Arc<dyn komga_application::operational::AnnouncementPort>,
+    pub remote_feeds: Arc<komga_application::operational::RemoteFeedService>,
     pub claim: Arc<dyn komga_application::operational::ClaimPort>,
     pub client_settings: Arc<dyn komga_application::operational::ClientSettingsPort>,
     pub filesystem_browse: Arc<dyn komga_application::operational::FilesystemBrowsePort>,
@@ -59,8 +59,6 @@ pub struct OperationalState {
     pub oauth2_account_creation: bool,
     pub oidc_email_verification: bool,
     pub sse: Arc<Mutex<SseOperationalState>>,
-    pub announcements_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
-    pub releases_cache: Arc<Mutex<Option<RemoteCacheEntry>>>,
     pub shutdown_trigger: Option<watch::Sender<bool>>,
 }
 
@@ -84,12 +82,6 @@ pub struct BookImportSseEvent {
 pub struct SessionExpiredSseEvent {
     pub id: u64,
     pub user_id: String,
-}
-
-#[derive(Clone)]
-pub struct RemoteCacheEntry {
-    pub fetched_at_epoch_seconds: u64,
-    pub payload: Value,
 }
 
 #[derive(Clone, Default)]

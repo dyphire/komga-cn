@@ -21,7 +21,7 @@ use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
 use crate::state::{
     BookImportSseEvent, HttpServerRequestsState, OAuth2ClientConfig, OperationalBuildMetadata,
-    RemoteCacheEntry, RuntimeState, ServerSettingsState, SseOperationalState, StartupTimingState,
+    RuntimeState, ServerSettingsState, SseOperationalState, StartupTimingState,
 };
 
 #[tokio::test]
@@ -330,8 +330,6 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
             session_expired_events: Vec::new(),
             next_session_expired_event_id: 1,
         })),
-        announcements_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
-        releases_cache: Arc::new(Mutex::new(None::<RemoteCacheEntry>)),
         shutdown_trigger: None,
     }
 }
