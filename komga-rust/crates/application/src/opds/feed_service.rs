@@ -343,11 +343,13 @@ mod tests {
         OpdsSeriesEntry,
     };
 
+    type LatestBooksCall = (Option<String>, Option<String>, i64, i64);
+
     #[derive(Default)]
     struct TestCatalog {
         latest_books: Mutex<Vec<OpdsBookFeedEntry>>,
         latest_series: Mutex<Vec<OpdsSeriesEntry>>,
-        latest_books_calls: Mutex<Vec<(Option<String>, Option<String>, i64, i64)>>,
+        latest_books_calls: Mutex<Vec<LatestBooksCall>>,
         latest_series_calls: Mutex<Vec<(i64, i64)>>,
     }
 

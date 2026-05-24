@@ -352,7 +352,7 @@ pub async fn readlist_detail(
     {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
+        Err(error) => internal_error_response(error),
     }
 }
 

@@ -34,17 +34,12 @@ pub struct ServerSettingsUpdateCommand {
     pub kobo_port: ServerSettingPatch<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ServerSettingPatch<T> {
+    #[default]
     Unchanged,
     Clear,
     Set(T),
-}
-
-impl<T> Default for ServerSettingPatch<T> {
-    fn default() -> Self {
-        Self::Unchanged
-    }
 }
 
 #[derive(Clone)]
@@ -117,14 +112,12 @@ impl ServerSettingsService {
             persistence_changes.push(("REMEMBER_ME_DURATION".to_string(), Some(value.to_string())));
         }
 
-        if let Some(value) = command.renew_remember_me_key {
-            if value {
-                settings.remember_me_key = generate_remember_me_key();
-                persistence_changes.push((
-                    "REMEMBER_ME_KEY".to_string(),
-                    Some(settings.remember_me_key.clone()),
-                ));
-            }
+        if command.renew_remember_me_key == Some(true) {
+            settings.remember_me_key = generate_remember_me_key();
+            persistence_changes.push((
+                "REMEMBER_ME_KEY".to_string(),
+                Some(settings.remember_me_key.clone()),
+            ));
         }
 
         if let Some(value) = command.thumbnail_size {
