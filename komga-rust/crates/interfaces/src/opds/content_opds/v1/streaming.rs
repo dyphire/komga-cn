@@ -69,7 +69,7 @@ pub(super) async fn series_book_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
     book: &PersistedSeriesBook,
-) -> Vec<String> {
+) -> Vec<OpdsV1XmlLink> {
     opds_book_page_streaming_links(
         app,
         headers,
@@ -87,7 +87,7 @@ async fn book_feed_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
     book: &PersistedBookFeedItem,
-) -> Vec<String> {
+) -> Vec<OpdsV1XmlLink> {
     opds_book_page_streaming_links(
         app,
         headers,
@@ -111,7 +111,7 @@ async fn opds_book_page_streaming_links(
     epub_divina_compatible: bool,
     last_read: Option<i64>,
     last_read_date: Option<&str>,
-) -> Vec<String> {
+) -> Vec<OpdsV1XmlLink> {
     let media_types = opds_book_page_stream_media_types(
         app.reader.as_ref(),
         app.content.as_ref(),
@@ -146,30 +146,18 @@ async fn opds_book_page_streaming_links(
         )
     };
 
-    let mut read_progress_attributes = String::new();
+    let mut link = OpdsV1XmlLink::new(link_type, "http://vaemendis.net/opds-pse/stream", href)
+        .with_attribute("pse:count", page_count.to_string());
     if let Some(last_read) = last_read {
-        read_progress_attributes
-            .push_str(format!(" pse:lastRead=\"{}\"", last_read.max(0)).as_str());
+        link = link.with_attribute("pse:lastRead", last_read.max(0).to_string());
         if let Some(last_read_date) = last_read_date.map(str::trim)
             && !last_read_date.is_empty()
         {
-            read_progress_attributes.push_str(
-                format!(
-                    " pse:lastReadDate=\"{}\"",
-                    xml_escape(&normalize_opds_updated(last_read_date)),
-                )
-                .as_str(),
-            );
+            link = link.with_attribute("pse:lastReadDate", normalize_opds_updated(last_read_date));
         }
     }
 
-    vec![format!(
-        "<link type=\"{}\" rel=\"http://vaemendis.net/opds-pse/stream\" href=\"{}\" pse:count=\"{}\"{}/>",
-        xml_escape(&link_type),
-        xml_escape(&href),
-        page_count,
-        read_progress_attributes,
-    )]
+    vec![link]
 }
 
 async fn opds_book_page_stream_media_types(

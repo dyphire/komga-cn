@@ -11,6 +11,12 @@ use crate::request_urls::app_absolute_url;
 use crate::state::{OpdsBookAuthorEntry, OpdsBookFeedEntry};
 
 use super::types::PersistedSeries;
+use super::xml_renderer::{
+    OpdsV1AcquisitionFeedDocument, OpdsV1AcquisitionFeedEntry as OpdsV1XmlAcquisitionFeedEntry,
+    OpdsV1NavigationFeedDocument, OpdsV1NavigationFeedEntry as OpdsV1XmlNavigationFeedEntry,
+    render_opds_v1_acquisition_feed, render_opds_v1_navigation_feed,
+};
+pub(super) use super::xml_renderer::{OpdsV1XmlLink, xml_escape};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1NavigationEntry {
@@ -32,7 +38,7 @@ pub(super) struct OpdsV1AcquisitionEntry {
     pub acquisition_href_path: String,
     pub thumbnail_href_path: String,
     pub image_href_path: String,
-    pub extra_links: Vec<String>,
+    pub extra_links: Vec<OpdsV1XmlLink>,
 }
 
 pub(super) fn opds_v1_navigation_feed_response(
@@ -65,7 +71,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_feed_updated(
         entries,
         feed_updated,
         pagination,
-        &[],
+        Vec::new(),
     )
 }
 
@@ -77,7 +83,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
     entries: Vec<OpdsV1NavigationEntry>,
     feed_updated: Option<&str>,
     pagination: Option<(usize, bool)>,
-    extra_links: &[String],
+    extra_links: Vec<OpdsV1XmlLink>,
 ) -> Response {
     let self_href = app_absolute_url(headers, self_path);
     let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
@@ -86,63 +92,35 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or_else(|| now.clone());
+    let (previous_href, next_href) = navigation_paging_hrefs(headers, self_path, pagination);
 
-    let mut body = String::new();
-    body.push_str(
-        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
-    );
-    body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
-    body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(&feed_updated)).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
-    for link in extra_links {
-        body.push_str(link.as_str());
-    }
-    if let Some((page, has_next)) = pagination {
-        if page > 0 {
-            let previous_href = app_absolute_url(
-                headers,
-                page_link_path(self_path, page.saturating_sub(1)).as_str(),
-            );
-            body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"previous\" href=\"{}\"/>", xml_escape(previous_href.as_str())).as_str());
-        }
-        if has_next {
-            let next_href = app_absolute_url(headers, page_link_path(self_path, page + 1).as_str());
-            body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
-        }
-    }
-    for entry in entries {
-        let entry_updated = entry
-            .updated
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .map(normalize_opds_updated)
-            .unwrap_or_else(|| now.clone());
-        let href = app_absolute_url(headers, entry.href_path.as_str());
-        body.push_str(
-            format!(
-                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content>{}</content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
-                xml_escape(&entry.title),
-                xml_escape(&entry_updated),
-                xml_escape(&entry.id),
-                opds_content_markup(&entry.content),
-                xml_escape(&href),
-            )
-            .as_str(),
-        );
-    }
-    body.push_str("</feed>");
-
-    (
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/atom+xml"),
-        )],
-        body,
-    )
-        .into_response()
+    atom_xml_response(render_opds_v1_navigation_feed(
+        OpdsV1NavigationFeedDocument {
+            id: feed_id.to_string(),
+            title: title.to_string(),
+            updated: feed_updated,
+            self_href,
+            start_href,
+            previous_href,
+            next_href,
+            extra_links,
+            entries: entries
+                .into_iter()
+                .map(|entry| OpdsV1XmlNavigationFeedEntry {
+                    id: entry.id,
+                    title: entry.title,
+                    updated: entry
+                        .updated
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .map(normalize_opds_updated)
+                        .unwrap_or_else(|| now.clone()),
+                    content: entry.content,
+                    href: app_absolute_url(headers, entry.href_path.as_str()),
+                })
+                .collect(),
+        },
+    ))
 }
 
 pub(super) fn opds_v1_library_series_feed_response(
@@ -162,63 +140,52 @@ pub(super) fn opds_v1_library_series_feed_response(
         .filter(|value| !value.is_empty())
         .unwrap_or(now.as_str())
         .to_string();
-
-    let mut body = String::new();
-    body.push_str(
-        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
-    );
-    body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
-    body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(feed_updated.as_str())).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
-    if page > 0 {
-        let previous_href = app_absolute_url(
+    let previous_href = (page > 0).then(|| {
+        app_absolute_url(
             headers,
             format!(
                 "/opds/v1.2/libraries/{feed_id}?page={}",
                 page.saturating_sub(1)
             )
             .as_str(),
-        );
-        body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"previous\" href=\"{}\"/>", xml_escape(previous_href.as_str())).as_str());
-    }
-    if has_next {
-        let next_href = app_absolute_url(
+        )
+    });
+    let next_href = has_next.then(|| {
+        app_absolute_url(
             headers,
             format!("/opds/v1.2/libraries/{feed_id}?page={}", page + 1).as_str(),
-        );
-        body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
-    }
-    for entry in series_entries {
-        let entry_updated = if entry.last_modified.is_empty() {
-            now.clone()
-        } else {
-            entry.last_modified.clone()
-        };
-        let href = app_absolute_url(headers, format!("/opds/v1.2/series/{}", entry.id).as_str());
-        body.push_str(
-            format!(
-                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content></content><link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"subsection\" href=\"{}\"/></entry>",
-                xml_escape(&entry.title),
-                xml_escape(&entry_updated),
-                xml_escape(&entry.id),
-                xml_escape(&href),
-            )
-            .as_str(),
-        );
-    }
-    body.push_str("</feed>");
+        )
+    });
 
-    (
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/atom+xml"),
-        )],
-        body,
-    )
-        .into_response()
+    atom_xml_response(render_opds_v1_navigation_feed(
+        OpdsV1NavigationFeedDocument {
+            id: feed_id.to_string(),
+            title: title.to_string(),
+            updated: feed_updated,
+            self_href,
+            start_href,
+            previous_href,
+            next_href,
+            extra_links: Vec::new(),
+            entries: series_entries
+                .into_iter()
+                .map(|entry| OpdsV1XmlNavigationFeedEntry {
+                    updated: if entry.last_modified.is_empty() {
+                        now.clone()
+                    } else {
+                        entry.last_modified.clone()
+                    },
+                    href: app_absolute_url(
+                        headers,
+                        format!("/opds/v1.2/series/{}", entry.id).as_str(),
+                    ),
+                    id: entry.id,
+                    title: entry.title,
+                    content: String::new(),
+                })
+                .collect(),
+        },
+    ))
 }
 
 pub(super) fn opds_v1_acquisition_feed_response_with_entries(
@@ -237,88 +204,42 @@ pub(super) fn opds_v1_acquisition_feed_response_with_entries(
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or(now.clone());
+    let (previous_href, next_href) = navigation_paging_hrefs(headers, self_path, pagination);
 
-    let mut body = String::new();
-    body.push_str(
-        "<feed xmlns=\"http://www.w3.org/2005/Atom\" xmlns:pse=\"http://vaemendis.net/opds-pse/ns\">",
-    );
-    body.push_str(format!("<id>{}</id>", xml_escape(feed_id)).as_str());
-    body.push_str(format!("<title>{}</title>", xml_escape(title)).as_str());
-    body.push_str(format!("<updated>{}</updated><author><name>Komga</name><uri>https://github.com/huihuimoe/komga-riir</uri></author>", xml_escape(feed_updated.as_str())).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"self\" href=\"{}\"/>", xml_escape(&self_href)).as_str());
-    body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=navigation\" rel=\"start\" href=\"{}\"/>", xml_escape(&start_href)).as_str());
-    if let Some((page, has_next)) = pagination {
-        if page > 0 {
-            let previous_href = app_absolute_url(
-                headers,
-                page_link_path(self_path, page.saturating_sub(1)).as_str(),
-            );
-            body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"previous\" href=\"{}\"/>", xml_escape(previous_href.as_str())).as_str());
-        }
-        if has_next {
-            let next_href = app_absolute_url(headers, page_link_path(self_path, page + 1).as_str());
-            body.push_str(format!("<link type=\"application/atom+xml;profile=opds-catalog;kind=acquisition\" rel=\"next\" href=\"{}\"/>", xml_escape(next_href.as_str())).as_str());
-        }
-    }
-
-    for entry in entries {
-        let entry_updated = entry
-            .updated
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .map(normalize_opds_updated)
-            .unwrap_or_else(|| now.clone());
-        let book_href = app_absolute_url(headers, entry.acquisition_href_path.as_str());
-        let thumb_href = app_absolute_url(headers, entry.thumbnail_href_path.as_str());
-        let image_href = app_absolute_url(headers, entry.image_href_path.as_str());
-        let authors = entry
-            .authors
-            .into_iter()
-            .map(|author| format!("<author><name>{}</name></author>", xml_escape(&author)))
-            .collect::<String>();
-        let extra_links = entry.extra_links.join("");
-        body.push_str(
-            format!(
-                "<entry><title>{}</title><updated>{}</updated><id>{}</id><content>{}</content>{}<link type=\"{}\" rel=\"http://opds-spec.org/acquisition\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image/thumbnail\" href=\"{}\"/><link type=\"image/jpeg\" rel=\"http://opds-spec.org/image\" href=\"{}\"/>{}</entry>",
-                xml_escape(&entry.title),
-                xml_escape(&entry_updated),
-                xml_escape(&entry.id),
-                opds_content_markup(&entry.content),
-                authors,
-                xml_escape(&entry.acquisition_media_type),
-                xml_escape(&book_href),
-                xml_escape(&thumb_href),
-                xml_escape(&image_href),
-                extra_links,
-            )
-            .as_str(),
-        );
-    }
-
-    body.push_str("</feed>");
-
-    (
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/atom+xml"),
-        )],
-        body,
-    )
-        .into_response()
-}
-
-pub(super) fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn opds_content_markup(value: &str) -> String {
-    xml_escape(value).replace('\n', "<br/>")
+    atom_xml_response(render_opds_v1_acquisition_feed(
+        OpdsV1AcquisitionFeedDocument {
+            id: feed_id.to_string(),
+            title: title.to_string(),
+            updated: feed_updated,
+            self_href,
+            start_href,
+            previous_href,
+            next_href,
+            entries: entries
+                .into_iter()
+                .map(|entry| OpdsV1XmlAcquisitionFeedEntry {
+                    id: entry.id,
+                    title: entry.title,
+                    updated: entry
+                        .updated
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .map(normalize_opds_updated)
+                        .unwrap_or_else(|| now.clone()),
+                    content: entry.content,
+                    authors: entry.authors,
+                    acquisition_media_type: entry.acquisition_media_type,
+                    acquisition_href: app_absolute_url(
+                        headers,
+                        entry.acquisition_href_path.as_str(),
+                    ),
+                    thumbnail_href: app_absolute_url(headers, entry.thumbnail_href_path.as_str()),
+                    image_href: app_absolute_url(headers, entry.image_href_path.as_str()),
+                    extra_links: entry.extra_links,
+                })
+                .collect(),
+        },
+    ))
 }
 
 pub(super) fn query_escape(value: &str) -> String {
@@ -332,6 +253,39 @@ pub(super) fn query_escape(value: &str) -> String {
             _ => format!("%{:02X}", byte),
         })
         .collect::<String>()
+}
+
+fn atom_xml_response(body: String) -> Response {
+    (
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/atom+xml"),
+        )],
+        body,
+    )
+        .into_response()
+}
+
+fn navigation_paging_hrefs(
+    headers: &HeaderMap,
+    self_path: &str,
+    pagination: Option<(usize, bool)>,
+) -> (Option<String>, Option<String>) {
+    let Some((page, has_next)) = pagination else {
+        return (None, None);
+    };
+
+    let previous_href = (page > 0).then(|| {
+        app_absolute_url(
+            headers,
+            page_link_path(self_path, page.saturating_sub(1)).as_str(),
+        )
+    });
+    let next_href =
+        has_next.then(|| app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()));
+
+    (previous_href, next_href)
 }
 
 fn page_link_path(self_path: &str, page: usize) -> String {

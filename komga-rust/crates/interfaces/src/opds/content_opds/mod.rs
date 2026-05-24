@@ -21,6 +21,7 @@ mod persisted;
 mod types;
 mod v1;
 mod v2;
+mod xml_renderer;
 
 pub(crate) use self::auth_extractors::{OpdsV1Authenticated, OpdsV2Authenticated};
 use self::feed_endpoints::*;

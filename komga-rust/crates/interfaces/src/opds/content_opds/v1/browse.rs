@@ -95,15 +95,13 @@ pub(crate) async fn opds_v1_catalog(_app: &OpdsState, headers: HeaderMap) -> Res
         ],
         None,
         None,
-        &[
-            format!(
-                "<link type=\"application/opensearchdescription+xml\" rel=\"search\" href=\"{}\"/>",
-                xml_escape(&search_href)
+        vec![
+            OpdsV1XmlLink::new(
+                "application/opensearchdescription+xml",
+                "search",
+                search_href,
             ),
-            format!(
-                "<link type=\"application/opds+json\" rel=\"alternate\" href=\"{}\"/>",
-                xml_escape(&alternate_href)
-            ),
+            OpdsV1XmlLink::new("application/opds+json", "alternate", alternate_href),
         ],
     )
 }
