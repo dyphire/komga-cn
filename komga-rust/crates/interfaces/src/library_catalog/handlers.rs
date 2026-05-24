@@ -3,7 +3,7 @@ use axum::extract::Path;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryRecord};
+use komga_application::library_catalog::LibraryRecord;
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 
@@ -18,7 +18,7 @@ use super::request_mapping::{
     is_deep_scan_query, parse_create_library_change_set, parse_update_library_change_set,
 };
 use super::response_mapping::{libraries_payload, library_payload};
-use super::task_mapping::{enqueue_task_records, enqueue_task_records_with_status};
+use super::task_mapping::LibraryCatalogCommands;
 
 pub async fn libraries_route(
     State(app): State<LibraryCatalogState>,
@@ -72,16 +72,9 @@ pub async fn library_create_route(
         Ok(changes) => changes,
         Err(response) => return response,
     };
-    match app.library_catalog.create_library(changes).await {
-        Ok(result) => {
-            let enqueue_response = enqueue_task_records(&app, result.task_records).await;
-            if enqueue_response.status().is_server_error() {
-                return enqueue_response;
-            }
-            Json(library_payload(&result.library, true)).into_response()
-        }
-        Err(error) => mutation_error_response(error),
-    }
+    LibraryCatalogCommands::new(&app)
+        .create_library(changes)
+        .await
 }
 
 pub async fn library_update_route(
@@ -94,18 +87,9 @@ pub async fn library_update_route(
         Ok(changes) => changes,
         Err(response) => return response,
     };
-    match app
-        .library_catalog
+    LibraryCatalogCommands::new(&app)
         .update_library(&library_id, changes)
         .await
-    {
-        Ok(result) if result.task_records.is_empty() => StatusCode::NO_CONTENT.into_response(),
-        Ok(result) => {
-            enqueue_task_records_with_status(&app, result.task_records, StatusCode::NO_CONTENT)
-                .await
-        }
-        Err(error) => mutation_error_response(error),
-    }
 }
 
 pub async fn library_delete_route(
@@ -113,11 +97,9 @@ pub async fn library_delete_route(
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
 ) -> Response {
-    match app.library_catalog.delete_library(&library_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => mutation_error_response(error),
-    }
+    LibraryCatalogCommands::new(&app)
+        .delete_library(&library_id)
+        .await
 }
 
 pub async fn library_scan_route(
@@ -127,14 +109,9 @@ pub async fn library_scan_route(
     Path(library_id): Path<String>,
 ) -> Response {
     let deep_scan = uri.query().map(is_deep_scan_query).unwrap_or(false);
-    match app
-        .library_catalog
+    LibraryCatalogCommands::new(&app)
         .scan_library(&library_id, deep_scan)
         .await
-    {
-        Ok(result) => enqueue_task_records(&app, result.task_records).await,
-        Err(error) => mutation_error_response(error),
-    }
 }
 
 pub async fn library_analyze_route(
@@ -142,10 +119,9 @@ pub async fn library_analyze_route(
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
 ) -> Response {
-    match app.library_catalog.analyze_library(&library_id).await {
-        Ok(result) => enqueue_task_records(&app, result.task_records).await,
-        Err(error) => mutation_error_response(error),
-    }
+    LibraryCatalogCommands::new(&app)
+        .analyze_library(&library_id)
+        .await
 }
 
 pub async fn library_metadata_refresh_route(
@@ -153,10 +129,9 @@ pub async fn library_metadata_refresh_route(
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
 ) -> Response {
-    match app.library_catalog.refresh_metadata(&library_id).await {
-        Ok(result) => enqueue_task_records(&app, result.task_records).await,
-        Err(error) => mutation_error_response(error),
-    }
+    LibraryCatalogCommands::new(&app)
+        .refresh_metadata(&library_id)
+        .await
 }
 
 pub async fn library_empty_trash_route(
@@ -164,30 +139,13 @@ pub async fn library_empty_trash_route(
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
 ) -> Response {
-    match app.library_catalog.empty_trash(&library_id).await {
-        Ok(result) => enqueue_task_records(&app, result.task_records).await,
-        Err(error) => mutation_error_response(error),
-    }
+    LibraryCatalogCommands::new(&app)
+        .empty_trash(&library_id)
+        .await
 }
 
 pub(super) fn bad_request_response(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
-}
-
-fn internal_error_response(error: impl std::fmt::Display) -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": error.to_string() })),
-    )
-        .into_response()
-}
-
-fn mutation_error_response(error: LibraryCatalogMutationError) -> Response {
-    match error {
-        LibraryCatalogMutationError::NotFound => StatusCode::NOT_FOUND.into_response(),
-        LibraryCatalogMutationError::Validation(message) => bad_request_response(&message),
-        LibraryCatalogMutationError::Persistence(message) => internal_error_response(message),
-    }
 }
 
 async fn forbidden_library_detail_response(
