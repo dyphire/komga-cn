@@ -20,9 +20,17 @@ pub fn session_token_store() -> &'static SessionRegistry {
 static SESSION_REGISTRY: LazyLock<SessionRegistry> = LazyLock::new(SessionRegistry::new);
 
 pub struct SessionRegistry {
+    sessions: SessionStore,
+    remember_me: RememberMeTokenStore,
+}
+
+struct SessionStore {
     counter: AtomicU64,
     sessions: RwLock<HashMap<String, Arc<SessionTokenRecord>>>,
     session_max_inactive_seconds_by_runtime_key: RwLock<HashMap<String, u64>>,
+}
+
+struct RememberMeTokenStore {
     remember_me_settings_by_runtime_key: RwLock<HashMap<String, RememberMeRuntimeSettings>>,
     remember_me_database_paths_by_runtime_key: RwLock<HashMap<String, PathBuf>>,
 }
@@ -48,14 +56,32 @@ const REMEMBER_ME_SIGNATURE_ALGORITHM: &str = "SHA256";
 impl SessionRegistry {
     fn new() -> Self {
         Self {
+            sessions: SessionStore::new(),
+            remember_me: RememberMeTokenStore::new(),
+        }
+    }
+}
+
+impl SessionStore {
+    fn new() -> Self {
+        Self {
             counter: AtomicU64::new(1),
             sessions: RwLock::new(HashMap::new()),
             session_max_inactive_seconds_by_runtime_key: RwLock::new(HashMap::new()),
+        }
+    }
+}
+
+impl RememberMeTokenStore {
+    fn new() -> Self {
+        Self {
             remember_me_settings_by_runtime_key: RwLock::new(HashMap::new()),
             remember_me_database_paths_by_runtime_key: RwLock::new(HashMap::new()),
         }
     }
+}
 
+impl SessionStore {
     fn session_max_inactive_seconds_for_runtime_key(&self, runtime_key: &str) -> u64 {
         self.session_max_inactive_seconds_by_runtime_key
             .read()
@@ -65,7 +91,7 @@ impl SessionRegistry {
             .unwrap_or(SESSION_MAX_INACTIVE_SECONDS)
     }
 
-    pub fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
+    fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
         let runtime_key = normalized_runtime_key(runtime_key);
         self.session_max_inactive_seconds_by_runtime_key
             .write()
@@ -76,58 +102,7 @@ impl SessionRegistry {
             );
     }
 
-    fn remember_me_database_path_for_runtime_key(&self, runtime_key: &str) -> Option<PathBuf> {
-        self.remember_me_database_paths_by_runtime_key
-            .read()
-            .expect("remember-me database paths lock should not be poisoned")
-            .get(runtime_key)
-            .cloned()
-    }
-
-    fn remember_me_settings_for_runtime_key(&self, runtime_key: &str) -> RememberMeRuntimeSettings {
-        self.remember_me_settings_by_runtime_key
-            .read()
-            .expect("remember-me settings lock should not be poisoned")
-            .get(runtime_key)
-            .cloned()
-            .unwrap_or_else(|| default_remember_me_settings(runtime_key))
-    }
-
-    pub fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
-        let runtime_key = normalized_runtime_key(runtime_key);
-        self.remember_me_settings_by_runtime_key
-            .write()
-            .expect("remember-me settings lock should not be poisoned")
-            .insert(
-                runtime_key,
-                RememberMeRuntimeSettings {
-                    key: normalized_remember_me_key(key),
-                    duration_days: normalized_remember_me_duration_days(duration_days),
-                },
-            );
-    }
-
-    pub fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
-        let runtime_key = normalized_runtime_key(runtime_key);
-        remember_me_duration_days_to_seconds(
-            self.remember_me_settings_for_runtime_key(runtime_key.as_str())
-                .duration_days,
-        )
-    }
-
-    pub fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
-        let runtime_key = normalized_runtime_key(runtime_key);
-        self.remember_me_database_paths_by_runtime_key
-            .write()
-            .expect("remember-me database paths lock should not be poisoned")
-            .insert(runtime_key, database_file.to_path_buf());
-    }
-
-    pub fn invalidate_user_sessions_for_runtime_key(
-        &self,
-        runtime_key: &str,
-        target_user_id: &str,
-    ) {
+    fn invalidate_user_sessions_for_runtime_key(&self, runtime_key: &str, target_user_id: &str) {
         let runtime_key = normalized_runtime_key(runtime_key);
         let mut sessions = self
             .sessions
@@ -142,7 +117,7 @@ impl SessionRegistry {
         });
     }
 
-    pub fn store_oauth2_authorization_state(
+    fn store_oauth2_authorization_state(
         &self,
         runtime_key: &str,
         session_token: &str,
@@ -211,7 +186,7 @@ impl SessionRegistry {
             .insert(registration_id.to_string(), state.to_string());
     }
 
-    pub fn take_oauth2_authorization_state(
+    fn take_oauth2_authorization_state(
         &self,
         runtime_key: &str,
         session_token: &str,
@@ -281,57 +256,7 @@ impl SessionRegistry {
             .remove(session_token);
         true
     }
-}
 
-impl RememberMeRuntime for SessionRegistry {
-    fn issue_remember_me_token(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
-        let _next = self.counter.fetch_add(1, Ordering::Relaxed);
-        let runtime_key = normalized_runtime_key(runtime_key);
-        let settings = self.remember_me_settings_for_runtime_key(runtime_key.as_str());
-        let expiry_epoch_millis = now_epoch_millis().saturating_add(
-            remember_me_duration_days_to_seconds(settings.duration_days).saturating_mul(1000),
-        );
-        Some(build_remember_me_cookie_value(
-            runtime_key.as_str(),
-            &user.email,
-            expiry_epoch_millis,
-            &user.password,
-            settings.key.as_str(),
-        ))
-    }
-
-    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
-        let parsed_token = parse_remember_me_token(token)?;
-        if parsed_token.algorithm != REMEMBER_ME_SIGNATURE_ALGORITHM {
-            return None;
-        }
-        if parsed_token.expiry_epoch_millis <= now_epoch_millis() {
-            return None;
-        }
-        let database_file =
-            self.remember_me_database_path_for_runtime_key(parsed_token.runtime_key())?;
-        let user = load_persisted_user_by_login_identifier(
-            database_file.as_path(),
-            parsed_token.login_identifier.as_str(),
-        )?;
-        let expected_signature = remember_me_signature(
-            parsed_token.login_identifier.as_str(),
-            parsed_token.expiry_epoch_millis,
-            user.password.as_str(),
-            self.remember_me_settings_for_runtime_key(parsed_token.runtime_key())
-                .key
-                .as_str(),
-        );
-        if parsed_token.signature != expected_signature {
-            return None;
-        }
-        Some(user)
-    }
-
-    fn invalidate_remember_me_token(&self, _token: &str) {}
-}
-
-impl SessionRuntime for SessionRegistry {
     fn issue_session_token(&self, user: &AuthUser, runtime_key: &str) -> String {
         let runtime_key = normalized_runtime_key(runtime_key);
         let next = self.counter.fetch_add(1, Ordering::Relaxed);
@@ -404,6 +329,187 @@ impl SessionRuntime for SessionRegistry {
             .write()
             .expect("session registry lock should not be poisoned");
         sessions.remove(token);
+    }
+}
+
+impl RememberMeTokenStore {
+    fn remember_me_database_path_for_runtime_key(&self, runtime_key: &str) -> Option<PathBuf> {
+        self.remember_me_database_paths_by_runtime_key
+            .read()
+            .expect("remember-me database paths lock should not be poisoned")
+            .get(runtime_key)
+            .cloned()
+    }
+
+    fn remember_me_settings_for_runtime_key(&self, runtime_key: &str) -> RememberMeRuntimeSettings {
+        self.remember_me_settings_by_runtime_key
+            .read()
+            .expect("remember-me settings lock should not be poisoned")
+            .get(runtime_key)
+            .cloned()
+            .unwrap_or_else(|| default_remember_me_settings(runtime_key))
+    }
+
+    fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        self.remember_me_settings_by_runtime_key
+            .write()
+            .expect("remember-me settings lock should not be poisoned")
+            .insert(
+                runtime_key,
+                RememberMeRuntimeSettings {
+                    key: normalized_remember_me_key(key),
+                    duration_days: normalized_remember_me_duration_days(duration_days),
+                },
+            );
+    }
+
+    fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        remember_me_duration_days_to_seconds(
+            self.remember_me_settings_for_runtime_key(runtime_key.as_str())
+                .duration_days,
+        )
+    }
+
+    fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        self.remember_me_database_paths_by_runtime_key
+            .write()
+            .expect("remember-me database paths lock should not be poisoned")
+            .insert(runtime_key, database_file.to_path_buf());
+    }
+
+    fn issue_remember_me_token(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
+        let runtime_key = normalized_runtime_key(runtime_key);
+        let settings = self.remember_me_settings_for_runtime_key(runtime_key.as_str());
+        let expiry_epoch_millis = now_epoch_millis().saturating_add(
+            remember_me_duration_days_to_seconds(settings.duration_days).saturating_mul(1000),
+        );
+        Some(build_remember_me_cookie_value(
+            runtime_key.as_str(),
+            &user.email,
+            expiry_epoch_millis,
+            &user.password,
+            settings.key.as_str(),
+        ))
+    }
+
+    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
+        let parsed_token = parse_remember_me_token(token)?;
+        if parsed_token.algorithm != REMEMBER_ME_SIGNATURE_ALGORITHM {
+            return None;
+        }
+        if parsed_token.expiry_epoch_millis <= now_epoch_millis() {
+            return None;
+        }
+        let database_file =
+            self.remember_me_database_path_for_runtime_key(parsed_token.runtime_key())?;
+        let user = load_persisted_user_by_login_identifier(
+            database_file.as_path(),
+            parsed_token.login_identifier.as_str(),
+        )?;
+        let expected_signature = remember_me_signature(
+            parsed_token.login_identifier.as_str(),
+            parsed_token.expiry_epoch_millis,
+            user.password.as_str(),
+            self.remember_me_settings_for_runtime_key(parsed_token.runtime_key())
+                .key
+                .as_str(),
+        );
+        if parsed_token.signature != expected_signature {
+            return None;
+        }
+        Some(user)
+    }
+
+    fn invalidate_remember_me_token(&self, _token: &str) {}
+}
+
+impl SessionRegistry {
+    pub fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
+        self.sessions
+            .sync_session_settings(runtime_key, max_inactive_seconds);
+    }
+
+    pub fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
+        self.remember_me
+            .sync_remember_me_settings(runtime_key, key, duration_days);
+    }
+
+    pub fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
+        self.remember_me.remember_me_max_age_seconds(runtime_key)
+    }
+
+    pub fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
+        self.remember_me
+            .sync_remember_me_database_path(runtime_key, database_file);
+    }
+
+    pub fn invalidate_user_sessions_for_runtime_key(
+        &self,
+        runtime_key: &str,
+        target_user_id: &str,
+    ) {
+        self.sessions
+            .invalidate_user_sessions_for_runtime_key(runtime_key, target_user_id);
+    }
+
+    pub fn store_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+        state: &str,
+    ) {
+        self.sessions.store_oauth2_authorization_state(
+            runtime_key,
+            session_token,
+            registration_id,
+            state,
+        );
+    }
+
+    pub fn take_oauth2_authorization_state(
+        &self,
+        runtime_key: &str,
+        session_token: &str,
+        registration_id: &str,
+    ) -> Option<String> {
+        self.sessions
+            .take_oauth2_authorization_state(runtime_key, session_token, registration_id)
+    }
+}
+
+impl RememberMeRuntime for SessionRegistry {
+    fn issue_remember_me_token(&self, user: &AuthUser, runtime_key: &str) -> Option<String> {
+        self.remember_me.issue_remember_me_token(user, runtime_key)
+    }
+
+    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
+        self.remember_me.resolve_remember_me_user(token)
+    }
+
+    fn invalidate_remember_me_token(&self, token: &str) {
+        self.remember_me.invalidate_remember_me_token(token);
+    }
+}
+
+impl SessionRuntime for SessionRegistry {
+    fn issue_session_token(&self, user: &AuthUser, runtime_key: &str) -> String {
+        self.sessions.issue_session_token(user, runtime_key)
+    }
+
+    fn resolve_session_user(&self, token: &str) -> Option<AuthUser> {
+        self.sessions.resolve_session_user(token)
+    }
+
+    fn invalidate_user_sessions(&self, target_user_id: &str) {
+        self.sessions.invalidate_user_sessions(target_user_id);
+    }
+
+    fn invalidate_session_token(&self, token: &str) {
+        self.sessions.invalidate_session_token(token);
     }
 }
 
