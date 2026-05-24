@@ -5,18 +5,18 @@ use std::time::Duration;
 use super::{TaskRuntimeConfig, TaskRuntimeContext};
 use komga_application::task_processing::{
     LibraryScanPipeline, LibraryScanScheduleState, ScanSchedulingTrigger,
-    ScheduledLibraryScanBatch, TaskKind, TaskProcessingError, TaskRequest,
+    ScheduledLibraryScanBatch, TaskKind, TaskRequest,
 };
 use tokio::runtime::Handle;
-use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::time::interval;
 use tracing::{Instrument, Span, error, info};
 
+use super::execution_loop::BackgroundTaskExecutionLoop;
+pub use super::execution_loop::SharedTaskQueue;
 use super::execution_pool::TaskExecutionPoolHandle;
 use super::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
 use super::{TaskExecutionResult, TaskQueueRecord, TaskQueueScheduler};
-
-pub type SharedTaskQueue = Arc<AsyncMutex<TaskQueueScheduler>>;
 pub type TaskQueueWakeSignal = Arc<Notify>;
 
 pub struct RuntimeBackgroundState {
@@ -156,7 +156,7 @@ pub async fn prepare_task_queue(
     }
 
     RuntimeBackgroundState {
-        task_queue: Arc::new(AsyncMutex::new(task_queue)),
+        task_queue: Arc::new(tokio::sync::Mutex::new(task_queue)),
         task_wakeup: wakeup,
         task_execution_pool: TaskExecutionPoolHandle::new(runtime.worker().task_pool_size()),
     }
@@ -470,12 +470,13 @@ async fn run_background_task_iteration_with_pool(
         RuntimeLifecycleFields::default().with_queued_tasks(queued_tasks),
     );
 
-    let processed = match process_shared_task_queue(
+    let processed = match BackgroundTaskExecutionLoop::new(
         &task_queue,
         task_execution_pool,
         &runtime,
         result_rx,
     )
+    .drain()
     .await
     {
         Ok(processed) => processed,
@@ -502,113 +503,6 @@ async fn run_background_task_iteration_with_pool(
             .with_processed(processed),
     );
     Ok(processed)
-}
-
-async fn process_shared_task_queue(
-    task_queue: &SharedTaskQueue,
-    task_execution_pool: &TaskExecutionPoolHandle,
-    runtime: &TaskRuntimeContext,
-    result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
-) -> Result<usize, TaskProcessingError> {
-    let mut processed = 0usize;
-    let mut logged_start = false;
-    let mut in_flight = 0usize;
-    let mut first_error: Option<TaskProcessingError> = None;
-    loop {
-        if first_error.is_none() {
-            let claimed = match claim_tasks_up_to_capacity(
-                task_queue,
-                task_execution_pool,
-                runtime,
-                &mut in_flight,
-            )
-            .await
-            {
-                Ok(claimed) => claimed,
-                Err(error) => {
-                    first_error = Some(error);
-                    0
-                }
-            };
-
-            if claimed > 0 && !logged_start {
-                let task_queue = task_queue.lock().await;
-                task_queue.log_process_available("started", processed, None);
-                logged_start = true;
-            }
-        }
-
-        if in_flight == 0 {
-            let task_queue = task_queue.lock().await;
-            if let Some(error) = first_error {
-                let error_message = error.to_string();
-                task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
-                return Err(error);
-            }
-            if logged_start {
-                task_queue.log_process_available("completed", processed, None);
-            }
-            return Ok(processed);
-        }
-
-        let Some(task_result) = result_rx.recv().await else {
-            let error = TaskProcessingError::runtime("task execution pool result channel closed");
-            let error_message = error.to_string();
-            let task_queue = task_queue.lock().await;
-            task_queue.log_process_available("failed", processed, Some(error_message.as_str()));
-            return Err(error);
-        };
-        in_flight = in_flight.saturating_sub(1);
-
-        let finalize_result = {
-            let task_queue = task_queue.lock().await;
-            super::queue_orchestration::finalize_task_result(
-                &task_queue,
-                task_result,
-                &mut processed,
-            )
-            .await
-        };
-        if let Err(error) = finalize_result
-            && first_error.is_none()
-        {
-            first_error = Some(error);
-        }
-    }
-}
-
-async fn claim_tasks_up_to_capacity(
-    task_queue: &SharedTaskQueue,
-    task_execution_pool: &TaskExecutionPoolHandle,
-    runtime: &TaskRuntimeContext,
-    in_flight: &mut usize,
-) -> Result<usize, TaskProcessingError> {
-    let mut claimed = 0usize;
-    while *in_flight < task_execution_pool.desired_size() {
-        let task = {
-            let task_queue = task_queue.lock().await;
-            task_queue.take_next().await
-        };
-        let Some(task) = task else {
-            break;
-        };
-
-        if let Err(error_message) = task_execution_pool.submit(task.clone(), runtime.clone()) {
-            let task_queue = task_queue.lock().await;
-            task_queue
-                .fail_claimed_task(&task, error_message.as_str())
-                .await;
-            return Err(TaskProcessingError::runtime(error_message));
-        }
-
-        {
-            let task_queue = task_queue.lock().await;
-            task_queue.log_task_start(&task);
-        }
-        *in_flight += 1;
-        claimed += 1;
-    }
-    Ok(claimed)
 }
 
 fn spawn_authentication_activity_cleanup_worker(

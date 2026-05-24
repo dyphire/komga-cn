@@ -23,6 +23,7 @@ use zip::ZipArchive;
 
 mod cleanup_tasks;
 mod delete_tasks;
+mod execution_loop;
 mod execution_pool;
 mod import_jobs;
 mod index_jobs;
