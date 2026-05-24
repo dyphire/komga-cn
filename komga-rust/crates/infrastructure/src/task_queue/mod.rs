@@ -39,6 +39,7 @@ mod runtime_task_engine;
 mod scanner_jobs;
 mod scanner_support;
 mod task_identity;
+mod task_job_dispatch;
 mod task_job_pipeline;
 #[cfg(test)]
 pub(crate) mod test_support;
