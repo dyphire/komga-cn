@@ -1,6 +1,6 @@
 use super::*;
 use crate::identity_access::auth::Authenticated;
-use crate::media_responses::{self, BookPageResponseOptions};
+use crate::media_responses::{BookMediaResponses, BookPageResponseOptions};
 use crate::opds::content_opds::OpdsV1Authenticated;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
@@ -12,17 +12,15 @@ pub async fn book_page(
     Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    media_responses::book_page_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number,
-        query.into_response_options(),
-    )
-    .await
+    BookMediaResponses::for_media_assets(&app)
+        .book_page(
+            &user,
+            &headers,
+            &book_id,
+            page_number,
+            query.into_response_options(),
+        )
+        .await
 }
 
 pub async fn book_page_opds_v1(
@@ -34,17 +32,15 @@ pub async fn book_page_opds_v1(
 ) -> Response {
     query.zero_based = true;
     query.content_negotiation = false;
-    media_responses::book_page_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number,
-        query.into_response_options(),
-    )
-    .await
+    BookMediaResponses::for_media_assets(&app)
+        .book_page(
+            &user,
+            &headers,
+            &book_id,
+            page_number,
+            query.into_response_options(),
+        )
+        .await
 }
 
 pub async fn book_page_raw(
@@ -53,16 +49,9 @@ pub async fn book_page_raw(
     headers: HeaderMap,
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
-    media_responses::book_page_raw_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number_signed,
-    )
-    .await
+    BookMediaResponses::for_media_assets(&app)
+        .book_page_raw(&user, &headers, &book_id, page_number_signed)
+        .await
 }
 
 #[derive(Deserialize, Default)]
@@ -98,16 +87,9 @@ pub async fn book_page_thumbnail(
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    media_responses::book_page_thumbnail_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number,
-    )
-    .await
+    BookMediaResponses::for_media_assets(&app)
+        .book_page_thumbnail(&user, &headers, &book_id, page_number)
+        .await
 }
 
 pub async fn book_pages(
@@ -115,14 +97,9 @@ pub async fn book_pages(
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    media_responses::book_pages_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &book_id,
-    )
-    .await
+    BookMediaResponses::for_media_assets(&app)
+        .book_pages(&user, &book_id)
+        .await
 }
 
 pub async fn book_positions(

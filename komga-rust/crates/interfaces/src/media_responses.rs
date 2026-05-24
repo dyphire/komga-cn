@@ -21,6 +21,7 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
+use crate::state::{MediaAssetsState, OpdsState};
 use komga_application::discovery::BookDetailPort;
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, ContentResolverPort, MediaReaderPort,
@@ -44,7 +45,173 @@ impl Default for BookPageResponseOptions {
     }
 }
 
-pub(crate) async fn book_file_response(
+pub(crate) struct BookMediaResponses<'a> {
+    reader: &'a dyn MediaReaderPort,
+    content: &'a dyn ContentResolverPort,
+    book_detail: &'a dyn BookDetailPort,
+}
+
+pub(crate) struct OpdsBookMediaResponses<'a> {
+    media: BookMediaResponses<'a>,
+    server_settings: &'a dyn ServerSettingsPort,
+}
+
+impl<'a> BookMediaResponses<'a> {
+    pub(crate) fn for_media_assets(app: &'a MediaAssetsState) -> Self {
+        Self {
+            reader: app.reader.as_ref(),
+            content: app.content.as_ref(),
+            book_detail: app.book_detail.as_ref(),
+        }
+    }
+
+    fn for_opds(app: &'a OpdsState) -> Self {
+        Self {
+            reader: app.reader.as_ref(),
+            content: app.content.as_ref(),
+            book_detail: app.book_detail.as_ref(),
+        }
+    }
+
+    pub(crate) async fn book_file(&self, user: &AuthUser, book_id: &str) -> Response {
+        book_file_response(self.reader, self.content, user, book_id).await
+    }
+
+    pub(crate) async fn book_page(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number: u32,
+        options: BookPageResponseOptions,
+    ) -> Response {
+        book_page_response(
+            self.reader,
+            self.content,
+            self.book_detail,
+            user,
+            headers,
+            book_id,
+            page_number,
+            options,
+        )
+        .await
+    }
+
+    pub(crate) async fn book_page_raw(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number_signed: i32,
+    ) -> Response {
+        book_page_raw_response(
+            self.reader,
+            self.content,
+            self.book_detail,
+            user,
+            headers,
+            book_id,
+            page_number_signed,
+        )
+        .await
+    }
+
+    pub(crate) async fn book_page_thumbnail(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number: u32,
+    ) -> Response {
+        book_page_thumbnail_response(
+            self.reader,
+            self.content,
+            self.book_detail,
+            user,
+            headers,
+            book_id,
+            page_number,
+        )
+        .await
+    }
+
+    pub(crate) async fn book_pages(&self, user: &AuthUser, book_id: &str) -> Response {
+        book_pages_response(self.reader, self.content, self.book_detail, user, book_id).await
+    }
+}
+
+impl<'a> OpdsBookMediaResponses<'a> {
+    pub(crate) fn new(app: &'a OpdsState) -> Self {
+        Self {
+            media: BookMediaResponses::for_opds(app),
+            server_settings: app.server_settings.as_ref(),
+        }
+    }
+
+    pub(crate) async fn book_file(&self, user: &AuthUser, book_id: &str) -> Response {
+        self.media.book_file(user, book_id).await
+    }
+
+    pub(crate) async fn book_page(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number: u32,
+        options: BookPageResponseOptions,
+    ) -> Response {
+        self.media
+            .book_page(user, headers, book_id, page_number, options)
+            .await
+    }
+
+    pub(crate) async fn book_page_raw(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number_signed: i32,
+    ) -> Response {
+        self.media
+            .book_page_raw(user, headers, book_id, page_number_signed)
+            .await
+    }
+
+    pub(crate) async fn book_thumbnail_opds(
+        &self,
+        headers: &HeaderMap,
+        book_id: &str,
+        user: &AuthUser,
+    ) -> Response {
+        book_thumbnail_opds_response(
+            self.media.reader,
+            self.media.content,
+            headers,
+            book_id,
+            user,
+        )
+        .await
+    }
+
+    pub(crate) async fn book_thumbnail_opds_small_default(
+        &self,
+        headers: &HeaderMap,
+        book_id: &str,
+        user: &AuthUser,
+    ) -> Response {
+        book_thumbnail_opds_small_default_response(
+            self.media.reader,
+            self.server_settings,
+            headers,
+            book_id,
+            user,
+        )
+        .await
+    }
+}
+
+async fn book_file_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     user: &AuthUser,
@@ -80,7 +247,7 @@ pub(crate) async fn book_file_response(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn book_page_response(
+async fn book_page_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     discovery_detail: &dyn BookDetailPort,
@@ -235,7 +402,7 @@ pub(crate) async fn book_page_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub(crate) async fn book_page_raw_response(
+async fn book_page_raw_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     discovery_detail: &dyn BookDetailPort,
@@ -305,7 +472,7 @@ pub(crate) async fn book_page_raw_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub(crate) async fn book_page_thumbnail_response(
+async fn book_page_thumbnail_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     discovery_detail: &dyn BookDetailPort,
@@ -378,7 +545,7 @@ pub(crate) async fn book_page_thumbnail_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub(crate) async fn book_pages_response(
+async fn book_pages_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     discovery_detail: &dyn BookDetailPort,
@@ -416,7 +583,7 @@ pub(crate) async fn book_pages_response(
     }
 }
 
-pub(crate) async fn book_thumbnail_opds_response(
+async fn book_thumbnail_opds_response(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,
     headers: &HeaderMap,
@@ -440,7 +607,7 @@ pub(crate) async fn book_thumbnail_opds_response(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub(crate) async fn book_thumbnail_opds_small_default_response(
+async fn book_thumbnail_opds_small_default_response(
     reader: &dyn MediaReaderPort,
     server_settings: &dyn ServerSettingsPort,
     headers: &HeaderMap,
@@ -462,7 +629,7 @@ pub(crate) async fn book_thumbnail_opds_small_default_response(
     .await
 }
 
-pub(crate) async fn book_thumbnail_opds_small_response(
+async fn book_thumbnail_opds_small_response(
     reader: &dyn MediaReaderPort,
     headers: &HeaderMap,
     book_id: &str,

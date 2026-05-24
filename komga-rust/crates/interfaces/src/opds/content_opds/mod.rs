@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::identity_access::auth::{user_has_role, user_is_admin};
 use crate::media_assets;
-use crate::media_responses;
+use crate::media_responses::OpdsBookMediaResponses;
 use crate::request_urls::app_absolute_url;
 use crate::state::OpdsState;
 
@@ -198,7 +198,8 @@ pub(crate) async fn opds_v1_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+    OpdsBookMediaResponses::new(&app)
+        .book_file(&user, &book_id)
         .await
 }
 
@@ -208,14 +209,9 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_responses::book_thumbnail_opds_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        &headers,
-        &book_id,
-        &user,
-    )
-    .await
+    OpdsBookMediaResponses::new(&app)
+        .book_thumbnail_opds(&headers, &book_id, &user)
+        .await
 }
 
 pub(crate) async fn opds_v1_book_thumbnail_small_route(
@@ -224,14 +220,9 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_responses::book_thumbnail_opds_small_default_response(
-        app.reader.as_ref(),
-        app.server_settings.as_ref(),
-        &headers,
-        &book_id,
-        &user,
-    )
-    .await
+    OpdsBookMediaResponses::new(&app)
+        .book_thumbnail_opds_small_default(&headers, &book_id, &user)
+        .await
 }
 
 pub(crate) async fn opds_v2_book_file_route(
@@ -243,7 +234,8 @@ pub(crate) async fn opds_v2_book_file_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+    OpdsBookMediaResponses::new(&app)
+        .book_file(&user, &book_id)
         .await
 }
 
@@ -256,7 +248,8 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    media_responses::book_file_response(app.reader.as_ref(), app.content.as_ref(), &user, &book_id)
+    OpdsBookMediaResponses::new(&app)
+        .book_file(&user, &book_id)
         .await
 }
 
@@ -269,17 +262,15 @@ pub(crate) async fn opds_v2_book_page_route(
 ) -> Response {
     query.zero_based = false;
     query.content_negotiation = false;
-    media_responses::book_page_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number,
-        query.into_response_options(),
-    )
-    .await
+    OpdsBookMediaResponses::new(&app)
+        .book_page(
+            &user,
+            &headers,
+            &book_id,
+            page_number,
+            query.into_response_options(),
+        )
+        .await
 }
 
 pub(crate) async fn opds_v2_book_page_raw_route(
@@ -288,16 +279,9 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     headers: HeaderMap,
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    media_responses::book_page_raw_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        &user,
-        &headers,
-        &book_id,
-        page_number,
-    )
-    .await
+    OpdsBookMediaResponses::new(&app)
+        .book_page_raw(&user, &headers, &book_id, page_number)
+        .await
 }
 
 pub(crate) async fn opds_v2_book_thumbnail_route(
@@ -306,14 +290,9 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    media_responses::book_thumbnail_opds_response(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        &headers,
-        &book_id,
-        &user,
-    )
-    .await
+    OpdsBookMediaResponses::new(&app)
+        .book_thumbnail_opds(&headers, &book_id, &user)
+        .await
 }
 
 pub(crate) async fn opds_v2_library_route(
