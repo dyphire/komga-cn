@@ -6,7 +6,7 @@ use komga_application::discovery::{
     BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
     DiscoverySearchService, ReadlistPort, SeriesDetailPort,
 };
-use komga_application::media_assets::{MediaImportService, MetadataWriter};
+use komga_application::media_assets::{MediaImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
     OperationalMetricsPort, PageHashService, RemoteFeedService, ServerSettingsService,
     TransientBookService,
@@ -132,6 +132,13 @@ pub fn compose_http_runtime(
         Arc::new(RemoteFeedAccess),
         announcement_access,
     ));
+    let media_reader = Arc::new(MediaReader::new(db.read_pool().clone()));
+    let media_reader_port: Arc<dyn komga_application::media_assets::MediaReaderPort> =
+        media_reader.clone();
+    let read_progress_surface: Arc<dyn komga_application::media_assets::ReadProgressSurfacePort> =
+        media_reader;
+    let progress_writer: Arc<dyn komga_application::media_assets::ProgressWriterPort> =
+        Arc::new(ProgressWriter::new(db.write_pool().clone()));
     let services = HttpServices {
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
@@ -166,10 +173,14 @@ pub fn compose_http_runtime(
         readlist,
         discovery_browse,
         discovery_facets,
-        media_reader: Arc::new(MediaReader::new(db.read_pool().clone())),
+        media_reader: media_reader_port,
         content_resolver: Arc::new(ContentResolver),
         thumbnail_writer: Arc::new(ThumbnailWriter::new(db.write_pool().clone())),
-        progress_writer: Arc::new(ProgressWriter::new(db.write_pool().clone())),
+        progress_writer: progress_writer.clone(),
+        read_progress_service: Arc::new(ReadProgressService::new(
+            read_progress_surface,
+            progress_writer,
+        )),
         metadata_writer,
         import_service: Arc::new(MediaImportService::new(Arc::new(
             FilesystemImportPort::new(db.database_file().to_path_buf()),

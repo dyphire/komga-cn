@@ -14,6 +14,7 @@ pub struct MediaAssetsState {
     pub(crate) content: Arc<dyn komga_application::media_assets::ContentResolverPort>,
     pub(crate) thumbnails: Arc<dyn komga_application::media_assets::ThumbnailWriterPort>,
     pub(crate) progress: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
+    pub(crate) read_progress_service: Arc<komga_application::media_assets::ReadProgressService>,
     pub(crate) metadata: Arc<komga_application::media_assets::MetadataWriter>,
     pub(crate) import: Arc<komga_application::media_assets::MediaImportService>,
 }
@@ -32,6 +33,7 @@ impl FromRef<Arc<HttpAppState>> for MediaAssetsState {
             content: app.services.content_resolver.clone(),
             thumbnails: app.services.thumbnail_writer.clone(),
             progress: app.services.progress_writer.clone(),
+            read_progress_service: app.services.read_progress_service.clone(),
             metadata: app.services.metadata_writer.clone(),
             import: app.services.import_service.clone(),
         }

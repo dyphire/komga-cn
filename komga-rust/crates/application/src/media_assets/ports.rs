@@ -285,6 +285,11 @@ pub trait ThumbnailReadPort: Send + Sync {
 pub trait ReadProgressReadPort: Send + Sync {
     async fn book_progression(&self, book_id: &str, user_id: &str)
     -> Result<Option<Value>, String>;
+    async fn book_read_progress_completed(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<bool>, String>;
     async fn series_tachiyomi_progress(
         &self,
         series_id: &str,
@@ -296,6 +301,49 @@ pub trait ReadProgressReadPort: Send + Sync {
         user_id: &str,
     ) -> Result<(u64, u64, u64, u64, u64), String>;
     async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+}
+
+/// Read access needed by read-progress write orchestration.
+#[async_trait]
+pub trait ReadProgressSurfacePort: Send + Sync {
+    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
+    async fn series_book_number_sorts(&self, series_id: &str)
+    -> Result<Vec<(String, f64)>, String>;
+    async fn book_read_progress_completed(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<bool>, String>;
+    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+}
+
+#[async_trait]
+impl<T> ReadProgressSurfacePort for T
+where
+    T: ReadProgressReadPort + SeriesRelationPort + Send + Sync,
+{
+    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
+        SeriesRelationPort::series_book_ids(self, series_id).await
+    }
+
+    async fn series_book_number_sorts(
+        &self,
+        series_id: &str,
+    ) -> Result<Vec<(String, f64)>, String> {
+        SeriesRelationPort::series_book_number_sorts(self, series_id).await
+    }
+
+    async fn book_read_progress_completed(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<bool>, String> {
+        ReadProgressReadPort::book_read_progress_completed(self, book_id, user_id).await
+    }
+
+    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+        ReadProgressReadPort::book_page_count(self, book_id).await
+    }
 }
 
 /// Supertrait aggregating all media reader sub-ports for backward compatibility.

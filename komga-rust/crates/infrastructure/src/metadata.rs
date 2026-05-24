@@ -6,8 +6,8 @@ mod thumbnails;
 pub use book_metadata::SqliteBookMetadataPort;
 pub use read_progress::{
     delete_persisted_read_progress, load_book_page_count, load_book_progression,
-    persist_book_progression, persist_read_progress, persist_readlist_tachiyomi_progress,
-    readlist_tachiyomi_counters,
+    load_book_read_progress_completed, persist_book_progression, persist_read_progress,
+    persist_readlist_tachiyomi_progress, readlist_tachiyomi_counters,
 };
 pub use refresh::{
     RefreshBookMetadataOutcome, TransientMetadataProviderInference, aggregate_series_metadata,

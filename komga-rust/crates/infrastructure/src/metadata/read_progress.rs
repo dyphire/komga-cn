@@ -345,6 +345,28 @@ pub async fn load_book_progression(
     })))
 }
 
+pub async fn load_book_read_progress_completed(
+    pool: &SqlitePool,
+    book_id: &str,
+    user_id_value: &str,
+) -> Result<Option<bool>, String> {
+    let row = sqlx::query(
+        r#"
+        SELECT COMPLETED
+        FROM READ_PROGRESS
+        WHERE BOOK_ID = ? AND USER_ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(book_id)
+    .bind(user_id_value)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query persisted book read-progress completion: {error}"))?;
+
+    Ok(row.map(|row| row.get::<bool, _>("COMPLETED")))
+}
+
 pub async fn load_book_page_count(pool: &SqlitePool, book_id: &str) -> Result<Option<u64>, String> {
     let row = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)

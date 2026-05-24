@@ -6,6 +6,7 @@ pub mod operations;
 mod page_hash_models;
 mod page_retrieval;
 mod ports;
+mod read_progress_service;
 mod thumbnail_operations;
 
 pub use file_import::{
@@ -32,9 +33,10 @@ pub use page_retrieval::{
 };
 pub use ports::{
     BookMediaPort, ContentAccessPort, ContentResolverPort, EntityExistencePort, MediaReaderPort,
-    ProgressWriterPort, ReadProgressReadPort, SeriesRelationPort, ThumbnailReadPort,
-    ThumbnailWriterPort,
+    ProgressWriterPort, ReadProgressReadPort, ReadProgressSurfacePort, SeriesRelationPort,
+    ThumbnailReadPort, ThumbnailWriterPort,
 };
+pub use read_progress_service::ReadProgressService;
 pub use thumbnail_operations::{
     CollectionThumbnailRecord, EntityThumbnailBinary, EntityThumbnailRecord,
     ReadlistThumbnailRecord, SeriesThumbnailRecord,

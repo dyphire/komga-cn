@@ -216,6 +216,14 @@ impl ReadProgressReadPort for MediaReader {
         metadata::load_book_progression(&self.read_pool, book_id, user_id).await
     }
 
+    async fn book_read_progress_completed(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<bool>, String> {
+        metadata::load_book_read_progress_completed(&self.read_pool, book_id, user_id).await
+    }
+
     async fn series_tachiyomi_progress(
         &self,
         series_id: &str,
