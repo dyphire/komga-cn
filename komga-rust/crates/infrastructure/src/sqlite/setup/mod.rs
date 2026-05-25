@@ -142,7 +142,7 @@ async fn bootstrap_or_migrate_schema(
 ) -> Result<(), sqlx::Error> {
     adopt_preexisting_schema(connection, migrator, required_schema, target).await?;
     migrator
-        .run_direct(None, connection)
+        .run_direct(None, connection, false)
         .await
         .map_err(map_migrate_error)?;
 
