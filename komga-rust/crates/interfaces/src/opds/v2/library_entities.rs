@@ -137,14 +137,16 @@ pub(crate) async fn opds_v2_collection(
     }
 
     opds_navigation_response_with_paging(
-        &headers,
-        collection.name.as_str(),
-        format!("/opds/v2/collections/{collection_id}").as_str(),
-        Some(collection.last_modified.as_str()),
+        OpdsV2PagedFeed {
+            headers: &headers,
+            title: collection.name.as_str(),
+            self_path: format!("/opds/v2/collections/{collection_id}").as_str(),
+            modified: Some(collection.last_modified.as_str()),
+            page,
+            size,
+            total: total_filtered_series,
+        },
         navigation,
-        page,
-        size,
-        total_filtered_series,
     )
 }
 
@@ -445,14 +447,16 @@ pub(crate) async fn opds_v2_readlist(
         .collect::<Vec<_>>();
 
     opds_publications_response_with_paging(
-        &headers,
-        readlist.name.as_str(),
-        format!("/opds/v2/readlists/{readlist_id}").as_str(),
-        Some(readlist.last_modified.as_str()),
+        OpdsV2PagedFeed {
+            headers: &headers,
+            title: readlist.name.as_str(),
+            self_path: format!("/opds/v2/readlists/{readlist_id}").as_str(),
+            modified: Some(readlist.last_modified.as_str()),
+            page,
+            size,
+            total: total_visible_books,
+        },
         publications,
-        page,
-        size,
-        total_visible_books,
     )
 }
 

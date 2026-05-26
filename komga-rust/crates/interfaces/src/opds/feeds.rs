@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -41,63 +39,42 @@ pub(super) struct OpdsV1AcquisitionEntry {
     pub extra_links: Vec<OpdsV1XmlLink>,
 }
 
-pub(super) fn opds_v1_navigation_feed_response(
-    headers: &HeaderMap,
-    feed_id: &str,
-    title: &str,
-    self_path: &str,
-    entries: Vec<OpdsV1NavigationEntry>,
-    pagination: Option<(usize, bool)>,
-) -> Response {
-    opds_v1_navigation_feed_response_with_feed_updated(
-        headers, feed_id, title, self_path, entries, None, pagination,
-    )
+pub(super) struct OpdsV1FeedHeader<'a> {
+    pub(super) headers: &'a HeaderMap,
+    pub(super) feed_id: &'a str,
+    pub(super) title: &'a str,
+    pub(super) self_path: &'a str,
+    pub(super) feed_updated: Option<&'a str>,
+    pub(super) pagination: Option<(usize, bool)>,
 }
 
-pub(super) fn opds_v1_navigation_feed_response_with_feed_updated(
-    headers: &HeaderMap,
-    feed_id: &str,
-    title: &str,
-    self_path: &str,
+pub(super) fn opds_v1_navigation_feed_response(
+    feed: OpdsV1FeedHeader<'_>,
     entries: Vec<OpdsV1NavigationEntry>,
-    feed_updated: Option<&str>,
-    pagination: Option<(usize, bool)>,
 ) -> Response {
-    opds_v1_navigation_feed_response_with_extra_links(
-        headers,
-        feed_id,
-        title,
-        self_path,
-        entries,
-        feed_updated,
-        pagination,
-        Vec::new(),
-    )
+    opds_v1_navigation_feed_response_with_extra_links(feed, entries, Vec::new())
 }
 
 pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
-    headers: &HeaderMap,
-    feed_id: &str,
-    title: &str,
-    self_path: &str,
+    feed: OpdsV1FeedHeader<'_>,
     entries: Vec<OpdsV1NavigationEntry>,
-    feed_updated: Option<&str>,
-    pagination: Option<(usize, bool)>,
     extra_links: Vec<OpdsV1XmlLink>,
 ) -> Response {
-    let self_href = app_absolute_url(headers, self_path);
-    let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
+    let self_href = app_absolute_url(feed.headers, feed.self_path);
+    let start_href = app_absolute_url(feed.headers, "/opds/v1.2/catalog");
     let now = opds_now_timestamp();
-    let feed_updated = feed_updated
+    let feed_updated = feed
+        .feed_updated
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or_else(|| now.clone());
-    let (previous_href, next_href) = navigation_paging_hrefs(headers, self_path, pagination);
+    let (previous_href, next_href) =
+        navigation_paging_hrefs(feed.headers, feed.self_path, feed.pagination);
 
     atom_xml_response(render_opds_v1_navigation_feed(
         OpdsV1NavigationFeedDocument {
-            id: feed_id.to_string(),
-            title: title.to_string(),
+            id: feed.feed_id.to_string(),
+            title: feed.title.to_string(),
             updated: feed_updated,
             self_href,
             start_href,
@@ -116,7 +93,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
                         .map(normalize_opds_updated)
                         .unwrap_or_else(|| now.clone()),
                     content: entry.content,
-                    href: app_absolute_url(headers, entry.href_path.as_str()),
+                    href: app_absolute_url(feed.headers, entry.href_path.as_str()),
                 })
                 .collect(),
         },
@@ -124,27 +101,24 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
 }
 
 pub(super) fn opds_v1_library_series_feed_response(
-    headers: &HeaderMap,
-    feed_id: &str,
-    title: &str,
-    self_path: &str,
+    feed: OpdsV1FeedHeader<'_>,
     series_entries: Vec<PersistedSeries>,
-    feed_updated: Option<&str>,
-    page: usize,
-    has_next: bool,
 ) -> Response {
-    let self_href = app_absolute_url(headers, self_path);
-    let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
+    let self_href = app_absolute_url(feed.headers, feed.self_path);
+    let start_href = app_absolute_url(feed.headers, "/opds/v1.2/catalog");
     let now = opds_now_timestamp();
-    let feed_updated = feed_updated
+    let feed_updated = feed
+        .feed_updated
         .filter(|value| !value.is_empty())
         .unwrap_or(now.as_str())
         .to_string();
+    let (page, has_next) = feed.pagination.unwrap_or((0, false));
     let previous_href = (page > 0).then(|| {
         app_absolute_url(
-            headers,
+            feed.headers,
             format!(
-                "/opds/v1.2/libraries/{feed_id}?page={}",
+                "/opds/v1.2/libraries/{}?page={}",
+                feed.feed_id,
                 page.saturating_sub(1)
             )
             .as_str(),
@@ -152,15 +126,15 @@ pub(super) fn opds_v1_library_series_feed_response(
     });
     let next_href = has_next.then(|| {
         app_absolute_url(
-            headers,
-            format!("/opds/v1.2/libraries/{feed_id}?page={}", page + 1).as_str(),
+            feed.headers,
+            format!("/opds/v1.2/libraries/{}?page={}", feed.feed_id, page + 1).as_str(),
         )
     });
 
     atom_xml_response(render_opds_v1_navigation_feed(
         OpdsV1NavigationFeedDocument {
-            id: feed_id.to_string(),
-            title: title.to_string(),
+            id: feed.feed_id.to_string(),
+            title: feed.title.to_string(),
             updated: feed_updated,
             self_href,
             start_href,
@@ -176,7 +150,7 @@ pub(super) fn opds_v1_library_series_feed_response(
                         entry.last_modified.clone()
                     },
                     href: app_absolute_url(
-                        headers,
+                        feed.headers,
                         format!("/opds/v1.2/series/{}", entry.id).as_str(),
                     ),
                     id: entry.id,
@@ -426,88 +400,34 @@ pub(super) fn opds_navigation_link(headers: &HeaderMap, title: &str, path: &str)
     })
 }
 
+pub(super) struct OpdsV2PagedFeed<'a> {
+    pub(super) headers: &'a HeaderMap,
+    pub(super) title: &'a str,
+    pub(super) self_path: &'a str,
+    pub(super) modified: Option<&'a str>,
+    pub(super) page: usize,
+    pub(super) size: usize,
+    pub(super) total: usize,
+}
+
 pub(super) fn opds_navigation_response_with_paging(
-    headers: &HeaderMap,
-    title: &str,
-    self_path: &str,
-    modified: Option<&str>,
+    feed: OpdsV2PagedFeed<'_>,
     navigation: Vec<Value>,
-    page: usize,
-    size: usize,
-    total: usize,
 ) -> Response {
-    let self_href = app_absolute_url(headers, self_path);
-    let modified = modified
-        .filter(|value| !value.is_empty())
-        .map(normalize_opds_updated)
-        .unwrap_or_else(opds_now_timestamp);
-
-    let mut links = vec![
-        json!({
-            "rel": "self",
-            "href": self_href,
-        }),
-        json!({
-            "title": "Home",
-            "rel": "start",
-            "href": app_absolute_url(headers, "/opds/v2/catalog"),
-            "type": "application/opds+json",
-        }),
-        json!({
-            "title": "Search",
-            "rel": "search",
-            "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
-            "type": "application/opds+json",
-            "templated": true,
-        }),
-    ];
-
-    if page > 0 {
-        links.push(json!({
-            "rel": "previous",
-            "href": app_absolute_url(headers, page_link_path(self_path, page.saturating_sub(1)).as_str()),
-        }));
-    }
-    if page.saturating_add(1).saturating_mul(size) < total {
-        links.push(json!({
-            "rel": "next",
-            "href": app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()),
-        }));
-    }
-
-    (
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/opds+json"),
-        )],
-        Json(json!({
-            "metadata": {
-                "title": title,
-                "modified": modified,
-                "itemsPerPage": size,
-                "currentPage": page + 1,
-                "numberOfItems": total,
-            },
-            "links": links,
-            "navigation": navigation,
-        })),
-    )
-        .into_response()
+    opds_v2_paged_response(feed, "navigation", navigation)
 }
 
 pub(super) fn opds_publications_response_with_paging(
-    headers: &HeaderMap,
-    title: &str,
-    self_path: &str,
-    modified: Option<&str>,
+    feed: OpdsV2PagedFeed<'_>,
     publications: Vec<Value>,
-    page: usize,
-    size: usize,
-    total: usize,
 ) -> Response {
-    let self_href = app_absolute_url(headers, self_path);
-    let modified = modified
+    opds_v2_paged_response(feed, "publications", publications)
+}
+
+fn opds_v2_paged_response(feed: OpdsV2PagedFeed<'_>, key: &str, entries: Vec<Value>) -> Response {
+    let self_href = app_absolute_url(feed.headers, feed.self_path);
+    let modified = feed
+        .modified
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or_else(opds_now_timestamp);
@@ -520,30 +440,45 @@ pub(super) fn opds_publications_response_with_paging(
         json!({
             "title": "Home",
             "rel": "start",
-            "href": app_absolute_url(headers, "/opds/v2/catalog"),
+            "href": app_absolute_url(feed.headers, "/opds/v2/catalog"),
             "type": "application/opds+json",
         }),
         json!({
             "title": "Search",
             "rel": "search",
-            "href": app_absolute_url(headers, "/opds/v2/search{?query}"),
+            "href": app_absolute_url(feed.headers, "/opds/v2/search{?query}"),
             "type": "application/opds+json",
             "templated": true,
         }),
     ];
 
-    if page > 0 {
+    if feed.page > 0 {
         links.push(json!({
             "rel": "previous",
-            "href": app_absolute_url(headers, page_link_path(self_path, page.saturating_sub(1)).as_str()),
+            "href": app_absolute_url(feed.headers, page_link_path(feed.self_path, feed.page.saturating_sub(1)).as_str()),
         }));
     }
-    if page.saturating_add(1).saturating_mul(size) < total {
+    if feed.page.saturating_add(1).saturating_mul(feed.size) < feed.total {
         links.push(json!({
             "rel": "next",
-            "href": app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()),
+            "href": app_absolute_url(feed.headers, page_link_path(feed.self_path, feed.page + 1).as_str()),
         }));
     }
+
+    let mut payload = json!({
+        "metadata": {
+            "title": feed.title,
+            "modified": modified,
+            "itemsPerPage": feed.size,
+            "currentPage": feed.page + 1,
+            "numberOfItems": feed.total,
+        },
+        "links": links,
+    });
+    payload
+        .as_object_mut()
+        .unwrap()
+        .insert(key.to_string(), Value::Array(entries));
 
     (
         StatusCode::OK,
@@ -551,17 +486,7 @@ pub(super) fn opds_publications_response_with_paging(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/opds+json"),
         )],
-        Json(json!({
-            "metadata": {
-                "title": title,
-                "modified": modified,
-                "itemsPerPage": size,
-                "currentPage": page + 1,
-                "numberOfItems": total,
-            },
-            "links": links,
-            "publications": publications,
-        })),
+        Json(payload),
     )
         .into_response()
 }
@@ -784,15 +709,23 @@ mod tests {
     use axum::http::HeaderMap;
     use time::{Month, OffsetDateTime, UtcOffset};
 
-    use super::{OpdsV1NavigationEntry, format_opds_timestamp, opds_v1_navigation_feed_response};
+    use super::{
+        OpdsV1FeedHeader, OpdsV1NavigationEntry, format_opds_timestamp,
+        opds_v1_navigation_feed_response,
+    };
 
     #[tokio::test]
     async fn navigation_feed_uses_entry_specific_updated_timestamp() {
+        let headers = HeaderMap::new();
         let response = opds_v1_navigation_feed_response(
-            &HeaderMap::new(),
-            "feed",
-            "Feed",
-            "/opds/v1.2/feed",
+            OpdsV1FeedHeader {
+                headers: &headers,
+                feed_id: "feed",
+                title: "Feed",
+                self_path: "/opds/v1.2/feed",
+                feed_updated: None,
+                pagination: None,
+            },
             vec![OpdsV1NavigationEntry {
                 id: "entry-1".to_string(),
                 title: "Entry".to_string(),
@@ -800,7 +733,6 @@ mod tests {
                 href_path: "/opds/v1.2/entry-1".to_string(),
                 updated: Some("2024-01-02T03:04:05Z".to_string()),
             }],
-            None,
         );
 
         let bytes = to_bytes(response.into_body(), usize::MAX)

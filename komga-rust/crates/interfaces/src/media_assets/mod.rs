@@ -17,6 +17,7 @@ use crate::identity_access::auth::{
     user_is_admin, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::MediaAssetsState;
+use komga_application::media_assets::BookProgressionInput;
 use komga_application::task_processing::{TaskKind, TaskQueueRecord, TaskRequest};
 #[cfg(test)]
 use komga_infrastructure::filesystem::media_access::page_content::{

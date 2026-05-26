@@ -176,14 +176,15 @@ pub(crate) async fn opds_v1_library_detail(
         .collect::<Vec<_>>();
 
     opds_v1_library_series_feed_response(
-        &headers,
-        library.id.as_str(),
-        library.name.as_str(),
-        format!("/opds/v1.2/libraries/{library_id}").as_str(),
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: library.id.as_str(),
+            title: library.name.as_str(),
+            self_path: format!("/opds/v1.2/libraries/{library_id}").as_str(),
+            feed_updated: Some(library.last_modified.as_str()),
+            pagination: Some((page, has_next)),
+        },
         entries,
-        Some(library.last_modified.as_str()),
-        page,
-        has_next,
     )
 }
 
@@ -221,14 +222,16 @@ pub(crate) async fn opds_v1_collection_detail(
         })
         .collect::<Vec<_>>();
 
-    opds_v1_navigation_feed_response_with_feed_updated(
-        &headers,
-        collection.id.as_str(),
-        collection.name.as_str(),
-        format!("/opds/v1.2/collections/{collection_id}").as_str(),
+    opds_v1_navigation_feed_response(
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: collection.id.as_str(),
+            title: collection.name.as_str(),
+            self_path: format!("/opds/v1.2/collections/{collection_id}").as_str(),
+            feed_updated: Some(collection.last_modified.as_str()),
+            pagination: Some((page, has_next)),
+        },
         entries,
-        Some(collection.last_modified.as_str()),
-        Some((page, has_next)),
     )
 }
 

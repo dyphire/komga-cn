@@ -97,6 +97,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+    use crate::media_assets::BookProgressionInput;
 
     #[derive(Default)]
     struct TestReadProgressSurface {
@@ -179,14 +180,7 @@ mod tests {
 
         async fn persist_book_progression(
             &self,
-            _book_id: &str,
-            _user_id: &str,
-            _progression: f64,
-            _use_locator_position_for_page: bool,
-            _modified: Option<String>,
-            _device_id: Option<String>,
-            _device_name: Option<String>,
-            _locator: Option<Value>,
+            _input: BookProgressionInput,
         ) -> Result<(), String> {
             unreachable!("book progression writes are not part of series read-progress service")
         }

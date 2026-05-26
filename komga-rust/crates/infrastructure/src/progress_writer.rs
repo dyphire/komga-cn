@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use komga_application::media_assets::ProgressWriterPort;
+use komga_application::media_assets::{BookProgressionInput, ProgressWriterPort};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
@@ -33,30 +33,8 @@ impl ProgressWriterPort for ProgressWriter {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn persist_book_progression(
-        &self,
-        book_id: &str,
-        user_id: &str,
-        progression: f64,
-        use_locator_position_for_page: bool,
-        modified: Option<String>,
-        device_id: Option<String>,
-        device_name: Option<String>,
-        locator: Option<Value>,
-    ) -> Result<(), String> {
-        metadata::persist_book_progression(
-            &self.pool,
-            book_id,
-            user_id,
-            progression,
-            use_locator_position_for_page,
-            modified,
-            device_id,
-            device_name,
-            locator,
-        )
-        .await
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+        metadata::persist_book_progression(&self.pool, input).await
     }
 
     async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {

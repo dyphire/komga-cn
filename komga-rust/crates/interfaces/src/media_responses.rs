@@ -85,17 +85,8 @@ impl<'a> BookMediaResponses<'a> {
         page_number: u32,
         options: BookPageResponseOptions,
     ) -> Response {
-        book_page_response(
-            self.reader,
-            self.content,
-            self.book_detail,
-            user,
-            headers,
-            book_id,
-            page_number,
-            options,
-        )
-        .await
+        self.book_page_response(user, headers, book_id, page_number, options)
+            .await
     }
 
     pub(crate) async fn book_page_raw(
@@ -138,6 +129,163 @@ impl<'a> BookMediaResponses<'a> {
 
     pub(crate) async fn book_pages(&self, user: &AuthUser, book_id: &str) -> Response {
         book_pages_response(self.reader, self.content, self.book_detail, user, book_id).await
+    }
+
+    async fn book_page_response(
+        &self,
+        user: &AuthUser,
+        headers: &HeaderMap,
+        book_id: &str,
+        page_number: u32,
+        options: BookPageResponseOptions,
+    ) -> Response {
+        let resolved_book_id = resolve_book_id_for_persisted(self.book_detail, book_id).await;
+        let requested_page_number = if options.zero_based {
+            page_number.saturating_add(1)
+        } else {
+            page_number
+        };
+        if requested_page_number == 0 {
+            return page_number_does_not_exist_response();
+        }
+
+        let requested_convert = options
+            .convert
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(requested_convert) = requested_convert
+            && !matches!(requested_convert, "jpeg" | "png")
+        {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+
+        if let Ok(Some(media)) = self.reader.book_media(&resolved_book_id).await {
+            let last_modified = file_last_modified_header_value(media.file_path.as_path());
+            if let Some(last_modified) = last_modified.as_deref()
+                && if_modified_since_matches(headers, last_modified)
+            {
+                return asset_not_modified_response(None, Some(last_modified));
+            }
+
+            let book_display_name = media.file_name.clone();
+            if !self
+                .reader
+                .book_media_is_ready(&resolved_book_id)
+                .await
+                .unwrap_or(false)
+            {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "Book analysis failed" })),
+                )
+                    .into_response();
+            }
+
+            if !user_is_admin(user) && !user_has_role(user, "PAGE_STREAMING") {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            if !user_can_access_book_media(self.reader, &resolved_book_id, user, &media).await {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            if !book_media_supports_page_api(&media) {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+
+            if book_media_is_pdf(&media)
+                && options.content_negotiation
+                && accept_header_prefers_pdf(headers)
+            {
+                let page_count = self
+                    .content
+                    .detect_pdf_page_count(&media)
+                    .unwrap_or(media.page_count);
+                if requested_page_number as u64 > page_count {
+                    return page_number_does_not_exist_response();
+                }
+                if let Some(bytes) = self
+                    .content
+                    .read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
+                {
+                    let last_modified = file_last_modified_header_value(media.file_path.as_path());
+                    if let Some(last_modified) = last_modified.as_deref()
+                        && if_modified_since_matches(headers, last_modified)
+                    {
+                        return asset_not_modified_response(None, Some(last_modified));
+                    }
+
+                    return asset_ok_with_inline_disposition(
+                        &book_display_name,
+                        requested_page_number,
+                        "application/pdf",
+                        bytes,
+                        None,
+                        last_modified.as_deref(),
+                    );
+                }
+                return page_number_does_not_exist_response();
+            }
+
+            let page_row = match page_resolution::load_book_page_row(
+                self.reader,
+                self.content,
+                &resolved_book_id,
+                &media,
+                requested_page_number as u64,
+                true,
+            )
+            .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => return page_number_does_not_exist_response(),
+                Err(error) => return internal_error_response(error),
+            };
+
+            if let Some(bytes) = self
+                .content
+                .resolve_page_bytes(&media, &page_row, requested_page_number as u64)
+                .await
+            {
+                let mut effective_bytes = bytes;
+                let content_type = page_resolution::page_row_media_type(&page_row, &media);
+                let mut effective_content_type = content_type;
+                if let Some(requested_convert) = requested_convert {
+                    let target_content_type = match requested_convert {
+                        "jpeg" => "image/jpeg",
+                        "png" => "image/png",
+                        _ => unreachable!("validated convert query should be jpeg|png"),
+                    };
+
+                    let Some(converted) = convert_page_image_bytes(
+                        &effective_bytes,
+                        &effective_content_type,
+                        target_content_type,
+                    ) else {
+                        return StatusCode::NOT_FOUND.into_response();
+                    };
+                    effective_bytes = converted;
+                    effective_content_type = target_content_type.to_string();
+                }
+
+                let last_modified = file_last_modified_header_value(media.file_path.as_path());
+                if let Some(last_modified) = last_modified.as_deref()
+                    && if_modified_since_matches(headers, last_modified)
+                {
+                    return asset_not_modified_response(None, Some(last_modified));
+                }
+
+                return asset_ok_with_inline_disposition(
+                    &book_display_name,
+                    requested_page_number,
+                    effective_content_type.as_str(),
+                    effective_bytes,
+                    None,
+                    last_modified.as_deref(),
+                );
+            }
+        }
+
+        StatusCode::NOT_FOUND.into_response()
     }
 }
 
@@ -241,162 +389,6 @@ async fn book_file_response(
             body,
         )
             .into_response();
-    }
-
-    StatusCode::NOT_FOUND.into_response()
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn book_page_response(
-    reader: &dyn MediaReaderPort,
-    content: &dyn ContentResolverPort,
-    discovery_detail: &dyn BookDetailPort,
-    user: &AuthUser,
-    headers: &HeaderMap,
-    book_id: &str,
-    page_number: u32,
-    options: BookPageResponseOptions,
-) -> Response {
-    let resolved_book_id = resolve_book_id_for_persisted(discovery_detail, book_id).await;
-    let requested_page_number = if options.zero_based {
-        page_number.saturating_add(1)
-    } else {
-        page_number
-    };
-    if requested_page_number == 0 {
-        return page_number_does_not_exist_response();
-    }
-
-    let requested_convert = options
-        .convert
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if let Some(requested_convert) = requested_convert
-        && !matches!(requested_convert, "jpeg" | "png")
-    {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-
-    if let Ok(Some(media)) = reader.book_media(&resolved_book_id).await {
-        let last_modified = file_last_modified_header_value(media.file_path.as_path());
-        if let Some(last_modified) = last_modified.as_deref()
-            && if_modified_since_matches(headers, last_modified)
-        {
-            return asset_not_modified_response(None, Some(last_modified));
-        }
-
-        let book_display_name = media.file_name.clone();
-        if !reader
-            .book_media_is_ready(&resolved_book_id)
-            .await
-            .unwrap_or(false)
-        {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "Book analysis failed" })),
-            )
-                .into_response();
-        }
-
-        if !user_is_admin(user) && !user_has_role(user, "PAGE_STREAMING") {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        if !user_can_access_book_media(reader, &resolved_book_id, user, &media).await {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        if !book_media_supports_page_api(&media) {
-            return StatusCode::NOT_FOUND.into_response();
-        }
-
-        if book_media_is_pdf(&media)
-            && options.content_negotiation
-            && accept_header_prefers_pdf(headers)
-        {
-            let page_count = content
-                .detect_pdf_page_count(&media)
-                .unwrap_or(media.page_count);
-            if requested_page_number as u64 > page_count {
-                return page_number_does_not_exist_response();
-            }
-            if let Some(bytes) =
-                content.read_pdf_page_as_single_page_pdf(&media, requested_page_number as u64)
-            {
-                let last_modified = file_last_modified_header_value(media.file_path.as_path());
-                if let Some(last_modified) = last_modified.as_deref()
-                    && if_modified_since_matches(headers, last_modified)
-                {
-                    return asset_not_modified_response(None, Some(last_modified));
-                }
-
-                return asset_ok_with_inline_disposition(
-                    &book_display_name,
-                    requested_page_number,
-                    "application/pdf",
-                    bytes,
-                    None,
-                    last_modified.as_deref(),
-                );
-            }
-            return page_number_does_not_exist_response();
-        }
-
-        let page_row = match page_resolution::load_book_page_row(
-            reader,
-            content,
-            &resolved_book_id,
-            &media,
-            requested_page_number as u64,
-            true,
-        )
-        .await
-        {
-            Ok(Some(row)) => row,
-            Ok(None) => return page_number_does_not_exist_response(),
-            Err(error) => return internal_error_response(error),
-        };
-
-        if let Some(bytes) = content
-            .resolve_page_bytes(&media, &page_row, requested_page_number as u64)
-            .await
-        {
-            let mut effective_bytes = bytes;
-            let content_type = page_resolution::page_row_media_type(&page_row, &media);
-            let mut effective_content_type = content_type;
-            if let Some(requested_convert) = requested_convert {
-                let target_content_type = match requested_convert {
-                    "jpeg" => "image/jpeg",
-                    "png" => "image/png",
-                    _ => unreachable!("validated convert query should be jpeg|png"),
-                };
-
-                let Some(converted) = convert_page_image_bytes(
-                    &effective_bytes,
-                    &effective_content_type,
-                    target_content_type,
-                ) else {
-                    return StatusCode::NOT_FOUND.into_response();
-                };
-                effective_bytes = converted;
-                effective_content_type = target_content_type.to_string();
-            }
-
-            let last_modified = file_last_modified_header_value(media.file_path.as_path());
-            if let Some(last_modified) = last_modified.as_deref()
-                && if_modified_since_matches(headers, last_modified)
-            {
-                return asset_not_modified_response(None, Some(last_modified));
-            }
-
-            return asset_ok_with_inline_disposition(
-                &book_display_name,
-                requested_page_number,
-                effective_content_type.as_str(),
-                effective_bytes,
-                None,
-                last_modified.as_deref(),
-            );
-        }
     }
 
     StatusCode::NOT_FOUND.into_response()

@@ -42,7 +42,6 @@ async fn load_accessible_book_media(
     Ok(media)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn persist_and_record_read_progress(
     app: &MediaAssetsState,
     token: &str,
@@ -314,16 +313,16 @@ async fn book_progression_response(
 
     match app
         .progress
-        .persist_book_progression(
-            book_id,
-            user_id(user),
+        .persist_book_progression(BookProgressionInput {
+            book_id: book_id.to_string(),
+            user_id: user_id(user).to_string(),
             progression,
-            !is_epub,
-            Some(modified.to_owned()),
-            Some(device_id.to_owned()),
-            Some(device_name.to_owned()),
-            locator_to_persist,
-        )
+            use_locator_position_for_page: !is_epub,
+            modified: Some(modified.to_owned()),
+            device_id: Some(device_id.to_owned()),
+            device_name: Some(device_name.to_owned()),
+            locator: locator_to_persist,
+        })
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

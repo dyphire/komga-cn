@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use std::io::Read;
 
 use flate2::read::GzDecoder;
@@ -10,6 +8,7 @@ use crate::resolve_optional_library_item_path;
 
 pub use komga_application::identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
+    ReadProgressWithLocatorInput,
 };
 
 fn decode_epub_extension_is_fixed_layout(blob: &[u8]) -> bool {
@@ -274,14 +273,7 @@ pub async fn load_read_progress(
 
 pub async fn persist_read_progress_with_locator(
     pool: &SqlitePool,
-    book_id: &str,
-    user_id_value: &str,
-    page: i64,
-    completed: bool,
-    device_id: &str,
-    device_name: &str,
-    last_modified: &str,
-    locator: Option<Value>,
+    input: &ReadProgressWithLocatorInput,
 ) -> Result<(), String> {
     let user_exists = sqlx::query(
         r#"SELECT 1
@@ -289,7 +281,7 @@ pub async fn persist_read_progress_with_locator(
  WHERE ID = ?
  LIMIT 1"#,
     )
-    .bind(user_id_value)
+    .bind(&input.user_id)
     .fetch_optional(pool)
     .await
     .map_err(|error| format!("query read-progress user: {error}"))?
@@ -299,8 +291,10 @@ pub async fn persist_read_progress_with_locator(
         return Err("read-progress user not found".to_string());
     }
 
-    let locator_blob = locator
-        .and_then(|value| serde_json::to_vec(&value).ok())
+    let locator_blob = input
+        .locator
+        .as_ref()
+        .and_then(|value| serde_json::to_vec(value).ok())
         .unwrap_or_default();
 
     sqlx::query(
@@ -315,13 +309,13 @@ pub async fn persist_read_progress_with_locator(
      LOCATOR = excluded.LOCATOR,
      LAST_MODIFIED_DATE = excluded.LAST_MODIFIED_DATE"#,
     )
-    .bind(book_id)
-    .bind(user_id_value)
-    .bind(page.max(0))
-    .bind(completed)
-    .bind(device_id)
-    .bind(device_name)
-    .bind(last_modified)
+    .bind(&input.book_id)
+    .bind(&input.user_id)
+    .bind(input.page.max(0))
+    .bind(input.completed)
+    .bind(&input.device_id)
+    .bind(&input.device_name)
+    .bind(&input.timestamp)
     .bind(locator_blob)
     .execute(pool)
     .await

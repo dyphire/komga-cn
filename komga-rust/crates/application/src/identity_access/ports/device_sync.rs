@@ -6,8 +6,18 @@ use super::super::device_records::{
 };
 use super::super::kobo_sync::{KoboLibrarySyncRequest, KoboLibrarySyncResponse};
 
+pub struct ReadProgressWithLocatorInput {
+    pub book_id: String,
+    pub user_id: String,
+    pub page: i64,
+    pub completed: bool,
+    pub device_id: String,
+    pub device_name: String,
+    pub timestamp: String,
+    pub locator: Option<Value>,
+}
+
 #[async_trait]
-#[allow(clippy::too_many_arguments)]
 pub trait DeviceSyncPort: Send + Sync {
     async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String>;
 
@@ -46,13 +56,6 @@ pub trait DeviceSyncPort: Send + Sync {
 
     async fn persist_read_progress_with_locator(
         &self,
-        book_id: &str,
-        user_id: &str,
-        page: i64,
-        completed: bool,
-        device_id: &str,
-        device_name: &str,
-        timestamp: &str,
-        locator: Option<Value>,
+        input: ReadProgressWithLocatorInput,
     ) -> Result<(), String>;
 }

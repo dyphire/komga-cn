@@ -230,7 +230,6 @@ pub(super) async fn load_opds_v1_series_search_results(
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
     backend: &dyn OpdsCatalogPort,
     headers: &HeaderMap,

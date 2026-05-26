@@ -32,9 +32,9 @@ pub use page_retrieval::{
     content_type_from_filename, is_supported_page_image_file_name,
 };
 pub use ports::{
-    BookMediaPort, ContentAccessPort, ContentResolverPort, EntityExistencePort, MediaReaderPort,
-    ProgressWriterPort, ReadProgressReadPort, ReadProgressSurfacePort, SeriesRelationPort,
-    ThumbnailReadPort, ThumbnailWriterPort,
+    BookMediaPort, BookProgressionInput, ContentAccessPort, ContentResolverPort,
+    EntityExistencePort, MediaReaderPort, ProgressWriterPort, ReadProgressReadPort,
+    ReadProgressSurfacePort, SeriesRelationPort, ThumbnailReadPort, ThumbnailWriterPort,
 };
 pub use read_progress_service::ReadProgressService;
 pub use thumbnail_operations::{

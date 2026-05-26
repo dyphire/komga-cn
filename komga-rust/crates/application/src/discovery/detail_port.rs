@@ -308,7 +308,6 @@ pub trait CollectionPort: Send + Sync {
 }
 
 #[async_trait]
-#[allow(clippy::too_many_arguments)]
 pub trait ReadlistPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,

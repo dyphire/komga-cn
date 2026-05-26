@@ -7,16 +7,18 @@ pub async fn load_persisted_genres(
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "genres",
-        r#"SELECT DISTINCT g.GENRE AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "genres",
+            base_sql: r#"SELECT DISTINCT g.GENRE AS VALUE
         FROM SERIES_METADATA_GENRE g
         JOIN SERIES s ON s.ID = g.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
-        r#"s.LIBRARY_ID"#,
-        None,
-        "lower(g.GENRE), g.GENRE, s.ID",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: None,
+            order_by: "lower(g.GENRE), g.GENRE, s.ID",
+        },
     )
     .await
 }
@@ -127,16 +129,18 @@ pub async fn load_persisted_languages(
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "languages",
-        r#"SELECT DISTINCT sm.LANGUAGE AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "languages",
+            base_sql: r#"SELECT DISTINCT sm.LANGUAGE AS VALUE
         FROM SERIES_METADATA sm
         JOIN SERIES s ON s.ID = sm.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
-        r#"s.LIBRARY_ID"#,
-        Some("sm.LANGUAGE <> ''"),
-        "lower(sm.LANGUAGE), sm.LANGUAGE",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: Some("sm.LANGUAGE <> ''"),
+            order_by: "lower(sm.LANGUAGE), sm.LANGUAGE",
+        },
     )
     .await
 }
@@ -148,16 +152,18 @@ pub async fn load_persisted_publishers(
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "publishers",
-        r#"SELECT DISTINCT sm.PUBLISHER AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "publishers",
+            base_sql: r#"SELECT DISTINCT sm.PUBLISHER AS VALUE
         FROM SERIES_METADATA sm
         JOIN SERIES s ON s.ID = sm.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
-        r#"s.LIBRARY_ID"#,
-        Some("sm.PUBLISHER <> ''"),
-        "lower(sm.PUBLISHER), sm.PUBLISHER",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: Some("sm.PUBLISHER <> ''"),
+            order_by: "lower(sm.PUBLISHER), sm.PUBLISHER",
+        },
     )
     .await
 }
@@ -218,16 +224,18 @@ pub async fn load_persisted_sharing_labels(
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "sharing-labels",
-        r#"SELECT DISTINCT sms.LABEL AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "sharing-labels",
+            base_sql: r#"SELECT DISTINCT sms.LABEL AS VALUE
         FROM SERIES_METADATA_SHARING sms
         JOIN SERIES s ON s.ID = sms.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
-        r#"s.LIBRARY_ID"#,
-        None,
-        "lower(sms.LABEL), sms.LABEL",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: None,
+            order_by: "lower(sms.LABEL), sms.LABEL",
+        },
     )
     .await
 }
@@ -239,16 +247,18 @@ pub async fn load_persisted_series_release_dates(
 ) -> Result<Vec<String>, String> {
     let values = common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "series-release-dates",
-        r#"SELECT DISTINCT bma.RELEASE_DATE AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "series-release-dates",
+            base_sql: r#"SELECT DISTINCT bma.RELEASE_DATE AS VALUE
         FROM BOOK_METADATA_AGGREGATION bma
         JOIN SERIES s ON s.ID = bma.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
-        r#"s.LIBRARY_ID"#,
-        Some("bma.RELEASE_DATE IS NOT NULL AND bma.RELEASE_DATE <> ''"),
-        "bma.RELEASE_DATE DESC",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: Some("bma.RELEASE_DATE IS NOT NULL AND bma.RELEASE_DATE <> ''"),
+            order_by: "bma.RELEASE_DATE DESC",
+        },
     )
     .await?;
 
@@ -274,16 +284,18 @@ pub async fn load_persisted_series_tags(
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
-        library_ids,
-        collection_id,
-        "series tags",
-        r#"SELECT DISTINCT st.TAG AS VALUE
+        &common::ScopedStringQuery {
+            library_ids,
+            collection_id,
+            label: "series tags",
+            base_sql: r#"SELECT DISTINCT st.TAG AS VALUE
         FROM SERIES_METADATA_TAG st
         JOIN SERIES s ON s.ID = st.SERIES_ID"#,
-        r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID"#,
-        r#"s.LIBRARY_ID"#,
-        None,
-        "lower(st.TAG), st.TAG",
+            collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID"#,
+            library_column: r#"s.LIBRARY_ID"#,
+            extra_condition: None,
+            order_by: "lower(st.TAG), st.TAG",
+        },
     )
     .await
 }

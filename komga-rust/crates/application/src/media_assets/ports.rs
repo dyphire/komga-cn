@@ -10,9 +10,19 @@ use super::{
     SeriesThumbnailRecord,
 };
 
+pub struct BookProgressionInput {
+    pub book_id: String,
+    pub user_id: String,
+    pub progression: f64,
+    pub use_locator_position_for_page: bool,
+    pub modified: Option<String>,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
+    pub locator: Option<Value>,
+}
+
 /// Write operations for read progress (book and series level).
 #[async_trait]
-#[allow(clippy::too_many_arguments)]
 pub trait ProgressWriterPort: Send + Sync {
     async fn persist_read_progress(
         &self,
@@ -23,17 +33,7 @@ pub trait ProgressWriterPort: Send + Sync {
         locator: Option<Value>,
     ) -> Result<(), String>;
 
-    async fn persist_book_progression(
-        &self,
-        book_id: &str,
-        user_id: &str,
-        progression: f64,
-        use_locator_position_for_page: bool,
-        modified: Option<String>,
-        device_id: Option<String>,
-        device_name: Option<String>,
-        locator: Option<Value>,
-    ) -> Result<(), String>;
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String>;
 
     async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String>;
 

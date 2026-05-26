@@ -9,6 +9,7 @@ use komga_application::identity_access::{
     build_kobo_book_metadata_payload, build_kobo_library_sync_payload,
     decode_or_passthrough_sync_token, generated_kobo_token_triplet, now_sync_marker, user_id,
 };
+use komga_application::media_assets::BookProgressionInput;
 use oauth2::{AuthUrl, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, basic::BasicClient};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

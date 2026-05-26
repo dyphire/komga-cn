@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use super::*;
 
 pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
@@ -13,38 +11,42 @@ pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
         .collect()
 }
 
+pub(super) struct ScopedStringQuery<'a> {
+    pub library_ids: Option<&'a [String]>,
+    pub collection_id: Option<&'a str>,
+    pub label: &'a str,
+    pub base_sql: &'a str,
+    pub collection_join: &'a str,
+    pub library_column: &'a str,
+    pub extra_condition: Option<&'a str>,
+    pub order_by: &'a str,
+}
+
 pub(super) async fn load_persisted_scoped_strings(
     pool: &SqlitePool,
-    library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
-    label: &str,
-    base_sql: &str,
-    collection_join: &str,
-    library_column: &str,
-    extra_condition: Option<&str>,
-    order_by: &str,
+    query: &ScopedStringQuery<'_>,
 ) -> Result<Vec<String>, String> {
-    if let Some(library_ids) = library_ids
+    if let Some(library_ids) = query.library_ids
         && library_ids.is_empty()
     {
         return Ok(Vec::new());
     }
 
-    let mut query = QueryBuilder::<Sqlite>::new(base_sql);
+    let mut builder = QueryBuilder::<Sqlite>::new(query.base_sql);
     let mut has_where = false;
 
-    if let Some(collection_id) = collection_id {
-        query.push(collection_join);
-        query.push(" WHERE cs.COLLECTION_ID = ");
-        query.push_bind(collection_id);
+    if let Some(collection_id) = query.collection_id {
+        builder.push(query.collection_join);
+        builder.push(" WHERE cs.COLLECTION_ID = ");
+        builder.push_bind(collection_id);
         has_where = true;
     }
 
-    if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
-        query.push(if has_where { " AND " } else { " WHERE " });
-        query.push(library_column);
-        query.push(" IN (");
-        let mut separated = query.separated(",");
+    if let Some(library_ids) = query.library_ids.filter(|ids| !ids.is_empty()) {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        builder.push(query.library_column);
+        builder.push(" IN (");
+        let mut separated = builder.separated(",");
         for library_id in library_ids {
             separated.push_bind(library_id);
         }
@@ -52,19 +54,19 @@ pub(super) async fn load_persisted_scoped_strings(
         has_where = true;
     }
 
-    if let Some(extra_condition) = extra_condition {
-        query.push(if has_where { " AND " } else { " WHERE " });
-        query.push(extra_condition);
+    if let Some(extra_condition) = query.extra_condition {
+        builder.push(if has_where { " AND " } else { " WHERE " });
+        builder.push(extra_condition);
     }
 
-    query.push(" ORDER BY ");
-    query.push(order_by);
+    builder.push(" ORDER BY ");
+    builder.push(query.order_by);
 
-    let rows = query
+    let rows = builder
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted {label}: {error}"))?;
+        .map_err(|error| format!("query persisted {}: {error}", query.label))?;
 
     Ok(rows
         .into_iter()

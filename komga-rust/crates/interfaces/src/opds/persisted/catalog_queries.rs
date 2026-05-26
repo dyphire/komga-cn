@@ -20,7 +20,6 @@ fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn load_browse_series_navigation(
     backend: &dyn OpdsCatalogPort,
     headers: &HeaderMap,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use komga_application::media_assets::BookProgressionInput;
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::Value;
 use serde_json::json;
@@ -211,33 +212,27 @@ pub async fn persist_read_progress(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn persist_book_progression(
     pool: &SqlitePool,
-    book_id: &str,
-    user_id_value: &str,
-    progression: f64,
-    use_locator_position_for_page: bool,
-    modified: Option<String>,
-    device_id: Option<String>,
-    device_name: Option<String>,
-    locator: Option<Value>,
+    input: BookProgressionInput,
 ) -> Result<(), String> {
-    let page_count = load_book_page_count(pool, book_id)
+    let page_count = load_book_page_count(pool, &input.book_id)
         .await?
         .unwrap_or(1)
         .max(1);
-    let total_progression = locator
+    let total_progression = input
+        .locator
         .as_ref()
         .and_then(|value| value.get("locations"))
         .and_then(|value| value.get("totalProgression"))
         .and_then(Value::as_f64);
-    let effective_progression = total_progression.unwrap_or(progression);
+    let effective_progression = total_progression.unwrap_or(input.progression);
     let page_from_progression = (effective_progression * page_count as f64)
         .round()
         .clamp(0.0, page_count as f64) as u64;
-    let page = if use_locator_position_for_page {
-        locator
+    let page = if input.use_locator_position_for_page {
+        input
+            .locator
             .as_ref()
             .and_then(|value| value.get("locations"))
             .and_then(|value| value.get("position"))
@@ -248,7 +243,7 @@ pub async fn persist_book_progression(
         page_from_progression
     };
     let completed = effective_progression >= 0.99;
-    require_user_exists(pool, user_id_value, "progression").await?;
+    require_user_exists(pool, &input.user_id, "progression").await?;
 
     sqlx::query(
         r#"
@@ -260,27 +255,27 @@ pub async fn persist_book_progression(
             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
         "#,
     )
-    .bind(book_id)
-    .bind(user_id_value)
+    .bind(&input.book_id)
+    .bind(&input.user_id)
     .bind(page as i64)
     .bind(completed)
-    .bind(modified)
-    .bind(device_id.unwrap_or_default())
-    .bind(device_name.unwrap_or_default())
-    .bind(serialize_locator(locator.as_ref()))
+    .bind(input.modified)
+    .bind(input.device_id.unwrap_or_default())
+    .bind(input.device_name.unwrap_or_default())
+    .bind(serialize_locator(input.locator.as_ref()))
     .execute(pool)
     .await
     .map_err(|error| format!("persist book progression: {error}"))?;
 
-    let series_id = load_book_series_id(pool, book_id, "progression").await?;
-    sync_series_read_progress_for_book(pool, book_id, user_id_value, "progression").await?;
+    let series_id = load_book_series_id(pool, &input.book_id, "progression").await?;
+    sync_series_read_progress_for_book(pool, &input.book_id, &input.user_id, "progression").await?;
 
-    emit_read_progress_changed(book_id, user_id_value);
+    emit_read_progress_changed(&input.book_id, &input.user_id);
     if let Some(series_id) = series_id {
         let exists =
-            persisted_series_read_progress_exists(pool, &series_id, user_id_value, "progression")
+            persisted_series_read_progress_exists(pool, &series_id, &input.user_id, "progression")
                 .await?;
-        emit_read_progress_series_event(&series_id, user_id_value, exists);
+        emit_read_progress_series_event(&series_id, &input.user_id, exists);
     }
 
     Ok(())

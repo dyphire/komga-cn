@@ -28,6 +28,17 @@ enum EpubTextTarget {
     },
 }
 
+#[derive(Default)]
+struct EpubMetadataAccumulator {
+    title: Option<String>,
+    description: Option<String>,
+    release_date: Option<String>,
+    identifiers: Vec<String>,
+    authors: Vec<BookMetadataAuthor>,
+    refined_roles: HashMap<String, String>,
+    group_positions: HashMap<String, String>,
+}
+
 pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataImportPatch {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
@@ -36,14 +47,8 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
     let mut current_target = None::<EpubTextTarget>;
     let mut current_text = String::new();
 
-    let mut title = None::<String>;
-    let mut description = None::<String>;
-    let mut release_date = None::<String>;
-    let mut identifiers = Vec::<String>::new();
-    let mut authors = Vec::<BookMetadataAuthor>::new();
-    let mut refined_roles = HashMap::<String, String>::new();
+    let mut acc = EpubMetadataAccumulator::default();
     let mut collection_id = None::<String>;
-    let mut group_positions = HashMap::<String, String>::new();
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -53,9 +58,9 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
                         &event,
                         &mut current_target,
                         &mut current_text,
-                        &mut refined_roles,
+                        &mut acc.refined_roles,
                         &mut collection_id,
-                        &mut group_positions,
+                        &mut acc.group_positions,
                     );
                 } else if let Some(target) = epub_text_target_from_start(&event) {
                     current_target = Some(target);
@@ -69,9 +74,9 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
                     &event,
                     &mut current_target,
                     &mut current_text,
-                    &mut refined_roles,
+                    &mut acc.refined_roles,
                     &mut collection_id,
-                    &mut group_positions,
+                    &mut acc.group_positions,
                 );
             }
             Ok(XmlEvent::Text(text)) if current_target.is_some() => {
@@ -86,17 +91,7 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
                 let target = current_target
                     .take()
                     .expect("epub text target should exist");
-                finalize_epub_text_target(
-                    target,
-                    current_text.trim().to_string(),
-                    &mut title,
-                    &mut description,
-                    &mut release_date,
-                    &mut identifiers,
-                    &mut authors,
-                    &mut refined_roles,
-                    &mut group_positions,
-                );
+                finalize_epub_text_target(target, current_text.trim().to_string(), &mut acc);
                 current_text.clear();
             }
             Ok(XmlEvent::Eof) => break,
@@ -108,7 +103,7 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
 
     let number = collection_id
         .as_deref()
-        .and_then(|id| group_positions.get(id))
+        .and_then(|id| acc.group_positions.get(id))
         .cloned()
         .filter(|value| !value.trim().is_empty());
     let number_sort = number
@@ -116,16 +111,18 @@ pub(super) fn extract_epub_book_patch(package_document: &[u8]) -> BookMetadataIm
         .and_then(|value| value.parse::<f64>().ok());
 
     BookMetadataImportPatch {
-        title,
-        summary: description
+        title: acc.title,
+        summary: acc
+            .description
             .map(|value| strip_markup_tags(&value))
             .filter(|value| !value.is_empty()),
         number,
         number_sort,
-        release_date,
-        authors: (!authors.is_empty()).then_some(authors),
+        release_date: acc.release_date,
+        authors: (!acc.authors.is_empty()).then_some(acc.authors),
         tags: None,
-        isbn: identifiers
+        isbn: acc
+            .identifiers
             .into_iter()
             .find_map(|value| normalize_epub_identifier_isbn(&value)),
         links: None,
@@ -221,46 +218,39 @@ fn handle_epub_meta_event(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn finalize_epub_text_target(
     target: EpubTextTarget,
     value: String,
-    title: &mut Option<String>,
-    description: &mut Option<String>,
-    release_date: &mut Option<String>,
-    identifiers: &mut Vec<String>,
-    authors: &mut Vec<BookMetadataAuthor>,
-    refined_roles: &mut HashMap<String, String>,
-    group_positions: &mut HashMap<String, String>,
+    acc: &mut EpubMetadataAccumulator,
 ) {
     match target {
         EpubTextTarget::Title => {
-            if title.is_none() {
-                *title = nonblank_string(value);
+            if acc.title.is_none() {
+                acc.title = nonblank_string(value);
             }
         }
         EpubTextTarget::Description => {
-            if description.is_none() {
-                *description = nonblank_string(value);
+            if acc.description.is_none() {
+                acc.description = nonblank_string(value);
             }
         }
         EpubTextTarget::Date => {
-            if release_date.is_none() {
-                *release_date = normalize_epub_date(&value);
+            if acc.release_date.is_none() {
+                acc.release_date = normalize_epub_date(&value);
             }
         }
         EpubTextTarget::Identifier => {
             if let Some(value) = nonblank_string(value) {
-                identifiers.push(value);
+                acc.identifiers.push(value);
             }
         }
         EpubTextTarget::Creator { id, role_attr } => {
             if let Some(name) = nonblank_string(value) {
                 let refined_role = id
                     .as_deref()
-                    .and_then(|id| refined_roles.get(id))
+                    .and_then(|id| acc.refined_roles.get(id))
                     .map(String::as_str);
-                authors.push(BookMetadataAuthor {
+                acc.authors.push(BookMetadataAuthor {
                     name,
                     role: map_epub_author_role(role_attr.as_deref().or(refined_role)).to_string(),
                 });
@@ -268,12 +258,12 @@ fn finalize_epub_text_target(
         }
         EpubTextTarget::RoleMeta { refines } => {
             if let (Some(refines), Some(value)) = (refines, nonblank_string(value)) {
-                refined_roles.entry(refines).or_insert(value);
+                acc.refined_roles.entry(refines).or_insert(value);
             }
         }
         EpubTextTarget::GroupPosition { refines } => {
             if let (Some(refines), Some(value)) = (refines, nonblank_string(value)) {
-                group_positions.entry(refines).or_insert(value);
+                acc.group_positions.entry(refines).or_insert(value);
             }
         }
     }

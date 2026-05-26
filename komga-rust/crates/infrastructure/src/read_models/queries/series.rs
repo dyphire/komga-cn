@@ -8,9 +8,10 @@ use komga_domain::discovery::{
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::super::filters::{
-    SqlxWhereState, append_bool_sqlx_filter, append_clause_sqlx, append_comparison_sqlx,
-    append_in_clause_sqlx, append_like_clause_sqlx, append_not_in_clause_sqlx,
-    append_subquery_exists_clause, effective_library_ids, query_filters_sqlx,
+    QueryFilterParams, SqlxWhereState, append_bool_sqlx_filter, append_clause_sqlx,
+    append_comparison_sqlx, append_in_clause_sqlx, append_like_clause_sqlx,
+    append_not_in_clause_sqlx, append_subquery_exists_clause, effective_library_ids,
+    query_filters_sqlx,
 };
 use super::map_sqlx_error;
 use crate::parsing::parse_csv_values;
@@ -238,12 +239,14 @@ fn apply_series_list_filters_sqlx(
     query_filters_sqlx(
         builder,
         state,
-        "s.library_id",
-        allowed_library_ids,
-        query.search.as_deref(),
-        Some("s.title"),
-        context.restrictions.as_ref(),
-        "s",
+        &QueryFilterParams {
+            library_column: "s.library_id",
+            allowed_library_ids,
+            search: query.search.as_deref(),
+            search_column: Some("s.title"),
+            restrictions: context.restrictions.as_ref(),
+            restriction_series_alias: "s",
+        },
     );
 
     if let Some(condition) = &query.filter.condition {

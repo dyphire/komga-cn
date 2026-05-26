@@ -157,19 +157,30 @@ async fn seed_ondeck_progress(
     .await;
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn seed_ondeck_user(
-    paths: &RuntimeDbPaths,
-    user_id: &str,
-    email: &str,
-    password: &str,
+struct OndeckTestUser<'a> {
+    user_id: &'a str,
+    email: &'a str,
+    password: &'a str,
     shared_all_libraries: bool,
     age_restriction: Option<i64>,
     age_restriction_allow_only: bool,
-    shared_library_ids: &[&str],
-    labels_allow: &[&str],
-    labels_exclude: &[&str],
-) {
+    shared_library_ids: &'a [&'a str],
+    labels_allow: &'a [&'a str],
+    labels_exclude: &'a [&'a str],
+}
+
+async fn seed_ondeck_user(paths: &RuntimeDbPaths, user: OndeckTestUser<'_>) {
+    let OndeckTestUser {
+        user_id,
+        email,
+        password,
+        shared_all_libraries,
+        age_restriction,
+        age_restriction_allow_only,
+        shared_library_ids,
+        labels_allow,
+        labels_exclude,
+    } = user;
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("ondeck test user db should open");
@@ -434,15 +445,17 @@ async fn router_discovery_books_ondeck_honors_label_allow_restriction() {
     update_ondeck_series_book_count(ctx.paths(), "series-2", 2).await;
     seed_ondeck_user(
         ctx.paths(),
-        "label-allow-user",
-        "label-allow@example.org",
-        "router-contract-label-allow-123",
-        true,
-        None,
-        false,
-        &[],
-        &["family"],
-        &[],
+        OndeckTestUser {
+            user_id: "label-allow-user",
+            email: "label-allow@example.org",
+            password: "router-contract-label-allow-123",
+            shared_all_libraries: true,
+            age_restriction: None,
+            age_restriction_allow_only: false,
+            shared_library_ids: &[],
+            labels_allow: &["family"],
+            labels_exclude: &[],
+        },
     )
     .await;
     seed_ondeck_progress(
@@ -507,15 +520,17 @@ async fn router_discovery_books_ondeck_filters_to_authorized_library_intersectio
     update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
         ctx.paths(),
-        "library-restricted-user",
-        "library-restricted@example.org",
-        "router-contract-library-restricted-123",
-        false,
-        None,
-        false,
-        &["library-1"],
-        &[],
-        &[],
+        OndeckTestUser {
+            user_id: "library-restricted-user",
+            email: "library-restricted@example.org",
+            password: "router-contract-library-restricted-123",
+            shared_all_libraries: false,
+            age_restriction: None,
+            age_restriction_allow_only: false,
+            shared_library_ids: &["library-1"],
+            labels_allow: &[],
+            labels_exclude: &[],
+        },
     )
     .await;
     seed_ondeck_progress(
@@ -588,15 +603,17 @@ async fn router_discovery_books_ondeck_hides_allow_only_age_mismatch_series() {
     update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
         ctx.paths(),
-        "allow-only-user",
-        "allow-only@example.org",
-        "router-contract-allow-only-123",
-        true,
-        Some(12),
-        true,
-        &[],
-        &[],
-        &[],
+        OndeckTestUser {
+            user_id: "allow-only-user",
+            email: "allow-only@example.org",
+            password: "router-contract-allow-only-123",
+            shared_all_libraries: true,
+            age_restriction: Some(12),
+            age_restriction_allow_only: true,
+            shared_library_ids: &[],
+            labels_allow: &[],
+            labels_exclude: &[],
+        },
     )
     .await;
     seed_ondeck_progress(
@@ -623,15 +640,17 @@ async fn router_discovery_books_ondeck_hides_label_restricted_series() {
     update_ondeck_series_book_count(ctx.paths(), "series-1", 2).await;
     seed_ondeck_user(
         ctx.paths(),
-        "label-restricted-user",
-        "label-restricted@example.org",
-        "router-contract-label-restricted-123",
-        true,
-        None,
-        false,
-        &[],
-        &[],
-        &["family"],
+        OndeckTestUser {
+            user_id: "label-restricted-user",
+            email: "label-restricted@example.org",
+            password: "router-contract-label-restricted-123",
+            shared_all_libraries: true,
+            age_restriction: None,
+            age_restriction_allow_only: false,
+            shared_library_ids: &[],
+            labels_allow: &[],
+            labels_exclude: &["family"],
+        },
     )
     .await;
     seed_ondeck_progress(

@@ -438,16 +438,16 @@ pub async fn koreader_put_progress(
     let modified = now_sync_marker();
     if app
         .progress
-        .persist_book_progression(
-            &target.id,
-            &user_id_value,
+        .persist_book_progression(BookProgressionInput {
+            book_id: target.id.clone(),
+            user_id: user_id_value.to_string(),
             progression,
             use_locator_position_for_page,
-            Some(modified),
-            Some(payload.device_id.clone()),
-            Some(payload.device.clone()),
-            Some(locator),
-        )
+            modified: Some(modified),
+            device_id: Some(payload.device_id.clone()),
+            device_name: Some(payload.device.clone()),
+            locator: Some(locator),
+        })
         .await
         .is_err()
     {

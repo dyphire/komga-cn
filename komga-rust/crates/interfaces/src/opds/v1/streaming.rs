@@ -73,12 +73,14 @@ pub(super) async fn series_book_page_streaming_links(
     opds_book_page_streaming_links(
         app,
         headers,
-        &book.id,
-        &book.media_type,
-        book.page_count,
-        book.epub_divina_compatible,
-        book.last_read,
-        book.last_read_date.as_deref(),
+        StreamingBookInfo {
+            id: &book.id,
+            media_type: &book.media_type,
+            page_count: book.page_count,
+            epub_divina_compatible: book.epub_divina_compatible,
+            last_read: book.last_read,
+            last_read_date: book.last_read_date.as_deref(),
+        },
     )
     .await
 }
@@ -91,34 +93,39 @@ async fn book_feed_page_streaming_links(
     opds_book_page_streaming_links(
         app,
         headers,
-        &book.id,
-        &book.media_type,
-        book.page_count,
-        book.epub_divina_compatible,
-        book.last_read,
-        book.last_read_date.as_deref(),
+        StreamingBookInfo {
+            id: &book.id,
+            media_type: &book.media_type,
+            page_count: book.page_count,
+            epub_divina_compatible: book.epub_divina_compatible,
+            last_read: book.last_read,
+            last_read_date: book.last_read_date.as_deref(),
+        },
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn opds_book_page_streaming_links(
-    app: &OpdsState,
-    headers: &HeaderMap,
-    book_id: &str,
-    media_type: &str,
+struct StreamingBookInfo<'a> {
+    id: &'a str,
+    media_type: &'a str,
     page_count: i64,
     epub_divina_compatible: bool,
     last_read: Option<i64>,
-    last_read_date: Option<&str>,
+    last_read_date: Option<&'a str>,
+}
+
+async fn opds_book_page_streaming_links(
+    app: &OpdsState,
+    headers: &HeaderMap,
+    book: StreamingBookInfo<'_>,
 ) -> Vec<OpdsV1XmlLink> {
     let media_types = opds_book_page_stream_media_types(
         app.reader.as_ref(),
         app.content.as_ref(),
-        book_id,
-        media_type,
-        page_count,
-        epub_divina_compatible,
+        book.id,
+        book.media_type,
+        book.page_count,
+        book.epub_divina_compatible,
     )
     .await;
     if media_types.is_empty() {
@@ -126,31 +133,34 @@ async fn opds_book_page_streaming_links(
     }
 
     let supported_formats = ["image/jpeg", "image/png", "image/gif"];
-    let (link_type, href) = if media_types.len() == 1
-        && supported_formats.contains(&media_types[0].as_str())
-    {
-        (
-            media_types[0].clone(),
-            app_absolute_url(
-                headers,
-                format!("/opds/v1.2/books/{book_id}/pages/{{pageNumber}}").as_str(),
-            ),
-        )
-    } else {
-        (
-            "image/jpeg".to_string(),
-            app_absolute_url(
-                headers,
-                format!("/opds/v1.2/books/{book_id}/pages/{{pageNumber}}?convert=jpeg").as_str(),
-            ),
-        )
-    };
+    let (link_type, href) =
+        if media_types.len() == 1 && supported_formats.contains(&media_types[0].as_str()) {
+            (
+                media_types[0].clone(),
+                app_absolute_url(
+                    headers,
+                    format!("/opds/v1.2/books/{}/pages/{{pageNumber}}", book.id).as_str(),
+                ),
+            )
+        } else {
+            (
+                "image/jpeg".to_string(),
+                app_absolute_url(
+                    headers,
+                    format!(
+                        "/opds/v1.2/books/{}/pages/{{pageNumber}}?convert=jpeg",
+                        book.id
+                    )
+                    .as_str(),
+                ),
+            )
+        };
 
     let mut link = OpdsV1XmlLink::new(link_type, "http://vaemendis.net/opds-pse/stream", href)
-        .with_attribute("pse:count", page_count.to_string());
-    if let Some(last_read) = last_read {
+        .with_attribute("pse:count", book.page_count.to_string());
+    if let Some(last_read) = book.last_read {
         link = link.with_attribute("pse:lastRead", last_read.max(0).to_string());
-        if let Some(last_read_date) = last_read_date.map(str::trim)
+        if let Some(last_read_date) = book.last_read_date.map(str::trim)
             && !last_read_date.is_empty()
         {
             link = link.with_attribute("pse:lastReadDate", normalize_opds_updated(last_read_date));

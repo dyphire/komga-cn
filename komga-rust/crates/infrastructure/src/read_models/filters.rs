@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use komga_domain::common_ids::LibraryId;
 use komga_domain::discovery::{AgeRestrictionKind, DiscoveryQueryContext, QueryRestrictions};
 use sqlx::{QueryBuilder, Sqlite};
@@ -16,21 +14,25 @@ pub(super) struct SqlxWhereState {
     pub(super) params: Vec<SqlValue>,
 }
 
+pub(super) struct QueryFilterParams<'a> {
+    pub library_column: &'a str,
+    pub allowed_library_ids: Option<&'a Vec<String>>,
+    pub search: Option<&'a str>,
+    pub search_column: Option<&'a str>,
+    pub restrictions: Option<&'a QueryRestrictions>,
+    pub restriction_series_alias: &'a str,
+}
+
 pub(super) fn query_filters_sqlx(
     builder: &mut QueryBuilder<Sqlite>,
     state: &mut SqlxWhereState,
-    library_column: &str,
-    allowed_library_ids: Option<&Vec<String>>,
-    search: Option<&str>,
-    search_column: Option<&str>,
-    restrictions: Option<&QueryRestrictions>,
-    restriction_series_alias: &str,
+    params: &QueryFilterParams<'_>,
 ) {
-    if let Some(allowed) = allowed_library_ids {
-        append_in_clause_sqlx(library_column, allowed, builder, state);
+    if let Some(allowed) = params.allowed_library_ids {
+        append_in_clause_sqlx(params.library_column, allowed, builder, state);
     }
 
-    if let (Some(term), Some(column)) = (search, search_column) {
+    if let (Some(term), Some(column)) = (params.search, params.search_column) {
         push_sqlx_clause_prefix(builder, state);
         builder.push(format!(r#"LOWER({column}) LIKE "#));
         let lowered = format!("%{}%", term.to_ascii_lowercase());
@@ -38,9 +40,9 @@ pub(super) fn query_filters_sqlx(
         state.params.push(SqlValue::Text(lowered));
     }
 
-    if let Some(active_restrictions) = restrictions {
+    if let Some(active_restrictions) = params.restrictions {
         apply_restrictions_sqlx(
-            restriction_series_alias,
+            params.restriction_series_alias,
             active_restrictions,
             builder,
             state,
@@ -258,7 +260,7 @@ mod tests {
     use komga_domain::discovery::{AgeRestrictionKind, QueryRestrictions};
     use sqlx::{Execute, QueryBuilder, Sqlite};
 
-    use super::{SqlValue, SqlxWhereState, query_filters_sqlx};
+    use super::{QueryFilterParams, SqlValue, SqlxWhereState, query_filters_sqlx};
 
     #[test]
     fn sqlx_query_filters_preserve_restriction_clause_and_bind_order() {
@@ -277,12 +279,14 @@ FROM series s"#,
         query_filters_sqlx(
             &mut builder,
             &mut state,
-            "s.library_id",
-            Some(&vec!["lib-2".to_string(), "lib-1".to_string()]),
-            Some("MiXeD"),
-            Some("s.title"),
-            Some(&restrictions),
-            "s",
+            &QueryFilterParams {
+                library_column: "s.library_id",
+                allowed_library_ids: Some(&vec!["lib-2".to_string(), "lib-1".to_string()]),
+                search: Some("MiXeD"),
+                search_column: Some("s.title"),
+                restrictions: Some(&restrictions),
+                restriction_series_alias: "s",
+            },
         );
 
         let query = builder.build();

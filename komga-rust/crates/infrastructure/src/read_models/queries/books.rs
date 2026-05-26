@@ -9,8 +9,8 @@ use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use super::map_sqlx_error;
 use crate::parsing::{parse_csv_values, parse_metadata_authors, parse_metadata_links};
 use crate::read_models::filters::{
-    SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx, append_like_clause_sqlx,
-    append_not_in_clause_sqlx, effective_library_ids, query_filters_sqlx,
+    QueryFilterParams, SqlxWhereState, append_clause_sqlx, append_in_clause_sqlx,
+    append_like_clause_sqlx, append_not_in_clause_sqlx, effective_library_ids, query_filters_sqlx,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,17 +144,7 @@ pub(in crate::read_models) async fn list_books_sqlx(
     context: &DiscoveryQueryContext,
     query: &BooksBrowseRequest,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-    list_books_sqlx_common(
-        pool,
-        context,
-        query.page.page,
-        query.page.size,
-        query.filter.condition.as_ref(),
-        query.search.as_deref(),
-        query.page.unpaged,
-        book_ordering_from_sorts(&query.sort),
-    )
-    .await
+    list_books_sqlx_common(pool, context, query, book_ordering_from_sorts(&query.sort)).await
 }
 
 pub(in crate::read_models) async fn list_books_latest_sqlx(
@@ -162,30 +152,20 @@ pub(in crate::read_models) async fn list_books_latest_sqlx(
     context: &DiscoveryQueryContext,
     query: &BooksBrowseRequest,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
-    list_books_sqlx_common(
-        pool,
-        context,
-        query.page.page,
-        query.page.size,
-        query.filter.condition.as_ref(),
-        query.search.as_deref(),
-        query.page.unpaged,
-        BookOrdering::LastModifiedDesc,
-    )
-    .await
+    list_books_sqlx_common(pool, context, query, BookOrdering::LastModifiedDesc).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn list_books_sqlx_common(
     pool: SqlitePool,
     context: &DiscoveryQueryContext,
-    page: usize,
-    size: usize,
-    condition: Option<&BookCondition>,
-    search: Option<&str>,
-    unpaged: bool,
+    query: &BooksBrowseRequest,
     ordering: BookOrdering,
 ) -> Result<PageEnvelope<BookReadModel>, DiscoveryError> {
+    let page = query.page.page;
+    let size = query.page.size;
+    let condition = query.filter.condition.as_ref();
+    let search = query.search.as_deref();
+    let unpaged = query.page.unpaged;
     let requested_library_ids = extract_book_library_ids(condition);
     let allowed = effective_library_ids(context, requested_library_ids.as_deref());
     if allowed.as_ref().is_some_and(Vec::is_empty) {
@@ -302,12 +282,14 @@ fn apply_book_filter_tree_sqlx(
     query_filters_sqlx(
         builder,
         state,
-        "b.library_id",
-        allowed_library_ids,
-        search,
-        Some("b.title"),
-        context.restrictions.as_ref(),
-        "s",
+        &QueryFilterParams {
+            library_column: "b.library_id",
+            allowed_library_ids,
+            search,
+            search_column: Some("b.title"),
+            restrictions: context.restrictions.as_ref(),
+            restriction_series_alias: "s",
+        },
     );
 
     let has_explicit_oneshot = condition.is_some_and(condition_has_oneshot);

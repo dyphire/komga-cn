@@ -12,9 +12,9 @@ use crate::state::{
 };
 
 use super::feeds::{
-    normalize_opds_updated, opds_navigation_response_with_paging, opds_publication_for_feed_entry,
-    opds_publications_response_with_paging, opds_subsection_navigation_link, paginate_vec,
-    parse_page_size,
+    OpdsV2PagedFeed, normalize_opds_updated, opds_navigation_response_with_paging,
+    opds_publication_for_feed_entry, opds_publications_response_with_paging,
+    opds_subsection_navigation_link, paginate_vec, parse_page_size,
 };
 use super::persisted::{
     allowed_library_ids_for_user, load_libraries, load_library, validate_library_scope,
@@ -125,14 +125,16 @@ fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> R
                 .map(|book| opds_publication_for_feed_entry(headers, book))
                 .collect::<Vec<_>>();
             opds_publications_response_with_paging(
-                headers,
-                title.as_str(),
-                self_path.as_str(),
-                modified,
+                OpdsV2PagedFeed {
+                    headers,
+                    title: title.as_str(),
+                    self_path: self_path.as_str(),
+                    modified,
+                    page,
+                    size,
+                    total,
+                },
                 publications,
-                page,
-                size,
-                total,
             )
         }
         OpdsV2FeedContent::Navigation(series) => {
@@ -147,14 +149,16 @@ fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> R
                 })
                 .collect::<Vec<_>>();
             opds_navigation_response_with_paging(
-                headers,
-                title.as_str(),
-                self_path.as_str(),
-                modified,
+                OpdsV2PagedFeed {
+                    headers,
+                    title: title.as_str(),
+                    self_path: self_path.as_str(),
+                    modified,
+                    page,
+                    size,
+                    total,
+                },
                 navigation,
-                page,
-                size,
-                total,
             )
         }
     }

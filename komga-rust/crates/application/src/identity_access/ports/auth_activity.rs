@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use super::super::user_models::{AuthUser, PersistedAuthenticationActivity};
 
 #[async_trait]
-#[allow(clippy::too_many_arguments)]
 pub trait AuthActivityPort: Send + Sync {
     async fn persisted_list_authentication_activity(
         &self,

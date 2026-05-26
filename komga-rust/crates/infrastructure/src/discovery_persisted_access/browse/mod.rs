@@ -827,17 +827,26 @@ mod tests {
             .expect("library row should be inserted");
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn insert_series(
-        pool: &SqlitePool,
-        id: &str,
-        library_id: &str,
-        title: &str,
+    struct TestSeriesRow<'a> {
+        id: &'a str,
+        library_id: &'a str,
+        title: &'a str,
         age_rating: Option<i64>,
-        labels: &[&str],
-        genres: &[&str],
-        tags: &[&str],
-    ) {
+        labels: &'a [&'a str],
+        genres: &'a [&'a str],
+        tags: &'a [&'a str],
+    }
+
+    async fn insert_series(pool: &SqlitePool, row: TestSeriesRow<'_>) {
+        let TestSeriesRow {
+            id,
+            library_id,
+            title,
+            age_rating,
+            labels,
+            genres,
+            tags,
+        } = row;
         sqlx::query(
             r#"INSERT INTO SERIES (
                 ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, BOOK_COUNT
@@ -1002,35 +1011,41 @@ mod tests {
         insert_library(&fixture.pool, "library-hidden").await;
         insert_series(
             &fixture.pool,
-            "series-visible",
-            "library-allowed",
-            "Visible",
-            Some(12),
-            &[],
-            &[],
-            &[],
+            TestSeriesRow {
+                id: "series-visible",
+                library_id: "library-allowed",
+                title: "Visible",
+                age_rating: Some(12),
+                labels: &[],
+                genres: &[],
+                tags: &[],
+            },
         )
         .await;
         insert_series(
             &fixture.pool,
-            "series-aged-out",
-            "library-allowed",
-            "Aged Out",
-            Some(18),
-            &[],
-            &[],
-            &[],
+            TestSeriesRow {
+                id: "series-aged-out",
+                library_id: "library-allowed",
+                title: "Aged Out",
+                age_rating: Some(18),
+                labels: &[],
+                genres: &[],
+                tags: &[],
+            },
         )
         .await;
         insert_series(
             &fixture.pool,
-            "series-hidden",
-            "library-hidden",
-            "Hidden",
-            Some(12),
-            &[],
-            &[],
-            &[],
+            TestSeriesRow {
+                id: "series-hidden",
+                library_id: "library-hidden",
+                title: "Hidden",
+                age_rating: Some(12),
+                labels: &[],
+                genres: &[],
+                tags: &[],
+            },
         )
         .await;
         insert_book(
@@ -1091,24 +1106,28 @@ mod tests {
         insert_library(&fixture.pool, "library-1").await;
         insert_series(
             &fixture.pool,
-            "series-alpha",
-            "library-1",
-            "Alpha",
-            None,
-            &["kids"],
-            &[],
-            &["favorite"],
+            TestSeriesRow {
+                id: "series-alpha",
+                library_id: "library-1",
+                title: "Alpha",
+                age_rating: None,
+                labels: &["kids"],
+                genres: &[],
+                tags: &["favorite"],
+            },
         )
         .await;
         insert_series(
             &fixture.pool,
-            "series-beta",
-            "library-1",
-            "Beta",
-            None,
-            &["restricted"],
-            &[],
-            &["queued"],
+            TestSeriesRow {
+                id: "series-beta",
+                library_id: "library-1",
+                title: "Beta",
+                age_rating: None,
+                labels: &["restricted"],
+                genres: &[],
+                tags: &["queued"],
+            },
         )
         .await;
 
@@ -1154,13 +1173,15 @@ mod tests {
         insert_library(&fixture.pool, "library-1").await;
         insert_series(
             &fixture.pool,
-            "series-1",
-            "library-1",
-            "Series",
-            None,
-            &[],
-            &[],
-            &[],
+            TestSeriesRow {
+                id: "series-1",
+                library_id: "library-1",
+                title: "Series",
+                age_rating: None,
+                labels: &[],
+                genres: &[],
+                tags: &[],
+            },
         )
         .await;
         insert_book(
@@ -1206,24 +1227,28 @@ mod tests {
         insert_library(&fixture.pool, "library-2").await;
         insert_series(
             &fixture.pool,
-            "series-1",
-            "library-1",
-            "Series One",
-            None,
-            &[],
-            &["Drama"],
-            &["series-tag"],
+            TestSeriesRow {
+                id: "series-1",
+                library_id: "library-1",
+                title: "Series One",
+                age_rating: None,
+                labels: &[],
+                genres: &["Drama"],
+                tags: &["series-tag"],
+            },
         )
         .await;
         insert_series(
             &fixture.pool,
-            "series-2",
-            "library-2",
-            "Series Two",
-            None,
-            &[],
-            &["Action"],
-            &[],
+            TestSeriesRow {
+                id: "series-2",
+                library_id: "library-2",
+                title: "Series Two",
+                age_rating: None,
+                labels: &[],
+                genres: &["Action"],
+                tags: &[],
+            },
         )
         .await;
         insert_book(

@@ -1,5 +1,16 @@
 use super::*;
 
+struct KoboThumbnailRequest<'a> {
+    app: &'a IdentityAccessState,
+    server_settings: &'a dyn komga_application::operational::ServerSettingsPort,
+    auth_token: &'a str,
+    headers: &'a HeaderMap,
+    remote_addr: Option<SocketAddr>,
+    thumbnail_id: &'a str,
+    width: &'a str,
+    height: &'a str,
+}
+
 pub async fn kobo_book_thumbnail(
     State(app): State<IdentityAccessState>,
     Path((auth_token, thumbnail_id, width, height, _)): Path<(
@@ -12,16 +23,16 @@ pub async fn kobo_book_thumbnail(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    kobo_book_thumbnail_response(
-        &app,
-        app.server_settings.as_ref(),
-        auth_token.as_str(),
-        &headers,
-        connection_info.remote_addr(),
-        thumbnail_id.as_str(),
-        width.as_str(),
-        height.as_str(),
-    )
+    kobo_book_thumbnail_response(KoboThumbnailRequest {
+        app: &app,
+        server_settings: app.server_settings.as_ref(),
+        auth_token: auth_token.as_str(),
+        headers: &headers,
+        remote_addr: connection_info.remote_addr(),
+        thumbnail_id: thumbnail_id.as_str(),
+        width: width.as_str(),
+        height: height.as_str(),
+    })
     .await
 }
 
@@ -38,35 +49,32 @@ pub async fn kobo_book_thumbnail_with_quality(
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
 ) -> Response {
-    kobo_book_thumbnail_response(
-        &app,
-        app.server_settings.as_ref(),
-        auth_token.as_str(),
-        &headers,
-        connection_info.remote_addr(),
-        thumbnail_id.as_str(),
-        width.as_str(),
-        height.as_str(),
-    )
+    kobo_book_thumbnail_response(KoboThumbnailRequest {
+        app: &app,
+        server_settings: app.server_settings.as_ref(),
+        auth_token: auth_token.as_str(),
+        headers: &headers,
+        remote_addr: connection_info.remote_addr(),
+        thumbnail_id: thumbnail_id.as_str(),
+        width: width.as_str(),
+        height: height.as_str(),
+    })
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn kobo_book_thumbnail_response(
-    app: &IdentityAccessState,
-    server_settings: &dyn komga_application::operational::ServerSettingsPort,
-    auth_token: &str,
-    headers: &HeaderMap,
-    remote_addr: Option<SocketAddr>,
-    thumbnail_id: &str,
-    width: &str,
-    height: &str,
-) -> Response {
-    if let Err(status) = required_kobo_user(&app.identity, auth_token, headers, remote_addr).await {
+async fn kobo_book_thumbnail_response(req: KoboThumbnailRequest<'_>) -> Response {
+    if let Err(status) = required_kobo_user(
+        &req.app.identity,
+        req.auth_token,
+        req.headers,
+        req.remote_addr,
+    )
+    .await
+    {
         return status.into_response();
     }
 
-    match load_thumbnail_by_id(app, thumbnail_id).await {
+    match load_thumbnail_by_id(req.app, req.thumbnail_id).await {
         Ok(Some((media_type, bytes))) => {
             let jpeg_bytes = if media_type.eq_ignore_ascii_case("image/jpeg") {
                 bytes
@@ -85,9 +93,10 @@ async fn kobo_book_thumbnail_response(
                 .into_response()
         }
         Ok(None) => {
-            if load_kobo_proxy_enabled(server_settings).await {
+            if load_kobo_proxy_enabled(req.server_settings).await {
                 let location = format!(
-                    "https://cdn.kobo.com/book-images/{thumbnail_id}/{width}/{height}/false/image.jpg"
+                    "https://cdn.kobo.com/book-images/{}/{}/{}/false/image.jpg",
+                    req.thumbnail_id, req.width, req.height
                 );
                 return (
                     StatusCode::TEMPORARY_REDIRECT,

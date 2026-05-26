@@ -403,7 +403,6 @@ fn epub_nav_links(
         .unwrap_or_default()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn persisted_epub_manifest_payload(
     book_id: &str,
     title: &str,
@@ -491,7 +490,6 @@ fn persisted_epub_manifest_payload(
     Ok(payload)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn build_manifest_reading_order(
     reader: &dyn MediaReaderPort,
     content: &dyn ContentResolverPort,

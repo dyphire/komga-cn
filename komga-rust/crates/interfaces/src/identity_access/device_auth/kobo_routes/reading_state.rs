@@ -199,16 +199,16 @@ pub async fn kobo_library_book_state_update(
 
     let persist_result = app
         .progress
-        .persist_book_progression(
-            &book_id,
-            user_id_value,
-            locator_progression,
-            false,
-            Some(progress_last_modified.clone()),
-            Some(device_id.to_string()),
-            Some(device_name.to_string()),
-            Some(locator),
-        )
+        .persist_book_progression(BookProgressionInput {
+            book_id: book_id.clone(),
+            user_id: user_id_value.to_string(),
+            progression: locator_progression,
+            use_locator_position_for_page: false,
+            modified: Some(progress_last_modified.clone()),
+            device_id: Some(device_id.to_string()),
+            device_name: Some(device_name.to_string()),
+            locator: Some(locator),
+        })
         .await;
 
     let update_result = if persist_result.is_ok() {

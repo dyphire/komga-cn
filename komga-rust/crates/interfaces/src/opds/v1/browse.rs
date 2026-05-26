@@ -33,10 +33,14 @@ pub(crate) async fn opds_v1_catalog(_app: &OpdsState, headers: HeaderMap) -> Res
     let search_href = app_absolute_url(&headers, "/opds/v1.2/search");
     let alternate_href = app_absolute_url(&headers, "/opds/v2/catalog");
     opds_v1_navigation_feed_response_with_extra_links(
-        &headers,
-        "root",
-        "Komga OPDS catalog",
-        "/opds/v1.2/catalog",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "root",
+            title: "Komga OPDS catalog",
+            self_path: "/opds/v1.2/catalog",
+            feed_updated: None,
+            pagination: None,
+        },
         vec![
             nav_entry_with_content(
                 "keepReading",
@@ -93,8 +97,6 @@ pub(crate) async fn opds_v1_catalog(_app: &OpdsState, headers: HeaderMap) -> Res
                 "/opds/v1.2/publishers",
             ),
         ],
-        None,
-        None,
         vec![
             OpdsV1XmlLink::new(
                 "application/opensearchdescription+xml",
@@ -234,12 +236,15 @@ pub(crate) async fn opds_v1_series_latest(
         .unwrap_or_default();
 
     opds_v1_navigation_feed_response(
-        &headers,
-        "latestSeries",
-        "Latest series",
-        "/opds/v1.2/series/latest",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "latestSeries",
+            title: "Latest series",
+            self_path: "/opds/v1.2/series/latest",
+            feed_updated: None,
+            pagination: Some((page, has_next)),
+        },
         rows,
-        Some((page, has_next)),
     )
 }
 
@@ -301,12 +306,15 @@ pub(crate) async fn opds_v1_libraries(
         .collect::<Vec<_>>();
 
     opds_v1_navigation_feed_response(
-        &headers,
-        "allLibraries",
-        "All libraries",
-        "/opds/v1.2/libraries",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "allLibraries",
+            title: "All libraries",
+            self_path: "/opds/v1.2/libraries",
+            feed_updated: None,
+            pagination: None,
+        },
         rows,
-        None,
     )
 }
 
@@ -339,12 +347,15 @@ pub(crate) async fn opds_v1_collections(
     let (rows, has_next) = paginate_vec(rows, page, size);
 
     opds_v1_navigation_feed_response(
-        &headers,
-        "allCollections",
-        "All collections",
-        "/opds/v1.2/collections",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "allCollections",
+            title: "All collections",
+            self_path: "/opds/v1.2/collections",
+            feed_updated: None,
+            pagination: Some((page, has_next)),
+        },
         rows,
-        Some((page, has_next)),
     )
 }
 
@@ -374,12 +385,15 @@ pub(crate) async fn opds_v1_readlists(
     let (rows, has_next) = paginate_vec(rows, page, size);
 
     opds_v1_navigation_feed_response(
-        &headers,
-        "allReadLists",
-        "All read lists",
-        "/opds/v1.2/readlists",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "allReadLists",
+            title: "All read lists",
+            self_path: "/opds/v1.2/readlists",
+            feed_updated: None,
+            pagination: Some((page, has_next)),
+        },
         rows,
-        Some((page, has_next)),
     )
 }
 
@@ -408,12 +422,15 @@ pub(crate) async fn opds_v1_publishers(
         .collect::<Vec<_>>();
     let (rows, has_next) = paginate_vec(rows, page, size);
     opds_v1_navigation_feed_response(
-        &headers,
-        "allPublishers",
-        "All publishers",
-        "/opds/v1.2/publishers",
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "allPublishers",
+            title: "All publishers",
+            self_path: "/opds/v1.2/publishers",
+            feed_updated: None,
+            pagination: Some((page, has_next)),
+        },
         rows,
-        Some((page, has_next)),
     )
 }
 
@@ -489,15 +506,18 @@ pub(crate) async fn opds_v1_series(
     };
 
     opds_v1_navigation_feed_response(
-        &headers,
-        "allSeries",
-        search
-            .as_deref()
-            .map(|term| format!("Series search for: {term}"))
-            .unwrap_or_else(|| "All series".to_string())
-            .as_str(),
-        self_path.as_str(),
+        OpdsV1FeedHeader {
+            headers: &headers,
+            feed_id: "allSeries",
+            title: search
+                .as_deref()
+                .map(|term| format!("Series search for: {term}"))
+                .unwrap_or_else(|| "All series".to_string())
+                .as_str(),
+            self_path: self_path.as_str(),
+            feed_updated: None,
+            pagination: Some((page, has_next)),
+        },
         entries,
-        Some((page, has_next)),
     )
 }
