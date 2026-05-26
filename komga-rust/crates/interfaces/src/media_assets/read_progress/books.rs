@@ -4,7 +4,7 @@ use super::epub::{
 };
 use super::*;
 use crate::identity_access::auth::Authenticated;
-use crate::opds::content_opds::OpdsV2Authenticated;
+use crate::opds::OpdsV2Authenticated;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
 

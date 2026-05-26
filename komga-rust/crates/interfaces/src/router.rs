@@ -515,143 +515,143 @@ pub fn build_router(app: HttpAppState) -> Router {
             patch(identity_access::content_auth::users_by_id_password_route),
         )
         .route("/api/v2/authors", get(discovery::facets::authors_v2))
-        .route("/opds/v1.2/catalog", get(opds::content_opds::opds_v1_catalog_route))
-        .route("/opds/v1.2/search", get(opds::content_opds::opds_v1_search_route))
-        .route("/opds/v1.2/ondeck", get(opds::content_opds::opds_v1_on_deck_route))
-        .route("/opds/v1.2/keep-reading", get(opds::content_opds::opds_v1_keep_reading_route))
-        .route("/opds/v1.2/series", get(opds::content_opds::opds_v1_series_route))
-        .route("/opds/v1.2/series/latest", get(opds::content_opds::opds_v1_series_latest_route))
-        .route("/opds/v1.2/books/latest", get(opds::content_opds::opds_v1_books_latest_route))
-        .route("/opds/v1.2/libraries", get(opds::content_opds::opds_v1_libraries_route))
-        .route("/opds/v1.2/collections", get(opds::content_opds::opds_v1_collections_route))
-        .route("/opds/v1.2/readlists", get(opds::content_opds::opds_v1_readlists_route))
-        .route("/opds/v1.2/publishers", get(opds::content_opds::opds_v1_publishers_route))
-        .route("/opds/v1.2/series/{series_id}", get(opds::content_opds::opds_v1_series_detail_route))
+        .route("/opds/v1.2/catalog", get(opds::opds_v1_catalog_route))
+        .route("/opds/v1.2/search", get(opds::opds_v1_search_route))
+        .route("/opds/v1.2/ondeck", get(opds::opds_v1_on_deck_route))
+        .route("/opds/v1.2/keep-reading", get(opds::opds_v1_keep_reading_route))
+        .route("/opds/v1.2/series", get(opds::opds_v1_series_route))
+        .route("/opds/v1.2/series/latest", get(opds::opds_v1_series_latest_route))
+        .route("/opds/v1.2/books/latest", get(opds::opds_v1_books_latest_route))
+        .route("/opds/v1.2/libraries", get(opds::opds_v1_libraries_route))
+        .route("/opds/v1.2/collections", get(opds::opds_v1_collections_route))
+        .route("/opds/v1.2/readlists", get(opds::opds_v1_readlists_route))
+        .route("/opds/v1.2/publishers", get(opds::opds_v1_publishers_route))
+        .route("/opds/v1.2/series/{series_id}", get(opds::opds_v1_series_detail_route))
         .route(
             "/opds/v1.2/libraries/{library_id}",
-            get(opds::content_opds::opds_v1_library_detail_route),
+            get(opds::opds_v1_library_detail_route),
         )
         .route(
             "/opds/v1.2/collections/{collection_id}",
-            get(opds::content_opds::opds_v1_collection_detail_route),
+            get(opds::opds_v1_collection_detail_route),
         )
         .route(
             "/opds/v1.2/readlists/{readlist_id}",
-            get(opds::content_opds::opds_v1_readlist_detail_route),
+            get(opds::opds_v1_readlist_detail_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/file/{file_name}",
-            get(opds::content_opds::opds_v1_book_file_route),
+            get(opds::opds_v1_book_file_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/thumbnail",
-            get(opds::content_opds::opds_v1_book_thumbnail_route),
+            get(opds::opds_v1_book_thumbnail_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/thumbnail/small",
-            get(opds::content_opds::opds_v1_book_thumbnail_small_route),
+            get(opds::opds_v1_book_thumbnail_small_route),
         )
         .route(
             "/opds/v1.2/books/{book_id}/pages/{page_number}",
             get(media_assets::handlers::book_page_opds_v1),
         )
-        .route("/opds/v2/auth", get(opds::content_opds::opds_auth_route))
-        .route("/opds/v2/catalog", get(opds::content_opds::opds_catalog))
-        .route("/opds/v2/libraries", get(opds::content_opds::opds_v2_libraries))
+        .route("/opds/v2/auth", get(opds::opds_auth_route))
+        .route("/opds/v2/catalog", get(opds::opds_catalog))
+        .route("/opds/v2/libraries", get(opds::opds_v2_libraries))
         .route(
             "/opds/v2/libraries/keep-reading",
-            get(opds::content_opds::opds_v2_libraries_keep_reading_route),
+            get(opds::opds_v2_libraries_keep_reading_route),
         )
         .route(
             "/opds/v2/libraries/on-deck",
-            get(opds::content_opds::opds_v2_libraries_on_deck_route),
+            get(opds::opds_v2_libraries_on_deck_route),
         )
         .route(
             "/opds/v2/libraries/books/latest",
-            get(opds::content_opds::opds_v2_libraries_latest_books_route),
+            get(opds::opds_v2_libraries_latest_books_route),
         )
         .route(
             "/opds/v2/libraries/series/latest",
-            get(opds::content_opds::opds_v2_libraries_latest_series_route),
+            get(opds::opds_v2_libraries_latest_series_route),
         )
         .route(
             "/opds/v2/libraries/browse",
-            get(opds::content_opds::opds_v2_libraries_browse_route),
+            get(opds::opds_v2_libraries_browse_route),
         )
         .route(
             "/opds/v2/libraries/collections",
-            get(opds::content_opds::opds_v2_libraries_collections_route),
+            get(opds::opds_v2_libraries_collections_route),
         )
         .route(
             "/opds/v2/libraries/readlists",
-            get(opds::content_opds::opds_v2_libraries_readlists_route),
+            get(opds::opds_v2_libraries_readlists_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}",
-            get(opds::content_opds::opds_v2_library_route),
+            get(opds::opds_v2_library_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/keep-reading",
-            get(opds::content_opds::opds_v2_library_keep_reading_route),
+            get(opds::opds_v2_library_keep_reading_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/on-deck",
-            get(opds::content_opds::opds_v2_library_on_deck_route),
+            get(opds::opds_v2_library_on_deck_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/books/latest",
-            get(opds::content_opds::opds_v2_library_latest_books_route),
+            get(opds::opds_v2_library_latest_books_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/series/latest",
-            get(opds::content_opds::opds_v2_library_latest_series_route),
+            get(opds::opds_v2_library_latest_series_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/browse",
-            get(opds::content_opds::opds_v2_library_browse_route),
+            get(opds::opds_v2_library_browse_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/collections",
-            get(opds::content_opds::opds_v2_library_collections_route),
+            get(opds::opds_v2_library_collections_route),
         )
         .route(
             "/opds/v2/libraries/{library_id}/readlists",
-            get(opds::content_opds::opds_v2_library_readlists_route),
+            get(opds::opds_v2_library_readlists_route),
         )
         .route(
             "/opds/v2/collections/{collection_id}",
-            get(opds::content_opds::opds_v2_collection_route),
+            get(opds::opds_v2_collection_route),
         )
-        .route("/opds/v2/series/{series_id}", get(opds::content_opds::opds_v2_series_route))
+        .route("/opds/v2/series/{series_id}", get(opds::opds_v2_series_route))
         .route(
             "/opds/v2/readlists/{readlist_id}",
-            get(opds::content_opds::opds_v2_readlist_route),
+            get(opds::opds_v2_readlist_route),
         )
-        .route("/opds/v2/search", get(opds::content_opds::opds_v2_search_route))
+        .route("/opds/v2/search", get(opds::opds_v2_search_route))
         .route(
             "/opds/v2/books/{book_id}/manifest",
-            get(opds::content_opds::opds_manifest_route),
+            get(opds::opds_manifest_route),
         )
         .route(
             "/opds/v2/books/{book_id}/manifest/{manifest_profile}",
-            get(opds::content_opds::opds_manifest_profile_route),
+            get(opds::opds_manifest_profile_route),
         )
-        .route("/opds/v2/books/{book_id}/file", get(opds::content_opds::opds_v2_book_file_route))
+        .route("/opds/v2/books/{book_id}/file", get(opds::opds_v2_book_file_route))
         .route(
             "/opds/v2/books/{book_id}/file/{*file_name}",
-            get(opds::content_opds::opds_v2_book_file_with_suffix_route),
+            get(opds::opds_v2_book_file_with_suffix_route),
         )
         .route(
             "/opds/v2/books/{book_id}/thumbnail",
-            get(opds::content_opds::opds_v2_book_thumbnail_route),
+            get(opds::opds_v2_book_thumbnail_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}",
-            get(opds::content_opds::opds_v2_book_page_route),
+            get(opds::opds_v2_book_page_route),
         )
         .route(
             "/opds/v2/books/{book_id}/pages/{page_number}/raw",
-            get(opds::content_opds::opds_v2_book_page_raw_route),
+            get(opds::opds_v2_book_page_raw_route),
         )
         .route(
             "/opds/v2/books/{book_id}/progression",

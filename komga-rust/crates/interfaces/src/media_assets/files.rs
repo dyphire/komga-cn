@@ -1,7 +1,7 @@
 use super::*;
 use crate::identity_access::auth::FileDownload;
 use crate::media_responses::BookMediaResponses;
-use crate::opds::content_opds::opds_catalog_unauthorized_response;
+use crate::opds::opds_catalog_unauthorized_response;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
 

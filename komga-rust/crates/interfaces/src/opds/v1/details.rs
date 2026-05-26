@@ -1,7 +1,7 @@
 use super::streaming::{localized_opds_updated, series_book_page_streaming_links};
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
-use crate::opds::content_opds::types::PersistedSeries;
+use crate::opds::types::PersistedSeries;
 use crate::state::{OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry, OpdsState};
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {

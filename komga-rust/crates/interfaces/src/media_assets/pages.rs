@@ -1,7 +1,7 @@
 use super::*;
 use crate::identity_access::auth::Authenticated;
 use crate::media_responses::{BookMediaResponses, BookPageResponseOptions};
-use crate::opds::content_opds::OpdsV1Authenticated;
+use crate::opds::OpdsV1Authenticated;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
 
