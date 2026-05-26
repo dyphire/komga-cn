@@ -74,11 +74,7 @@ pub async fn book_metadata_update(
     };
 
     match app.metadata.update_book(&book_id, &patch).await {
-        Ok(MetadataUpdateResult::Updated) => {
-            let mut response = StatusCode::NO_CONTENT.into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(MetadataUpdateResult::Updated) => StatusCode::NO_CONTENT.into_response(),
         Ok(MetadataUpdateResult::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -134,11 +130,7 @@ pub async fn book_metadata_batch_update(
     }
 
     match app.metadata.update_books_batch(updates).await {
-        Ok(_) => {
-            let mut response = StatusCode::NO_CONTENT.into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => internal_error_response(error),
     }
 }

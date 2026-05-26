@@ -12,7 +12,3 @@ pub mod operational;
 pub mod request_urls;
 pub mod router;
 pub mod state;
-
-pub const CACHE_CONTROL_PRIVATE: &str = "max-age=0, must-revalidate, private";
-pub const SEARCH_OWNERSHIP_HEADER: &str = "x-komga-runtime-search-ownership";
-pub const PERSISTED_OWNERSHIP_MARKER: &str = "persisted-owned-writer";

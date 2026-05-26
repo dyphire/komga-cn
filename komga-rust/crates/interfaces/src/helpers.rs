@@ -3,7 +3,7 @@ use crate::discovery_auth::context::{
 };
 use crate::discovery_auth::principal::AgeRestrictionKind;
 use axum::Json;
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
@@ -17,7 +17,6 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::SEARCH_OWNERSHIP_HEADER;
 use crate::state::{ReadProgress, ReadProgressState};
 
 pub(crate) fn books_page_payload(
@@ -270,13 +269,6 @@ fn hex_value(byte: u8) -> Option<u8> {
         b'A'..=b'F' => Some(byte - b'A' + 10),
         _ => None,
     }
-}
-
-pub fn mark_runtime_owned(response: &mut Response) {
-    response.headers_mut().insert(
-        HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
-        HeaderValue::from_static("runtime-rust-owned"),
-    );
 }
 
 pub(crate) fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {

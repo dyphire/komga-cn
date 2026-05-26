@@ -9,9 +9,7 @@ pub use tags::book_tags;
 use super::persisted::common_helpers::{internal_error_response, requested_query_values};
 use super::persisted::library_mappings::remap_requested_library_ids_for_persisted;
 use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
-use crate::helpers::{
-    books_page_payload, detail_access_denial_response, mark_runtime_owned, to_domain_query_context,
-};
+use crate::helpers::{books_page_payload, detail_access_denial_response, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
 use axum::Json;
@@ -75,17 +73,13 @@ pub async fn books_list(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(
-                page,
-                context.is_admin,
-                resolved.response.paged,
-                resolved.response.sorted,
-            ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(page) => Json(books_page_payload(
+            page,
+            context.is_admin,
+            resolved.response.paged,
+            resolved.response.sorted,
+        ))
+        .into_response(),
         Err(DiscoveryError::InvalidSemantics(e)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
         }
@@ -148,17 +142,13 @@ pub(crate) async fn books_deprecated_get(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(
-                page,
-                context.is_admin,
-                resolved.response.paged,
-                resolved.response.sorted,
-            ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(page) => Json(books_page_payload(
+            page,
+            context.is_admin,
+            resolved.response.paged,
+            resolved.response.sorted,
+        ))
+        .into_response(),
         Err(DiscoveryError::InvalidSemantics(e)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
         }
@@ -219,17 +209,13 @@ pub async fn series_books_deprecated(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => {
-            let mut response = Json(books_page_payload(
-                page,
-                context.is_admin,
-                resolved.response.paged,
-                resolved.response.sorted,
-            ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(page) => Json(books_page_payload(
+            page,
+            context.is_admin,
+            resolved.response.paged,
+            resolved.response.sorted,
+        ))
+        .into_response(),
         Err(DiscoveryError::InvalidSemantics(e)) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
         }

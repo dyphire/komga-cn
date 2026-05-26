@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::discovery_auth::context::{
     DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext,
 };
-use crate::helpers::{detail_access_denial_response, mark_runtime_owned, to_domain_query_context};
+use crate::helpers::{detail_access_denial_response, to_domain_query_context};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::LibraryCatalogState;
 
@@ -197,11 +197,7 @@ async fn runtime_owned_library_detail_response(
         .get_library(domain_context, library_id)
         .await
     {
-        Ok(Some(library)) => {
-            let mut response = Json(library_payload(&library, context.is_admin)).into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(Some(library)) => Json(library_payload(&library, context.is_admin)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -59,9 +59,7 @@ pub async fn readlists(
         Err(error) => return internal_error_response(error),
     };
 
-    let mut response = Json(readlists_page_payload(page)).into_response();
-    mark_runtime_owned(&mut response);
-    response
+    Json(readlists_page_payload(page)).into_response()
 }
 
 pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: Bytes) -> Response {

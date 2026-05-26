@@ -9,7 +9,7 @@ use icu::collator::{
 use icu::locale::locale;
 use serde_json::{Value, json};
 
-use crate::helpers::{mark_runtime_owned, query_bool, query_value, query_values};
+use crate::helpers::{query_bool, query_value, query_values};
 use crate::identity_access::auth::{Admin, user_id};
 use crate::state::DiscoveryState;
 
@@ -373,16 +373,14 @@ pub async fn books_duplicates(
             let page_slice =
                 slice_duplicate_books_page(content, requested_page, requested_size, unpaged);
 
-            let mut response = Json(duplicate_books_page_payload(
+            Json(duplicate_books_page_payload(
                 page_slice.content,
                 page_slice.page,
                 page_slice.size,
                 page_slice.total_elements,
                 !sort_modes.is_empty(),
             ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
+            .into_response()
         }
         Err(error) => internal_error_response(error),
     }

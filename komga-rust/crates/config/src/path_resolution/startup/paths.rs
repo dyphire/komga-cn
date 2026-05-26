@@ -13,9 +13,8 @@ pub(crate) fn read_string(layered: &LayeredConfig, keys: &[&str]) -> Option<Stri
     keys.iter().find_map(|key| layered.get_string(key).ok())
 }
 
-#[allow(clippy::ptr_arg)]
-pub(crate) fn path_to_string(path: &PathBuf) -> String {
-    path.to_string_lossy().to_string()
+pub(crate) fn path_to_string(path: impl AsRef<Path>) -> String {
+    path.as_ref().to_string_lossy().to_string()
 }
 
 pub(crate) fn expand_path_placeholders(
@@ -47,12 +46,7 @@ pub(crate) fn resolve_derived_runtime_paths(
         .map(path_to_string)
         .or_else(|| env.get(LOG_FILE_ENV).cloned())
         .or_else(|| read_string(layered, &["logging.file.name"]))
-        .or_else(|| {
-            platform_profile
-                .default_log_file(env)
-                .as_ref()
-                .map(path_to_string)
-        })
+        .or_else(|| platform_profile.default_log_file(env).map(path_to_string))
         .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
         .unwrap_or_else(|| default_log_file_for_config_dir(resolved_config_dir));
 

@@ -25,8 +25,7 @@ use komga_infrastructure::filesystem::media_access::page_content::{
 };
 
 use super::helpers::{
-    invalid_progression_payload, invalid_read_progress_payload, mark_runtime_owned,
-    set_read_progress,
+    invalid_progression_payload, invalid_read_progress_payload, set_read_progress,
 };
 
 pub(crate) mod access_control;
@@ -146,9 +145,7 @@ async fn enqueue_task_records(
             .into_response();
     }
 
-    let mut response = StatusCode::ACCEPTED.into_response();
-    mark_runtime_owned(&mut response);
-    response
+    StatusCode::ACCEPTED.into_response()
 }
 
 #[cfg(test)]

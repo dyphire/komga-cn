@@ -9,9 +9,7 @@ use serde_json::{Value, json};
 
 use crate::discovery_auth::context::QueryRestrictions;
 use crate::discovery_auth::principal::AgeRestrictionKind;
-use crate::helpers::{
-    books_page_payload, mark_runtime_owned, query_bool, query_value, to_domain_query_context,
-};
+use crate::helpers::{books_page_payload, query_bool, query_value, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
 
@@ -160,15 +158,13 @@ pub async fn books_latest(
                 (page, true)
             }
             .0;
-            let mut response = Json(books_page_payload(
+            Json(books_page_payload(
                 page,
                 context.is_admin,
                 resolved.response.paged,
                 resolved.response.sorted,
             ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
+            .into_response()
         }
         Err(error) => internal_error_response(format!("{error:?}")),
     }
@@ -255,9 +251,7 @@ pub async fn books_ondeck(
                 ));
             }
 
-            let mut response = Json(ondeck_page_payload(content, &uri)).into_response();
-            mark_runtime_owned(&mut response);
-            response
+            Json(ondeck_page_payload(content, &uri)).into_response()
         }
         Err(error) => internal_error_response(error),
     }

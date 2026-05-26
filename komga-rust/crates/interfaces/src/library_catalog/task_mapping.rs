@@ -7,7 +7,6 @@ use komga_application::task_processing::{
 };
 use serde_json::json;
 
-use crate::helpers::mark_runtime_owned;
 use crate::state::LibraryCatalogState;
 
 use super::response_mapping::library_payload;
@@ -125,9 +124,7 @@ async fn enqueue_task_records_with_status(
             .into_response();
     }
 
-    let mut response = status.into_response();
-    mark_runtime_owned(&mut response);
-    response
+    status.into_response()
 }
 
 fn mutation_error_response(error: LibraryCatalogMutationError) -> Response {

@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream;
@@ -15,8 +15,6 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use crate::identity_access::auth::{resolved_auth_user, user_id, user_is_admin};
 use crate::state::OperationalApiState;
-
-use super::super::super::{PERSISTED_OWNERSHIP_MARKER, SEARCH_OWNERSHIP_HEADER};
 
 fn sse_event(name: &str, payload: serde_json::Value) -> Event {
     Event::default()
@@ -96,17 +94,12 @@ pub(crate) async fn sse_events(
         },
     );
 
-    let mut response = (
+    (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/event-stream")],
         Sse::new(stream),
     )
-        .into_response();
-    response.headers_mut().insert(
-        HeaderName::from_static(SEARCH_OWNERSHIP_HEADER),
-        HeaderValue::from_static(PERSISTED_OWNERSHIP_MARKER),
-    );
-    response
+        .into_response()
 }
 
 pub(crate) fn register_session_expired_event(user_id: &str) {

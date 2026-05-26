@@ -40,7 +40,5 @@ pub async fn books_import(
         );
     }
 
-    let mut response = StatusCode::ACCEPTED.into_response();
-    mark_runtime_owned(&mut response);
-    response
+    StatusCode::ACCEPTED.into_response()
 }

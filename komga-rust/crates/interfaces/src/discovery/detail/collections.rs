@@ -3,7 +3,7 @@ use super::*;
 use crate::discovery::persisted::common_helpers::decode_query_component;
 use crate::discovery::series::series_read_model_page_payload;
 use crate::discovery::series_routes::author_query_to_author_match;
-use crate::helpers::{mark_runtime_owned, to_domain_query_context, validation_error_response};
+use crate::helpers::{to_domain_query_context, validation_error_response};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
 use axum::body::{Body, to_bytes};
@@ -178,9 +178,7 @@ pub async fn collection_series(
         Err(e) => return internal_error_response(format!("{e:?}")),
     };
 
-    let mut response =
-        Json(series_read_model_page_payload(result, !unpaged, false)).into_response();
-    mark_runtime_owned(&mut response);
+    let response = Json(series_read_model_page_payload(result, !unpaged, false)).into_response();
 
     if !collection.ordered {
         return response;
@@ -485,9 +483,7 @@ pub async fn collections(
 
     if unpaged {
         let payload = collections_unpaged_payload(content);
-        let mut response = Json(payload).into_response();
-        mark_runtime_owned(&mut response);
-        return response;
+        return Json(payload).into_response();
     }
 
     let page_size = if size == 0 { 20 } else { size };
@@ -504,9 +500,7 @@ pub async fn collections(
     };
     let page = PageEnvelope::from_slice(page_content, page, page_size, total_elements);
 
-    let mut response = Json(collections_page_payload(page)).into_response();
-    mark_runtime_owned(&mut response);
-    response
+    Json(collections_page_payload(page)).into_response()
 }
 
 pub async fn collection_create(

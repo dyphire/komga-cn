@@ -3,7 +3,7 @@ mod payload;
 pub(in crate::discovery) use payload::series_read_model_page_payload;
 
 use super::persisted::common_helpers::{internal_error_response, requested_query_values};
-use crate::helpers::{mark_runtime_owned, to_domain_query_context};
+use crate::helpers::to_domain_query_context;
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
 use axum::Json;
@@ -130,16 +130,12 @@ pub async fn series_deprecated_get(
         .list_series(&context, resolved.request)
         .await
     {
-        Ok(page) => {
-            let mut response = Json(series_read_model_page_payload(
-                page,
-                resolved.response.paged,
-                resolved.response.sorted,
-            ))
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(page) => Json(series_read_model_page_payload(
+            page,
+            resolved.response.paged,
+            resolved.response.sorted,
+        ))
+        .into_response(),
         Err(e) => internal_error_response(format!("{e:?}")),
     }
 }

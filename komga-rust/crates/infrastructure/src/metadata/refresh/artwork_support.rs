@@ -9,6 +9,8 @@ use tokio::fs;
 use crate::load_pdfium;
 use crate::resolve_rooted_path;
 
+type RenderedThumbnail = (Vec<u8>, String, i64, i64);
+
 pub(super) async fn book_thumbnail_housekeeping(
     tx: &mut Transaction<'_, Sqlite>,
     book_id: &str,
@@ -88,7 +90,7 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
     book_id: &str,
     thumbnail_bytes: &[u8],
     configured_max_edge: u32,
-) -> Result<(Vec<u8>, String, i64, i64), String> {
+) -> Result<RenderedThumbnail, String> {
     let image = image::load_from_memory(thumbnail_bytes).map_err(|error| {
         format!("failed to decode generated thumbnail source for '{book_id}': {error}")
     })?;
@@ -106,11 +108,10 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
     Ok((output.into_inner(), "image/jpeg".to_string(), width, height))
 }
 
-#[allow(clippy::type_complexity)]
 pub(super) fn render_pdf_thumbnail(
     media: &BookMediaRecord,
     configured_max_edge: u32,
-) -> Result<Option<(Vec<u8>, String, i64, i64)>, String> {
+) -> Result<Option<RenderedThumbnail>, String> {
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(&media.file_path, None)

@@ -81,7 +81,7 @@ pub async fn book_thumbnails(
                 return StatusCode::NOT_FOUND.into_response();
             }
 
-            let mut response = Json(
+            Json(
                 rows.into_iter()
                     .map(|row| {
                         json!({
@@ -97,9 +97,7 @@ pub async fn book_thumbnails(
                     })
                     .collect::<Vec<_>>(),
             )
-            .into_response();
-            mark_runtime_owned(&mut response);
-            response
+            .into_response()
         }
         Err(error) => internal_error_response(error),
     }
@@ -157,11 +155,7 @@ pub async fn book_thumbnail_select(
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     match app.thumbnails.select_book(&thumbnail_id).await {
-        Ok(true) => {
-            let mut response = StatusCode::ACCEPTED.into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -173,11 +167,7 @@ pub async fn book_thumbnail_delete(
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     match app.thumbnails.delete_book(&thumbnail_id).await {
-        Ok(true) => {
-            let mut response = StatusCode::ACCEPTED.into_response();
-            mark_runtime_owned(&mut response);
-            response
-        }
+        Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) if error == "only uploaded thumbnails can be deleted" => {
             StatusCode::BAD_REQUEST.into_response()

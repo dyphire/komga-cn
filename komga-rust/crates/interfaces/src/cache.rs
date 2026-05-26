@@ -11,8 +11,6 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc2822;
 
-use crate::CACHE_CONTROL_PRIVATE;
-
 pub(crate) async fn cache_workflow_middleware(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let matched_path = request
@@ -195,7 +193,7 @@ fn set_private_cache_control_if_missing(headers: &mut HeaderMap) {
     if !headers.contains_key(header::CACHE_CONTROL) {
         headers.insert(
             header::CACHE_CONTROL,
-            HeaderValue::from_static(CACHE_CONTROL_PRIVATE),
+            HeaderValue::from_static("max-age=0, must-revalidate, private"),
         );
     }
 }
