@@ -41,6 +41,19 @@ pub(super) async fn read_sse_until(
     }
 }
 
+pub(super) async fn read_sse_until_after_clock_advance(
+    body: axum::body::Body,
+    predicate: impl Fn(&str) -> bool + Send + 'static,
+    timeout: Duration,
+    advance: Duration,
+) -> String {
+    tokio::time::pause();
+    let reader = tokio::spawn(read_sse_until(body, predicate, timeout));
+    tokio::task::yield_now().await;
+    tokio::time::advance(advance).await;
+    reader.await.expect("sse reader should complete")
+}
+
 #[derive(Debug)]
 pub(super) struct ParsedEventLog {
     pub events: Vec<ParsedEvent>,
@@ -240,10 +253,11 @@ async fn router_sse_events_admin_stream_emits_task_queue_status_and_heartbeat() 
         Some("text/event-stream")
     );
 
-    let body = read_sse_until(
+    let body = read_sse_until_after_clock_advance(
         response.into_body(),
         |raw| raw.contains("event: TaskQueueStatus") && raw.contains("heartbeat"),
         Duration::from_secs(17),
+        Duration::from_secs(11),
     )
     .await;
     let parsed = parse_event_log(&body).expect("admin sse body should parse");
@@ -650,10 +664,11 @@ async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_pas
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
     });
 
-    let body = read_sse_until(
+    let body = read_sse_until_after_clock_advance(
         response.into_body(),
         |raw| raw.lines().filter(|line| *line == ": heartbeat").count() >= 2,
         Duration::from_secs(17),
+        Duration::from_secs(16),
     )
     .await;
     let parsed = parse_event_log(&body).expect("self-password sse body should parse");

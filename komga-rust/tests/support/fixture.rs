@@ -23,12 +23,9 @@ impl TestDbFixture {
     pub async fn new(case_id: &str) -> Self {
         let paths = persistence_contract_fixture::new_runtime_db_paths(case_id)
             .expect("fixture paths should be created");
-        persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+        persistence_contract_fixture::seed_runtime_dbs_from_flyway_template(&paths)
             .await
-            .expect("main db flyway migration should succeed");
-        persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
-            .await
-            .expect("tasks db flyway migration should succeed");
+            .expect("runtime db template seed should succeed");
         TestDbFixture { paths: Some(paths) }
     }
 
@@ -139,12 +136,9 @@ impl TestFixtureBuilder {
     pub async fn build(self) -> TestFixture {
         let paths = persistence_contract_fixture::new_runtime_db_paths(&self.case_id)
             .expect("fixture paths should be created");
-        persistence_contract_fixture::seed_main_db_from_flyway(&paths.main_db)
+        persistence_contract_fixture::seed_runtime_dbs_from_flyway_template(&paths)
             .await
-            .expect("main db flyway migration should succeed");
-        persistence_contract_fixture::seed_tasks_db_from_flyway(&paths.tasks_db)
-            .await
-            .expect("tasks db flyway migration should succeed");
+            .expect("runtime db template seed should succeed");
 
         let mut config = match self.config_mode {
             ConfigMode::SnapshotAligned => build_snapshot_config(&paths),

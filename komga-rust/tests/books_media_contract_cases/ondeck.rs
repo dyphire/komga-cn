@@ -1,5 +1,4 @@
 use super::*;
-use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 
 async fn insert_ondeck_read_progress(
     paths: &RuntimeDbPaths,
@@ -185,8 +184,7 @@ async fn seed_ondeck_user(paths: &RuntimeDbPaths, user: OndeckTestUser<'_>) {
         .await
         .expect("ondeck test user db should open");
 
-    let hashed_password =
-        hash_bcrypt_password(password, DEFAULT_COST).expect("bcrypt hash should be computed");
+    let hashed_password = hash_router_contract_password(password);
 
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \

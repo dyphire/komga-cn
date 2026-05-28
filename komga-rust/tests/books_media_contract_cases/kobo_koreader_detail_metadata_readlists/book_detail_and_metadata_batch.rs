@@ -295,6 +295,12 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
     let pool_before = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open before metadata batch update");
+    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+        .bind("2000-01-01 00:00:00")
+        .bind("book-1")
+        .execute(&pool_before)
+        .await
+        .expect("book last modified fixture should be pinned before metadata batch update");
     let last_modified_before = sqlx::query(
         "SELECT COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED FROM BOOK WHERE ID = ? LIMIT 1",
     )

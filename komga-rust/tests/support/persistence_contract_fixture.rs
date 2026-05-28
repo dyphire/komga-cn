@@ -1,13 +1,19 @@
 use std::collections::BTreeMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use komga_infrastructure::context::SqlitePersistenceContext;
 use komga_infrastructure::sqlite::{
     connect_shared_pool, connect_test_pool, evict_shared_pools_for_paths,
 };
+use tokio::sync::OnceCell;
+
+const TEMPLATE_LOCK_STALE_AFTER: Duration = Duration::from_secs(300);
+const TEMPLATE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone)]
 pub struct RuntimeDbPaths {
@@ -15,6 +21,15 @@ pub struct RuntimeDbPaths {
     pub main_db: PathBuf,
     pub tasks_db: PathBuf,
 }
+
+#[derive(Clone)]
+struct RuntimeDbTemplate {
+    config_dir: PathBuf,
+    main_db: PathBuf,
+    tasks_db: PathBuf,
+}
+
+static SEEDED_RUNTIME_DB_TEMPLATE: OnceCell<RuntimeDbTemplate> = OnceCell::const_new();
 
 pub fn new_runtime_db_paths(case_id: &str) -> std::io::Result<RuntimeDbPaths> {
     let nanos = SystemTime::now()
@@ -31,10 +46,193 @@ pub fn new_runtime_db_paths(case_id: &str) -> std::io::Result<RuntimeDbPaths> {
     })
 }
 
+pub async fn seed_runtime_dbs_from_flyway_template(paths: &RuntimeDbPaths) -> anyhow::Result<()> {
+    let template = SEEDED_RUNTIME_DB_TEMPLATE
+        .get_or_try_init(create_seeded_runtime_db_template)
+        .await?;
+
+    copy_sqlite_database(&template.main_db, &paths.main_db)?;
+    copy_sqlite_database(&template.tasks_db, &paths.tasks_db)?;
+    Ok(())
+}
+
+async fn create_seeded_runtime_db_template() -> anyhow::Result<RuntimeDbTemplate> {
+    let fingerprint = runtime_db_template_fingerprint()?;
+    let paths = cached_runtime_db_template_paths(&fingerprint);
+    let lock_dir = cached_runtime_db_template_lock_dir(&fingerprint);
+
+    if runtime_db_template_ready(&paths) {
+        return Ok(paths);
+    }
+
+    loop {
+        match fs::create_dir(&lock_dir) {
+            Ok(()) => {
+                return create_seeded_runtime_db_template_under_lock(paths, lock_dir).await;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if wait_for_cached_runtime_db_template(&paths, &lock_dir).await? {
+                    return Ok(paths);
+                }
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to create fixture template lock {}",
+                        lock_dir.display()
+                    )
+                });
+            }
+        }
+    }
+}
+
+async fn create_seeded_runtime_db_template_under_lock(
+    paths: RuntimeDbTemplate,
+    lock_dir: PathBuf,
+) -> anyhow::Result<RuntimeDbTemplate> {
+    if runtime_db_template_ready(&paths) {
+        remove_runtime_db_template_lock(&lock_dir);
+        return Ok(paths);
+    }
+
+    let staging_paths = new_runtime_db_paths("flyway-template-build")?;
+    let result = async {
+        seed_main_db_from_flyway(&staging_paths.main_db).await?;
+        seed_tasks_db_from_flyway(&staging_paths.tasks_db).await?;
+        fs::write(staging_paths.config_dir.join(".ready"), b"ready")?;
+
+        if paths.config_dir.exists() {
+            fs::remove_dir_all(&paths.config_dir).with_context(|| {
+                format!(
+                    "failed to remove stale fixture template {}",
+                    paths.config_dir.display()
+                )
+            })?;
+        }
+
+        fs::rename(&staging_paths.config_dir, &paths.config_dir).with_context(|| {
+            format!(
+                "failed to publish fixture template {}",
+                paths.config_dir.display()
+            )
+        })?;
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging_paths.config_dir);
+    }
+    remove_runtime_db_template_lock(&lock_dir);
+    result?;
+    Ok(paths)
+}
+
+async fn wait_for_cached_runtime_db_template(
+    paths: &RuntimeDbTemplate,
+    lock_dir: &Path,
+) -> anyhow::Result<bool> {
+    loop {
+        if runtime_db_template_ready(paths) {
+            return Ok(true);
+        }
+
+        if runtime_db_template_lock_is_stale(lock_dir)? {
+            let _ = fs::remove_dir_all(lock_dir);
+            return Ok(false);
+        }
+
+        tokio::time::sleep(TEMPLATE_LOCK_POLL_INTERVAL).await;
+    }
+}
+
+fn runtime_db_template_lock_is_stale(lock_dir: &Path) -> anyhow::Result<bool> {
+    let modified = match fs::metadata(lock_dir).and_then(|metadata| metadata.modified()) {
+        Ok(modified) => modified,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect fixture template lock {}",
+                    lock_dir.display()
+                )
+            });
+        }
+    };
+    Ok(modified
+        .elapsed()
+        .unwrap_or_default()
+        .gt(&TEMPLATE_LOCK_STALE_AFTER))
+}
+
+fn remove_runtime_db_template_lock(lock_dir: &Path) {
+    let _ = fs::remove_dir_all(lock_dir);
+}
+
+fn runtime_db_template_ready(paths: &RuntimeDbTemplate) -> bool {
+    paths.config_dir.join(".ready").exists() && paths.main_db.exists() && paths.tasks_db.exists()
+}
+
+fn cached_runtime_db_template_paths(fingerprint: &str) -> RuntimeDbTemplate {
+    let config_dir =
+        std::env::temp_dir().join(format!("komga-persistence-contract-template-{fingerprint}"));
+    RuntimeDbTemplate {
+        config_dir: config_dir.clone(),
+        main_db: config_dir.join("database.sqlite"),
+        tasks_db: config_dir.join("tasks.sqlite"),
+    }
+}
+
+fn cached_runtime_db_template_lock_dir(fingerprint: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "komga-persistence-contract-template-{fingerprint}.lock"
+    ))
+}
+
+fn runtime_db_template_fingerprint() -> anyhow::Result<String> {
+    let mut hasher = DefaultHasher::new();
+    for dir in [main_migration_dir(), tasks_migration_dir()] {
+        for file in sorted_migration_files(&dir)? {
+            file.file_name().hash(&mut hasher);
+            fs::read(&file)
+                .with_context(|| format!("failed to read migration {}", file.display()))?
+                .hash(&mut hasher);
+        }
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+fn copy_sqlite_database(from: &Path, to: &Path) -> anyhow::Result<()> {
+    for path in sqlite_sidecar_paths(to) {
+        if path.exists() {
+            std::fs::remove_file(&path).with_context(|| {
+                format!("failed to remove stale sqlite file {}", path.display())
+            })?;
+        }
+    }
+
+    for (source, destination) in sqlite_sidecar_paths(from)
+        .into_iter()
+        .zip(sqlite_sidecar_paths(to))
+    {
+        if source.exists() {
+            std::fs::copy(&source, &destination).with_context(|| {
+                format!(
+                    "failed to copy sqlite fixture template {} to {}",
+                    source.display(),
+                    destination.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn seed_main_db_from_flyway(path: &Path) -> anyhow::Result<()> {
-    let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/infrastructure/sqlx-migrations/main");
-    execute_sql_files(path, &migration_dir, None).await
+    execute_sql_files(path, &main_migration_dir(), None).await
 }
 
 #[allow(dead_code)]
@@ -42,15 +240,20 @@ pub async fn seed_main_db_from_flyway_through(
     path: &Path,
     through_version: i64,
 ) -> anyhow::Result<()> {
-    let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/infrastructure/sqlx-migrations/main");
-    execute_sql_files(path, &migration_dir, Some(through_version)).await
+    execute_sql_files(path, &main_migration_dir(), Some(through_version)).await
 }
 
 pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
-    let migration_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../komga/src/flyway/resources/tasks/migration/sqlite");
-    execute_sql_files(path, &migration_dir, None).await
+    execute_sql_files(path, &tasks_migration_dir(), None).await
+}
+
+fn main_migration_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/infrastructure/sqlx-migrations/main")
+}
+
+fn tasks_migration_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../komga/src/flyway/resources/tasks/migration/sqlite")
 }
 
 pub fn cleanup(paths: RuntimeDbPaths) {

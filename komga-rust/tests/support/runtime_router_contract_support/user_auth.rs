@@ -1,11 +1,19 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
+use bcrypt::hash as hash_bcrypt_password;
 use komga_infrastructure::sqlite::connect_test_pool;
 use tower::util::ServiceExt;
 
 use super::RuntimeDbPaths;
+
+const TEST_BCRYPT_COST: u32 = 4;
+
+/// Router contracts exercise authentication semantics, not bcrypt cost calibration.
+/// `auth_bcrypt_contract` covers production-cost hashing separately.
+pub fn hash_router_contract_password(password: &str) -> String {
+    hash_bcrypt_password(password, TEST_BCRYPT_COST).expect("bcrypt hash should be computed")
+}
 
 pub fn basic_authorization_header_value(email: &str, password: &str) -> String {
     format!("Basic {}", STANDARD.encode(format!("{email}:{password}")))
@@ -41,8 +49,7 @@ pub async fn seed_router_age_exclude_user_with_roles(
         .await
         .expect("router contract restricted-user db should open");
 
-    let hashed_password =
-        hash_bcrypt_password(password, DEFAULT_COST).expect("bcrypt hash should be computed");
+    let hashed_password = hash_router_contract_password(password);
 
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY) \
@@ -81,8 +88,7 @@ pub async fn seed_router_library_restricted_user(
         .await
         .expect("router contract library-restricted-user db should open");
 
-    let hashed_password = hash_bcrypt_password(password, DEFAULT_COST)
-        .expect("restricted user password hash should be computed");
+    let hashed_password = hash_router_contract_password(password);
 
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) \

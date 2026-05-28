@@ -1,7 +1,6 @@
-use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use komga_infrastructure::sqlite::connect_test_pool;
 
-use super::RuntimeDbPaths;
+use super::{RuntimeDbPaths, user_auth::hash_router_contract_password};
 
 async fn add_read_progress_column_if_missing(pool: &sqlx::SqlitePool, column: &str, sql: &str) {
     match sqlx::query(sqlx::AssertSqlSafe(sql)).execute(pool).await {
@@ -261,8 +260,7 @@ pub async fn seed_router_contract_data(paths: &RuntimeDbPaths) {
     .await
     .expect("readlist book row should be inserted");
 
-    let hashed_password = hash_bcrypt_password("router-contract-admin-123", DEFAULT_COST)
-        .expect("bcrypt hash should be computed");
+    let hashed_password = hash_router_contract_password("router-contract-admin-123");
     sqlx::query(
         "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) \
                  VALUES (?, ?, ?, ?)",
