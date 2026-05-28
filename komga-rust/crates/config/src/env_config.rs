@@ -23,9 +23,13 @@ pub struct OAuth2ClientConfig {
     pub client_name: String,
     pub client_id: String,
     pub client_secret: String,
-    pub authorization_uri: String,
-    pub token_uri: String,
+    pub authorization_uri: Option<String>,
+    pub token_uri: Option<String>,
     pub user_info_uri: Option<String>,
+    pub issuer_uri: Option<String>,
+    pub jwk_set_uri: Option<String>,
+    pub redirect_uri: Option<String>,
+    pub client_authentication_method: Option<String>,
     pub scopes: Vec<String>,
 }
 

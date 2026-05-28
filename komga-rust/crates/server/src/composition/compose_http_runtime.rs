@@ -301,6 +301,10 @@ fn oauth2_clients(config: &RuntimeConfig) -> Vec<OAuth2ClientConfig> {
             authorization_uri: client.authorization_uri.clone(),
             token_uri: client.token_uri.clone(),
             user_info_uri: client.user_info_uri.clone(),
+            issuer_uri: client.issuer_uri.clone(),
+            jwk_set_uri: client.jwk_set_uri.clone(),
+            redirect_uri: client.redirect_uri.clone(),
+            client_authentication_method: client.client_authentication_method.clone(),
             scopes: client.scopes.clone(),
         })
         .collect()

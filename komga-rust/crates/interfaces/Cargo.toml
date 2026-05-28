@@ -19,6 +19,7 @@ language-tags.workspace = true
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
 komga-kepubify = { path = "../kepubify" }
+komga-oauth = { path = "../oauth" }
 lopdf.workspace = true
 mime_guess.workspace = true
 oauth2.workspace = true

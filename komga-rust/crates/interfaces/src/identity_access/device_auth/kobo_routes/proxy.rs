@@ -1,4 +1,5 @@
 use super::*;
+use reqwest::Client;
 
 pub(super) async fn proxied_missing_kobo_book_response(
     app: &IdentityAccessState,

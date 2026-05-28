@@ -2,10 +2,7 @@ use super::*;
 use crate::state::IdentityAccessState;
 use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
+use komga_oauth::{AuthorizationSession, OAuthClientConfig};
 
 pub async fn oauth2_authorization(
     State(app): State<IdentityAccessState>,
@@ -17,51 +14,39 @@ pub async fn oauth2_authorization(
         .oauth2_clients
         .iter()
         .find(|client| client.registration_id == registration_id)
+        .map(oauth_client_config)
     else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 
-    let Ok(auth_url) = AuthUrl::new(client.authorization_uri.clone()) else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
     let base_url = request_base_url(&headers);
     let context_base_url = format!("{base_url}{}", request_context_path(&headers));
-    let Ok(redirect_url) = RedirectUrl::new(format!(
-        "{context_base_url}/login/oauth2/code/{}",
-        client.registration_id
-    )) else {
+    let Ok(start) = komga_oauth::prepare_authorization(&client, context_base_url.as_str()).await
+    else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-
-    let oauth_client = BasicClient::new(ClientId::new(client.client_id.clone()))
-        .set_client_secret(ClientSecret::new(client.client_secret.clone()))
-        .set_auth_uri(auth_url)
-        .set_redirect_uri(redirect_url);
-
-    let authorization_request = client.scopes.iter().cloned().fold(
-        oauth_client.authorize_url(CsrfToken::new_random),
-        |request, scope| request.add_scope(Scope::new(scope)),
-    );
-    let (url, csrf_state) = authorization_request.url();
 
     let existing_session_token = oauth2_session_cookie_token(&headers);
     let session_token = existing_session_token
         .clone()
-        .unwrap_or_else(issue_oauth2_session_token);
+        .unwrap_or_else(komga_oauth::issue_pre_auth_session_token);
+    let Ok(stored_state) = serde_json::to_string(&start.session) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
     app.identity
         .session_lifecycle()
         .store_oauth2_authorization_state(
-            &state.remember_me_runtime_key,
+            &app.auth_db.session_runtime_key,
             &session_token,
             &client.registration_id,
-            csrf_state.secret(),
+            stored_state.as_str(),
         );
 
     let mut response = (
         StatusCode::FOUND,
         [(
             header::LOCATION,
-            HeaderValue::from_str(url.as_str()).unwrap_or_else(|_| {
+            HeaderValue::from_str(start.authorization_url.as_str()).unwrap_or_else(|_| {
                 HeaderValue::from_static("/login?server_redirect=Y&error=oauth2_invalid_redirect")
             }),
         )],
@@ -88,12 +73,12 @@ pub async fn oauth2_login_code(
     headers: HeaderMap,
     Query(query): Query<OAuth2CallbackQuery>,
 ) -> Response {
-    let auth_db = &app.auth_db;
-    let state = &app.operational;
-    let Some(client_config) = state
+    let Some(client_config) = app
+        .operational
         .oauth2_clients
         .iter()
         .find(|client| client.registration_id == registration_id)
+        .map(oauth_client_config)
     else {
         return oauth2_login_error_redirect("oauth2_provider_not_found");
     };
@@ -122,7 +107,6 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-
     let Some(received_state) = query.state.as_deref() else {
         return oauth2_login_error_response(
             &app,
@@ -145,11 +129,11 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-    let Some(expected_state) = app
+    let Some(stored_state) = app
         .identity
         .session_lifecycle()
         .take_oauth2_authorization_state(
-            &auth_db.session_runtime_key,
+            &app.auth_db.session_runtime_key,
             &session_token,
             &registration_id,
         )
@@ -164,117 +148,75 @@ pub async fn oauth2_login_code(
         )
         .await;
     };
-    if received_state != expected_state {
+    let Ok(session) = serde_json::from_str::<AuthorizationSession>(&stored_state) else {
         return oauth2_login_error_response(
             &app,
             &headers,
             &connection_info,
             client_name,
-            "oauth2_state_mismatch",
+            "oauth2_state_missing",
             None,
         )
         .await;
-    }
+    };
 
-    let base_url = request_base_url(&headers);
-    let context_base_url = format!("{base_url}{}", request_context_path(&headers));
-    let redirect_uri = format!("{context_base_url}/login/oauth2/code/{registration_id}");
-
-    let token_payload = match exchange_oauth2_token(client_config, code, &redirect_uri).await {
-        Ok(payload) => payload,
+    let identity = match komga_oauth::complete_callback(
+        &client_config,
+        &session,
+        code,
+        received_state,
+    )
+    .await
+    {
+        Ok(identity) => identity,
         Err(error) => {
             return oauth2_login_error_response(
                 &app,
                 &headers,
                 &connection_info,
                 client_name,
-                error.as_str(),
+                error.redirect_error_code(),
                 None,
             )
             .await;
         }
     };
 
-    let access_token = token_payload
-        .get("access_token")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty());
-
-    let Some(access_token) = access_token else {
-        return oauth2_login_error_response(
-            &app,
-            &headers,
-            &connection_info,
-            client_name,
-            "oauth2_missing_access_token",
-            None,
-        )
-        .await;
-    };
-
-    let email = if oauth2_client_uses_oidc(client_config) {
-        let claims = resolve_oidc_claims(client_config, &token_payload, access_token).await;
-        let Some(email) = claims.email else {
-            return oauth2_login_error_response(
-                &app,
-                &headers,
-                &connection_info,
-                client_name,
-                "ERR_1028",
-                None,
-            )
-            .await;
-        };
-        if state.oidc_email_verification {
-            match claims.email_verified {
-                Some(true) => email,
-                Some(false) => {
-                    return oauth2_login_error_response(
-                        &app,
-                        &headers,
-                        &connection_info,
-                        client_name,
-                        "ERR_1026",
-                        Some(email.as_str()),
-                    )
-                    .await;
-                }
-                None => {
-                    return oauth2_login_error_response(
-                        &app,
-                        &headers,
-                        &connection_info,
-                        client_name,
-                        "ERR_1027",
-                        Some(email.as_str()),
-                    )
-                    .await;
-                }
+    if oauth2_client_uses_oidc(&client_config) && app.operational.oidc_email_verification {
+        match identity.email_verified {
+            Some(true) => {}
+            Some(false) => {
+                return oauth2_login_error_response(
+                    &app,
+                    &headers,
+                    &connection_info,
+                    client_name,
+                    "ERR_1026",
+                    Some(identity.email.as_str()),
+                )
+                .await;
             }
-        } else {
-            email
+            None => {
+                return oauth2_login_error_response(
+                    &app,
+                    &headers,
+                    &connection_info,
+                    client_name,
+                    "ERR_1027",
+                    Some(identity.email.as_str()),
+                )
+                .await;
+            }
         }
-    } else {
-        let email = resolve_oauth2_email(client_config, access_token).await;
-        let Some(email) = email else {
-            return oauth2_login_error_response(
-                &app,
-                &headers,
-                &connection_info,
-                client_name,
-                "ERR_1024",
-                None,
-            )
-            .await;
-        };
-        email
-    };
+    }
 
-    let allow_create = oauth2_account_creation_enabled(&app).await;
     let user = match app
         .identity
         .user_admin()
-        .ensure_oauth_user(&email, allow_create)
+        .ensure_oauth_user(
+            identity.email.as_str(),
+            app.operational.oauth2_account_creation,
+        )
         .await
     {
         Ok(Some(user)) => user,
@@ -285,7 +227,7 @@ pub async fn oauth2_login_code(
                 &connection_info,
                 client_name,
                 "ERR_1025",
-                Some(email.as_str()),
+                Some(identity.email.as_str()),
             )
             .await;
         }
@@ -311,9 +253,26 @@ pub async fn oauth2_login_code(
     let session_token = session_token_for_user_with_runtime_key(
         &app.identity,
         &user,
-        auth_db.session_runtime_key.as_str(),
+        app.auth_db.session_runtime_key.as_str(),
     );
     oauth2_login_success_redirect(session_token.as_str())
+}
+
+fn oauth_client_config(client: &crate::state::OAuth2ClientConfig) -> OAuthClientConfig {
+    OAuthClientConfig {
+        registration_id: client.registration_id.clone(),
+        client_name: client.client_name.clone(),
+        client_id: client.client_id.clone(),
+        client_secret: client.client_secret.clone(),
+        authorization_uri: client.authorization_uri.clone(),
+        token_uri: client.token_uri.clone(),
+        user_info_uri: client.user_info_uri.clone(),
+        issuer_uri: client.issuer_uri.clone(),
+        jwk_set_uri: client.jwk_set_uri.clone(),
+        redirect_uri: client.redirect_uri.clone(),
+        client_authentication_method: client.client_authentication_method.clone(),
+        scopes: client.scopes.clone(),
+    }
 }
 
 fn oauth2_login_error_redirect(error: &str) -> Response {
@@ -351,17 +310,11 @@ fn oauth2_login_success_redirect(session_token: &str) -> Response {
         .into_response()
 }
 
-fn oauth2_client_uses_oidc(client: &crate::state::OAuth2ClientConfig) -> bool {
+fn oauth2_client_uses_oidc(client: &OAuthClientConfig) -> bool {
     client
         .scopes
         .iter()
         .any(|scope| scope.eq_ignore_ascii_case("openid"))
-}
-
-#[derive(Default)]
-struct OidcIdentityClaims {
-    email: Option<String>,
-    email_verified: Option<bool>,
 }
 
 fn oauth2_session_cookie(session_token: &str) -> String {
@@ -378,252 +331,6 @@ fn oauth2_session_cookie_token(headers: &HeaderMap) -> Option<String> {
     jar.get("KOMGA-SESSION")
         .map(|cookie| cookie.value().to_string())
         .filter(|value| !value.trim().is_empty())
-}
-
-fn issue_oauth2_session_token() -> String {
-    format!("komga-session-oauth-{}", random_hex_token(24))
-}
-
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-async fn exchange_oauth2_token(
-    client: &crate::state::OAuth2ClientConfig,
-    code: &str,
-    redirect_uri: &str,
-) -> Result<Value, String> {
-    let http = Client::new();
-    let form = reqwest::Url::parse_with_params(
-        client.token_uri.as_str(),
-        [
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("client_id", client.client_id.as_str()),
-            ("client_secret", client.client_secret.as_str()),
-        ],
-    )
-    .ok()
-    .and_then(|url| url.query().map(str::to_string))
-    .ok_or_else(|| "oauth2_token_exchange_failed".to_string())?;
-
-    let response = http
-        .post(client.token_uri.as_str())
-        .header(header::ACCEPT.as_str(), "application/json")
-        .header(
-            header::CONTENT_TYPE.as_str(),
-            "application/x-www-form-urlencoded",
-        )
-        .body(form)
-        .send()
-        .await
-        .map_err(|_| "oauth2_token_exchange_failed".to_string())?;
-
-    let status = response.status();
-    let payload = response
-        .json::<Value>()
-        .await
-        .map_err(|_| "oauth2_token_invalid_response".to_string())?;
-
-    if !status.is_success() {
-        let error_code = payload
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("oauth2_token_exchange_failed");
-        return Err(error_code.to_string());
-    }
-
-    Ok(payload)
-}
-
-async fn resolve_oauth2_email(
-    client: &crate::state::OAuth2ClientConfig,
-    access_token: &str,
-) -> Option<String> {
-    let http = Client::new();
-    let candidates = oauth2_userinfo_candidates(client);
-    for endpoint in candidates {
-        let request = http
-            .get(endpoint.endpoint.as_str())
-            .bearer_auth(access_token)
-            .header("User-Agent", "komga-rust/runtime")
-            .header(header::ACCEPT.as_str(), "application/json");
-
-        let Ok(response) = request.send().await else {
-            continue;
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-
-        let Ok(payload) = response.json::<Value>().await else {
-            continue;
-        };
-
-        let email = match endpoint.kind {
-            OAuth2UserinfoKind::Standard => extract_standard_email_from_userinfo_payload(&payload),
-            OAuth2UserinfoKind::GithubEmails => extract_github_email_from_payload(&payload),
-        };
-        if let Some(email) = email {
-            return Some(email);
-        }
-    }
-
-    None
-}
-
-async fn resolve_oidc_claims(
-    client: &crate::state::OAuth2ClientConfig,
-    token_payload: &Value,
-    access_token: &str,
-) -> OidcIdentityClaims {
-    let mut claims = extract_oidc_claims_from_id_token(token_payload).unwrap_or_default();
-    if client.user_info_uri.is_none() {
-        return claims;
-    }
-
-    let http = Client::new();
-    for endpoint in oauth2_userinfo_candidates(client) {
-        let request = http
-            .get(endpoint.endpoint.as_str())
-            .bearer_auth(access_token)
-            .header("User-Agent", "komga-rust/runtime")
-            .header(header::ACCEPT.as_str(), "application/json");
-
-        let Ok(response) = request.send().await else {
-            continue;
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-
-        let Ok(payload) = response.json::<Value>().await else {
-            continue;
-        };
-        let userinfo_claims = extract_oidc_claims(&payload);
-        if userinfo_claims.email.is_some() {
-            claims.email = userinfo_claims.email;
-        }
-        if userinfo_claims.email_verified.is_some() {
-            claims.email_verified = userinfo_claims.email_verified;
-        }
-    }
-
-    claims
-}
-
-fn extract_oidc_claims_from_id_token(token_payload: &Value) -> Option<OidcIdentityClaims> {
-    let id_token = token_payload.get("id_token")?.as_str()?.trim();
-    if id_token.is_empty() {
-        return None;
-    }
-    let payload_segment = id_token.split('.').nth(1)?;
-    let decoded = URL_SAFE_NO_PAD.decode(payload_segment).ok()?;
-    let payload = serde_json::from_slice::<Value>(&decoded).ok()?;
-    Some(extract_oidc_claims(&payload))
-}
-
-fn extract_oidc_claims(payload: &Value) -> OidcIdentityClaims {
-    OidcIdentityClaims {
-        email: payload
-            .get("email")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
-        email_verified: payload.get("email_verified").and_then(Value::as_bool),
-    }
-}
-
-fn extract_standard_email_from_userinfo_payload(payload: &Value) -> Option<String> {
-    if let Some(email) = payload
-        .get("email")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return Some(email.to_string());
-    }
-
-    None
-}
-
-fn extract_github_email_from_payload(payload: &Value) -> Option<String> {
-    if let Some(array) = payload.as_array() {
-        let selected = array.iter().find(|entry| {
-            entry
-                .get("email")
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.trim().is_empty())
-                && entry
-                    .get("primary")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                && entry
-                    .get("verified")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-        });
-        if let Some(email) = selected
-            .and_then(|entry| entry.get("email"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(email.to_string());
-        }
-    }
-
-    None
-}
-
-#[derive(Clone, Copy)]
-enum OAuth2UserinfoKind {
-    Standard,
-    GithubEmails,
-}
-
-struct OAuth2UserinfoCandidate {
-    endpoint: String,
-    kind: OAuth2UserinfoKind,
-}
-
-fn oauth2_userinfo_candidates(
-    client: &crate::state::OAuth2ClientConfig,
-) -> Vec<OAuth2UserinfoCandidate> {
-    let mut candidates = Vec::new();
-    if let Some(user_info_uri) = client.user_info_uri.as_ref() {
-        push_userinfo_candidate(
-            &mut candidates,
-            user_info_uri.clone(),
-            OAuth2UserinfoKind::Standard,
-        );
-
-        if oauth2_client_supports_github_email_lookup(client) {
-            push_userinfo_candidate(
-                &mut candidates,
-                format!("{}/emails", user_info_uri.trim_end_matches('/')),
-                OAuth2UserinfoKind::GithubEmails,
-            );
-        }
-
-        return candidates;
-    }
-    candidates
 }
 
 async fn oauth2_login_error_response(
@@ -657,58 +364,4 @@ async fn oauth2_login_error_response(
         .await;
 
     oauth2_login_error_redirect(error)
-}
-
-fn push_userinfo_candidate(
-    candidates: &mut Vec<OAuth2UserinfoCandidate>,
-    endpoint: String,
-    kind: OAuth2UserinfoKind,
-) {
-    if !candidates
-        .iter()
-        .any(|candidate| candidate.endpoint == endpoint)
-    {
-        candidates.push(OAuth2UserinfoCandidate { endpoint, kind });
-    }
-}
-
-fn oauth2_client_supports_github_email_lookup(client: &crate::state::OAuth2ClientConfig) -> bool {
-    client.registration_id.eq_ignore_ascii_case("github")
-        && client.scopes.iter().any(|scope| {
-            scope.eq_ignore_ascii_case("user") || scope.eq_ignore_ascii_case("user:email")
-        })
-}
-
-async fn oauth2_account_creation_enabled(app: &IdentityAccessState) -> bool {
-    let state = &app.operational;
-    if state.oauth2_account_creation {
-        return true;
-    }
-    if std::env::var("KOMGA_OAUTH2_ACCOUNT_CREATION")
-        .ok()
-        .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")
-    {
-        return true;
-    }
-    if std::env::var("KOMGA_OAUTH2_ACCOUNT_CREATION_ENABLED")
-        .ok()
-        .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")
-    {
-        return true;
-    }
-
-    let Ok(settings) = app.server_settings.load_map().await else {
-        return false;
-    };
-    [
-        "OAUTH2_ACCOUNT_CREATION",
-        "oauth2AccountCreation",
-        "oauth2.account.creation",
-    ]
-    .iter()
-    .find_map(|key| settings.get(*key))
-    .and_then(|value| value.as_ref())
-    .is_some_and(|value| {
-        value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") || value == "1"
-    })
 }

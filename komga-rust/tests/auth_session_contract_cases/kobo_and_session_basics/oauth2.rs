@@ -2,11 +2,18 @@ use super::*;
 use axum::extract::ConnectInfo;
 use axum::response::Response;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::{Duration as ChronoDuration, Utc};
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
+use openidconnect::core::{CoreHmacKey, CoreIdToken, CoreIdTokenClaims, CoreJwsSigningAlgorithm};
+use openidconnect::{
+    Audience, EmptyAdditionalClaims, EndUserEmail, IssuerUrl, Nonce, StandardClaims,
+    SubjectIdentifier,
+};
 use reqwest::Url;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -125,6 +132,26 @@ async fn oauth2_callback_response_for_config_with_request_metadata(
     remote_addr: Option<SocketAddr>,
     user_agent: Option<&str>,
 ) -> Response {
+    oauth2_callback_response_for_config_with_authorization_observer(
+        config,
+        registration_id,
+        remote_addr,
+        user_agent,
+        |_| {},
+    )
+    .await
+}
+
+async fn oauth2_callback_response_for_config_with_authorization_observer<F>(
+    config: &RuntimeConfig,
+    registration_id: &str,
+    remote_addr: Option<SocketAddr>,
+    user_agent: Option<&str>,
+    observe_authorization: F,
+) -> Response
+where
+    F: FnOnce(&Url),
+{
     let app = build_router_with_config(config).await;
     let authorization_response = app
         .clone()
@@ -143,11 +170,13 @@ async fn oauth2_callback_response_for_config_with_request_metadata(
         .get(header::LOCATION)
         .and_then(|value| value.to_str().ok())
         .expect("oauth2 authorization response should redirect");
-    let state = Url::parse(authorization_location)
-        .expect("oauth2 authorization location should be a valid url")
+    let authorization_url = Url::parse(authorization_location)
+        .expect("oauth2 authorization location should be a valid url");
+    let state = authorization_url
         .query_pairs()
         .find_map(|(key, value)| (key == "state").then_some(value.into_owned()))
         .expect("oauth2 authorization redirect should include state query");
+    observe_authorization(&authorization_url);
     let session_cookie = authorization_response
         .headers()
         .get(header::SET_COOKIE)
@@ -178,6 +207,69 @@ async fn oauth2_callback_response_for_config_with_request_metadata(
     app.oneshot(callback_request)
         .await
         .expect("oauth2 callback request should complete")
+}
+
+fn oidc_runtime_config_for_provider(
+    paths: &RuntimeDbPaths,
+    registration_id: &str,
+    provider_url: &str,
+    include_user_info_uri: bool,
+) -> RuntimeConfig {
+    let mut env = oauth2_runtime_env_for_paths(
+        paths,
+        registration_id,
+        format!("{provider_url}/oauth/authorize").as_str(),
+        format!("{provider_url}/oauth/token").as_str(),
+        include_user_info_uri
+            .then(|| format!("{provider_url}/oauth/userinfo"))
+            .as_deref(),
+        "openid email",
+    );
+    let provider_key = registration_id.to_ascii_uppercase();
+    env.insert(
+        format!("SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_{provider_key}_ISSUER_URI"),
+        provider_url.to_string(),
+    );
+    RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+        .expect("runtime config should resolve oidc provider env")
+}
+
+async fn oidc_callback_response_for_provider(
+    config: &RuntimeConfig,
+    registration_id: &str,
+    provider: &OidcProviderServer,
+) -> Response {
+    oidc_callback_response_for_provider_with_request_metadata(
+        config,
+        registration_id,
+        provider,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn oidc_callback_response_for_provider_with_request_metadata(
+    config: &RuntimeConfig,
+    registration_id: &str,
+    provider: &OidcProviderServer,
+    remote_addr: Option<SocketAddr>,
+    user_agent: Option<&str>,
+) -> Response {
+    oauth2_callback_response_for_config_with_authorization_observer(
+        config,
+        registration_id,
+        remote_addr,
+        user_agent,
+        |authorization_url| {
+            let nonce = authorization_url
+                .query_pairs()
+                .find_map(|(key, value)| (key == "nonce").then_some(value.into_owned()))
+                .expect("oidc authorization redirect should include nonce query");
+            provider.set_nonce(nonce);
+        },
+    )
+    .await
 }
 
 async fn spawn_path_response_server(routes: &[(&str, u16, &str, &str)]) -> SingleResponseServer {
@@ -296,8 +388,33 @@ fn unsigned_jwt_token(claims: Value) -> String {
     format!("{header}.{payload}.")
 }
 
-fn oidc_token_payload(email: Option<&str>, email_verified: Option<bool>) -> String {
+fn unsigned_oidc_token_payload(
+    issuer: &str,
+    registration_id: &str,
+    nonce: &str,
+    email: Option<&str>,
+    email_verified: Option<bool>,
+) -> String {
     let mut claims = serde_json::Map::new();
+    let now = Utc::now().timestamp();
+    claims.insert("iss".to_string(), Value::String(issuer.to_string()));
+    claims.insert(
+        "aud".to_string(),
+        Value::String(format!("{registration_id}-client-id")),
+    );
+    claims.insert(
+        "exp".to_string(),
+        Value::Number(serde_json::Number::from(now + 600)),
+    );
+    claims.insert(
+        "iat".to_string(),
+        Value::Number(serde_json::Number::from(now)),
+    );
+    claims.insert(
+        "sub".to_string(),
+        Value::String("komga-test-subject".to_string()),
+    );
+    claims.insert("nonce".to_string(), Value::String(nonce.to_string()));
     if let Some(email) = email {
         claims.insert("email".to_string(), Value::String(email.to_string()));
     }
@@ -307,31 +424,248 @@ fn oidc_token_payload(email: Option<&str>, email_verified: Option<bool>) -> Stri
 
     json!({
         "access_token": "oidc-token",
+        "token_type": "Bearer",
         "id_token": unsigned_jwt_token(Value::Object(claims)),
     })
     .to_string()
 }
 
-async fn oauth2_callback_response(
-    paths: &RuntimeDbPaths,
+#[derive(Clone, Copy)]
+enum OidcTokenSignature {
+    Signed,
+    Unsigned,
+}
+
+struct OidcProviderServer {
+    url: String,
+    nonce: Arc<Mutex<Option<String>>>,
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl OidcProviderServer {
+    fn set_nonce(&self, nonce: String) {
+        *self
+            .nonce
+            .lock()
+            .expect("oidc provider nonce lock should open") = Some(nonce);
+    }
+}
+
+async fn spawn_oidc_provider_server(
     registration_id: &str,
-    token_payload: &str,
-) -> Response {
-    let token_server = spawn_single_response_server(200, "application/json", token_payload).await;
-    let config = oauth2_runtime_config_for_base_url(
-        paths,
-        registration_id,
-        token_server.url.as_str(),
-        "openid email",
-    );
-    let response = oauth2_callback_response_for_config(&config, registration_id).await;
-
-    token_server
-        .join
+    email: Option<&str>,
+    email_verified: Option<bool>,
+    include_user_info_endpoint: bool,
+    token_signature: OidcTokenSignature,
+) -> OidcProviderServer {
+    let listener = TcpListener::bind("127.0.0.1:0")
         .await
-        .expect("oauth2 token mock server should finish");
+        .expect("oidc provider server should bind");
+    let address = listener
+        .local_addr()
+        .expect("oidc provider server should have local addr");
+    let issuer = format!("http://{address}");
+    let registration_id = registration_id.to_string();
+    let email = email.map(str::to_string);
+    let nonce = Arc::new(Mutex::new(None::<String>));
+    let task_nonce = Arc::clone(&nonce);
+    let task_issuer = issuer.clone();
 
-    response
+    let join = tokio::spawn(async move {
+        loop {
+            let accept =
+                tokio::time::timeout(std::time::Duration::from_secs(1), listener.accept()).await;
+            let (mut stream, _) = match accept {
+                Ok(Ok(connection)) => connection,
+                Ok(Err(error)) => panic!("oidc provider server should accept connection: {error}"),
+                Err(_) => break,
+            };
+            let request = read_http_request(&mut stream).await;
+            let request_line = String::from_utf8_lossy(&request)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let path = request_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|target| target.split('?').next())
+                .unwrap_or("/");
+            let (status_code, content_type, body) = match path {
+                "/.well-known/openid-configuration" => {
+                    let mut metadata = json!({
+                        "issuer": task_issuer,
+                        "authorization_endpoint": format!("{task_issuer}/oauth/authorize"),
+                        "token_endpoint": format!("{task_issuer}/oauth/token"),
+                        "jwks_uri": format!("{task_issuer}/oauth/jwks"),
+                        "response_types_supported": ["code"],
+                        "subject_types_supported": ["public"],
+                        "id_token_signing_alg_values_supported": ["HS256"],
+                    });
+                    if include_user_info_endpoint {
+                        metadata["userinfo_endpoint"] =
+                            Value::String(format!("{task_issuer}/oauth/userinfo"));
+                    }
+                    (200, "application/json", metadata.to_string())
+                }
+                "/oauth/jwks" => (200, "application/json", r#"{"keys":[]}"#.to_string()),
+                "/oauth/token" => {
+                    let nonce = task_nonce
+                        .lock()
+                        .expect("oidc provider nonce lock should open")
+                        .clone()
+                        .expect(
+                            "oidc authorization nonce should be captured before token exchange",
+                        );
+                    let body = match token_signature {
+                        OidcTokenSignature::Signed => signed_oidc_token_payload(
+                            task_issuer.as_str(),
+                            registration_id.as_str(),
+                            nonce.as_str(),
+                            email.as_deref(),
+                            email_verified,
+                        ),
+                        OidcTokenSignature::Unsigned => unsigned_oidc_token_payload(
+                            task_issuer.as_str(),
+                            registration_id.as_str(),
+                            nonce.as_str(),
+                            email.as_deref(),
+                            email_verified,
+                        ),
+                    };
+                    (200, "application/json", body)
+                }
+                "/oauth/userinfo" if include_user_info_endpoint => {
+                    let mut claims = serde_json::Map::new();
+                    if let Some(email) = email.as_deref() {
+                        claims.insert("email".to_string(), Value::String(email.to_string()));
+                    }
+                    if let Some(email_verified) = email_verified {
+                        claims.insert("email_verified".to_string(), Value::Bool(email_verified));
+                    }
+                    (200, "application/json", Value::Object(claims).to_string())
+                }
+                _ => (
+                    404,
+                    "application/json",
+                    r#"{"error":"not_found"}"#.to_string(),
+                ),
+            };
+            write_http_response(&mut stream, status_code, content_type, body.as_str()).await;
+        }
+    });
+
+    OidcProviderServer {
+        url: issuer,
+        nonce,
+        join,
+    }
+}
+
+async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 1024];
+
+    loop {
+        let read = stream
+            .read(&mut chunk)
+            .await
+            .expect("mock server should read request bytes");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+
+        let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+            })
+            .unwrap_or(0);
+        if request.len() >= header_end + 4 + content_length {
+            break;
+        }
+    }
+
+    request
+}
+
+async fn write_http_response(
+    stream: &mut tokio::net::TcpStream,
+    status_code: u16,
+    content_type: &str,
+    body: &str,
+) {
+    let status_text = match status_code {
+        200 => "OK",
+        302 => "Found",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        _ => "OK",
+    };
+    let response = format!(
+        "HTTP/1.1 {status_code} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream
+        .write_all(response.as_bytes())
+        .await
+        .expect("mock server should write response");
+}
+
+fn signed_oidc_token_payload(
+    issuer: &str,
+    registration_id: &str,
+    nonce: &str,
+    email: Option<&str>,
+    email_verified: Option<bool>,
+) -> String {
+    let client_id = format!("{registration_id}-client-id");
+    let client_secret = format!("{registration_id}-client-secret");
+    let now = Utc::now();
+    let mut claims = CoreIdTokenClaims::new(
+        IssuerUrl::new(issuer.to_string()).expect("oidc issuer should be valid"),
+        vec![Audience::new(client_id)],
+        now + ChronoDuration::minutes(10),
+        now,
+        StandardClaims::new(SubjectIdentifier::new("komga-test-subject".to_string())),
+        EmptyAdditionalClaims {},
+    )
+    .set_nonce(Some(Nonce::new(nonce.to_string())));
+
+    if let Some(email) = email {
+        claims = claims.set_email(Some(EndUserEmail::new(email.to_string())));
+    }
+    claims = claims.set_email_verified(email_verified);
+
+    let id_token = CoreIdToken::new(
+        claims,
+        &CoreHmacKey::new(client_secret.into_bytes()),
+        CoreJwsSigningAlgorithm::HmacSha256,
+        None,
+        None,
+    )
+    .expect("oidc id token should sign");
+
+    json!({
+        "access_token": "oidc-token",
+        "token_type": "Bearer",
+        "id_token": id_token.to_string(),
+    })
+    .to_string()
 }
 
 fn assert_redirect_location(response: &Response, expected_location: &str) {
@@ -443,6 +777,84 @@ async fn router_oauth2_authorization_uses_session_cookie_instead_of_state_cookie
     assert!(
         !set_cookie.contains("komga-oauth2-state-github="),
         "oauth2 authorization should not emit a dedicated oauth2 state cookie: {set_cookie}"
+    );
+}
+
+#[tokio::test]
+async fn router_oidc_authorization_discovers_provider_from_issuer_uri() {
+    let ctx = TestFixture::new("router-oidc-authorization-discovers-provider").await;
+
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        Some(true),
+        false,
+        OidcTokenSignature::Signed,
+    )
+    .await;
+    let env = BTreeMap::from([
+        (
+            "KOMGA_CONFIG_DIR".to_string(),
+            ctx.paths().config_dir.to_string_lossy().to_string(),
+        ),
+        (
+            "KOMGA_DATABASE_FILE".to_string(),
+            ctx.paths().main_db.to_string_lossy().to_string(),
+        ),
+        (
+            "KOMGA_TASKS_DB_FILE".to_string(),
+            ctx.paths().tasks_db.to_string_lossy().to_string(),
+        ),
+        (
+            "KOMGA_RUST_RUNTIME_PROFILE".to_string(),
+            "snapshot-aligned".to_string(),
+        ),
+        (
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_CLIENT_ID".to_string(),
+            "oidc-client-id".to_string(),
+        ),
+        (
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_CLIENT_SECRET".to_string(),
+            "oidc-client-secret".to_string(),
+        ),
+        (
+            "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_OIDC_SCOPE".to_string(),
+            "openid email".to_string(),
+        ),
+        (
+            "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_OIDC_ISSUER_URI".to_string(),
+            provider.url.clone(),
+        ),
+    ]);
+    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+        .expect("runtime config should resolve issuer-only oidc client env");
+
+    let response = oauth2_authorization_response_for_config(&config, "oidc").await;
+
+    provider
+        .join
+        .await
+        .expect("oidc provider mock server should finish");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("oidc authorization response should redirect");
+    let url = Url::parse(location).expect("oidc authorization location should be a valid url");
+    let expected_authorization_endpoint = format!("{}/oauth/authorize", provider.url);
+    assert_eq!(
+        url.as_str().split('?').next(),
+        Some(expected_authorization_endpoint.as_str())
+    );
+    assert!(
+        url.query_pairs().any(|(key, _)| key == "nonce"),
+        "issuer-discovered oidc authorization should include nonce"
+    );
+    assert!(
+        url.query_pairs().any(|(key, _)| key == "code_challenge"),
+        "issuer-discovered oidc authorization should include PKCE challenge"
     );
 }
 
@@ -563,8 +975,22 @@ async fn router_oauth2_callback_expires_authorization_state_with_session_lifetim
 async fn router_oauth2_callback_requires_email_verified_claim_for_oidc() {
     let ctx = TestFixture::new("router-oauth2-callback-requires-email-verified-claim").await;
 
-    let token_payload = oidc_token_payload(Some("admin@example.org"), None);
-    let response = oauth2_callback_response(ctx.paths(), "oidc", token_payload.as_str()).await;
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        None,
+        false,
+        OidcTokenSignature::Signed,
+    )
+    .await;
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
+
+    provider
+        .join
+        .await
+        .expect("oidc provider mock server should finish");
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -580,28 +1006,22 @@ async fn router_oauth2_callback_requires_email_verified_claim_for_oidc() {
 async fn router_oauth2_callback_rejects_unverified_email_for_oidc() {
     let ctx = TestFixture::new("router-oauth2-callback-rejects-unverified-email").await;
 
-    let token_server = spawn_single_response_server(
-        200,
-        "application/json",
-        oidc_token_payload(Some("admin@example.org"), Some(false)).as_str(),
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        Some(false),
+        false,
+        OidcTokenSignature::Signed,
     )
     .await;
-    let env = oauth2_runtime_env_for_paths(
-        ctx.paths(),
-        "oidc",
-        token_server.url.as_str(),
-        token_server.url.as_str(),
-        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
-        "openid email",
-    );
-    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
-        .expect("runtime config should resolve oauth2 callback env");
-    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
 
-    token_server
+    provider
         .join
         .await
-        .expect("oauth2 token mock server should finish");
+        .expect("oidc provider mock server should finish");
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -617,33 +1037,24 @@ async fn router_oauth2_callback_rejects_unverified_email_for_oidc() {
 async fn router_oauth2_callback_allows_missing_email_verified_when_disabled_for_oidc() {
     let ctx = TestFixture::new("router-oauth2-callback-allows-missing-email-verified").await;
 
-    let token_server = spawn_single_response_server(
-        200,
-        "application/json",
-        oidc_token_payload(Some("admin@example.org"), None).as_str(),
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        None,
+        false,
+        OidcTokenSignature::Signed,
     )
     .await;
-    let mut env = oauth2_runtime_env_for_paths(
-        ctx.paths(),
-        "oidc",
-        token_server.url.as_str(),
-        token_server.url.as_str(),
-        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
-        "openid email",
-    );
-    env.insert(
-        "KOMGA_OIDC_EMAIL_VERIFICATION".to_string(),
-        "false".to_string(),
-    );
-    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
-        .expect("runtime config should resolve oauth2 callback env");
+    let mut config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+    config.oidc_email_verification = false;
 
-    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
 
-    token_server
+    provider
         .join
         .await
-        .expect("oauth2 token mock server should finish");
+        .expect("oidc provider mock server should finish");
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -668,25 +1079,20 @@ async fn router_oauth2_callback_allows_missing_email_verified_when_disabled_for_
 pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_auth_token_header() {
     let ctx = TestFixture::new("router-oauth2-callback-success-cookie-only").await;
 
-    let token_server = spawn_single_response_server(
-        200,
-        "application/json",
-        oidc_token_payload(Some("admin@example.org"), Some(true)).as_str(),
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        Some(true),
+        false,
+        OidcTokenSignature::Signed,
     )
     .await;
-    let env = oauth2_runtime_env_for_paths(
-        ctx.paths(),
-        "oidc",
-        token_server.url.as_str(),
-        token_server.url.as_str(),
-        Some(format!("{}/oauth/userinfo", token_server.url).as_str()),
-        "openid email",
-    );
-    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
-        .expect("runtime config should resolve oauth2 callback env");
-    let response = oauth2_callback_response_for_config_with_request_metadata(
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+    let response = oidc_callback_response_for_provider_with_request_metadata(
         &config,
         "oidc",
+        &provider,
         Some(
             "203.0.113.27:43123"
                 .parse()
@@ -696,10 +1102,10 @@ pub(crate) async fn verify_oauth2_callback_success_uses_session_cookie_without_a
     )
     .await;
 
-    token_server
+    provider
         .join
         .await
-        .expect("oauth2 token mock server should finish");
+        .expect("oidc provider mock server should finish");
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -749,7 +1155,7 @@ async fn router_oauth2_callback_rejects_token_payload_email_for_non_oidc() {
     let token_server = spawn_single_response_server(
         200,
         "application/json",
-        r#"{"access_token":"oauth-token","email":"admin@example.org"}"#,
+        r#"{"access_token":"oauth-token","token_type":"Bearer","email":"admin@example.org"}"#,
     )
     .await;
     let config = oauth2_runtime_config_for_base_url(
@@ -785,7 +1191,7 @@ async fn router_oauth2_callback_rejects_preferred_username_for_non_oidc() {
             "/oauth/token",
             200,
             "application/json",
-            r#"{"access_token":"oauth-token"}"#,
+            r#"{"access_token":"oauth-token","token_type":"Bearer"}"#,
         ),
         (
             "/oauth/userinfo",
@@ -824,7 +1230,7 @@ async fn router_github_oauth2_callback_rejects_unverified_primary_email() {
             "/oauth/token",
             200,
             "application/json",
-            r#"{"access_token":"github-token"}"#,
+            r#"{"access_token":"github-token","token_type":"Bearer"}"#,
         ),
         (
             "/oauth/userinfo",
@@ -873,7 +1279,7 @@ async fn router_github_oauth2_callback_accepts_verified_primary_email() {
             "/oauth/token",
             200,
             "application/json",
-            r#"{"access_token":"github-token"}"#,
+            r#"{"access_token":"github-token","token_type":"Bearer"}"#,
         ),
         (
             "/oauth/userinfo",
@@ -928,7 +1334,7 @@ async fn router_oauth2_callback_respects_komga_oauth2_account_creation_config() 
             "/oauth/token",
             200,
             "application/json",
-            r#"{"access_token":"oauth-token"}"#,
+            r#"{"access_token":"oauth-token","token_type":"Bearer"}"#,
         ),
         (
             "/oauth/userinfo",
@@ -981,7 +1387,7 @@ async fn router_oauth2_callback_respects_user_info_endpoint_configuration() {
             "/oauth/token/custom",
             200,
             "application/json",
-            r#"{"access_token":"oauth-token"}"#,
+            r#"{"access_token":"oauth-token","token_type":"Bearer"}"#,
         ),
         (
             "/api/v3/profile",
@@ -1019,7 +1425,7 @@ async fn router_oauth2_callback_respects_user_info_endpoint_configuration() {
             "/oauth/token",
             200,
             "application/json",
-            r#"{"access_token":"oauth-token"}"#,
+            r#"{"access_token":"oauth-token","token_type":"Bearer"}"#,
         ),
         (
             "/oauth/userinfo",
@@ -1053,26 +1459,23 @@ async fn router_oauth2_callback_respects_user_info_endpoint_configuration() {
 async fn router_oidc_callback_accepts_id_token_claims_without_user_info_endpoint() {
     let ctx = TestFixture::new("router-oidc-callback-id-token-without-userinfo").await;
 
-    let token_payload = oidc_token_payload(Some("admin@example.org"), Some(true));
-    let token_server =
-        spawn_single_response_server(200, "application/json", token_payload.as_str()).await;
-    let env = oauth2_runtime_env_for_paths(
-        ctx.paths(),
+    let provider = spawn_oidc_provider_server(
         "oidc",
-        token_server.url.as_str(),
-        token_server.url.as_str(),
-        None,
-        "openid email",
-    );
-    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
-        .expect("runtime config should resolve oidc callback env without user_info_uri");
+        Some("admin@example.org"),
+        Some(true),
+        false,
+        OidcTokenSignature::Signed,
+    )
+    .await;
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
 
-    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
 
-    token_server
+    provider
         .join
         .await
-        .expect("oauth2 token mock server should finish");
+        .expect("oidc provider mock server should finish");
 
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(
@@ -1081,6 +1484,65 @@ async fn router_oidc_callback_accepts_id_token_claims_without_user_info_endpoint
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok()),
         Some("/?server_redirect=Y")
+    );
+}
+
+#[tokio::test]
+async fn router_oidc_callback_rejects_unsigned_id_token() {
+    let ctx = TestFixture::new("router-oidc-callback-rejects-unsigned-id-token").await;
+
+    let provider = spawn_oidc_provider_server(
+        "oidc",
+        Some("admin@example.org"),
+        Some(true),
+        false,
+        OidcTokenSignature::Unsigned,
+    )
+    .await;
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
+
+    provider
+        .join
+        .await
+        .expect("oidc provider mock server should finish");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=oauth2_oidc_verification_failed")
+    );
+}
+
+#[tokio::test]
+async fn router_oidc_callback_rejects_openid_client_without_verification_metadata() {
+    let ctx = TestFixture::new("router-oidc-callback-rejects-missing-verification-metadata").await;
+
+    let env = oauth2_runtime_env_for_paths(
+        ctx.paths(),
+        "oidc",
+        "http://127.0.0.1:9/oauth/authorize",
+        "http://127.0.0.1:9/oauth/token",
+        None,
+        "openid email",
+    );
+    let config = RuntimeConfig::resolve_with_env(&RuntimeCli::default(), &env)
+        .expect("runtime config should resolve oidc callback env without verification metadata");
+
+    let response = oauth2_callback_response_for_config(&config, "oidc").await;
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=oauth2_oidc_verification_failed")
     );
 }
 
