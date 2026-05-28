@@ -14,7 +14,8 @@ pub(in crate::task_queue) async fn execute_import_book(
     }
 
     let service = MediaImportService::new(Arc::new(FilesystemImportPort::new(
-        runtime.database().main_db().database_file(),
+        runtime.database().read_pool().clone(),
+        runtime.database().write_pool().clone(),
     )));
     service
         .process_queued_book_payload(&payload, priority)

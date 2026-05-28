@@ -168,7 +168,10 @@ async fn import_book_for_sse(
     source_file: &Path,
     expected_success: bool,
 ) -> Result<(), String> {
-    let port = FilesystemImportPort::new(main_db.to_path_buf());
+    let pool = komga_infrastructure::sqlite::connect_test_pool(main_db, 1)
+        .await
+        .map_err(|error| format!("open import db for sse test: {error}"))?;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let result = port
         .import_book(
             ImportCopyMode::Copy,
@@ -180,6 +183,7 @@ async fn import_book_for_sse(
             },
         )
         .await;
+    pool.close().await;
 
     match (expected_success, result) {
         (true, Ok(Some(_))) => Ok(()),

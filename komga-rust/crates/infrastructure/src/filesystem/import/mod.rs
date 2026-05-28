@@ -12,20 +12,21 @@ use komga_application::media_assets::{
 };
 use komga_application::runtime_sse::register_runtime_sse_event;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{Row, SqlitePool};
 
-use crate::sqlite::{connect_read_pool, connect_write_pool};
 use crate::{resolve_library_item_path, resolve_rooted_path, resolve_stored_path};
 
 #[derive(Clone, Debug)]
 pub struct FilesystemImportPort {
-    database_file: PathBuf,
+    read_pool: SqlitePool,
+    write_pool: SqlitePool,
 }
 
 impl FilesystemImportPort {
-    pub fn new(database_file: impl Into<PathBuf>) -> Self {
+    pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
         Self {
-            database_file: database_file.into(),
+            read_pool,
+            write_pool,
         }
     }
 }
@@ -39,7 +40,7 @@ impl MediaImportPort for FilesystemImportPort {
     ) -> Result<Option<ImportBookOutcome>, String> {
         let source_file = entry.source_file.clone();
         let series_id = entry.series_id.clone();
-        let result = import_book_impl(self.database_file.as_path(), copy_mode, entry).await;
+        let result = import_book_impl(&self.read_pool, &self.write_pool, copy_mode, entry).await;
 
         match &result {
             Ok(Some(outcome)) => {
@@ -74,7 +75,8 @@ impl MediaImportPort for FilesystemImportPort {
 }
 
 async fn import_book_impl(
-    database_file: &Path,
+    read_pool: &SqlitePool,
+    write_pool: &SqlitePool,
     copy_mode: ImportCopyMode,
     entry: BooksImportEntry,
 ) -> Result<Option<ImportBookOutcome>, String> {
@@ -82,12 +84,12 @@ async fn import_book_impl(
         return Err("source file does not exist".to_string());
     }
 
-    let library_roots = load_library_roots(database_file).await.unwrap_or_default();
+    let library_roots = load_library_roots(read_pool).await.unwrap_or_default();
     if source_inside_library_roots(entry.source_file.as_path(), &library_roots) {
         return Err("cannot import file that is part of an existing library".to_string());
     }
 
-    let target = match load_import_series_target(database_file, &entry.series_id).await {
+    let target = match load_import_series_target(read_pool, &entry.series_id).await {
         Ok(Some(target)) => target,
         Ok(None) => {
             return Err(format!(
@@ -106,7 +108,7 @@ async fn import_book_impl(
     let mut upgrade_sidecars: Vec<PathBuf> = Vec::new();
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
         let loaded_upgrade_target =
-            match load_import_upgrade_book_target(database_file, upgrade_book_id).await {
+            match load_import_upgrade_book_target(read_pool, upgrade_book_id).await {
                 Ok(Some(target)) => target,
                 Ok(None) => {
                     return Err(format!(
@@ -183,7 +185,7 @@ async fn import_book_impl(
     if let Some(upgrade_book_id) = entry.upgrade_book_id.as_deref() {
         let resolved_library_root = resolve_stored_path(&target.library_root);
         migrate_upgraded_book_identity(
-            database_file,
+            write_pool,
             upgrade_book_id,
             imported_book_id.as_str(),
             resolved_library_root.as_path(),
@@ -193,7 +195,7 @@ async fn import_book_impl(
     }
 
     let _ = persist_book_imported_event(
-        database_file,
+        write_pool,
         imported_book_id.as_str(),
         target.series_id.as_str(),
         &destination_file,
@@ -244,13 +246,9 @@ struct ImportBookSidecarResult {
 }
 
 async fn load_import_series_target(
-    database_file: &Path,
+    pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<ImportSeriesTarget>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open series target db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL,
             l.ROOT AS LIBRARY_ROOT, COALESCE(s.oneshot, 0) AS ONESHOT
@@ -260,7 +258,7 @@ async fn load_import_series_target(
         LIMIT 1"#,
     )
     .bind(series_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query series target for import: {error}"))?;
 
@@ -274,13 +272,9 @@ async fn load_import_series_target(
 }
 
 async fn load_import_upgrade_book_target(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<ImportUpgradeBookTarget>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open upgrade book target db: {error}"))?;
-
     let row = sqlx::query(
         r#"SELECT b.SERIES_ID AS SERIES_ID, b.URL AS BOOK_URL,
             l.ROOT AS LIBRARY_ROOT
@@ -290,7 +284,7 @@ async fn load_import_upgrade_book_target(
         LIMIT 1"#,
     )
     .bind(book_id)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await
     .map_err(|error| format!("query upgrade book target for import: {error}"))?;
 
@@ -316,13 +310,9 @@ fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
     }
 }
 
-async fn load_library_roots(database_file: &Path) -> Result<Vec<PathBuf>, String> {
-    let pool = connect_read_pool(database_file)
-        .await
-        .map_err(|error| format!("open library roots db: {error}"))?;
-
+async fn load_library_roots(pool: &SqlitePool) -> Result<Vec<PathBuf>, String> {
     let rows = sqlx::query("SELECT ROOT FROM LIBRARY")
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|error| format!("query library roots for import: {error}"))?;
 
@@ -551,7 +541,7 @@ fn scanner_book_id_for_path(path: &Path) -> String {
 }
 
 async fn migrate_upgraded_book_identity(
-    database_file: &Path,
+    pool: &SqlitePool,
     old_book_id: &str,
     new_book_id: &str,
     library_root: &Path,
@@ -568,9 +558,6 @@ async fn migrate_upgraded_book_identity(
         .to_string();
     let destination_url = import_book_url_for_library_root(library_root, destination_file)?;
 
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open import-upgrade migration db: {error}"))?;
     let mut tx = pool
         .begin()
         .await
@@ -745,7 +732,7 @@ fn import_book_url_for_library_root(
 }
 
 async fn persist_book_imported_event(
-    database_file: &Path,
+    pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
     destination_file: &Path,
@@ -757,9 +744,6 @@ async fn persist_book_imported_event(
     let source_name = source_file.to_string_lossy().to_string();
     let upgrade_value = if upgrade { "Yes" } else { "No" };
 
-    let pool = connect_write_pool(database_file)
-        .await
-        .map_err(|error| format!("open historical-event db for import: {error}"))?;
     let mut tx = pool
         .begin()
         .await

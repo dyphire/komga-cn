@@ -183,7 +183,7 @@ pub fn compose_http_runtime(
         )),
         metadata_writer,
         import_service: Arc::new(MediaImportService::new(Arc::new(
-            FilesystemImportPort::new(db.database_file().to_path_buf()),
+            FilesystemImportPort::new(db.read_pool().clone(), db.write_pool().clone()),
         ))),
     };
     let operational = compose_operational_state(

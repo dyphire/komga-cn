@@ -21,7 +21,6 @@ use sqlx::{Row, SqlitePool};
 
 use super::session_store::RememberMeRuntimeSettings;
 use super::session_store::session_token_store;
-use crate::sqlite::connect_read_pool;
 
 static API_KEY_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -667,10 +666,6 @@ pub async fn ensure_oauth_user(
             .into_iter()
             .find(|user| auth_user_email_equals(user, email))
     }))
-}
-
-pub async fn open_auth_pool(database_file: &Path) -> Result<sqlx::SqlitePool, sqlx::Error> {
-    connect_read_pool(database_file).await
 }
 
 fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {

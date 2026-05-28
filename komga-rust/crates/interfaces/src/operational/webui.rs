@@ -139,10 +139,19 @@ fn rewrite_index_html(asset_data: &[u8], resource_base_url: &str) -> Vec<u8> {
         RESOURCE_BASE_URL_TEMPLATE_MARKER,
         format!("'{resource_base_url}'").as_str(),
     );
+    let html = remove_legacy_thymeleaf_scaffolding(html);
     let html = rewrite_attribute_values(html, "src", resource_base_url);
     let html = rewrite_attribute_values(html, "href", resource_base_url);
     let html = rewrite_attribute_values(html, "content", resource_base_url);
     html.into_bytes()
+}
+
+fn remove_legacy_thymeleaf_scaffolding(input: String) -> String {
+    input
+        .replace(r#" th:inline="javascript""#, "")
+        .replace(r#" th:inline='javascript'"#, "")
+        .replace("/*<![CDATA[*/", "")
+        .replace("/*]]>*/", "")
 }
 
 fn rewrite_attribute_values(input: String, attribute: &str, resource_base_url: &str) -> String {

@@ -58,8 +58,8 @@ async fn create_test_db(case: &str) -> (PathBuf, sqlx::Pool<sqlx::Sqlite>, PathB
 
 #[tokio::test]
 async fn import_book_returns_error_when_source_file_is_missing() {
-    let (db_path, pool, root) = create_test_db("missing-source").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("missing-source").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
 
     let result = port
         .import_book(
@@ -84,8 +84,8 @@ async fn import_book_returns_error_when_source_file_is_missing() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_series_target_is_missing() {
-    let (db_path, pool, root) = create_test_db("missing-series-target").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("missing-series-target").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -112,8 +112,8 @@ async fn import_book_returns_error_when_series_target_is_missing() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_destination_name_is_invalid() {
-    let (db_path, pool, root) = create_test_db("invalid-destination-name").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("invalid-destination-name").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -140,8 +140,8 @@ async fn import_book_returns_error_when_destination_name_is_invalid() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
-    let (db_path, pool, root) = create_test_db("upgrade-series-mismatch").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("upgrade-series-mismatch").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -194,8 +194,8 @@ async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_upgrade_target_is_missing() {
-    let (db_path, pool, root) = create_test_db("upgrade-target-missing").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("upgrade-target-missing").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -222,8 +222,8 @@ async fn import_book_returns_error_when_upgrade_target_is_missing() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_source_file_is_inside_library_root() {
-    let (db_path, pool, root) = create_test_db("source-inside-library-root").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("source-inside-library-root").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let library_root = root.join("library-root");
     let source_path = library_root.join("incoming/book.cbz");
     fs::create_dir_all(source_path.parent().expect("source parent should exist"))
@@ -253,8 +253,8 @@ async fn import_book_returns_error_when_source_file_is_inside_library_root() {
 
 #[tokio::test]
 async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id() {
-    let (db_path, pool, root) = create_test_db("oneshot-missing-upgrade-book-id").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("oneshot-missing-upgrade-book-id").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("book.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -288,8 +288,8 @@ async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id()
 
 #[tokio::test]
 async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
-    let (db_path, pool, root) = create_test_db("oneshot-parent-directory-destination").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("oneshot-parent-directory-destination").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("incoming.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
     fs::write(source_path.with_extension("xml"), b"metadata-fixture")
@@ -384,8 +384,8 @@ async fn import_book_uses_oneshot_parent_directory_and_destination_basename() {
 #[tokio::test]
 async fn import_book_emits_book_added_runtime_sse_event() {
     let _guard = import_runtime_sse_lock().lock().await;
-    let (db_path, pool, root) = create_test_db("import-book-runtime-sse").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("import-book-runtime-sse").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("incoming.cbz");
     fs::write(&source_path, b"fixture").expect("source fixture should be written");
 
@@ -432,8 +432,8 @@ async fn import_book_emits_book_added_runtime_sse_event() {
 
 #[tokio::test]
 async fn import_book_upgrade_preserves_epub_extension_blob() {
-    let (db_path, pool, root) = create_test_db("upgrade-preserves-epub-extension").await;
-    let port = FilesystemImportPort::new(&db_path);
+    let (_db_path, pool, root) = create_test_db("upgrade-preserves-epub-extension").await;
+    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
     let source_path = root.join("incoming.epub");
     fs::write(&source_path, b"epub-fixture").expect("source fixture should be written");
 
