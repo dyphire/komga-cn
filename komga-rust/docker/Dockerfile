@@ -3,14 +3,12 @@
 FROM --platform=$TARGETPLATFORM alpine:3.23 AS runner
 ARG TARGETOS
 ARG TARGETARCH
-RUN apk add --no-cache tzdata
-WORKDIR /app
-COPY --chmod=755 docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/komga-rust ./komga-rust
-COPY docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/libpdfium.so ./libpdfium.so
 RUN <<'EOF'
 set -eu
-install -m 755 /dev/null ./docker-runtime.sh
-cat > ./docker-runtime.sh <<'SCRIPT'
+apk add --no-cache tzdata
+mkdir -p /app
+install -m 755 /dev/null /app/docker-runtime.sh
+cat > /app/docker-runtime.sh <<'SCRIPT'
 #!/bin/sh
 set -eu
 
@@ -48,6 +46,9 @@ fi
 exit 64
 SCRIPT
 EOF
+WORKDIR /app
+COPY --chmod=755 docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/komga-rust ./komga-rust
+COPY docker-artifacts/${TARGETOS}-musl/${TARGETARCH}/libpdfium.so ./libpdfium.so
 VOLUME /config
 ENV KOMGA_CONFIG_DIR="/config"
 ENV KOMGA_RUST_MODE="localdb"
