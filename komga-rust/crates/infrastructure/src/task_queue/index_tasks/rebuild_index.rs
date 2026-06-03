@@ -5,15 +5,9 @@ pub(in crate::task_queue) async fn rebuild_index(
     runtime: &JobRuntime<'_>,
     entity_types: Option<&[SearchEntityType]>,
 ) -> Result<(), TaskProcessingError> {
-    if !runtime.search().owns_search_index() {
-        return Ok(());
+    match entity_types {
+        Some(entity_types) => runtime.search_sync().rebuild_entities(entity_types).await,
+        None => runtime.search_sync().rebuild_all().await,
     }
-
-    rebuild_index_from_database_for_entities(
-        runtime.database().read_pool(),
-        runtime.search().lucene_data_directory(),
-        entity_types,
-    )
-    .await
     .map_err(TaskProcessingError::runtime)
 }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 
 use crate::database_handle::DatabaseHandle;
+use crate::search::sync::SearchIndexSync;
 
 #[derive(Clone, Debug)]
 pub struct TaskRuntimeContext {
@@ -132,6 +133,14 @@ impl JobRuntime<'_> {
         SearchRuntime {
             runtime: self.runtime,
         }
+    }
+
+    pub(in crate::task_queue) fn search_sync(&self) -> SearchIndexSync {
+        SearchIndexSync::new(
+            self.runtime.task_read_pool.clone(),
+            self.runtime.lucene_data_directory.clone(),
+            self.runtime.owns_search_index,
+        )
     }
 
     pub fn filesystem(&self) -> FilesystemRuntime<'_> {

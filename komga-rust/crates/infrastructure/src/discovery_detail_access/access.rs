@@ -16,11 +16,7 @@ use crate::database_handle::DatabaseHandle;
 use crate::discovery_persisted_access::{
     runtime_queries, series as infrastructure_discovery_series,
 };
-use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::sync::{
-    sync_entity_delete_from_index, sync_entity_upsert_from_database,
-    sync_series_and_oneshot_books_after_metadata_update,
-};
+use crate::search::sync::SearchIndexSync;
 
 use super::books;
 use super::collections;
@@ -31,11 +27,24 @@ use super::series;
 pub struct DiscoveryDetailAccess {
     db: DatabaseHandle,
     index_dir: PathBuf,
+    owns_search_index: bool,
 }
 
 impl DiscoveryDetailAccess {
-    pub fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
-        Self { db, index_dir }
+    pub fn new(db: DatabaseHandle, index_dir: PathBuf, owns_search_index: bool) -> Self {
+        Self {
+            db,
+            index_dir,
+            owns_search_index,
+        }
+    }
+
+    fn search_sync(&self) -> SearchIndexSync {
+        SearchIndexSync::new(
+            self.db.write_pool().clone(),
+            self.index_dir.clone(),
+            self.owns_search_index,
+        )
     }
 }
 
@@ -196,12 +205,9 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
     ) -> Result<(), String> {
         series::refresh_series_after_metadata_update(self.db.write_pool(), series_id).await?;
 
-        sync_series_and_oneshot_books_after_metadata_update(
-            self.db.write_pool(),
-            self.index_dir.as_path(),
-            series_id,
-        )
-        .await
+        self.search_sync()
+            .refresh_series_after_metadata_update(series_id)
+            .await
     }
 }
 
@@ -270,23 +276,11 @@ impl CollectionPort for DiscoveryDetailAccess {
     }
 
     async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
-        sync_entity_upsert_from_database(
-            self.db.write_pool(),
-            self.index_dir.as_path(),
-            SearchEntityType::Collection,
-            collection_id,
-        )
-        .await
+        self.search_sync().upsert_collection(collection_id).await
     }
 
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
-        sync_entity_delete_from_index(
-            self.db.write_pool(),
-            self.index_dir.as_path(),
-            SearchEntityType::Collection,
-            collection_id,
-        )
-        .await
+        self.search_sync().delete_collection(collection_id).await
     }
 }
 
@@ -361,22 +355,10 @@ impl ReadlistPort for DiscoveryDetailAccess {
     }
 
     async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
-        sync_entity_upsert_from_database(
-            self.db.write_pool(),
-            self.index_dir.as_path(),
-            SearchEntityType::ReadList,
-            readlist_id,
-        )
-        .await
+        self.search_sync().upsert_readlist(readlist_id).await
     }
 
     async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
-        sync_entity_delete_from_index(
-            self.db.write_pool(),
-            self.index_dir.as_path(),
-            SearchEntityType::ReadList,
-            readlist_id,
-        )
-        .await
+        self.search_sync().delete_readlist(readlist_id).await
     }
 }

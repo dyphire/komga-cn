@@ -8,8 +8,6 @@ use sqlx::{Row, SqlitePool};
 use tokio::fs;
 
 use super::*;
-use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::sync::sync_entity_delete_from_index;
 
 pub(super) async fn delete_book_task(
     runtime: &JobRuntime<'_>,
@@ -100,16 +98,11 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    if runtime.search().owns_search_index() {
-        sync_entity_delete_from_index(
-            runtime.database().read_pool(),
-            runtime.search().lucene_data_directory(),
-            SearchEntityType::Book,
-            book_id,
-        )
+    runtime
+        .search_sync()
+        .delete_book(book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
-    }
 
     emit_book_changed_after_file_delete(book_id, &context.series_id, &context.library_id);
 
@@ -271,26 +264,17 @@ pub(super) async fn delete_series(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    if runtime.search().owns_search_index() {
-        for book_id in &work.book_ids {
-            sync_entity_delete_from_index(
-                runtime.database().read_pool(),
-                runtime.search().lucene_data_directory(),
-                SearchEntityType::Book,
-                book_id,
-            )
+    let search_sync = runtime.search_sync();
+    for book_id in &work.book_ids {
+        search_sync
+            .delete_book(book_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
-        }
-        sync_entity_delete_from_index(
-            runtime.database().read_pool(),
-            runtime.search().lucene_data_directory(),
-            SearchEntityType::Series,
-            series_id,
-        )
+    }
+    search_sync
+        .delete_series(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
-    }
 
     emit_series_changed_after_file_delete(series_id, &context.library_id);
 

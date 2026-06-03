@@ -1,11 +1,6 @@
 use super::*;
 use std::collections::BTreeSet;
 
-use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::sync::{
-    sync_entity_upsert_from_database, sync_series_and_oneshot_books_after_metadata_update,
-};
-
 pub(super) async fn refresh_book_metadata(
     runtime: &JobRuntime<'_>,
     book_id: &str,
@@ -23,25 +18,16 @@ pub(super) async fn refresh_book_metadata(
     .await
     .map_err(TaskProcessingError::runtime)?;
 
-    if runtime.search().owns_search_index() {
-        sync_entity_upsert_from_database(
-            runtime.database().read_pool(),
-            runtime.search().lucene_data_directory(),
-            SearchEntityType::Book,
-            book_id,
-        )
+    let search_sync = runtime.search_sync();
+    search_sync
+        .upsert_book(book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
-        for readlist_id in &outcome.changed_readlist_ids {
-            sync_entity_upsert_from_database(
-                runtime.database().read_pool(),
-                runtime.search().lucene_data_directory(),
-                SearchEntityType::ReadList,
-                readlist_id,
-            )
+    for readlist_id in &outcome.changed_readlist_ids {
+        search_sync
+            .upsert_readlist(readlist_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
-        }
     }
 
     Ok(outcome.series_id)
@@ -59,15 +45,11 @@ pub(super) async fn refresh_series_metadata(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    if runtime.search().owns_search_index() {
-        sync_series_and_oneshot_books_after_metadata_update(
-            runtime.database().read_pool(),
-            runtime.search().lucene_data_directory(),
-            series_id,
-        )
+    runtime
+        .search_sync()
+        .refresh_series_after_metadata_update(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
-    }
 
     Ok(())
 }
@@ -84,16 +66,11 @@ pub(super) async fn aggregate_series_metadata(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    if runtime.search().owns_search_index() {
-        sync_entity_upsert_from_database(
-            runtime.database().read_pool(),
-            runtime.search().lucene_data_directory(),
-            SearchEntityType::Series,
-            series_id,
-        )
+    runtime
+        .search_sync()
+        .upsert_series(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
-    }
 
     Ok(())
 }

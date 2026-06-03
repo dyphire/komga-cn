@@ -4,31 +4,24 @@ use async_trait::async_trait;
 use komga_application::media_assets::metadata_writer::SearchSyncPort;
 use sqlx::SqlitePool;
 
-use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::sync::sync_entity_upsert_from_database;
+use crate::search::sync::SearchIndexSync;
 
 #[derive(Clone)]
 pub struct SearchSyncAdapter {
-    pool: SqlitePool,
-    index_dir: PathBuf,
+    search_sync: SearchIndexSync,
 }
 
 impl SearchSyncAdapter {
-    pub fn new(pool: SqlitePool, index_dir: PathBuf) -> Self {
-        Self { pool, index_dir }
+    pub fn new(pool: SqlitePool, index_dir: PathBuf, owns_search_index: bool) -> Self {
+        Self {
+            search_sync: SearchIndexSync::new(pool, index_dir, owns_search_index),
+        }
     }
 }
 
 #[async_trait]
 impl SearchSyncPort for SearchSyncAdapter {
     async fn sync_book(&self, book_id: &str) -> Result<(), String> {
-        sync_entity_upsert_from_database(
-            &self.pool,
-            &self.index_dir,
-            SearchEntityType::Book,
-            book_id,
-        )
-        .await
-        .map(|_| ())
+        self.search_sync.upsert_book(book_id).await.map(|_| ())
     }
 }

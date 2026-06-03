@@ -2,7 +2,6 @@ mod books;
 mod browse;
 pub mod browse_engine;
 mod detail_port;
-mod index_maintenance;
 mod read_models;
 mod readlists;
 mod request_resolution;
@@ -23,10 +22,6 @@ pub use detail_port::{
     PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
     ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort, SeriesMetadataLinkRecord,
     SeriesMetadataUpdateRecord,
-};
-pub use index_maintenance::{
-    DiscoveryIndexDocument, DiscoveryIndexEntityType, DiscoveryIndexError, DiscoveryIndexEvent,
-    DiscoveryIndexLifecyclePort, DiscoveryIndexMaintenance, DiscoveryIndexStartupState,
 };
 pub use read_models::{
     BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,

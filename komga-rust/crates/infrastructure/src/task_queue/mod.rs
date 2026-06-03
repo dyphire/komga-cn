@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use crate::search::runtime_tasks::{
     AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
-    rebuild_index_from_database_for_entities,
 };
 use komga_application::task_processing::{
     TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError, TaskQueueOrchestrator,

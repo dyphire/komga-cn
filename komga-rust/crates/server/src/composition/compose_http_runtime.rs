@@ -13,6 +13,7 @@ use komga_application::operational::{
 };
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
+use komga_config::writer_ownership::WriterKind;
 use komga_infrastructure::content_resolver::ContentResolver;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
@@ -64,9 +65,13 @@ pub fn compose_http_runtime(
     let identity = IdentityState::new(Arc::new(IdentityAccess::new(db.clone())));
     let operational_runtime_service: Arc<dyn OperationalMetricsPort> =
         Arc::new(OperationalMetricsAccess::new(db.clone(), tasks_db));
+    let owns_search_index = config
+        .writer_decision(WriterKind::SearchIndex)
+        .allows_write();
     let discovery_detail_access = Arc::new(DiscoveryDetailAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
+        owns_search_index,
     ));
     let book_detail: Arc<dyn BookDetailPort> = discovery_detail_access.clone();
     let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
@@ -121,6 +126,7 @@ pub fn compose_http_runtime(
         Box::new(SearchSyncAdapter::new(
             db.write_pool().clone(),
             config.lucene_data_directory.clone(),
+            owns_search_index,
         )),
         Box::new(TaskEnqueueAdapter::new(task_engine_arc.clone())),
         Box::new(SseBookEventEmitter),

@@ -2,7 +2,6 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 
-use super::index_lifecycle::SearchEntityType;
 mod rebuild;
 
 #[cfg(test)]
@@ -40,14 +39,6 @@ pub async fn rebuild_index_from_database(
     index_dir: &Path,
 ) -> Result<(), String> {
     rebuild::rebuild_index_from_database(pool, index_dir).await
-}
-
-pub async fn rebuild_index_from_database_for_entities(
-    pool: &SqlitePool,
-    index_dir: &Path,
-    entity_types: Option<&[SearchEntityType]>,
-) -> Result<(), String> {
-    rebuild::rebuild_index_from_database_for_entities(pool, index_dir, entity_types).await
 }
 
 pub async fn analyze_book_input(
