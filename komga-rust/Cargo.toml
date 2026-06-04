@@ -55,7 +55,7 @@ image = "0.25.8"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }
 language-tags = "0.3.2"
-rusqlite = "0.37.0"
+rusqlite = "0.39.0"
 pdfium-render = { version = "0.9.1", features = ["thread_safe"] }
 unrar = "0.5.8"
 unicode-normalization = "0.1.24"
