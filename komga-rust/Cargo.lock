@@ -2600,7 +2600,7 @@ name = "komga-build-support"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rusqlite",
  "serde_json",
  "tar",
@@ -2645,7 +2645,7 @@ dependencies = [
  "pdfium-render",
  "quick-xml",
  "regex",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rusqlite",
  "rxing",
  "serde",
@@ -2687,7 +2687,7 @@ dependencies = [
  "oauth2",
  "quick-xml",
  "regex",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2746,7 +2746,7 @@ dependencies = [
  "lopdf",
  "mimalloc",
  "openidconnect",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2785,7 +2785,7 @@ dependencies = [
  "lopdf",
  "oauth2",
  "quick-xml",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4204,9 +4204,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
