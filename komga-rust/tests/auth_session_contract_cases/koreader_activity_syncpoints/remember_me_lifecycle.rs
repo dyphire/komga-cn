@@ -1,4 +1,4 @@
-use super::sse_events::{parse_event_log, read_sse_until};
+use super::sse_events::{parse_event_log, read_initial_sse_heartbeat, read_sse_until_buffered};
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
@@ -97,33 +97,34 @@ pub(crate) async fn verify_password_change_invalidates_existing_remember_me_cook
         .expect("member lifecycle sse request should complete");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let admin_app = app.clone();
     let password_update_uri = format!("/api/v2/users/{logged_in_member_user_id}/password");
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = admin_app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri(password_update_uri)
-                    .header("x-auth-token", &admin_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({ "password": "updated-password-123" }).to_string(),
-                    ))
-                    .expect("remember-me password reset request should build"),
-            )
-            .await
-            .expect("remember-me password reset request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(password_update_uri)
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "password": "updated-password-123" }).to_string(),
+                ))
+                .expect("remember-me password reset request should build"),
+        )
+        .await
+        .expect("remember-me password reset request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: SessionExpired"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("remember-me lifecycle sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -289,39 +290,40 @@ pub(crate) async fn verify_admin_user_update_expires_sessions_and_emits_session_
         .expect("admin user update lifecycle sse request should complete");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let admin_app = app.clone();
     let user_update_uri = format!("/api/v2/users/{member_user_id}");
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = admin_app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri(user_update_uri)
-                    .header("x-auth-token", &admin_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({
-                            "sharedLibraries": {
-                                "all": false,
-                                "libraryIds": ["library-2"]
-                            }
-                        })
-                        .to_string(),
-                    ))
-                    .expect("admin user update request should build"),
-            )
-            .await
-            .expect("admin user update request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(user_update_uri)
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "sharedLibraries": {
+                            "all": false,
+                            "libraryIds": ["library-2"]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("admin user update request should build"),
+        )
+        .await
+        .expect("admin user update request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: SessionExpired"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("admin user update sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -387,30 +389,31 @@ async fn user_deletion_invalidates_existing_session_and_remember_me_and_emits_se
         .expect("member delete lifecycle sse request should complete");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let admin_app = app.clone();
     let user_delete_uri = format!("/api/v2/users/{logged_in_member_user_id}");
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = admin_app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(user_delete_uri)
-                    .header("x-auth-token", &admin_token)
-                    .body(Body::empty())
-                    .expect("remember-me user delete request should build"),
-            )
-            .await
-            .expect("remember-me user delete request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(user_delete_uri)
+                .header("x-auth-token", &admin_token)
+                .body(Body::empty())
+                .expect("remember-me user delete request should build"),
+        )
+        .await
+        .expect("remember-me user delete request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: SessionExpired"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("delete lifecycle sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {

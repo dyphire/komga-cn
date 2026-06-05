@@ -11,16 +11,27 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MEMBER_PASSWORD: &str = "router-contract-member-123";
 
 pub(super) async fn read_sse_until(
-    mut body: axum::body::Body,
+    body: axum::body::Body,
     predicate: impl Fn(&str) -> bool,
     timeout: Duration,
 ) -> String {
-    let deadline = tokio::time::Instant::now() + timeout;
+    let mut body = body;
     let mut buffer = String::new();
+    read_sse_until_buffered(&mut body, &mut buffer, predicate, timeout).await;
+    buffer
+}
+
+pub(super) async fn read_sse_until_buffered(
+    body: &mut axum::body::Body,
+    buffer: &mut String,
+    predicate: impl Fn(&str) -> bool,
+    timeout: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + timeout;
 
     loop {
-        if predicate(&buffer) {
-            return buffer;
+        if predicate(buffer.as_str()) {
+            return;
         }
 
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -41,6 +52,18 @@ pub(super) async fn read_sse_until(
     }
 }
 
+pub(super) async fn read_initial_sse_heartbeat(body: &mut axum::body::Body) -> String {
+    let mut buffer = String::new();
+    read_sse_until_buffered(
+        body,
+        &mut buffer,
+        |raw| raw.contains(": heartbeat"),
+        Duration::from_secs(1),
+    )
+    .await;
+    buffer
+}
+
 pub(super) async fn read_sse_until_after_clock_advance(
     body: axum::body::Body,
     predicate: impl Fn(&str) -> bool + Send + 'static,
@@ -52,6 +75,27 @@ pub(super) async fn read_sse_until_after_clock_advance(
     tokio::task::yield_now().await;
     tokio::time::advance(advance).await;
     reader.await.expect("sse reader should complete")
+}
+
+pub(super) async fn read_sse_until_after_clock_advance_buffered(
+    body: &mut axum::body::Body,
+    buffer: &mut String,
+    predicate: impl Fn(&str) -> bool,
+    timeout: Duration,
+    advance: Duration,
+) {
+    tokio::time::pause();
+    let reader = read_sse_until_buffered(body, buffer, predicate, timeout);
+    tokio::pin!(reader);
+    tokio::select! {
+        () = &mut reader => {}
+        () = async {
+            tokio::task::yield_now().await;
+            tokio::time::advance(advance).await;
+        } => {
+            reader.await;
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -290,33 +334,32 @@ async fn router_sse_events_emit_library_changed_without_five_second_poll_delay()
         .await
         .expect("sse library change request should complete");
 
-    let update_app = app.clone();
-    let update_auth_token = auth_token.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = update_app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/libraries/library-1")
-                    .header("x-auth-token", &update_auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({ "name": "Updated Library 1" }).to_string(),
-                    ))
-                    .expect("sse library patch request should build"),
-            )
-            .await
-            .expect("sse library patch request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "name": "Updated Library 1" }).to_string(),
+                ))
+                .expect("sse library patch request should build"),
+        )
+        .await
+        .expect("sse library patch request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: LibraryChanged"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("library change sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -349,21 +392,20 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
         .await
         .expect("sse successful book import request should complete");
 
-    let update_main_db = ctx.paths().main_db.clone();
-    let import_source = source_file.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        import_book_for_sse(update_main_db.as_path(), import_source.as_path(), true)
-            .await
-            .expect("runtime import should succeed");
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    import_book_for_sse(ctx.paths().main_db.as_path(), source_file.as_path(), true)
+        .await
+        .expect("runtime import should succeed");
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: BookImported") && raw.contains("\"success\":true"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("successful book import sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -404,21 +446,20 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
         .await
         .expect("sse failed book import request should complete");
 
-    let update_main_db = ctx.paths().main_db.clone();
-    let import_source = source_file.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        import_book_for_sse(update_main_db.as_path(), import_source.as_path(), false)
-            .await
-            .expect("runtime import should fail");
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    import_book_for_sse(ctx.paths().main_db.as_path(), source_file.as_path(), false)
+        .await
+        .expect("runtime import should fail");
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: BookImported") && raw.contains("\"success\":false"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("failed book import sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -470,33 +511,33 @@ async fn router_sse_events_emit_session_expired_for_invalidated_user_sessions() 
         .await
         .expect("member sse request should complete");
 
-    let admin_app = app.clone();
     let password_update_uri = format!("/api/v2/users/{member_user_id}/password");
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = admin_app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri(password_update_uri)
-                    .header("x-auth-token", &admin_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({ "password": "updated-password-123" }).to_string(),
-                    ))
-                    .expect("admin password reset request should build"),
-            )
-            .await
-            .expect("admin password reset request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(password_update_uri)
+                .header("x-auth-token", &admin_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "password": "updated-password-123" }).to_string(),
+                ))
+                .expect("admin password reset request should build"),
+        )
+        .await
+        .expect("admin password reset request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: SessionExpired"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("session expired sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -576,30 +617,30 @@ async fn router_sse_events_emit_session_expired_when_admin_deletes_user() {
         .await
         .expect("member delete-target sse request should complete");
 
-    let admin_app = app.clone();
     let user_delete_uri = format!("/api/v2/users/{member_user_id}");
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = admin_app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(user_delete_uri)
-                    .header("x-auth-token", &admin_token)
-                    .body(Body::empty())
-                    .expect("admin user delete request should build"),
-            )
-            .await
-            .expect("admin user delete request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(user_delete_uri)
+                .header("x-auth-token", &admin_token)
+                .body(Body::empty())
+                .expect("admin user delete request should build"),
+        )
+        .await
+        .expect("admin user delete request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until(
-        response.into_body(),
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.contains("event: SessionExpired"),
         Duration::from_secs(3),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("delete session expired sse body should parse");
     assert!(
         parsed.events.iter().any(|event| {
@@ -643,34 +684,33 @@ async fn router_sse_events_do_not_emit_session_expired_when_user_changes_own_pas
         .expect("self-password sse request should complete");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let update_app = app.clone();
-    let update_token = member_token.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let response = update_app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v2/users/me/password")
-                    .header("x-auth-token", &update_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({ "password": "router-contract-member-456" }).to_string(),
-                    ))
-                    .expect("self password update request should build"),
-            )
-            .await
-            .expect("self password update request should complete");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    });
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v2/users/me/password")
+                .header("x-auth-token", &member_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "password": "router-contract-member-456" }).to_string(),
+                ))
+                .expect("self password update request should build"),
+        )
+        .await
+        .expect("self password update request should complete");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let body = read_sse_until_after_clock_advance(
-        response.into_body(),
+    read_sse_until_after_clock_advance_buffered(
+        &mut body,
+        &mut body_buffer,
         |raw| raw.lines().filter(|line| *line == ": heartbeat").count() >= 2,
         Duration::from_secs(17),
         Duration::from_secs(16),
     )
     .await;
+    let body = body_buffer;
     let parsed = parse_event_log(&body).expect("self-password sse body should parse");
     assert!(
         parsed
