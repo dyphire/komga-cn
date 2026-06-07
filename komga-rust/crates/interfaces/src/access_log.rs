@@ -13,7 +13,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Span;
 
-use crate::state::{HttpServerRequestMetricKey, HttpServerRequestsState};
+use komga_application::operational::{HttpServerRequestMetricKey, HttpServerRequestsState};
 
 const ANONYMOUS_USER_ID: &str = "anonymous";
 static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);

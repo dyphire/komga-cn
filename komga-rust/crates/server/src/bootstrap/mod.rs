@@ -3,13 +3,13 @@ use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
+use komga_application::operational::StartupTimingState;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
 use komga_infrastructure::operational_access::load_server_settings;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_interfaces::state::StartupTimingState;
 
 pub mod admin_cli;
 pub mod noclaim_bootstrap;

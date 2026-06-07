@@ -40,12 +40,6 @@ async-trait.workspace = true
 zip.workspace = true
 unicode-normalization.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-
 [dev-dependencies]
 komga-infrastructure = { path = "../infrastructure" }
 sqlx.workspace = true

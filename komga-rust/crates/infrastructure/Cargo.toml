@@ -35,5 +35,11 @@ unrar.workspace = true
 unicode-normalization.workspace = true
 zip.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [build-dependencies]
 komga-build-support = { path = "../build-support" }

@@ -8,7 +8,8 @@ use komga_application::discovery::{
 };
 use komga_application::media_assets::{MediaImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
-    OperationalMetricsPort, PageHashService, RemoteFeedService, ServerSettingsService,
+    ActuatorRuntimeMetadata, ActuatorSnapshotPort, HttpServerRequestsState, OperationalMetricsPort,
+    PageHashService, RemoteFeedService, ServerSettingsService, StartupTimingState,
     TransientBookService,
 };
 use komga_config::env_config::RuntimeConfig;
@@ -31,6 +32,7 @@ use komga_infrastructure::operational_access::{
     FontAccess, HistoryAccess, PageHashAccess, RemoteFeedAccess, SyncpointAccess,
     TransientBookAccess,
 };
+use komga_infrastructure::operational_actuator_access::ActuatorSnapshotAccess;
 use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
 use komga_infrastructure::progress_writer::ProgressWriter;
 use komga_infrastructure::runtime_identity_access::IdentityAccess;
@@ -41,9 +43,9 @@ use komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter;
 use komga_infrastructure::thumbnail_writer::ThumbnailWriter;
 use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
-    AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServerRequestsState, HttpServices,
-    IdentityState, OAuth2ClientConfig, OperationalBuildMetadata, OperationalState,
-    ReadProgressState, RuntimeProfile, RuntimeState, SseOperationalState, StartupTimingState,
+    AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServices, IdentityState,
+    OAuth2ClientConfig, OperationalBuildMetadata, OperationalState, ReadProgressState,
+    RuntimeProfile, RuntimeState, SseOperationalState,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -145,6 +147,22 @@ pub fn compose_http_runtime(
         media_reader;
     let progress_writer: Arc<dyn komga_application::media_assets::ProgressWriterPort> =
         Arc::new(ProgressWriter::new(db.write_pool().clone()));
+    let http_server_requests = HttpServerRequestsState::default();
+    let build_metadata = current_build_metadata();
+    let actuator_snapshots: Arc<dyn ActuatorSnapshotPort> = Arc::new(ActuatorSnapshotAccess::new(
+        ActuatorRuntimeMetadata {
+            main_db_file: db.database_file().to_path_buf(),
+            tasks_db_file: config.tasks_db_file.clone(),
+            config_dir: config.config_dir.clone(),
+            build_version: build_metadata.version.clone(),
+            build_time: build_metadata.build_time.clone(),
+            git_branch: build_metadata.git_branch.clone(),
+            git_commit_id: build_metadata.git_commit_id.clone(),
+            git_commit_time: build_metadata.git_commit_time.clone(),
+        },
+        startup_timing.clone(),
+        http_server_requests.clone(),
+    ));
     let services = HttpServices {
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
@@ -158,6 +176,7 @@ pub fn compose_http_runtime(
         )),
         identity,
         operational_runtime: operational_runtime_service,
+        actuator_snapshots,
         remote_feeds,
         claim: Arc::new(ClaimAccess::new(db.clone())),
         client_settings: Arc::new(ClientSettingsAccess::new(db.clone())),
@@ -195,6 +214,8 @@ pub fn compose_http_runtime(
     let operational = compose_operational_state(
         config,
         startup_timing,
+        http_server_requests,
+        build_metadata,
         remember_me_runtime_key,
         shutdown_trigger,
     );
@@ -256,10 +277,11 @@ fn compose_discovery_browse_service(
 fn compose_operational_state(
     config: &RuntimeConfig,
     startup_timing: StartupTimingState,
+    http_server_requests: HttpServerRequestsState,
+    build_metadata: crate::build_metadata::BuildMetadata,
     remember_me_runtime_key: String,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
-    let build_metadata = current_build_metadata();
     OperationalState {
         runtime: RuntimeState {
             tasks_db_file: config.tasks_db_file.clone(),
@@ -273,7 +295,7 @@ fn compose_operational_state(
             configuration_server_context_path: config.configuration_server_context_path.clone(),
         },
         startup_timing,
-        http_server_requests: HttpServerRequestsState::default(),
+        http_server_requests,
         remember_me_runtime_key,
         build_metadata: OperationalBuildMetadata {
             version: build_metadata.version,

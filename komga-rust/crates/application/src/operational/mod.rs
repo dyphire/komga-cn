@@ -1,10 +1,14 @@
 mod actuator_contract;
+mod actuator_service;
+#[cfg(test)]
+mod actuator_service_tests;
 mod metrics_port;
 mod page_hashes;
 pub mod ports;
 mod remote_feeds;
 mod server_settings;
 mod server_settings_port;
+mod telemetry;
 mod transient_books;
 
 pub use actuator_contract::{
@@ -14,6 +18,7 @@ pub use actuator_contract::{
     actuator_health_payload, actuator_info_payload, actuator_metric_query_tags,
     actuator_metrics_index_payload, actuator_root_payload,
 };
+pub use actuator_service::{ActuatorService, ActuatorSnapshotPort};
 pub use metrics_port::{OperationalMetricsPort, SqlitePoolSnapshot};
 pub use page_hashes::{PageHashDeleteError, PageHashDeleteMatch, PageHashService};
 pub use ports::{
@@ -28,6 +33,10 @@ pub use server_settings::{
     ServerSettingsUpdateCommand, ServerSettingsUpdateError,
 };
 pub use server_settings_port::ServerSettingsPort;
+pub use telemetry::{
+    ActuatorRuntimeMetadata, HttpServerRequestMetricKey, HttpServerRequestMetricSummary,
+    HttpServerRequestsState, StartupTimingSnapshot, StartupTimingState,
+};
 pub use transient_books::{
     TransientBookPageContent, TransientBookPageError, TransientBookRecord, TransientBookScanError,
     TransientBookService, TransientBooksStore,

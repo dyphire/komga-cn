@@ -323,7 +323,7 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
     use axum::http::Method;
     use axum::routing::get;
     use http_body::Frame;
-    use komga_interfaces::state::HttpServerRequestsState;
+    use komga_application::operational::HttpServerRequestsState;
     use tower_http::trace::TraceLayer;
 
     struct FailingBody {

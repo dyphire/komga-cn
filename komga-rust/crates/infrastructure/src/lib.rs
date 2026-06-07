@@ -21,6 +21,7 @@ pub mod opds_catalog_access;
 pub mod opds_manifest_access;
 pub mod opds_persisted_access;
 pub mod operational_access;
+pub mod operational_actuator_access;
 pub mod operational_metrics_access;
 pub mod page_hashes_access;
 mod parsing;

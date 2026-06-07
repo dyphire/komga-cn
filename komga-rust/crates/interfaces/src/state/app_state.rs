@@ -3,6 +3,7 @@ use komga_application::discovery::{
     BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService, ReadlistPort,
     SeriesDetailPort,
 };
+use komga_application::operational::{HttpServerRequestsState, StartupTimingState};
 
 #[derive(Clone)]
 pub struct HttpServices {
@@ -12,6 +13,7 @@ pub struct HttpServices {
     pub server_settings_control: Arc<komga_application::operational::ServerSettingsService>,
     pub identity: IdentityState,
     pub operational_runtime: Arc<dyn komga_application::operational::OperationalMetricsPort>,
+    pub actuator_snapshots: Arc<dyn komga_application::operational::ActuatorSnapshotPort>,
     pub remote_feeds: Arc<komga_application::operational::RemoteFeedService>,
     pub claim: Arc<dyn komga_application::operational::ClaimPort>,
     pub client_settings: Arc<dyn komga_application::operational::ClientSettingsPort>,

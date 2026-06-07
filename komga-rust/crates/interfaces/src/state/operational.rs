@@ -2,18 +2,18 @@ use super::*;
 use axum::extract::FromRef;
 
 use komga_application::operational::{
-    ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort, HistoryPort,
-    OperationalMetricsPort, PageHashPort, PageHashService, RemoteFeedService,
+    ActuatorSnapshotPort, ClaimPort, ClientSettingsPort, FilesystemBrowsePort, FontPort,
+    HistoryPort, OperationalMetricsPort, PageHashPort, PageHashService, RemoteFeedService,
     ServerSettingsService, SyncpointPort, TransientBookService,
 };
 
 #[derive(Clone)]
 pub struct OperationalApiState {
-    pub(crate) auth_db: AuthDatabaseState,
     pub(crate) operational: OperationalState,
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
     pub(crate) operational_runtime: Arc<dyn OperationalMetricsPort>,
+    pub(crate) actuator_snapshots: Arc<dyn ActuatorSnapshotPort>,
     pub(crate) remote_feeds: Arc<RemoteFeedService>,
     pub(crate) claim: Arc<dyn ClaimPort>,
     pub(crate) client_settings: Arc<dyn ClientSettingsPort>,
@@ -29,11 +29,11 @@ pub struct OperationalApiState {
 impl FromRef<Arc<HttpAppState>> for OperationalApiState {
     fn from_ref(app: &Arc<HttpAppState>) -> Self {
         Self {
-            auth_db: app.auth_db.clone(),
             operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             task_queue: TaskQueueState::from_ref(app),
             operational_runtime: app.services.operational_runtime.clone(),
+            actuator_snapshots: app.services.actuator_snapshots.clone(),
             remote_feeds: app.services.remote_feeds.clone(),
             claim: app.services.claim.clone(),
             client_settings: app.services.client_settings.clone(),

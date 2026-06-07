@@ -1,10 +1,11 @@
 use axum::Router;
+use komga_application::operational::StartupTimingState;
 use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::composition::start_server;
 use komga_config::env_config::RuntimeConfig;
-use komga_interfaces::state::{RuntimeProfile, StartupTimingState};
+use komga_interfaces::state::RuntimeProfile;
 
 pub async fn build_router(config: &RuntimeConfig) -> std::io::Result<Router> {
     let startup_timing = StartupTimingState::default();

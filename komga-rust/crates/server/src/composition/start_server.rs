@@ -1,6 +1,6 @@
 use axum::Router;
+use komga_application::operational::StartupTimingState;
 use komga_infrastructure::sqlite::close_all_shared_pools;
-use komga_interfaces::state::StartupTimingState;
 use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;
 use std::task::Poll;

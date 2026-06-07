@@ -60,6 +60,7 @@ fn actuator_root_links() -> Value {
     )))
 }
 
+#[derive(Clone, Debug)]
 pub struct ActuatorHealthSnapshot {
     pub sqlite_rw_ready: bool,
     pub sqlite_ro_ready: bool,
@@ -68,6 +69,7 @@ pub struct ActuatorHealthSnapshot {
     pub disk_space: ActuatorDiskSpaceSnapshot,
 }
 
+#[derive(Clone, Debug)]
 pub struct ActuatorDiskSpaceSnapshot {
     pub total: Option<u64>,
     pub free: Option<u64>,
@@ -216,6 +218,7 @@ pub struct ActuatorProcessMemorySnapshot {
     pub non_heap_max: u64,
 }
 
+#[derive(Clone, Debug)]
 pub struct ActuatorInfoSnapshot {
     pub build: ActuatorBuildInfo,
     pub os: ActuatorOsInfo,

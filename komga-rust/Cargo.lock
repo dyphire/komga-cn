@@ -2641,6 +2641,7 @@ dependencies = [
  "komga-domain",
  "komga-kepubify",
  "language-tags",
+ "libc",
  "lopdf",
  "pdfium-render",
  "quick-xml",
@@ -2657,6 +2658,7 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "unrar",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
@@ -2681,7 +2683,6 @@ dependencies = [
  "komga-kepubify",
  "komga-oauth",
  "language-tags",
- "libc",
  "lopdf",
  "mime_guess",
  "oauth2",
@@ -2699,7 +2700,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "unicode-normalization",
- "windows-sys 0.61.2",
  "zip",
 ]
 
