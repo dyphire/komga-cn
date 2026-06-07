@@ -7,6 +7,10 @@ use crate::task_processing::{
 };
 
 use super::PageHashPort;
+use super::page_hash_models::{
+    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
+    PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+};
 
 const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
 
@@ -68,6 +72,48 @@ impl PageHashService {
         let record = remove_hashed_pages_task(delete_match.book_id, pages);
 
         self.enqueue_remove_hashed_pages(vec![record]).await
+    }
+
+    pub async fn load_page_hashes(
+        &self,
+        query: PageHashKnownQuery,
+    ) -> Result<PageHashPage<PageHashKnownEntry>, String> {
+        self.page_hashes.load_page_hashes_page(query).await
+    }
+
+    pub async fn load_unknown_page_hashes(
+        &self,
+        query: PageHashUnknownQuery,
+    ) -> Result<PageHashPage<PageHashUnknownEntry>, String> {
+        self.page_hashes.load_page_hashes_unknown_page(query).await
+    }
+
+    pub async fn load_page_hash_matches(
+        &self,
+        query: PageHashMatchesQuery,
+    ) -> Result<PageHashPage<PageHashMatchEntry>, String> {
+        self.page_hashes.load_page_hash_matches_page(query).await
+    }
+
+    pub async fn load_page_hash_thumbnail(
+        &self,
+        page_hash: &str,
+    ) -> Result<Option<crate::media_assets::PageHashThumbnail>, String> {
+        self.page_hashes.load_page_hash_thumbnail(page_hash).await
+    }
+
+    pub async fn load_unknown_page_hash_thumbnail(
+        &self,
+        page_hash: &str,
+        resize_to: Option<u32>,
+    ) -> Result<Option<crate::media_assets::PageHashThumbnail>, String> {
+        self.page_hashes
+            .load_unknown_page_hash_thumbnail(page_hash, resize_to)
+            .await
+    }
+
+    pub async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String> {
+        self.page_hashes.upsert_page_hash(command).await
     }
 
     async fn enqueue_remove_hashed_pages(

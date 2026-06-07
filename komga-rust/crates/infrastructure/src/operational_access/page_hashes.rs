@@ -1,5 +1,8 @@
 use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
-use komga_application::operational::PageHashPort;
+use komga_application::operational::{
+    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
+    PageHashPort, PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+};
 
 use crate::database_handle::DatabaseHandle;
 use crate::page_hashes_access;
@@ -19,20 +22,11 @@ impl PageHashAccess {
 impl PageHashPort for PageHashAccess {
     async fn load_page_hash_matches_page(
         &self,
-        page_hash: &str,
-        page: u64,
-        size: u64,
-        sorts: &[String],
-    ) -> Result<serde_json::Value, String> {
-        page_hashes_access::load_page_hash_matches_page(
-            self.db.read_pool(),
-            page_hash,
-            page,
-            size,
-            sorts,
-        )
-        .await
-        .map_err(|e| e.to_string())
+        query: PageHashMatchesQuery,
+    ) -> Result<PageHashPage<PageHashMatchEntry>, String> {
+        page_hashes_access::load_page_hash_matches_page(self.db.read_pool(), query)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn load_page_hash_thumbnail(
@@ -60,23 +54,18 @@ impl PageHashPort for PageHashAccess {
 
     async fn load_page_hashes_page(
         &self,
-        page: u64,
-        size: u64,
-        actions: &[String],
-        sorts: &[String],
-    ) -> Result<serde_json::Value, String> {
-        page_hashes_access::load_page_hashes_page(self.db.read_pool(), page, size, actions, sorts)
+        query: PageHashKnownQuery,
+    ) -> Result<PageHashPage<PageHashKnownEntry>, String> {
+        page_hashes_access::load_page_hashes_page(self.db.read_pool(), query)
             .await
             .map_err(|e| e.to_string())
     }
 
     async fn load_page_hashes_unknown_page(
         &self,
-        page: u64,
-        size: u64,
-        sorts: &[String],
-    ) -> Result<serde_json::Value, String> {
-        page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), page, size, sorts)
+        query: PageHashUnknownQuery,
+    ) -> Result<PageHashPage<PageHashUnknownEntry>, String> {
+        page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), query)
             .await
             .map_err(|e| e.to_string())
     }
@@ -90,20 +79,9 @@ impl PageHashPort for PageHashAccess {
             .map_err(|e| e.to_string())
     }
 
-    async fn upsert_page_hash(
-        &self,
-        hash: &str,
-        size: Option<i64>,
-        action: &str,
-    ) -> Result<(), String> {
-        page_hashes_access::upsert_page_hash(
-            self.db.read_pool(),
-            self.db.write_pool(),
-            hash,
-            size,
-            action,
-        )
-        .await
-        .map_err(|e| e.to_string())
+    async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String> {
+        page_hashes_access::upsert_page_hash(self.db.read_pool(), self.db.write_pool(), command)
+            .await
+            .map_err(|e| e.to_string())
     }
 }

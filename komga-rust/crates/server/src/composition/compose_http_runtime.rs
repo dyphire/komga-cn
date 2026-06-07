@@ -183,7 +183,6 @@ pub fn compose_http_runtime(
         filesystem_browse: Arc::new(FilesystemBrowseAccess),
         fonts: Arc::new(FontAccess),
         history: Arc::new(HistoryAccess::new(db.clone())),
-        page_hashes: page_hashes.clone(),
         page_hash_control: Arc::new(PageHashService::new(page_hashes, task_engine_arc)),
         syncpoints: Arc::new(SyncpointAccess::new(db.clone())),
         transient_books: Arc::new(TransientBookService::new(Arc::new(

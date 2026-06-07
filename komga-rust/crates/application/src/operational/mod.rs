@@ -3,6 +3,7 @@ mod actuator_service;
 #[cfg(test)]
 mod actuator_service_tests;
 mod metrics_port;
+mod page_hash_models;
 mod page_hashes;
 pub mod ports;
 mod remote_feeds;
@@ -20,6 +21,12 @@ pub use actuator_contract::{
 };
 pub use actuator_service::{ActuatorService, ActuatorSnapshotPort};
 pub use metrics_port::{OperationalMetricsPort, SqlitePoolSnapshot};
+pub use page_hash_models::{
+    PageHashAction, PageHashCommandError, PageHashKnownEntry, PageHashKnownQuery,
+    PageHashMatchEntry, PageHashMatchesQuery, PageHashPage, PageHashPageable, PageHashSort,
+    PageHashSortDirection, PageHashSortState, PageHashUnknownEntry, PageHashUnknownQuery,
+    PageHashUpsertCommand,
+};
 pub use page_hashes::{PageHashDeleteError, PageHashDeleteMatch, PageHashService};
 pub use ports::{
     AnnouncementPort, ClaimInitialAdminUserResult, ClaimPort, ClientSettingsPort,

@@ -5,7 +5,10 @@ use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, PageHashDeleteTarget, PageHashThumbnail, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
 };
-use serde_json::Value;
+use komga_application::operational::{
+    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
+    PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+};
 use sqlx::SqlitePool;
 use std::io::Cursor;
 use zip::ZipArchive;
@@ -33,31 +36,23 @@ const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
 
 pub async fn load_page_hashes_page(
     pool: &SqlitePool,
-    page: u64,
-    size: u64,
-    actions: &[String],
-    sorts: &[String],
-) -> Result<Value, sqlx::Error> {
-    load_page_hashes_page_model(pool, page, size, actions, sorts).await
+    query: PageHashKnownQuery,
+) -> Result<PageHashPage<PageHashKnownEntry>, sqlx::Error> {
+    load_page_hashes_page_model(pool, query).await
 }
 
 pub async fn load_page_hashes_unknown_page(
     pool: &SqlitePool,
-    page: u64,
-    size: u64,
-    sorts: &[String],
-) -> Result<Value, sqlx::Error> {
-    load_page_hashes_unknown_page_model(pool, page, size, sorts).await
+    query: PageHashUnknownQuery,
+) -> Result<PageHashPage<PageHashUnknownEntry>, sqlx::Error> {
+    load_page_hashes_unknown_page_model(pool, query).await
 }
 
 pub async fn load_page_hash_matches_page(
     pool: &SqlitePool,
-    page_hash: &str,
-    page: u64,
-    size: u64,
-    sorts: &[String],
-) -> Result<Value, sqlx::Error> {
-    load_page_hash_matches_page_model(pool, page_hash, page, size, sorts).await
+    query: PageHashMatchesQuery,
+) -> Result<PageHashPage<PageHashMatchEntry>, sqlx::Error> {
+    load_page_hash_matches_page_model(pool, query).await
 }
 
 pub async fn load_page_hash_delete_targets(
@@ -154,12 +149,11 @@ pub async fn load_unknown_page_hash_thumbnail(
 pub async fn upsert_page_hash(
     read_pool: &SqlitePool,
     write_pool: &SqlitePool,
-    page_hash: &str,
-    size: Option<i64>,
-    action: &str,
+    command: PageHashUpsertCommand,
 ) -> Result<(), sqlx::Error> {
+    let page_hash = command.hash.as_str();
     let existed = page_hash_exists(read_pool, page_hash).await?;
-    upsert_page_hash_model(write_pool, page_hash, size, action).await?;
+    upsert_page_hash_model(write_pool, &command).await?;
 
     if !existed
         && let Some(thumbnail) = build_known_page_hash_thumbnail(read_pool, page_hash).await?

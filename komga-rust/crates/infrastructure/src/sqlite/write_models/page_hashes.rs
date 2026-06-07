@@ -1,12 +1,10 @@
+use komga_application::operational::PageHashUpsertCommand;
 use sqlx::SqlitePool;
 
 pub async fn upsert_page_hash(
     pool: &SqlitePool,
-    page_hash: &str,
-    size: Option<i64>,
-    action: &str,
+    command: &PageHashUpsertCommand,
 ) -> Result<(), sqlx::Error> {
-    let normalized_size = size.filter(|value| *value >= 0);
     sqlx::query(
         r#"
         INSERT INTO PAGE_HASH (HASH, SIZE, ACTION, DELETE_COUNT, CREATED_DATE, LAST_MODIFIED_DATE)
@@ -17,9 +15,9 @@ pub async fn upsert_page_hash(
             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
     "#,
     )
-    .bind(page_hash)
-    .bind(normalized_size)
-    .bind(action)
+    .bind(command.hash.as_str())
+    .bind(command.size)
+    .bind(command.action.as_str())
     .execute(pool)
     .await?;
     Ok(())

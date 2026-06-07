@@ -4,9 +4,11 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::operational::{PageHashDeleteError, PageHashDeleteMatch};
+use komga_application::operational::{
+    PageHashAction, PageHashDeleteError, PageHashDeleteMatch, PageHashKnownQuery,
+    PageHashMatchesQuery, PageHashSort, PageHashUnknownQuery, PageHashUpsertCommand,
+};
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::identity_access::auth::Admin;
 
@@ -24,28 +26,33 @@ struct DeletePageHashMatchRequest {
     media_type: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PutPageHashRequest {
+    hash: String,
+    size: Option<i64>,
+    action: PageHashAction,
+}
+
 pub(crate) async fn get_page_hashes(
     State(app): State<OperationalApiState>,
     _admin: Admin,
     uri: Uri,
 ) -> Response {
     let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
     let actions = match parse_page_hash_actions(query_values(query, "action")) {
         Ok(actions) => actions,
         Err(status) => return status.into_response(),
     };
-    let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .page_hashes
-        .load_page_hashes_page(page, size, &actions, &sorts)
+        .page_hash_control
+        .load_page_hashes(PageHashKnownQuery {
+            page: page_query(query),
+            size: size_query(query),
+            actions,
+            sorts: page_hash_sorts(query),
+        })
         .await
     {
         Ok(page_data) => page_data,
@@ -55,19 +62,32 @@ pub(crate) async fn get_page_hashes(
     Json(page_data).into_response()
 }
 
-fn parse_page_hash_actions(raw_values: Vec<String>) -> Result<Vec<String>, StatusCode> {
+fn parse_page_hash_actions(raw_values: Vec<String>) -> Result<Vec<PageHashAction>, StatusCode> {
     let mut actions = Vec::new();
 
     for raw_value in raw_values {
         for action in raw_value.split(',') {
-            if !matches!(action, "DELETE_MANUAL" | "DELETE_AUTO" | "IGNORE") {
+            let Some(action) = PageHashAction::parse(action) else {
                 return Err(StatusCode::BAD_REQUEST);
-            }
-            actions.push(action.to_string());
+            };
+            actions.push(action);
         }
     }
 
     Ok(actions)
+}
+
+fn page_query(query: &str) -> u64 {
+    query_value(query, "page")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn size_query(query: &str) -> u64 {
+    query_value(query, "size")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(20)
 }
 
 pub(crate) async fn get_page_hashes_unknown(
@@ -76,18 +96,14 @@ pub(crate) async fn get_page_hashes_unknown(
     uri: Uri,
 ) -> Response {
     let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .page_hashes
-        .load_page_hashes_unknown_page(page, size, &sorts)
+        .page_hash_control
+        .load_unknown_page_hashes(PageHashUnknownQuery {
+            page: page_query(query),
+            size: size_query(query),
+            sorts: page_hash_sorts(query),
+        })
         .await
     {
         Ok(page_data) => page_data,
@@ -104,18 +120,15 @@ pub(crate) async fn get_page_hash_matches(
     uri: Uri,
 ) -> Response {
     let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let sorts = query_values(query, "sort");
 
     let page_data = match app
-        .page_hashes
-        .load_page_hash_matches_page(&page_hash, page, size, &sorts)
+        .page_hash_control
+        .load_page_hash_matches(PageHashMatchesQuery {
+            hash: page_hash,
+            page: page_query(query),
+            size: size_query(query),
+            sorts: page_hash_sorts(query),
+        })
         .await
     {
         Ok(page_data) => page_data,
@@ -130,7 +143,11 @@ pub(crate) async fn get_page_hash_thumbnail(
     _admin: Admin,
     AxumPath(page_hash): AxumPath<String>,
 ) -> Response {
-    let thumbnail = match app.page_hashes.load_page_hash_thumbnail(&page_hash).await {
+    let thumbnail = match app
+        .page_hash_control
+        .load_page_hash_thumbnail(&page_hash)
+        .await
+    {
         Ok(Some(thumbnail)) => thumbnail,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -155,7 +172,7 @@ pub(crate) async fn get_page_hash_unknown_thumbnail(
     };
 
     let thumbnail = match app
-        .page_hashes
+        .page_hash_control
         .load_unknown_page_hash_thumbnail(&page_hash, resize_to)
         .await
     {
@@ -176,32 +193,14 @@ pub(crate) async fn put_page_hash(
     _admin: Admin,
     body: Bytes,
 ) -> Response {
-    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
+    let Ok(payload) = serde_json::from_slice::<PutPageHashRequest>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let Some(hash) = payload
-        .get("hash")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    let size = match payload.get("size") {
-        None | Some(Value::Null) => None,
-        Some(value) => match value.as_i64() {
-            Some(size) => Some(size),
-            None => return StatusCode::BAD_REQUEST.into_response(),
-        },
-    };
-    let Some(action) = payload
-        .get("action")
-        .and_then(Value::as_str)
-        .filter(|value| matches!(*value, "DELETE_MANUAL" | "DELETE_AUTO" | "IGNORE"))
-    else {
+    let Ok(command) = PageHashUpsertCommand::new(payload.hash, payload.size, payload.action) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    match app.page_hashes.upsert_page_hash(hash, size, action).await {
+    match app.page_hash_control.upsert_page_hash(command).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -259,4 +258,11 @@ fn page_hash_delete_error_response(error: PageHashDeleteError) -> Response {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+fn page_hash_sorts(query: &str) -> Vec<PageHashSort> {
+    query_values(query, "sort")
+        .into_iter()
+        .filter_map(|value| PageHashSort::parse(&value))
+        .collect()
 }

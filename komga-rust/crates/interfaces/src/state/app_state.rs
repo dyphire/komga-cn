@@ -20,7 +20,6 @@ pub struct HttpServices {
     pub filesystem_browse: Arc<dyn komga_application::operational::FilesystemBrowsePort>,
     pub fonts: Arc<dyn komga_application::operational::FontPort>,
     pub history: Arc<dyn komga_application::operational::HistoryPort>,
-    pub page_hashes: Arc<dyn komga_application::operational::PageHashPort>,
     pub page_hash_control: Arc<komga_application::operational::PageHashService>,
     pub syncpoints: Arc<dyn komga_application::operational::SyncpointPort>,
     pub transient_books: Arc<komga_application::operational::TransientBookService>,
