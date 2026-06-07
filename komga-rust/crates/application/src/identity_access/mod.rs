@@ -1,3 +1,6 @@
+mod device_progress;
+#[cfg(test)]
+mod device_progress_tests;
 mod device_records;
 mod device_tokens;
 mod kobo_sync;
@@ -7,6 +10,10 @@ mod principal_resolution;
 mod session_tokens;
 mod user_models;
 
+pub use device_progress::{
+    DeviceProgressError, DeviceProgressService, KoboReadingStateUpdate, KoreaderProgressSnapshot,
+    KoreaderProgressUpdate,
+};
 pub use device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };

@@ -5,11 +5,11 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::CookieJar;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest,
+    AuthOutcome, AuthUser, DeviceProgressError, DeviceProgressService, KOBO_SYNC_ITEM_LIMIT,
+    KoboLibrarySyncRequest, KoboReadingStateUpdate, KoreaderProgressUpdate,
     build_kobo_book_metadata_payload, build_kobo_library_sync_payload,
     decode_or_passthrough_sync_token, generated_kobo_token_triplet, now_sync_marker, user_id,
 };
-use komga_application::media_assets::BookProgressionInput;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
@@ -22,10 +22,7 @@ use crate::identity_access::auth::{
     session_token_for_user_with_runtime_key, user_has_role, user_is_admin,
 };
 use crate::request_urls::{request_base_url, request_base_url_with_port, request_context_path};
-use crate::state::{
-    IdentityAccessState, IdentityState, KoreaderBookLookupError, KoreaderBookTarget,
-    PersistedReadProgressRecord,
-};
+use crate::state::{IdentityAccessState, IdentityState};
 
 mod auth_resolvers;
 mod helpers;
@@ -166,6 +163,15 @@ fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> 
         return from_header.and_then(|value| decode_or_passthrough_sync_token(value.as_str()));
     }
     None
+}
+
+fn device_progress_service(app: &IdentityAccessState) -> DeviceProgressService<'_> {
+    DeviceProgressService::new(
+        app.identity.device_sync(),
+        app.reader.as_ref(),
+        app.content.as_ref(),
+        app.progress.as_ref(),
+    )
 }
 
 async fn load_kobo_proxy_enabled(

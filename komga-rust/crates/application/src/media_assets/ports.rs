@@ -10,6 +10,12 @@ use super::{
     SeriesThumbnailRecord,
 };
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EpubPositionsExtension {
+    pub positions: Vec<Value>,
+    pub is_fixed_layout: bool,
+}
+
 pub struct BookProgressionInput {
     pub book_id: String,
     pub user_id: String,
@@ -171,7 +177,15 @@ pub trait ContentResolverPort: Send + Sync {
         resource_name: &str,
     ) -> Option<Vec<u8>>;
 
-    fn decode_epub_positions_blob(&self, blob: &[u8]) -> Result<Vec<Value>, String>;
+    fn decode_epub_positions_extension(
+        &self,
+        blob: &[u8],
+    ) -> Result<EpubPositionsExtension, String>;
+
+    fn decode_epub_positions_blob(&self, blob: &[u8]) -> Result<Vec<Value>, String> {
+        self.decode_epub_positions_extension(blob)
+            .map(|extension| extension.positions)
+    }
 
     async fn epub_archive_positions(&self, media: &BookMediaRecord) -> Option<Vec<Value>>;
 

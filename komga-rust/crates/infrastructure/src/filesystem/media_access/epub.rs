@@ -4,7 +4,9 @@ use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 
 use flate2::read::GzDecoder;
-use komga_application::media_assets::{BookMediaRecord, book_media_is_epub};
+use komga_application::media_assets::{
+    BookMediaRecord, EpubPositionsExtension, book_media_is_epub,
+};
 use quick_xml::Reader as XmlReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
@@ -35,7 +37,7 @@ pub async fn read_epub_resource_bytes(epub_path: &Path, resource_name: &str) -> 
     .flatten()
 }
 
-pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
+pub fn decode_epub_positions_extension(blob: &[u8]) -> Result<EpubPositionsExtension, String> {
     let mut decoder = GzDecoder::new(blob);
     let mut decoded = Vec::new();
     decoder
@@ -44,11 +46,24 @@ pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
 
     let extension = serde_json::from_slice::<Value>(&decoded)
         .map_err(|error| format!("parse epub extension blob json: {error}"))?;
-    Ok(extension
+    let positions = extension
         .get("positions")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default())
+        .unwrap_or_default();
+    let is_fixed_layout = extension
+        .get("isFixedLayout")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    Ok(EpubPositionsExtension {
+        positions,
+        is_fixed_layout,
+    })
+}
+
+pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
+    decode_epub_positions_extension(blob).map(|extension| extension.positions)
 }
 
 pub async fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>> {

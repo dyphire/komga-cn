@@ -1,6 +1,6 @@
 use super::epub::{
-    load_epub_locator_for_page, locator_position, locator_progression, progression_bad_request,
-    progression_is_older_than_existing, progression_locator,
+    load_epub_locator_for_page, locator_position, locator_progression, normalize_book_epub_locator,
+    progression_bad_request, progression_is_older_than_existing, progression_locator,
 };
 use super::*;
 use crate::identity_access::auth::Authenticated;
@@ -267,11 +267,17 @@ async fn book_progression_response(
         let Some(locator) = locator else {
             return invalid_progression_payload();
         };
-        let normalized_locator =
-            match normalize_book_epub_locator(app.reader.as_ref(), book_id, locator).await {
-                Ok(locator) => locator,
-                Err(response) => return response,
-            };
+        let normalized_locator = match normalize_book_epub_locator(
+            app.reader.as_ref(),
+            app.content.as_ref(),
+            book_id,
+            locator,
+        )
+        .await
+        {
+            Ok(locator) => locator,
+            Err(response) => return response,
+        };
         let Some(progression) = locator_progression(&normalized_locator) else {
             return invalid_progression_payload();
         };

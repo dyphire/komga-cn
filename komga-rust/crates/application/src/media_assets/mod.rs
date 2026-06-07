@@ -33,8 +33,9 @@ pub use page_retrieval::{
 };
 pub use ports::{
     BookMediaPort, BookProgressionInput, ContentAccessPort, ContentResolverPort,
-    EntityExistencePort, MediaReaderPort, ProgressWriterPort, ReadProgressReadPort,
-    ReadProgressSurfacePort, SeriesRelationPort, ThumbnailReadPort, ThumbnailWriterPort,
+    EntityExistencePort, EpubPositionsExtension, MediaReaderPort, ProgressWriterPort,
+    ReadProgressReadPort, ReadProgressSurfacePort, SeriesRelationPort, ThumbnailReadPort,
+    ThumbnailWriterPort,
 };
 pub use read_progress_service::ReadProgressService;
 pub use thumbnail_operations::{

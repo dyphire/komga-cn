@@ -1,9 +1,6 @@
 use super::*;
 use crate::media_assets::access_control::user_can_access_book_media;
 use crate::media_assets::http_helpers::attachment_disposition;
-use crate::media_assets::read_progress::{
-    normalize_book_epub_locator, progression_is_older_than_existing,
-};
 use crate::state::IdentityAccessState;
 use axum::extract::State;
 mod catch_all;
@@ -36,17 +33,6 @@ async fn load_kobo_metadata_record(
         .await
 }
 
-async fn load_read_progress(
-    app: &IdentityAccessState,
-    book_id: &str,
-    user_id: &str,
-) -> Result<Option<PersistedReadProgressRecord>, String> {
-    app.identity
-        .device_sync()
-        .load_read_progress(book_id, user_id)
-        .await
-}
-
 async fn persisted_book_exists(app: &IdentityAccessState, book_id: &str) -> Result<bool, String> {
     app.identity
         .device_sync()
@@ -61,15 +47,5 @@ async fn load_book_created_timestamp(
     app.identity
         .device_sync()
         .load_book_created_timestamp(book_id)
-        .await
-}
-
-async fn load_book_last_epub_position_locator(
-    app: &IdentityAccessState,
-    book_id: &str,
-) -> Result<Option<Value>, String> {
-    app.identity
-        .device_sync()
-        .load_book_last_epub_position_locator(book_id)
         .await
 }

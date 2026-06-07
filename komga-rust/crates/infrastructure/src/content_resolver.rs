@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use komga_application::media_assets::{BookMediaRecord, BookPageRecord, ContentResolverPort};
+use komga_application::media_assets::{
+    BookMediaRecord, BookPageRecord, ContentResolverPort, EpubPositionsExtension,
+};
 use serde_json::Value;
 
 use crate::filesystem::media_access::epub;
@@ -88,8 +90,11 @@ impl ContentResolverPort for ContentResolver {
         epub::read_epub_resource_bytes(epub_path, resource_name).await
     }
 
-    fn decode_epub_positions_blob(&self, blob: &[u8]) -> Result<Vec<Value>, String> {
-        epub::decode_epub_positions_blob(blob)
+    fn decode_epub_positions_extension(
+        &self,
+        blob: &[u8],
+    ) -> Result<EpubPositionsExtension, String> {
+        epub::decode_epub_positions_extension(blob)
     }
 
     async fn epub_archive_positions(&self, media: &BookMediaRecord) -> Option<Vec<Value>> {

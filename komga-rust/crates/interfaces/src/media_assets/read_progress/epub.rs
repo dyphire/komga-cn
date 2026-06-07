@@ -1,25 +1,5 @@
 use super::*;
-use komga_application::media_assets::MediaReaderPort;
-
-fn decode_epub_extension_positions_and_layout(blob: &[u8]) -> Result<(Vec<Value>, bool), String> {
-    let mut decoder = GzDecoder::new(blob);
-    let mut json = String::new();
-    decoder
-        .read_to_string(&mut json)
-        .map_err(|error| format!("decode epub extension blob: {error}"))?;
-    let payload = serde_json::from_str::<Value>(&json)
-        .map_err(|error| format!("parse epub extension blob json: {error}"))?;
-    let positions = payload
-        .get("positions")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let is_fixed_layout = payload
-        .get("isFixedLayout")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    Ok((positions, is_fixed_layout))
-}
+use komga_application::media_assets::{ContentResolverPort, MediaReaderPort};
 
 pub(super) fn progression_bad_request(message: impl Into<String>) -> Response {
     (
@@ -180,6 +160,7 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
 
 pub(crate) async fn normalize_book_epub_locator(
     reader: &dyn MediaReaderPort,
+    content: &dyn ContentResolverPort,
     book_id: &str,
     locator: &Value,
 ) -> Result<Value, Response> {
@@ -219,10 +200,12 @@ pub(crate) async fn normalize_book_epub_locator(
     let Some((_class, blob)) = extension else {
         return Err(progression_bad_request("Epub extension not found"));
     };
-    let (positions, is_fixed_layout) = match decode_epub_extension_positions_and_layout(&blob) {
+    let extension = match content.decode_epub_positions_extension(&blob) {
         Ok(decoded) => decoded,
         Err(error) => return Err(internal_error_response(error)),
     };
+    let positions = extension.positions;
+    let is_fixed_layout = extension.is_fixed_layout;
 
     if persisted_resource_exists.is_none()
         && !positions
