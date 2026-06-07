@@ -9,6 +9,7 @@ pub mod browser;
 pub mod fonts;
 pub mod import;
 pub mod media_access;
+pub mod media_analysis;
 pub mod transient_books;
 
 pub fn remove_file_after_release(path: &Path) -> io::Result<bool> {

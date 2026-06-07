@@ -1,7 +1,5 @@
-mod archive;
 mod detection;
 mod epub;
-mod image_analysis;
 mod metadata;
 mod pdf;
 
@@ -14,6 +12,9 @@ use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 use zip::ZipArchive;
 
+use crate::filesystem::media_analysis::{
+    AnalyzedMediaPage, MediaAnalysisProfile, MediaFileAnalysis, MediaFileAnalyzer,
+};
 use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_stored_path;
 
@@ -21,7 +22,6 @@ use detection::is_recognized_transient_book_file;
 pub use detection::{transient_book_content_type, transient_book_media_type};
 
 const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
-const KOTLIN_PDF_MIN_EDGE: f64 = 3200.0;
 #[derive(Clone, Debug)]
 pub struct TransientBookFileMetadata {
     pub file_last_modified_unix_nanos: i128,
@@ -172,13 +172,13 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
     }
 
     let analysis_result = if media_type.starts_with("image/") {
-        Ok(image_analysis::analyze_transient_image(path))
+        analyze_transient_media_file(path).map_err(|_| "ERR_1001")
     } else if media_type == "application/epub+zip" {
         return epub::analyze_transient_epub(path).unwrap_or_else(|error_code| {
             transient_analysis_error("ERROR", media_type, error_code)
         });
     } else if media_type == "application/zip" {
-        archive::analyze_transient_zip_archive(path).map_err(|_| "ERR_1008")
+        analyze_transient_media_file(path).map_err(|_| "ERR_1008")
     } else if matches!(
         media_type.as_str(),
         "application/vnd.comicbook-rar"
@@ -186,9 +186,9 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
             | "application/x-rar-compressed; version=4"
             | "application/x-rar-compressed; version=5"
     ) {
-        archive::analyze_transient_rar_archive(path).map_err(|_| "ERR_1008")
+        analyze_transient_media_file(path).map_err(|_| "ERR_1008")
     } else if media_type == "application/pdf" {
-        pdf::analyze_transient_pdf(path).map_err(|_| "ERR_1005")
+        analyze_transient_media_file(path).map_err(|_| "ERR_1005")
     } else {
         return transient_analysis_error("UNSUPPORTED", media_type, "ERR_1001");
     };
@@ -212,6 +212,50 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
         number: None,
         series_id: None,
     }
+}
+
+fn analyze_transient_media_file(
+    path: &str,
+) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
+    let analysis = MediaFileAnalyzer.analyze(Path::new(path), MediaAnalysisProfile::Transient)?;
+    Ok(transient_pages_from_media_analysis(analysis))
+}
+
+fn transient_pages_from_media_analysis(
+    analysis: MediaFileAnalysis,
+) -> (Vec<TransientBookPage>, Vec<String>) {
+    let media_type = analysis.media_type;
+    let pages = analysis
+        .pages
+        .into_iter()
+        .enumerate()
+        .map(|(index, page)| transient_page_from_analyzed_media_page(index, page, &media_type))
+        .collect();
+
+    (pages, analysis.files)
+}
+
+fn transient_page_from_analyzed_media_page(
+    index: usize,
+    page: AnalyzedMediaPage,
+    media_type: &str,
+) -> TransientBookPage {
+    TransientBookPage {
+        number: (index as u32) + 1,
+        file_name: page.file_name,
+        media_type: page.media_type,
+        width: page.width.and_then(|width| width.try_into().ok()),
+        height: page.height.and_then(|height| height.try_into().ok()),
+        size_bytes: transient_page_size_bytes(page.file_size, media_type),
+    }
+}
+
+fn transient_page_size_bytes(file_size: i64, media_type: &str) -> Option<u64> {
+    if media_type == "application/pdf" {
+        return None;
+    }
+
+    file_size.try_into().ok()
 }
 
 fn transient_analysis_error(

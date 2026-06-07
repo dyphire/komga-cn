@@ -6,11 +6,11 @@ use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 use zip::ZipArchive;
 
-use super::image_analysis::image_dimensions_from_bytes;
 use super::{
     EPUB_DIVINA_LETTER_COUNT_THRESHOLD, TransientBookAnalysis, TransientBookPage,
     TransientEpubManifestItem,
 };
+use crate::filesystem::media_analysis::image_dimensions_from_bytes_u32;
 
 pub(super) fn analyze_transient_epub(path: &str) -> Result<TransientBookAnalysis, &'static str> {
     let file = std::fs::File::open(path).map_err(|_| "ERR_1032")?;
@@ -87,7 +87,7 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
         let page = if item.media_type.starts_with("image/") {
             let bytes = read_zip_entry_bytes_normalized(archive, &item.href)
                 .ok_or_else(|| format!("missing epub resource {}", item.href))?;
-            let dimensions = image_dimensions_from_bytes(&bytes);
+            let dimensions = image_dimensions_from_bytes_u32(&bytes);
             TransientBookPage {
                 number: (pages.len() as u32) + 1,
                 file_name: item.href.clone(),
@@ -113,7 +113,7 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
             }
             let image_bytes = read_zip_entry_bytes_normalized(archive, &image_href)
                 .ok_or_else(|| format!("missing epub image resource {image_href}"))?;
-            let dimensions = image_dimensions_from_bytes(&image_bytes);
+            let dimensions = image_dimensions_from_bytes_u32(&image_bytes);
             TransientBookPage {
                 number: (pages.len() as u32) + 1,
                 file_name: image_href,
