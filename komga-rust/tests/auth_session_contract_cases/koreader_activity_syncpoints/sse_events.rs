@@ -1,10 +1,13 @@
 use super::*;
 use http_body_util::BodyExt;
-use komga_application::media_assets::{BooksImportEntry, ImportCopyMode, MediaImportPort};
-use komga_infrastructure::filesystem::import::FilesystemImportPort;
+use komga_application::media_assets::{
+    BookImportService, BooksImportEntry, BooksImportPayload, ImportCopyMode,
+};
+use komga_infrastructure::filesystem::import::FilesystemBookImport;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -228,23 +231,28 @@ async fn import_book_for_sse(
     let pool = komga_infrastructure::sqlite::connect_test_pool(main_db, 1)
         .await
         .map_err(|error| format!("open import db for sse test: {error}"))?;
-    let port = FilesystemImportPort::new(pool.clone(), pool.clone());
-    let result = port
-        .import_book(
-            ImportCopyMode::Copy,
-            BooksImportEntry {
-                source_file: source_file.to_path_buf(),
-                series_id: "series-1".to_string(),
-                destination_name: None,
-                upgrade_book_id: None,
+    let service = BookImportService::new(Arc::new(FilesystemBookImport::new(
+        pool.clone(),
+        pool.clone(),
+    )));
+    let result = service
+        .process_books_payload(
+            BooksImportPayload {
+                copy_mode: ImportCopyMode::Copy,
+                books: vec![BooksImportEntry {
+                    source_file: source_file.to_path_buf(),
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                }],
             },
+            100,
         )
         .await;
     pool.close().await;
 
     match (expected_success, result) {
-        (true, Ok(Some(_))) => Ok(()),
-        (true, Ok(None)) => Err("import unexpectedly returned no-op".to_string()),
+        (true, Ok(_)) => Ok(()),
         (true, Err(error)) => Err(error),
         (false, Err(_)) => Ok(()),
         (false, Ok(_)) => Err("import unexpectedly succeeded".to_string()),

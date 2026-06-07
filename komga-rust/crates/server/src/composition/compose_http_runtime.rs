@@ -6,7 +6,7 @@ use komga_application::discovery::{
     BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
     DiscoverySearchService, ReadlistPort, SeriesDetailPort,
 };
-use komga_application::media_assets::{MediaImportService, MetadataWriter, ReadProgressService};
+use komga_application::media_assets::{BookImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
     ActuatorRuntimeMetadata, ActuatorSnapshotPort, HttpServerRequestsState, OperationalMetricsPort,
     PageHashService, RemoteFeedService, ServerSettingsService, StartupTimingState,
@@ -21,7 +21,7 @@ use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
 use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
 use komga_infrastructure::discovery_persisted_access::search::DiscoverySearchAccess;
 use komga_infrastructure::event_emitter_adapter::SseBookEventEmitter;
-use komga_infrastructure::filesystem::import::FilesystemImportPort;
+use komga_infrastructure::filesystem::import::FilesystemBookImport;
 use komga_infrastructure::library_catalog::LibraryCatalogAccess;
 use komga_infrastructure::media_reader::MediaReader;
 use komga_infrastructure::metadata::SqliteBookMetadataPort;
@@ -206,9 +206,10 @@ pub fn compose_http_runtime(
             progress_writer,
         )),
         metadata_writer,
-        import_service: Arc::new(MediaImportService::new(Arc::new(
-            FilesystemImportPort::new(db.read_pool().clone(), db.write_pool().clone()),
-        ))),
+        import_service: Arc::new(BookImportService::new(Arc::new(FilesystemBookImport::new(
+            db.read_pool().clone(),
+            db.write_pool().clone(),
+        )))),
     };
     let operational = compose_operational_state(
         config,

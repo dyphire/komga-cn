@@ -1,6 +1,6 @@
 use super::JobRuntime;
-use crate::filesystem::import::FilesystemImportPort;
-use komga_application::media_assets::MediaImportService;
+use crate::filesystem::import::FilesystemBookImport;
+use komga_application::media_assets::BookImportService;
 use komga_application::task_processing::{TaskExecutionOutcome, TaskProcessingError};
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ pub(in crate::task_queue) async fn execute_import_book(
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let service = MediaImportService::new(Arc::new(FilesystemImportPort::new(
+    let service = BookImportService::new(Arc::new(FilesystemBookImport::new(
         runtime.database().read_pool().clone(),
         runtime.database().write_pool().clone(),
     )));

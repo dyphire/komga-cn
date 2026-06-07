@@ -38,7 +38,7 @@ pub struct HttpServices {
     pub progress_writer: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
     pub read_progress_service: Arc<komga_application::media_assets::ReadProgressService>,
     pub metadata_writer: Arc<komga_application::media_assets::MetadataWriter>,
-    pub import_service: Arc<komga_application::media_assets::MediaImportService>,
+    pub import_service: Arc<komga_application::media_assets::BookImportService>,
 }
 
 pub struct HttpAppState {

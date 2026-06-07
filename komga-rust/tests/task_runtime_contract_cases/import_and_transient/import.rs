@@ -1,7 +1,7 @@
 use super::*;
 use async_trait::async_trait;
 use komga_application::media_assets::{
-    BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort, MediaImportService,
+    BookImportPort, BookImportService, BooksImportEntry, ImportBookOutcome, ImportCopyMode,
 };
 use std::sync::{Arc, Mutex};
 
@@ -48,7 +48,7 @@ struct RecordingImportPort {
 }
 
 #[async_trait]
-impl MediaImportPort for RecordingImportPort {
+impl BookImportPort for RecordingImportPort {
     async fn import_book(
         &self,
         copy_mode: ImportCopyMode,
@@ -376,7 +376,7 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     let import_row = rows.pop().expect("queued import task row should exist");
 
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let follow_up_tasks = MediaImportService::new(Arc::new(RecordingImportPort {
+    let follow_up_tasks = BookImportService::new(Arc::new(RecordingImportPort {
         calls: calls.clone(),
         outcome: Some(ImportBookOutcome {
             library_id: "library-1".to_string(),

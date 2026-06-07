@@ -13,6 +13,7 @@ use crate::runtime_sse::{
 use crate::task_processing::{SubmitUrgency, TaskKind, TaskQueue, TaskQueueRecord, TaskRequest};
 
 static GENERATED_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+const IMPORT_BOOK_PRIORITY: i32 = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeBookImportEvent {
@@ -84,7 +85,7 @@ pub struct BookImportSubmissionFailure {
 }
 
 #[async_trait]
-pub trait MediaImportPort: Send + Sync {
+pub trait BookImportPort: Send + Sync {
     async fn import_book(
         &self,
         copy_mode: ImportCopyMode,
@@ -92,12 +93,12 @@ pub trait MediaImportPort: Send + Sync {
     ) -> Result<Option<ImportBookOutcome>, String>;
 }
 
-pub struct MediaImportService {
-    port: Arc<dyn MediaImportPort>,
+pub struct BookImportService {
+    port: Arc<dyn BookImportPort>,
 }
 
-impl MediaImportService {
-    pub fn new(port: Arc<dyn MediaImportPort>) -> Self {
+impl BookImportService {
+    pub fn new(port: Arc<dyn BookImportPort>) -> Self {
         Self { port }
     }
 
@@ -111,17 +112,20 @@ impl MediaImportService {
             .into_iter()
             .map(|book| {
                 let group_id = book.series_id.clone();
-                let task_payload = serde_json::to_string(&QueuedBookImportPayload {
-                    copy_mode: payload.copy_mode,
-                    book,
-                })
-                .map_err(|error| format!("serialize books import payload: {error}"))?;
-
-                Ok(TaskRequest::new(TaskKind::ImportBook)
-                    .priority(100)
+                let task_id = next_task_id();
+                let task_record = TaskRequest::new(TaskKind::ImportBook)
+                    .priority(IMPORT_BOOK_PRIORITY)
                     .group(group_id)
-                    .into_queue_record_with_id(&next_task_id())
-                    .with_payload(task_payload))
+                    .into_queue_record_with_id(&task_id);
+                let task_payload = queued_book_import_task_payload(
+                    payload.copy_mode,
+                    &book,
+                    task_record.priority,
+                    task_record.group.as_deref(),
+                    task_record.id.as_str(),
+                );
+
+                Ok(task_record.with_payload(task_payload))
             })
             .collect()
     }
@@ -187,9 +191,27 @@ impl MediaImportService {
 
         for book in payload.books {
             let series_id = book.series_id.clone();
-            let Some(outcome) = self.port.import_book(payload.copy_mode, book).await? else {
-                continue;
+            let source_file = book.source_file.to_string_lossy().to_string();
+            let outcome = match self.port.import_book(payload.copy_mode, book).await {
+                Ok(Some(outcome)) => outcome,
+                Ok(None) => continue,
+                Err(error) => {
+                    register_runtime_book_import_event(
+                        None,
+                        source_file,
+                        false,
+                        Some(error.clone()),
+                    );
+                    return Err(error);
+                }
             };
+            register_runtime_book_import_event(
+                Some(outcome.imported_book_id.clone()),
+                source_file,
+                true,
+                None,
+            );
+            register_runtime_book_added_event(&outcome, series_id.as_str());
             let book_id = outcome.imported_book_id.as_str();
 
             follow_up_tasks.push(import_follow_up_analyze_task(
@@ -225,6 +247,47 @@ impl MediaImportService {
         )
         .await
     }
+}
+
+fn queued_book_import_task_payload(
+    copy_mode: ImportCopyMode,
+    book: &BooksImportEntry,
+    priority: i32,
+    group_id: Option<&str>,
+    unique_id: &str,
+) -> String {
+    json!({
+        "sourceFile": book.source_file.to_string_lossy().to_string(),
+        "seriesId": book.series_id.as_str(),
+        "copyMode": import_copy_mode_str(copy_mode),
+        "destinationName": book.destination_name.as_deref(),
+        "upgradeBookId": book.upgrade_book_id.as_deref(),
+        "priority": priority,
+        "groupId": group_id,
+        "uniqueId": unique_id,
+    })
+    .to_string()
+}
+
+fn import_copy_mode_str(copy_mode: ImportCopyMode) -> &'static str {
+    match copy_mode {
+        ImportCopyMode::Move => "MOVE",
+        ImportCopyMode::Copy => "COPY",
+        ImportCopyMode::Hardlink => "HARDLINK",
+    }
+}
+
+fn register_runtime_book_added_event(outcome: &ImportBookOutcome, series_id: &str) {
+    register_runtime_sse_event(
+        "BookAdded",
+        json!({
+            "bookId": outcome.imported_book_id,
+            "seriesId": series_id,
+            "libraryId": outcome.library_id,
+        }),
+        false,
+        None,
+    );
 }
 
 pub fn parse_books_import_payload(body: &Value) -> Result<BooksImportPayload, String> {
@@ -419,7 +482,19 @@ pub fn pending_runtime_book_import_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    fn import_runtime_sse_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn import_runtime_sse_guard() -> std::sync::MutexGuard<'static, ()> {
+        import_runtime_sse_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn test_waker() -> Waker {
         fn noop(_: *const ()) {}
@@ -444,17 +519,17 @@ mod tests {
 
     #[derive(Clone)]
     struct StubImportPort {
-        outcome: Option<ImportBookOutcome>,
+        result: Result<Option<ImportBookOutcome>, String>,
     }
 
     #[async_trait]
-    impl MediaImportPort for StubImportPort {
+    impl BookImportPort for StubImportPort {
         async fn import_book(
             &self,
             _copy_mode: ImportCopyMode,
             _book: BooksImportEntry,
         ) -> Result<Option<ImportBookOutcome>, String> {
-            Ok(self.outcome.clone())
+            self.result.clone()
         }
     }
 
@@ -492,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_books_import_keeps_later_books_when_earlier_enqueue_fails() {
-        let service = MediaImportService::new(Arc::new(StubImportPort { outcome: None }));
+        let service = BookImportService::new(Arc::new(StubImportPort { result: Ok(None) }));
         let queue = RecordingTaskQueue {
             persisted_ids: std::sync::Mutex::new(Vec::new()),
         };
@@ -563,14 +638,74 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_books_builds_flat_kotlin_task_payload_before_persistence() {
+        let service = BookImportService::new(Arc::new(StubImportPort { result: Ok(None) }));
+        let records = service
+            .enqueue_books(
+                BooksImportPayload {
+                    copy_mode: ImportCopyMode::Hardlink,
+                    books: vec![BooksImportEntry {
+                        source_file: PathBuf::from("/tmp/book-a.cbz"),
+                        series_id: "series-1".to_string(),
+                        destination_name: Some("dest-a".to_string()),
+                        upgrade_book_id: Some("book-1".to_string()),
+                    }],
+                },
+                || "series-1_/tmp/book-a.cbz".to_string(),
+            )
+            .expect("import task should be generated");
+
+        let record = records.into_iter().next().expect("task should exist");
+        let payload = serde_json::from_str::<Value>(
+            record
+                .payload
+                .as_deref()
+                .expect("task payload should exist"),
+        )
+        .expect("task payload should be valid JSON");
+
+        assert_eq!(
+            payload.get("sourceFile").and_then(Value::as_str),
+            Some("/tmp/book-a.cbz")
+        );
+        assert_eq!(
+            payload.get("seriesId").and_then(Value::as_str),
+            Some("series-1")
+        );
+        assert_eq!(
+            payload.get("copyMode").and_then(Value::as_str),
+            Some("HARDLINK")
+        );
+        assert_eq!(
+            payload.get("destinationName").and_then(Value::as_str),
+            Some("dest-a"),
+        );
+        assert_eq!(
+            payload.get("upgradeBookId").and_then(Value::as_str),
+            Some("book-1"),
+        );
+        assert_eq!(payload.get("priority").and_then(Value::as_i64), Some(100));
+        assert_eq!(
+            payload.get("groupId").and_then(Value::as_str),
+            Some("series-1")
+        );
+        assert_eq!(
+            payload.get("uniqueId").and_then(Value::as_str),
+            Some("ImportBook_series-1_/tmp/book-a.cbz"),
+        );
+        assert!(payload.get("book").is_none());
+        assert!(payload.get("books").is_none());
+    }
+
+    #[test]
     fn process_books_payload_enqueues_local_artwork_refresh_for_imported_artwork_sidecars() {
-        let service = MediaImportService::new(Arc::new(StubImportPort {
-            outcome: Some(ImportBookOutcome {
+        let service = BookImportService::new(Arc::new(StubImportPort {
+            result: Ok(Some(ImportBookOutcome {
                 library_id: "library-1".to_string(),
                 imported_book_id: "book-1".to_string(),
                 sidecar_imported: false,
                 artwork_sidecar_imported: true,
-            }),
+            })),
         }));
 
         let tasks = block_on_ready(service.process_books_payload(
@@ -608,13 +743,13 @@ mod tests {
 
     #[test]
     fn process_queued_book_payload_accepts_kotlin_style_import_payload() {
-        let service = MediaImportService::new(Arc::new(StubImportPort {
-            outcome: Some(ImportBookOutcome {
+        let service = BookImportService::new(Arc::new(StubImportPort {
+            result: Ok(Some(ImportBookOutcome {
                 library_id: "library-1".to_string(),
                 imported_book_id: "book-1".to_string(),
                 sidecar_imported: false,
                 artwork_sidecar_imported: false,
-            }),
+            })),
         }));
 
         let tasks = block_on_ready(
@@ -640,5 +775,81 @@ mod tests {
         assert_eq!(tasks[0].simple_type, "AnalyzeBook");
         assert_eq!(tasks[0].priority, 101);
         assert_eq!(tasks[0].group.as_deref(), Some("series-1"));
+    }
+
+    #[test]
+    fn process_books_payload_registers_import_runtime_events() {
+        let _guard = import_runtime_sse_guard();
+        let service = BookImportService::new(Arc::new(StubImportPort {
+            result: Ok(Some(ImportBookOutcome {
+                library_id: "library-1".to_string(),
+                imported_book_id: "book-1".to_string(),
+                sidecar_imported: false,
+                artwork_sidecar_imported: false,
+            })),
+        }));
+        let cursor = current_runtime_book_import_event_cursor();
+
+        block_on_ready(service.process_books_payload(
+            BooksImportPayload {
+                copy_mode: ImportCopyMode::Copy,
+                books: vec![BooksImportEntry {
+                    source_file: PathBuf::from("/tmp/book.cbz"),
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                }],
+            },
+            100,
+        ))
+        .expect("successful import should produce follow-up tasks");
+
+        let (_, import_events) = pending_runtime_book_import_events(cursor);
+        assert!(import_events.iter().any(|event| {
+            event.book_id.as_deref() == Some("book-1")
+                && event.source_file == "/tmp/book.cbz"
+                && event.success
+                && event.message.is_none()
+        }));
+        let (_, runtime_events) =
+            crate::runtime_sse::pending_runtime_sse_events(cursor, "admin", true);
+        assert!(runtime_events.iter().any(|event| {
+            event.name == "BookAdded"
+                && event.payload.get("bookId").and_then(Value::as_str) == Some("book-1")
+                && event.payload.get("seriesId").and_then(Value::as_str) == Some("series-1")
+                && event.payload.get("libraryId").and_then(Value::as_str) == Some("library-1")
+        }));
+    }
+
+    #[test]
+    fn process_books_payload_registers_failed_import_runtime_event() {
+        let _guard = import_runtime_sse_guard();
+        let service = BookImportService::new(Arc::new(StubImportPort {
+            result: Err("source file does not exist".to_string()),
+        }));
+        let cursor = current_runtime_book_import_event_cursor();
+
+        let error = block_on_ready(service.process_books_payload(
+            BooksImportPayload {
+                copy_mode: ImportCopyMode::Copy,
+                books: vec![BooksImportEntry {
+                    source_file: PathBuf::from("/tmp/missing.cbz"),
+                    series_id: "series-1".to_string(),
+                    destination_name: None,
+                    upgrade_book_id: None,
+                }],
+            },
+            100,
+        ))
+        .expect_err("failed import should return the port error");
+
+        assert_eq!(error, "source file does not exist");
+        let (_, import_events) = pending_runtime_book_import_events(cursor);
+        assert!(import_events.iter().any(|event| {
+            event.book_id.is_none()
+                && event.source_file == "/tmp/missing.cbz"
+                && !event.success
+                && event.message.as_deref() == Some("source file does not exist")
+        }));
     }
 }

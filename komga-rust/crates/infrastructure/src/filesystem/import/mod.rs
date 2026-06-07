@@ -7,22 +7,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use komga_application::media_assets::{
-    BooksImportEntry, ImportBookOutcome, ImportCopyMode, MediaImportPort,
-    register_runtime_book_import_event,
+    BookImportPort, BooksImportEntry, ImportBookOutcome, ImportCopyMode,
 };
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use crate::{resolve_library_item_path, resolve_rooted_path, resolve_stored_path};
 
 #[derive(Clone, Debug)]
-pub struct FilesystemImportPort {
+pub struct FilesystemBookImport {
     read_pool: SqlitePool,
     write_pool: SqlitePool,
 }
 
-impl FilesystemImportPort {
+impl FilesystemBookImport {
     pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
         Self {
             read_pool,
@@ -32,45 +29,13 @@ impl FilesystemImportPort {
 }
 
 #[async_trait]
-impl MediaImportPort for FilesystemImportPort {
+impl BookImportPort for FilesystemBookImport {
     async fn import_book(
         &self,
         copy_mode: ImportCopyMode,
         entry: BooksImportEntry,
     ) -> Result<Option<ImportBookOutcome>, String> {
-        let source_file = entry.source_file.clone();
-        let series_id = entry.series_id.clone();
-        let result = import_book_impl(&self.read_pool, &self.write_pool, copy_mode, entry).await;
-
-        match &result {
-            Ok(Some(outcome)) => {
-                register_runtime_book_import_event(
-                    Some(outcome.imported_book_id.clone()),
-                    source_file.to_string_lossy().to_string(),
-                    true,
-                    None,
-                );
-                register_runtime_sse_event(
-                    "BookAdded",
-                    json!({
-                        "bookId": outcome.imported_book_id,
-                        "seriesId": series_id,
-                        "libraryId": outcome.library_id,
-                    }),
-                    false,
-                    None,
-                );
-            }
-            Err(error) => register_runtime_book_import_event(
-                None,
-                source_file.to_string_lossy().to_string(),
-                false,
-                Some(error.clone()),
-            ),
-            Ok(None) => {}
-        }
-
-        result
+        import_book_impl(&self.read_pool, &self.write_pool, copy_mode, entry).await
     }
 }
 

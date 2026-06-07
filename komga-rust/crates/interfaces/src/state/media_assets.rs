@@ -16,7 +16,7 @@ pub struct MediaAssetsState {
     pub(crate) progress: Arc<dyn komga_application::media_assets::ProgressWriterPort>,
     pub(crate) read_progress_service: Arc<komga_application::media_assets::ReadProgressService>,
     pub(crate) metadata: Arc<komga_application::media_assets::MetadataWriter>,
-    pub(crate) import: Arc<komga_application::media_assets::MediaImportService>,
+    pub(crate) import: Arc<komga_application::media_assets::BookImportService>,
 }
 
 impl FromRef<Arc<HttpAppState>> for MediaAssetsState {
