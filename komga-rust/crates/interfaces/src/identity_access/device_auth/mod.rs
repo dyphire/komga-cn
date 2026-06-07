@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::CookieJar;
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, DeviceProgressError, DeviceProgressService, KOBO_SYNC_ITEM_LIMIT,
-    KoboLibrarySyncRequest, KoboReadingStateUpdate, KoreaderProgressUpdate,
+    KoboLibrarySyncRequest, KoboLibrarySyncService, KoboReadingStateUpdate, KoreaderProgressUpdate,
     build_kobo_book_metadata_payload, build_kobo_library_sync_payload,
     decode_or_passthrough_sync_token, generated_kobo_token_triplet, now_sync_marker, user_id,
 };
@@ -171,6 +171,13 @@ fn device_progress_service(app: &IdentityAccessState) -> DeviceProgressService<'
         app.reader.as_ref(),
         app.content.as_ref(),
         app.progress.as_ref(),
+    )
+}
+
+fn kobo_library_sync_service(app: &IdentityAccessState) -> KoboLibrarySyncService<'_> {
+    KoboLibrarySyncService::new(
+        app.identity.kobo_sync_state(),
+        app.identity.kobo_store_sync(),
     )
 }
 

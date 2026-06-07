@@ -1,14 +1,18 @@
 mod diff;
 mod models;
+mod pipeline;
+#[cfg(test)]
+mod pipeline_tests;
 mod sync_tokens;
 mod wire;
 
 pub use diff::build_kobo_sync_events;
 pub use models::{
     KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncPayload, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
-    KoboStoreSyncMergeResult, KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPointBook,
-    KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
+    KoboStoreSyncMergeResult, KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPageRequest,
+    KoboSyncPointBook, KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncSnapshot,
 };
+pub use pipeline::{KoboLibrarySyncService, KoboStoreSyncPort, KoboSyncStatePort};
 pub use sync_tokens::{
     KomgaSyncTokenPayload, build_kobo_library_sync_payload, build_komga_sync_token_payload,
     decode_or_passthrough_sync_token, is_kobo_store_sync_token_candidate, now_sync_marker,

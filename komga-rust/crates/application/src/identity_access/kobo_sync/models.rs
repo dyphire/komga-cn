@@ -26,6 +26,15 @@ pub struct KoboLibrarySyncRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboSyncPageRequest {
+    pub user: AuthUser,
+    pub current_api_key_id: Option<String>,
+    pub ongoing_sync_point_id: Option<String>,
+    pub last_successful_sync_point_id: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KoboLibrarySyncResponse {
     pub events: Vec<Value>,
     pub sync_token_payload: String,

@@ -38,10 +38,8 @@ pub async fn kobo_library_sync(
         })
         .collect::<Vec<_>>();
     let store_sync_enabled = load_kobo_proxy_enabled(app.server_settings.as_ref()).await;
-    let sync_response = match app
-        .identity
-        .device_sync()
-        .load_kobo_library_sync(KoboLibrarySyncRequest {
+    let sync_response = match kobo_library_sync_service(&app)
+        .sync_library(KoboLibrarySyncRequest {
             user: current_user,
             current_api_key_id,
             sync_token_raw,

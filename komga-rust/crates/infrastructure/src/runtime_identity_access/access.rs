@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use komga_application::identity_access::{
     AuthActivityPort, AuthOutcome, AuthUser, AuthenticationPort, CreateAuthUserInput,
-    DeviceSyncPort, KoboLibrarySyncRequest, KoboLibrarySyncResponse, PersistedApiKey,
-    PersistedApiKeyMetadata, PersistedAuthenticationActivity, ReadProgressWithLocatorInput,
-    ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort, UpdateAuthUserInput,
-    UpdateAuthUserResult, UserAdminPort,
+    DeviceSyncPort, KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncPage, KoboSyncPageRequest,
+    KoboSyncStatePort, PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    ReadProgressWithLocatorInput, ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort,
+    UpdateAuthUserInput, UpdateAuthUserResult, UserAdminPort,
 };
 use serde_json::Value;
 
@@ -303,15 +303,6 @@ impl DeviceSyncPort for IdentityAccess {
             .map_err(|e| e.to_string())
     }
 
-    async fn load_kobo_library_sync(
-        &self,
-        request: KoboLibrarySyncRequest,
-    ) -> Result<KoboLibrarySyncResponse, String> {
-        kobo_sync::load_kobo_library_sync(self.db.write_pool(), request)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
     async fn load_koreader_book_target(
         &self,
         book_hash: &str,
@@ -349,5 +340,53 @@ impl DeviceSyncPort for IdentityAccess {
         input: ReadProgressWithLocatorInput,
     ) -> Result<(), String> {
         device_auth::persist_read_progress_with_locator(self.db.write_pool(), &input).await
+    }
+}
+
+#[async_trait]
+impl KoboSyncStatePort for IdentityAccess {
+    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
+        kobo_sync::SqliteKoboSyncState::new(self.db.write_pool())
+            .load_sync_page(request)
+            .await
+    }
+
+    async fn load_kobo_metadata_record(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<KoboMetadataRecord>, String> {
+        device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn load_read_progress(
+        &self,
+        book_id: &str,
+        user_id_value: &str,
+    ) -> Result<Option<PersistedReadProgressRecord>, String> {
+        device_auth::load_read_progress(self.db.read_pool(), book_id, user_id_value)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String> {
+        kobo_sync::SqliteKoboSyncState::new(self.db.write_pool())
+            .remove_sync_point(sync_point_id)
+            .await
+    }
+}
+
+#[async_trait]
+impl KoboStoreSyncPort for IdentityAccess {
+    async fn sync_store_library(
+        &self,
+        forwarded_headers: &[(String, String)],
+        query: Option<&str>,
+        raw_sync_token: &str,
+    ) -> Result<KoboStoreSyncMergeResult, String> {
+        kobo_sync::HttpKoboStoreSync
+            .sync_store_library(forwarded_headers, query, raw_sync_token)
+            .await
     }
 }

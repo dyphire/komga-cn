@@ -323,13 +323,6 @@ impl DeviceSyncPort for TestDeviceSync {
         Ok(None)
     }
 
-    async fn load_kobo_library_sync(
-        &self,
-        _request: crate::identity_access::KoboLibrarySyncRequest,
-    ) -> Result<crate::identity_access::KoboLibrarySyncResponse, String> {
-        unreachable!("library sync is not part of device progress service tests")
-    }
-
     async fn load_koreader_book_target(
         &self,
         _book_hash: &str,

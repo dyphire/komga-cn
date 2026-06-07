@@ -2,8 +2,8 @@ use super::*;
 use axum::extract::FromRef;
 
 use komga_application::identity_access::{
-    AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,
-    SessionResolverPort, UserAdminPort,
+    AuthActivityPort, AuthenticationPort, DeviceSyncPort, KoboStoreSyncPort, KoboSyncStatePort,
+    SessionLifecyclePort, SessionResolverPort, UserAdminPort,
 };
 pub use komga_application::identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
@@ -17,6 +17,8 @@ pub struct IdentityState {
     user_admin: Arc<dyn UserAdminPort>,
     auth_activity: Arc<dyn AuthActivityPort>,
     device_sync: Arc<dyn DeviceSyncPort>,
+    kobo_sync_state: Arc<dyn KoboSyncStatePort>,
+    kobo_store_sync: Arc<dyn KoboStoreSyncPort>,
 }
 
 impl IdentityState {
@@ -28,6 +30,8 @@ impl IdentityState {
             + UserAdminPort
             + AuthActivityPort
             + DeviceSyncPort
+            + KoboSyncStatePort
+            + KoboStoreSyncPort
             + 'static,
     {
         Self {
@@ -36,7 +40,9 @@ impl IdentityState {
             session_lifecycle: access.clone(),
             user_admin: access.clone(),
             auth_activity: access.clone(),
-            device_sync: access,
+            device_sync: access.clone(),
+            kobo_sync_state: access.clone(),
+            kobo_store_sync: access,
         }
     }
 
@@ -62,6 +68,14 @@ impl IdentityState {
 
     pub fn device_sync(&self) -> &dyn DeviceSyncPort {
         &*self.device_sync
+    }
+
+    pub fn kobo_sync_state(&self) -> &dyn KoboSyncStatePort {
+        &*self.kobo_sync_state
+    }
+
+    pub fn kobo_store_sync(&self) -> &dyn KoboStoreSyncPort {
+        &*self.kobo_store_sync
     }
 }
 

@@ -4,8 +4,6 @@ use serde_json::Value;
 use super::super::device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
-use super::super::kobo_sync::{KoboLibrarySyncRequest, KoboLibrarySyncResponse};
-
 pub struct ReadProgressWithLocatorInput {
     pub book_id: String,
     pub user_id: String,
@@ -30,11 +28,6 @@ pub trait DeviceSyncPort: Send + Sync {
         &self,
         book_id: &str,
     ) -> Result<Option<KoboMetadataRecord>, String>;
-
-    async fn load_kobo_library_sync(
-        &self,
-        request: KoboLibrarySyncRequest,
-    ) -> Result<KoboLibrarySyncResponse, String>;
 
     async fn load_koreader_book_target(
         &self,
