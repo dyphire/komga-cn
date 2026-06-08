@@ -99,7 +99,7 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
         .map_err(TaskProcessingError::runtime)?;
 
     runtime
-        .search_sync()
+        .search_engine()
         .delete_book(book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
@@ -264,14 +264,14 @@ pub(super) async fn delete_series(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    let search_sync = runtime.search_sync();
+    let search = runtime.search_engine();
     for book_id in &work.book_ids {
-        search_sync
+        search
             .delete_book(book_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
     }
-    search_sync
+    search
         .delete_series(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;

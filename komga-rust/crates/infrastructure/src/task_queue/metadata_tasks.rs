@@ -18,13 +18,13 @@ pub(super) async fn refresh_book_metadata(
     .await
     .map_err(TaskProcessingError::runtime)?;
 
-    let search_sync = runtime.search_sync();
-    search_sync
+    let search = runtime.search_engine();
+    search
         .upsert_book(book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
     for readlist_id in &outcome.changed_readlist_ids {
-        search_sync
+        search
             .upsert_readlist(readlist_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
@@ -46,7 +46,7 @@ pub(super) async fn refresh_series_metadata(
         .map_err(TaskProcessingError::runtime)?;
 
     runtime
-        .search_sync()
+        .search_engine()
         .refresh_series_after_metadata_update(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
@@ -67,7 +67,7 @@ pub(super) async fn aggregate_series_metadata(
         .map_err(TaskProcessingError::runtime)?;
 
     runtime
-        .search_sync()
+        .search_engine()
         .upsert_series(series_id)
         .await
         .map_err(TaskProcessingError::runtime)?;

@@ -16,7 +16,7 @@ use crate::database_handle::DatabaseHandle;
 use crate::discovery_persisted_access::{
     runtime_queries, series as infrastructure_discovery_series,
 };
-use crate::search::sync::SearchIndexSync;
+use crate::search::engine::SearchIndexEngine;
 
 use super::books;
 use super::collections;
@@ -26,25 +26,13 @@ use super::series;
 #[derive(Clone)]
 pub struct DiscoveryDetailAccess {
     db: DatabaseHandle,
-    index_dir: PathBuf,
-    owns_search_index: bool,
+    search: SearchIndexEngine,
 }
 
 impl DiscoveryDetailAccess {
     pub fn new(db: DatabaseHandle, index_dir: PathBuf, owns_search_index: bool) -> Self {
-        Self {
-            db,
-            index_dir,
-            owns_search_index,
-        }
-    }
-
-    fn search_sync(&self) -> SearchIndexSync {
-        SearchIndexSync::new(
-            self.db.write_pool().clone(),
-            self.index_dir.clone(),
-            self.owns_search_index,
-        )
+        let search = SearchIndexEngine::new(db.write_pool().clone(), index_dir, owns_search_index);
+        Self { db, search }
     }
 }
 
@@ -205,7 +193,7 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
     ) -> Result<(), String> {
         series::refresh_series_after_metadata_update(self.db.write_pool(), series_id).await?;
 
-        self.search_sync()
+        self.search
             .refresh_series_after_metadata_update(series_id)
             .await
     }
@@ -276,11 +264,11 @@ impl CollectionPort for DiscoveryDetailAccess {
     }
 
     async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
-        self.search_sync().upsert_collection(collection_id).await
+        self.search.upsert_collection(collection_id).await
     }
 
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
-        self.search_sync().delete_collection(collection_id).await
+        self.search.delete_collection(collection_id).await
     }
 }
 
@@ -355,10 +343,10 @@ impl ReadlistPort for DiscoveryDetailAccess {
     }
 
     async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
-        self.search_sync().upsert_readlist(readlist_id).await
+        self.search.upsert_readlist(readlist_id).await
     }
 
     async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
-        self.search_sync().delete_readlist(readlist_id).await
+        self.search.delete_readlist(readlist_id).await
     }
 }

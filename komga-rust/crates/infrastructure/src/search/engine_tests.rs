@@ -3,17 +3,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::SqlitePool;
 
-use super::SearchIndexSync;
-use crate::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
+use super::SearchIndexEngine;
+use crate::search::index_lifecycle::{
+    SearchDocument, SearchEntityType, SearchField, SearchFieldEntry, SearchIndexLifecycle,
+};
 use crate::sqlite::connect_main_write_context;
 
-struct SearchSyncFixture {
+struct SearchIndexEngineFixture {
     database_file: PathBuf,
     index_dir: PathBuf,
     pool: SqlitePool,
 }
 
-impl SearchSyncFixture {
+impl SearchIndexEngineFixture {
     async fn new(case: &str) -> Self {
         let database_file = temp_db_path(case);
         let index_dir = temp_index_dir(case);
@@ -31,8 +33,8 @@ impl SearchSyncFixture {
         }
     }
 
-    fn sync(&self, owns_search_index: bool) -> SearchIndexSync {
-        SearchIndexSync::new(self.pool.clone(), self.index_dir.clone(), owns_search_index)
+    fn engine(&self, owns_search_index: bool) -> SearchIndexEngine {
+        SearchIndexEngine::new(self.pool.clone(), self.index_dir.clone(), owns_search_index)
     }
 
     async fn cleanup(self) {
@@ -45,12 +47,63 @@ impl SearchSyncFixture {
 }
 
 #[tokio::test]
-async fn search_index_sync_upserts_and_deletes_entity_documents() {
-    let fixture = SearchSyncFixture::new("sync-upsert-delete-entities").await;
+async fn missing_index_searches_return_empty_without_creating_index_state() {
+    let fixture = SearchIndexEngineFixture::new("missing-index-query").await;
+    let _ = std::fs::remove_dir_all(&fixture.index_dir);
+    let engine = fixture.engine(false);
+
+    assert_eq!(
+        engine.search_ids_or_empty("anything", SearchEntityType::Book, 10),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        engine.search_scored_ids_or_empty("anything", SearchEntityType::Book, 10),
+        Vec::<(f32, String)>::new()
+    );
+    assert!(
+        !fixture.index_dir.exists(),
+        "read-only search boundary must not create missing index directories"
+    );
+
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn explicit_index_dir_is_the_only_query_source() {
+    let fixture = SearchIndexEngineFixture::new("explicit-index-query").await;
+    let other_index_dir = temp_index_dir("explicit-index-query-other");
+
+    let explicit_index = SearchIndexLifecycle::bootstrap(fixture.index_dir.as_path())
+        .expect("explicit index fixture should bootstrap");
+    explicit_index
+        .rebuild(&[collection_document("collection-1", "Explicit Shelf")])
+        .expect("explicit index fixture should rebuild");
+    let other_index = SearchIndexLifecycle::bootstrap(other_index_dir.as_path())
+        .expect("other index fixture should bootstrap");
+    other_index
+        .rebuild(&[collection_document("collection-2", "Other Shelf")])
+        .expect("other index fixture should rebuild");
+
+    let hits =
+        fixture
+            .engine(false)
+            .search_ids_or_empty("Explicit", SearchEntityType::Collection, 10);
+
+    assert_eq!(hits, vec!["collection-1".to_string()]);
+
+    let _ = explicit_index.shutdown();
+    let _ = other_index.shutdown();
+    let _ = std::fs::remove_dir_all(other_index_dir);
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn search_index_engine_upserts_and_deletes_entity_documents() {
+    let fixture = SearchIndexEngineFixture::new("engine-upsert-delete-entities").await;
     seed_series(
         &fixture.pool,
         "series-1",
-        "Search Sync Series",
+        "Search Engine Series",
         false,
         "Series Publisher",
     )
@@ -59,93 +112,101 @@ async fn search_index_sync_upserts_and_deletes_entity_documents() {
         &fixture.pool,
         "book-1",
         "series-1",
-        "Search Sync Book",
+        "Search Engine Book",
         false,
     )
     .await;
-    seed_collection(&fixture.pool, "collection-1", "Search Sync Collection").await;
-    seed_readlist(&fixture.pool, "readlist-1", "Search Sync Readlist").await;
+    seed_collection(&fixture.pool, "collection-1", "Search Engine Collection").await;
+    seed_readlist(&fixture.pool, "readlist-1", "Search Engine Readlist").await;
 
-    let sync = fixture.sync(true);
+    let engine = fixture.engine(true);
 
     assert!(
-        sync.upsert_book("book-1")
+        engine
+            .upsert_book("book-1")
             .await
             .expect("book upsert should succeed")
     );
     assert!(
-        sync.upsert_series("series-1")
+        engine
+            .upsert_series("series-1")
             .await
             .expect("series upsert should succeed")
     );
     assert!(
-        sync.upsert_readlist("readlist-1")
+        engine
+            .upsert_readlist("readlist-1")
             .await
             .expect("readlist upsert should succeed")
     );
     assert!(
-        sync.upsert_collection("collection-1")
+        engine
+            .upsert_collection("collection-1")
             .await
             .expect("collection upsert should succeed")
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Book",
+        "Search Engine Book",
         SearchEntityType::Book,
         &["book-1"],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Series",
+        "Search Engine Series",
         SearchEntityType::Series,
         &["series-1"],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Collection",
+        "Search Engine Collection",
         SearchEntityType::Collection,
         &["collection-1"],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Readlist",
+        "Search Engine Readlist",
         SearchEntityType::ReadList,
         &["readlist-1"],
     );
 
-    sync.delete_book("book-1")
+    engine
+        .delete_book("book-1")
         .await
         .expect("book delete should succeed");
-    sync.delete_series("series-1")
+    engine
+        .delete_series("series-1")
         .await
         .expect("series delete should succeed");
-    sync.delete_collection("collection-1")
+    engine
+        .delete_collection("collection-1")
         .await
         .expect("collection delete should succeed");
-    sync.delete_readlist("readlist-1")
+    engine
+        .delete_readlist("readlist-1")
         .await
         .expect("readlist delete should succeed");
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Book",
+        "Search Engine Book",
         SearchEntityType::Book,
         &[],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Series",
+        "Search Engine Series",
         SearchEntityType::Series,
         &[],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Collection",
+        "Search Engine Collection",
         SearchEntityType::Collection,
         &[],
     );
     assert_search_hits(
         fixture.index_dir.as_path(),
-        "Search Sync Readlist",
+        "Search Engine Readlist",
         SearchEntityType::ReadList,
         &[],
     );
@@ -154,8 +215,8 @@ async fn search_index_sync_upserts_and_deletes_entity_documents() {
 }
 
 #[tokio::test]
-async fn search_index_sync_refreshes_series_and_oneshot_book_documents_after_metadata_update() {
-    let fixture = SearchSyncFixture::new("sync-refresh-series-oneshot").await;
+async fn search_index_engine_refreshes_series_and_oneshot_book_documents_after_metadata_update() {
+    let fixture = SearchIndexEngineFixture::new("engine-refresh-series-oneshot").await;
     seed_series(
         &fixture.pool,
         "series-1",
@@ -166,8 +227,9 @@ async fn search_index_sync_refreshes_series_and_oneshot_book_documents_after_met
     .await;
     seed_book(&fixture.pool, "book-1", "series-1", "One Shot Book", true).await;
 
-    let sync = fixture.sync(true);
-    sync.rebuild_all()
+    let engine = fixture.engine(true);
+    engine
+        .rebuild_all()
         .await
         .expect("initial full rebuild should succeed");
     assert_search_hits(
@@ -184,9 +246,10 @@ async fn search_index_sync_refreshes_series_and_oneshot_book_documents_after_met
         .await
         .expect("series metadata should update");
 
-    sync.refresh_series_after_metadata_update("series-1")
+    engine
+        .refresh_series_after_metadata_update("series-1")
         .await
-        .expect("series metadata refresh sync should succeed");
+        .expect("series metadata refresh should succeed");
 
     assert_search_hits(
         fixture.index_dir.as_path(),
@@ -205,13 +268,14 @@ async fn search_index_sync_refreshes_series_and_oneshot_book_documents_after_met
 }
 
 #[tokio::test]
-async fn search_index_sync_rebuilds_all_and_scoped_entities() {
-    let fixture = SearchSyncFixture::new("sync-rebuild-scoped").await;
+async fn search_index_engine_rebuilds_all_and_scoped_entities() {
+    let fixture = SearchIndexEngineFixture::new("engine-rebuild-scoped").await;
     seed_collection(&fixture.pool, "collection-1", "Collection Before").await;
     seed_readlist(&fixture.pool, "readlist-1", "Readlist Before").await;
 
-    let sync = fixture.sync(true);
-    sync.rebuild_all()
+    let engine = fixture.engine(true);
+    engine
+        .rebuild_all()
         .await
         .expect("initial full rebuild should succeed");
     assert_search_hits(
@@ -230,7 +294,8 @@ async fn search_index_sync_rebuilds_all_and_scoped_entities() {
     rename_collection(&fixture.pool, "collection-1", "Collection After").await;
     rename_readlist(&fixture.pool, "readlist-1", "Readlist After").await;
 
-    sync.rebuild_entities(&[SearchEntityType::Collection])
+    engine
+        .rebuild_entities(&[SearchEntityType::Collection])
         .await
         .expect("scoped collection rebuild should succeed");
 
@@ -257,30 +322,123 @@ async fn search_index_sync_rebuilds_all_and_scoped_entities() {
 }
 
 #[tokio::test]
-async fn search_index_sync_skips_writes_when_search_index_is_external_owned() {
-    let fixture = SearchSyncFixture::new("sync-ownership-noop").await;
+async fn search_index_engine_rebuild_indexes_oneshot_inherited_metadata_and_book_isbn_fields() {
+    let fixture = SearchIndexEngineFixture::new("engine-rebuild-oneshot-inherited-metadata").await;
+    seed_series(
+        &fixture.pool,
+        "series-1",
+        "Series One",
+        true,
+        "InheritedPub",
+    )
+    .await;
+    sqlx::query(
+        r#"UPDATE SERIES_METADATA SET TITLE_SORT = ?, LANGUAGE = ?, AGE_RATING = ? WHERE SERIES_ID = ?"#,
+    )
+    .bind("Series One Sort")
+    .bind("EN")
+    .bind(13_i64)
+    .bind("series-1")
+    .execute(&fixture.pool)
+    .await
+    .expect("series metadata should be updated");
+    sqlx::query(
+        r#"INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)"#,
+    )
+    .bind("series-1")
+    .bind("alt-1")
+    .bind("Series Uno")
+    .execute(&fixture.pool)
+    .await
+    .expect("series alternate title should be inserted");
+    seed_book(&fixture.pool, "book-1", "series-1", "book-1.epub", true).await;
+    sqlx::query(r#"INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)"#)
+        .bind("book-1")
+        .bind("Jane Writer")
+        .bind("writer")
+        .execute(&fixture.pool)
+        .await
+        .expect("book metadata author should be inserted");
+    sqlx::query(
+        r#"INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, ISBN, BOOK_ID)
+VALUES (?, ?, ?, ?, ?)"#,
+    )
+    .bind("1")
+    .bind(1.0_f64)
+    .bind("One Shot")
+    .bind("978-1-23")
+    .bind("book-1")
+    .execute(&fixture.pool)
+    .await
+    .expect("book metadata should be inserted");
+
+    fixture
+        .engine(true)
+        .rebuild_all()
+        .await
+        .expect("index rebuild should complete");
+
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "publisher:InheritedPub",
+        SearchEntityType::Book,
+        &["book-1"],
+    );
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "isbn:978-1-23",
+        SearchEntityType::Book,
+        &["book-1"],
+    );
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "title:Sort",
+        SearchEntityType::Series,
+        &["series-1"],
+    );
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "title:Uno",
+        SearchEntityType::Series,
+        &["series-1"],
+    );
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "writer:Jane",
+        SearchEntityType::Book,
+        &["book-1"],
+    );
+
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn search_index_engine_skips_writes_when_search_index_is_external_owned() {
+    let fixture = SearchIndexEngineFixture::new("engine-ownership-noop").await;
     seed_collection(&fixture.pool, "collection-1", "External Owned Collection").await;
 
-    let sync = fixture.sync(false);
+    let engine = fixture.engine(false);
 
-    let upserted = sync
+    let upserted = engine
         .upsert_collection("collection-1")
         .await
         .expect("external-owned upsert should no-op");
     assert!(!upserted);
     assert!(
         !fixture.index_dir.join("meta.json").exists(),
-        "external-owned sync must not create index files",
+        "external-owned engine must not create index files",
     );
 
-    sync.rebuild_all()
+    engine
+        .rebuild_all()
         .await
         .expect("external-owned rebuild should no-op");
     assert!(
         !fixture.index_dir.join("meta.json").exists(),
         "external-owned rebuild must not create index files",
     );
-    sync.delete_collection("collection-1")
+    engine
+        .delete_collection("collection-1")
         .await
         .expect("external-owned delete should no-op");
     assert!(
@@ -292,12 +450,13 @@ async fn search_index_sync_skips_writes_when_search_index_is_external_owned() {
 }
 
 #[tokio::test]
-async fn search_index_sync_recovers_corrupted_index_before_applying_delete() {
-    let fixture = SearchSyncFixture::new("sync-delete-corruption-recovery").await;
+async fn search_index_engine_recovers_corrupted_index_before_applying_delete() {
+    let fixture = SearchIndexEngineFixture::new("engine-delete-corruption-recovery").await;
     seed_collection(&fixture.pool, "collection-1", "Delete Drift Collection").await;
 
-    let sync = fixture.sync(true);
-    sync.rebuild_all()
+    let engine = fixture.engine(true);
+    engine
+        .rebuild_all()
         .await
         .expect("initial full rebuild should succeed");
     assert_search_hits(
@@ -309,7 +468,8 @@ async fn search_index_sync_recovers_corrupted_index_before_applying_delete() {
     std::fs::remove_file(fixture.index_dir.join(".komga-search-analyzer-version"))
         .expect("analyzer marker should be removable");
 
-    sync.delete_collection("collection-1")
+    engine
+        .delete_collection("collection-1")
         .await
         .expect("delete should recover the index before applying");
 
@@ -324,8 +484,8 @@ async fn search_index_sync_recovers_corrupted_index_before_applying_delete() {
 }
 
 #[tokio::test]
-async fn search_index_sync_recovers_corrupted_index_before_scoped_rebuild() {
-    let fixture = SearchSyncFixture::new("sync-scoped-rebuild-corruption-recovery").await;
+async fn search_index_engine_recovers_corrupted_index_before_scoped_rebuild() {
+    let fixture = SearchIndexEngineFixture::new("engine-scoped-rebuild-corruption-recovery").await;
     seed_collection(
         &fixture.pool,
         "collection-1",
@@ -333,8 +493,9 @@ async fn search_index_sync_recovers_corrupted_index_before_scoped_rebuild() {
     )
     .await;
 
-    let sync = fixture.sync(true);
-    sync.rebuild_all()
+    let engine = fixture.engine(true);
+    engine
+        .rebuild_all()
         .await
         .expect("initial full rebuild should succeed");
     assert_search_hits(
@@ -353,7 +514,8 @@ async fn search_index_sync_recovers_corrupted_index_before_scoped_rebuild() {
     )
     .await;
 
-    sync.rebuild_entities(&[SearchEntityType::Collection])
+    engine
+        .rebuild_entities(&[SearchEntityType::Collection])
         .await
         .expect("scoped rebuild should recover the index before applying");
 
@@ -474,6 +636,15 @@ async fn rename_readlist(pool: &SqlitePool, readlist_id: &str, name: &str) {
         .expect("readlist row should be renamed");
 }
 
+fn collection_document(id: &str, name: &str) -> SearchDocument {
+    SearchDocument {
+        entity_type: SearchEntityType::Collection,
+        id: id.to_string(),
+        title: name.to_string(),
+        fields: vec![SearchFieldEntry::new(SearchField::Name, name)],
+    }
+}
+
 fn assert_search_hits(
     index_dir: &Path,
     query: &str,
@@ -496,7 +667,7 @@ fn assert_search_hits(
 fn temp_db_path(case: &str) -> PathBuf {
     let nanos = unique_nanos();
     std::env::temp_dir().join(format!(
-        "komga-rust-search-sync-{case}-{}-{nanos}.db",
+        "komga-rust-search-engine-{case}-{}-{nanos}.db",
         std::process::id(),
     ))
 }
@@ -504,7 +675,7 @@ fn temp_db_path(case: &str) -> PathBuf {
 fn temp_index_dir(case: &str) -> PathBuf {
     let nanos = unique_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "komga-rust-search-sync-index-{case}-{}-{nanos}",
+        "komga-rust-search-engine-index-{case}-{}-{nanos}",
         std::process::id(),
     ));
     std::fs::create_dir_all(&dir).expect("temporary index directory should be created");

@@ -7,20 +7,20 @@ use komga_application::discovery::{
 };
 
 use crate::database_handle::DatabaseHandle;
+use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::query::SearchIndexQuery;
 
 use super::{authors, library_mappings, models, runtime_queries};
 
 #[derive(Clone)]
 pub struct DiscoveryQuerySupportAccess {
     db: DatabaseHandle,
-    search: SearchIndexQuery,
+    search: SearchIndexEngine,
 }
 
 impl DiscoveryQuerySupportAccess {
     pub fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
-        let search = SearchIndexQuery::new(db.database_file().to_path_buf(), index_dir);
+        let search = SearchIndexEngine::read_only(db.read_pool().clone(), index_dir);
         Self { db, search }
     }
 }
@@ -114,7 +114,7 @@ impl CollectionSearchPort for DiscoveryQuerySupportAccess {
     ) -> Result<Vec<String>, String> {
         Ok(self
             .search
-            .search_ids(query, SearchEntityType::Collection, limit))
+            .search_ids_or_empty(query, SearchEntityType::Collection, limit))
     }
 }
 
@@ -127,6 +127,6 @@ impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
     ) -> Result<Vec<(f32, String)>, String> {
         Ok(self
             .search
-            .search_scored_ids(query, SearchEntityType::ReadList, limit))
+            .search_scored_ids_or_empty(query, SearchEntityType::ReadList, limit))
     }
 }

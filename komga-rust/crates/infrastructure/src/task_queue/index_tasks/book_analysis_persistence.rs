@@ -1,15 +1,7 @@
-use std::path::Path;
-
 use sqlx::SqlitePool;
 
-mod rebuild;
-
-#[cfg(test)]
-mod tests;
-
 #[derive(Clone, Debug)]
-pub struct BookAnalysisInput {
-    pub title: String,
+pub(super) struct BookAnalysisInput {
     pub url: String,
     pub root: String,
     pub analyze_dimensions: bool,
@@ -19,7 +11,7 @@ pub struct BookAnalysisInput {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnalyzedBookPage {
+pub(super) struct AnalyzedBookPage {
     pub file_name: String,
     pub media_type: String,
     pub width: Option<i64>,
@@ -28,26 +20,18 @@ pub struct AnalyzedBookPage {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnalyzedBookMedia {
+pub(super) struct AnalyzedBookMedia {
     pub status: String,
     pub media_type: String,
     pub pages: Vec<AnalyzedBookPage>,
 }
 
-pub async fn rebuild_index_from_database(
-    pool: &SqlitePool,
-    index_dir: &Path,
-) -> Result<(), String> {
-    rebuild::rebuild_index_from_database(pool, index_dir).await
-}
-
-pub async fn analyze_book_input(
+pub(super) async fn analyze_book_input(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<BookAnalysisInput>, String> {
     let row = sqlx::query(
         r#"SELECT
-             COALESCE(bm.TITLE, b.NAME) AS TITLE,
              b.URL AS URL,
              b.SERIES_ID AS SERIES_ID,
              l.ANALYZE_DIMENSIONS AS ANALYZE_DIMENSIONS,
@@ -56,7 +40,6 @@ pub async fn analyze_book_input(
              l.ROOT AS ROOT
             FROM BOOK b
             JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-           LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
               WHERE b.ID = ?
               LIMIT 1
@@ -68,7 +51,6 @@ pub async fn analyze_book_input(
     .map_err(|error| format!("failed to load BOOK row for analyze: {error}"))?;
 
     Ok(row.map(|row| BookAnalysisInput {
-        title: sqlx::Row::get::<String, _>(&row, "TITLE"),
         url: sqlx::Row::get::<String, _>(&row, "URL"),
         root: sqlx::Row::get::<String, _>(&row, "ROOT"),
         analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
@@ -78,7 +60,7 @@ pub async fn analyze_book_input(
     }))
 }
 
-pub async fn persist_book_analysis(
+pub(super) async fn persist_book_analysis(
     pool: &SqlitePool,
     book_id: &str,
     analysis: &AnalyzedBookMedia,

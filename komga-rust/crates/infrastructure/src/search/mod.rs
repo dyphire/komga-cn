@@ -1,7 +1,4 @@
 pub mod analyzer_profiles;
 mod documents;
-pub mod index_dirs;
+pub mod engine;
 pub mod index_lifecycle;
-pub mod query;
-pub mod runtime_tasks;
-pub(crate) mod sync;

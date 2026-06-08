@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
@@ -17,7 +17,6 @@ use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_config::writer_ownership::WriterKind;
 use komga_infrastructure::content_resolver::ContentResolver;
-use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
 use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
 use komga_infrastructure::discovery_persisted_access::query_support::DiscoveryQuerySupportAccess;
@@ -37,7 +36,6 @@ use komga_infrastructure::operational_actuator_access::ActuatorSnapshotAccess;
 use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
 use komga_infrastructure::progress_writer::ProgressWriter;
 use komga_infrastructure::runtime_identity_access::IdentityAccess;
-use komga_infrastructure::search::index_dirs::register_discovery_index_dir;
 use komga_infrastructure::search_sync_adapter::SearchSyncAdapter;
 use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
 use komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter;
@@ -90,7 +88,7 @@ pub fn compose_http_runtime(
     let book_special_lists: Arc<dyn BookSpecialListPort> = discovery_query_support.clone();
     let collection_search: Arc<dyn CollectionSearchPort> = discovery_query_support.clone();
     let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_query_support;
-    let discovery_browse_service = Arc::new(compose_discovery_browse_service(
+    let discovery_browse_service = Arc::new(SqliteDiscoveryBrowseService::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
@@ -276,14 +274,6 @@ fn preload_remember_me_runtime_settings(
             remember_me_key.as_str(),
             remember_me_duration_days,
         );
-}
-
-fn compose_discovery_browse_service(
-    db: DatabaseHandle,
-    lucene_data_directory: PathBuf,
-) -> SqliteDiscoveryBrowseService {
-    register_discovery_index_dir(db.database_file(), lucene_data_directory.as_path());
-    SqliteDiscoveryBrowseService::new(db, lucene_data_directory)
 }
 
 fn compose_operational_state(

@@ -17,8 +17,8 @@ use crate::database_handle::DatabaseHandle;
 use crate::discovery_persisted_access::{
     books, facets, library_mappings, models as persisted_models, runtime_queries, series,
 };
+use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::query::SearchIndexQuery;
 
 mod books_queries;
 mod common_helpers;
@@ -119,12 +119,12 @@ trait PersistedDiscoveryBrowseDataSource: Send + Sync {
 #[derive(Clone)]
 pub struct SqliteDiscoveryBrowseService {
     db: DatabaseHandle,
-    search: SearchIndexQuery,
+    search: SearchIndexEngine,
 }
 
 impl SqliteDiscoveryBrowseService {
     pub fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
-        let search = SearchIndexQuery::new(db.database_file().to_path_buf(), index_dir);
+        let search = SearchIndexEngine::read_only(db.read_pool().clone(), index_dir);
         Self { db, search }
     }
 }
@@ -508,7 +508,9 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     }
 
     async fn search_book_ids(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
-        Ok(self.search.search_ids(query, SearchEntityType::Book, limit))
+        Ok(self
+            .search
+            .search_ids_or_empty(query, SearchEntityType::Book, limit))
     }
 
     async fn search_series_scored_ids(
@@ -518,7 +520,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     ) -> Result<Vec<(f32, String)>, String> {
         Ok(self
             .search
-            .search_scored_ids(query, SearchEntityType::Series, limit))
+            .search_scored_ids_or_empty(query, SearchEntityType::Series, limit))
     }
 }
 

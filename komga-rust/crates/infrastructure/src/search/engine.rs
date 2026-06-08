@@ -5,15 +5,16 @@ use sqlx::SqlitePool;
 
 use super::documents;
 use super::index_lifecycle::{
-    SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle, prepare_for_rebuild,
+    SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
+    SearchQueryLifecycle, prepare_for_rebuild,
 };
-use super::runtime_tasks;
 
 #[cfg(test)]
+#[path = "engine_tests.rs"]
 mod tests;
 
 #[derive(Clone, Debug)]
-pub struct SearchIndexSync {
+pub struct SearchIndexEngine {
     pool: SqlitePool,
     index_dir: PathBuf,
     owns_search_index: bool,
@@ -30,40 +31,67 @@ struct SearchIndexMutationRunner<'a> {
     index_dir: &'a Path,
 }
 
-impl<'a> SearchIndexMutationRunner<'a> {
-    fn new(pool: &'a SqlitePool, index_dir: &'a Path) -> Self {
-        Self { pool, index_dir }
-    }
-
-    async fn run<F, Fut>(&self, attempt: F) -> Result<(), String>
-    where
-        F: Fn() -> Fut,
-        Fut: Future<Output = Result<SearchEventAttempt, String>>,
-    {
-        match attempt().await? {
-            SearchEventAttempt::Applied => Ok(()),
-            SearchEventAttempt::RebuildRequired => {
-                recover_search_index(self.pool, self.index_dir).await?;
-
-                match attempt().await? {
-                    SearchEventAttempt::Applied => Ok(()),
-                    SearchEventAttempt::RebuildRequired => Err(format!(
-                        "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
-                        self.index_dir.display()
-                    )),
-                }
-            }
-        }
-    }
-}
-
-impl SearchIndexSync {
+impl SearchIndexEngine {
     pub fn new(pool: SqlitePool, index_dir: PathBuf, owns_search_index: bool) -> Self {
         Self {
             pool,
             index_dir,
             owns_search_index,
         }
+    }
+
+    pub fn read_only(pool: SqlitePool, index_dir: PathBuf) -> Self {
+        Self::new(pool, index_dir, false)
+    }
+
+    pub fn index_dir(&self) -> &Path {
+        self.index_dir.as_path()
+    }
+
+    pub fn search_ids(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let index = SearchQueryLifecycle::bootstrap(self.index_dir())
+            .map_err(|error| format!("failed to open search index for query: {error}"))?;
+        index
+            .search_ids(query, entity_type, limit)
+            .map_err(|error| format!("failed to execute search query: {error}"))
+    }
+
+    pub fn search_scored_ids(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, String> {
+        let index = SearchQueryLifecycle::bootstrap(self.index_dir())
+            .map_err(|error| format!("failed to open search index for query: {error}"))?;
+        index
+            .search_scored_ids(query, entity_type, limit)
+            .map_err(|error| format!("failed to execute scored search query: {error}"))
+    }
+
+    pub fn search_ids_or_empty(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Vec<String> {
+        self.search_ids(query, entity_type, limit)
+            .unwrap_or_default()
+    }
+
+    pub fn search_scored_ids_or_empty(
+        &self,
+        query: &str,
+        entity_type: SearchEntityType,
+        limit: usize,
+    ) -> Vec<(f32, String)> {
+        self.search_scored_ids(query, entity_type, limit)
+            .unwrap_or_default()
     }
 
     pub async fn upsert_book(&self, book_id: &str) -> Result<bool, String> {
@@ -168,11 +196,57 @@ impl SearchIndexSync {
     }
 }
 
+impl<'a> SearchIndexMutationRunner<'a> {
+    fn new(pool: &'a SqlitePool, index_dir: &'a Path) -> Self {
+        Self { pool, index_dir }
+    }
+
+    async fn run<F, Fut>(&self, attempt: F) -> Result<(), String>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<SearchEventAttempt, String>>,
+    {
+        match attempt().await? {
+            SearchEventAttempt::Applied => Ok(()),
+            SearchEventAttempt::RebuildRequired => {
+                recover_search_index(self.pool, self.index_dir).await?;
+
+                match attempt().await? {
+                    SearchEventAttempt::Applied => Ok(()),
+                    SearchEventAttempt::RebuildRequired => Err(format!(
+                        "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
+                        self.index_dir.display()
+                    )),
+                }
+            }
+        }
+    }
+}
+
 async fn recover_search_index(pool: &SqlitePool, index_dir: &Path) -> Result<(), String> {
     prepare_for_rebuild(index_dir)
         .map_err(|error| format!("failed to prepare search index rebuild: {error}"))?;
 
-    runtime_tasks::rebuild_index_from_database(pool, index_dir).await
+    rebuild_index_from_database(pool, index_dir).await
+}
+
+pub async fn rebuild_index_from_database(
+    pool: &SqlitePool,
+    index_dir: &Path,
+) -> Result<(), String> {
+    let docs = documents::load_rebuild_search_documents(pool.clone()).await?;
+    rebuild_index_with_documents(index_dir, &docs)
+}
+
+fn rebuild_index_with_documents(index_dir: &Path, docs: &[SearchDocument]) -> Result<(), String> {
+    let index = SearchIndexLifecycle::bootstrap(index_dir)
+        .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+    index
+        .rebuild(docs)
+        .map_err(|error| format!("failed to rebuild search index: {error}"))?;
+    index
+        .shutdown()
+        .map_err(|error| format!("failed to finalize rebuilt search writer: {error}"))
 }
 
 async fn try_rebuild_search_index_for_entities(

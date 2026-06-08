@@ -61,7 +61,7 @@ pub(in crate::task_queue) async fn analyze_book(
         .map_err(TaskProcessingError::runtime)?;
 
     runtime
-        .search_sync()
+        .search_engine()
         .upsert_book(&book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;

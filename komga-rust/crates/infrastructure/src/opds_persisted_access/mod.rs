@@ -6,8 +6,8 @@ use komga_application::opds::OpdsPersistedPort;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
+use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::search::query::SearchIndexQuery;
 
 mod collections;
 mod records;
@@ -34,12 +34,12 @@ const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
 #[derive(Clone)]
 pub struct OpdsPersistedAccess {
     db: DatabaseHandle,
-    search: SearchIndexQuery,
+    search: SearchIndexEngine,
 }
 
 impl OpdsPersistedAccess {
     pub fn new(db: DatabaseHandle, lucene_data_directory: PathBuf) -> Self {
-        let search = SearchIndexQuery::new(db.database_file().to_path_buf(), lucene_data_directory);
+        let search = SearchIndexEngine::read_only(db.read_pool().clone(), lucene_data_directory);
         Self { db, search }
     }
 }
@@ -223,53 +223,53 @@ async fn load_blank_opds_search_results(
 
 async fn load_ranked_series_search_results(
     pool: &SqlitePool,
-    search: &SearchIndexQuery,
+    search: &SearchIndexEngine,
     query: &str,
 ) -> Result<Vec<PersistedSeriesSearchRecord>, String> {
     let limit = load_series_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS series search count: {error}"))?
         .max(1);
-    let ids = search.search_ids(query, SearchEntityType::Series, limit);
+    let ids = search.search_ids_or_empty(query, SearchEntityType::Series, limit);
     ordered_series_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_book_search_results(
     pool: &SqlitePool,
-    search: &SearchIndexQuery,
+    search: &SearchIndexEngine,
     query: &str,
 ) -> Result<Vec<PersistedBookSearchRecord>, String> {
     let limit = load_book_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS book search count: {error}"))?
         .max(1);
-    let ids = search.search_ids(query, SearchEntityType::Book, limit);
+    let ids = search.search_ids_or_empty(query, SearchEntityType::Book, limit);
     ordered_book_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_collection_search_results(
     pool: &SqlitePool,
-    search: &SearchIndexQuery,
+    search: &SearchIndexEngine,
     query: &str,
 ) -> Result<Vec<PersistedNamedRecord>, String> {
     let limit = load_collection_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS collection search count: {error}"))?
         .max(1);
-    let ids = search.search_ids(query, SearchEntityType::Collection, limit);
+    let ids = search.search_ids_or_empty(query, SearchEntityType::Collection, limit);
     ordered_collection_search_rows(pool, &ids).await
 }
 
 async fn load_ranked_readlist_search_results(
     pool: &SqlitePool,
-    search: &SearchIndexQuery,
+    search: &SearchIndexEngine,
     query: &str,
 ) -> Result<Vec<PersistedNamedRecord>, String> {
     let limit = load_readlist_search_count(pool)
         .await
         .map_err(|error| format!("load OPDS readlist search count: {error}"))?
         .max(1);
-    let ids = search.search_ids(query, SearchEntityType::ReadList, limit);
+    let ids = search.search_ids_or_empty(query, SearchEntityType::ReadList, limit);
     ordered_readlist_search_rows(pool, &ids).await
 }
 

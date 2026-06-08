@@ -7,8 +7,8 @@ use std::pin::Pin;
 use axum::Router;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
+use komga_infrastructure::search::engine::rebuild_index_from_database;
 use komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle;
-use komga_infrastructure::search::runtime_tasks::rebuild_index_from_database;
 use komga_infrastructure::sqlite::connect_task_write_pool;
 
 use super::persistence_contract_fixture::{self, RuntimeDbPaths};

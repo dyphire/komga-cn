@@ -6,8 +6,8 @@ pub(in crate::task_queue) async fn rebuild_index(
     entity_types: Option<&[SearchEntityType]>,
 ) -> Result<(), TaskProcessingError> {
     match entity_types {
-        Some(entity_types) => runtime.search_sync().rebuild_entities(entity_types).await,
-        None => runtime.search_sync().rebuild_all().await,
+        Some(entity_types) => runtime.search_engine().rebuild_entities(entity_types).await,
+        None => runtime.search_engine().rebuild_all().await,
     }
     .map_err(TaskProcessingError::runtime)
 }

@@ -3,9 +3,6 @@ use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
-use crate::search::runtime_tasks::{
-    AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
-};
 use komga_application::task_processing::{
     TaskExecutionOutcome, TaskExecutionResult, TaskProcessingError, TaskQueueOrchestrator,
 };
