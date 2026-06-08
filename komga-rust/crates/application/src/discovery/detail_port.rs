@@ -184,6 +184,25 @@ pub struct SeriesMetadataUpdateRecord {
 // --- Port traits ---
 
 #[async_trait]
+pub trait ReadlistBookPort: Send + Sync {
+    async fn load_persisted_book_resource(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<PersistedBookResourceRecord>, String>;
+
+    async fn load_persisted_book_detail(
+        &self,
+        book_id: &str,
+        user_id: Option<&str>,
+    ) -> Result<Option<BookReadModel>, String>;
+
+    async fn load_persisted_book_authors(
+        &self,
+        book_id: &str,
+    ) -> Result<Vec<BookMetadataAuthorReadModel>, String>;
+}
+
+#[async_trait]
 pub trait BookDetailPort: Send + Sync {
     async fn load_book_id_by_sorted_position(&self, index: usize)
     -> Result<Option<String>, String>;
@@ -209,6 +228,34 @@ pub trait BookDetailPort: Send + Sync {
         &self,
         book_id: &str,
     ) -> Result<Vec<BookMetadataAuthorReadModel>, String>;
+}
+
+#[async_trait]
+impl<T> ReadlistBookPort for T
+where
+    T: BookDetailPort + ?Sized,
+{
+    async fn load_persisted_book_resource(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<PersistedBookResourceRecord>, String> {
+        BookDetailPort::load_persisted_book_resource(self, book_id).await
+    }
+
+    async fn load_persisted_book_detail(
+        &self,
+        book_id: &str,
+        user_id: Option<&str>,
+    ) -> Result<Option<BookReadModel>, String> {
+        BookDetailPort::load_persisted_book_detail(self, book_id, user_id).await
+    }
+
+    async fn load_persisted_book_authors(
+        &self,
+        book_id: &str,
+    ) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
+        BookDetailPort::load_persisted_book_authors(self, book_id).await
+    }
 }
 
 #[async_trait]

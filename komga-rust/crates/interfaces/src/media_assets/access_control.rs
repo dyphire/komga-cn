@@ -81,7 +81,7 @@ pub(super) async fn visible_readlist_book_ids_for_user(
     let principal = principal_from_user_payload(&user_payload_json(user))
         .expect("authenticated user payload should resolve to discovery principal");
     let context = to_domain_query_context(to_query_context(&principal, None));
-    ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref())
+    ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref())
         .visible_readlist_book_ids(&context, readlist_id)
         .await
 }

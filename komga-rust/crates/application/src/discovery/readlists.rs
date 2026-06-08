@@ -15,8 +15,9 @@ use komga_domain::discovery::{
 use serde_json::json;
 
 use super::{
-    BookDetailPort, BookMetadataAuthorReadModel, BookReadModel, DiscoveryPersistedReadlistRecord,
-    PersistedBookResourceRecord, ReadListReadModel, ReadlistPort, ReadlistSearchPort,
+    BookMetadataAuthorReadModel, BookReadModel, DiscoveryPersistedReadlistRecord,
+    PersistedBookResourceRecord, ReadListReadModel, ReadlistBookPort, ReadlistPort,
+    ReadlistSearchPort,
 };
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
@@ -217,14 +218,14 @@ pub fn resolve_readlist_books_query(
 
 pub struct ReadlistListService<'a> {
     readlists: &'a dyn ReadlistPort,
-    books: &'a dyn BookDetailPort,
+    books: &'a dyn ReadlistBookPort,
     search: &'a dyn ReadlistSearchPort,
 }
 
 impl<'a> ReadlistListService<'a> {
     pub fn new(
         readlists: &'a dyn ReadlistPort,
-        books: &'a dyn BookDetailPort,
+        books: &'a dyn ReadlistBookPort,
         search: &'a dyn ReadlistSearchPort,
     ) -> Self {
         Self {
@@ -343,11 +344,11 @@ pub struct ReadlistMutationService<'a> {
 
 pub struct ReadlistVisibilityService<'a> {
     readlists: &'a dyn ReadlistPort,
-    books: &'a dyn BookDetailPort,
+    books: &'a dyn ReadlistBookPort,
 }
 
 impl<'a> ReadlistVisibilityService<'a> {
-    pub fn new(readlists: &'a dyn ReadlistPort, books: &'a dyn BookDetailPort) -> Self {
+    pub fn new(readlists: &'a dyn ReadlistPort, books: &'a dyn ReadlistBookPort) -> Self {
         Self { readlists, books }
     }
 
@@ -1130,10 +1131,10 @@ mod tests {
     use std::{collections::HashMap, sync::Mutex};
 
     use crate::discovery::{
-        BookDetailPort, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
+        BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
         DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
-        PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-        PersistedComicrackMatchCandidateRecord, ReadlistPort, ReadlistSearchPort,
+        PersistedBookResourceRecord, PersistedComicrackMatchCandidateRecord, ReadlistBookPort,
+        ReadlistPort, ReadlistSearchPort,
     };
 
     use super::{
@@ -1512,14 +1513,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl BookDetailPort for TestReadlistPorts {
-        async fn load_book_id_by_sorted_position(
-            &self,
-            _index: usize,
-        ) -> Result<Option<String>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
+    impl ReadlistBookPort for TestReadlistPorts {
         async fn load_persisted_book_resource(
             &self,
             book_id: &str,
@@ -1533,14 +1527,6 @@ mod tests {
             _user_id: Option<&str>,
         ) -> Result<Option<BookReadModel>, String> {
             Ok(self.books.get(book_id).cloned())
-        }
-
-        async fn load_persisted_book_sibling_id(
-            &self,
-            _book_id: &str,
-            _direction: PersistedBookSiblingDirectionRecord,
-        ) -> Result<Option<String>, String> {
-            unimplemented!("not used by readlist list service tests")
         }
 
         async fn load_persisted_book_authors(

@@ -44,7 +44,7 @@ pub async fn readlists(
 
     let service = komga_application::discovery::ReadlistListService::new(
         app.readlist.as_ref(),
-        app.book_detail.as_ref(),
+        app.readlist_books.as_ref(),
         app.readlist_search.as_ref(),
     );
     let page = match service
@@ -310,7 +310,8 @@ pub async fn readlist_books(
     };
 
     let paged = !query.unpaged;
-    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let service =
+        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
     let page = match service
         .list_readlist_books(&to_domain_query_context(visibility_context), query)
         .await
@@ -343,7 +344,8 @@ pub async fn readlist_detail(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let service =
+        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
     match service
         .readlist_detail(&to_domain_query_context(context), &readlist_id)
         .await
@@ -387,7 +389,8 @@ async fn sibling_response(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let is_admin = context.is_admin;
-    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let service =
+        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
     let sibling = match service
         .readlist_book_sibling(
             &to_domain_query_context(context),

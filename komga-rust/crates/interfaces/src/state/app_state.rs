@@ -1,8 +1,8 @@
 use super::*;
 use komga_application::discovery::{
     AuthorFacetPort, BookDetailPort, BookSpecialListPort, CollectionPort, CollectionSearchPort,
-    DiscoveryBrowseService, DiscoveryFacetService, LibraryIdMappingPort, ReadlistPort,
-    ReadlistSearchPort, SeriesDetailPort,
+    DiscoveryBrowseService, DiscoveryFacetService, LibraryIdMappingPort, ReadlistBookPort,
+    ReadlistPort, ReadlistSearchPort, SeriesDetailPort,
 };
 use komga_application::operational::{HttpServerRequestsState, StartupTimingState};
 
@@ -32,6 +32,7 @@ pub struct HttpServices {
     pub collection_search: Arc<dyn CollectionSearchPort>,
     pub readlist_search: Arc<dyn ReadlistSearchPort>,
     pub book_detail: Arc<dyn BookDetailPort>,
+    pub readlist_books: Arc<dyn ReadlistBookPort>,
     pub series_detail: Arc<dyn SeriesDetailPort>,
     pub collection: Arc<dyn CollectionPort>,
     pub readlist: Arc<dyn ReadlistPort>,

@@ -176,7 +176,8 @@ pub async fn book_readlists(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let service = ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref());
+    let service =
+        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
     let visible_readlists = match service
         .readlists_for_book(
             candidate_library_ids.as_deref(),

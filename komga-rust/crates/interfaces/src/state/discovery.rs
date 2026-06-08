@@ -9,8 +9,8 @@ pub use komga_application::discovery::{
     PersistedBookSiblingDirectionRecord, PersistedCollectionAccessRecord,
     PersistedComicrackMatchCandidateRecord, PersistedSeriesCollectionRecord,
     PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
-    ReadlistPort, ReadlistSearchPort, SeriesAlternateTitleRecord, SeriesDetailPort,
-    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
+    ReadlistBookPort, ReadlistPort, ReadlistSearchPort, SeriesAlternateTitleRecord,
+    SeriesDetailPort, SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
 };
 
 #[derive(Clone)]
@@ -23,6 +23,7 @@ pub struct DiscoveryState {
     pub(crate) collection_search: Arc<dyn CollectionSearchPort>,
     pub(crate) readlist_search: Arc<dyn ReadlistSearchPort>,
     pub(crate) book_detail: Arc<dyn BookDetailPort>,
+    pub(crate) readlist_books: Arc<dyn ReadlistBookPort>,
     pub(crate) series_detail: Arc<dyn SeriesDetailPort>,
     pub(crate) collection: Arc<dyn CollectionPort>,
     pub(crate) readlist: Arc<dyn ReadlistPort>,
@@ -41,6 +42,7 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
             collection_search: app.services.collection_search.clone(),
             readlist_search: app.services.readlist_search.clone(),
             book_detail: app.services.book_detail.clone(),
+            readlist_books: app.services.readlist_books.clone(),
             series_detail: app.services.series_detail.clone(),
             collection: app.services.collection.clone(),
             readlist: app.services.readlist.clone(),

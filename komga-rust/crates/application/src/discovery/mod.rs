@@ -20,8 +20,8 @@ pub use detail_port::{
     PersistedBookSiblingDirectionRecord, PersistedCollectionAccessRecord,
     PersistedComicrackMatchCandidateRecord, PersistedSeriesCollectionRecord,
     PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
-    ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort, SeriesMetadataLinkRecord,
-    SeriesMetadataUpdateRecord,
+    ReadlistBookPort, ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort,
+    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
 };
 pub use query_ports::{
     AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,
