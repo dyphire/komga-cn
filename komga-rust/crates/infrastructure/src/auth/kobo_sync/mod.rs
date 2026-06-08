@@ -9,15 +9,12 @@ use super::device_auth::{
     KoboMetadataRecord, PersistedReadProgressRecord, load_kobo_metadata_record, load_read_progress,
 };
 
-mod exists;
-mod mark_synced;
-mod page_loading;
 mod proxy;
-mod queries;
 mod seeding;
+mod sync_point_diff;
 
-use page_loading::{load_incremental_sync_page, load_initial_sync_page};
 use seeding::{seed_sync_point_books, seed_sync_point_ondeck};
+use sync_point_diff::{load_incremental_sync_page, load_initial_sync_page};
 
 #[derive(Clone, Debug)]
 struct PersistedSyncPoint {
@@ -212,7 +209,7 @@ mod tests {
 
     use komga_application::identity_access::{
         AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest, KoboLibrarySyncService,
-        parse_komga_sync_token_payload,
+        KoboSyncPageRequest, parse_komga_sync_token_payload,
     };
 
     use super::*;
@@ -289,6 +286,130 @@ mod tests {
             sync_point.get::<Option<String>, _>("API_KEY_ID").as_deref(),
             Some("api-key-1"),
         );
+
+        pool.close().await;
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_kobo_sync_diff_paginates_readlist_item_changes() {
+        let db_path = temp_db_path("readlist-item-change");
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
+            .bind("kobo-user")
+            .bind("kobo-user@example.org")
+            .bind("secret")
+            .execute(&pool)
+            .await
+            .expect("sync user should be inserted");
+        for sync_point_id in ["from-sync-point", "to-sync-point"] {
+            sqlx::query("INSERT INTO SYNC_POINT (ID, USER_ID, API_KEY_ID) VALUES (?, ?, ?)")
+                .bind(sync_point_id)
+                .bind("kobo-user")
+                .bind("api-key-1")
+                .execute(&pool)
+                .await
+                .expect("sync point should be inserted");
+            sqlx::query(
+                r#"
+                INSERT INTO SYNC_POINT_READLIST (
+                    SYNC_POINT_ID,
+                    READLIST_ID,
+                    READLIST_NAME,
+                    READLIST_CREATED_DATE,
+                    READLIST_LAST_MODIFIED_DATE
+                ) VALUES (?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(sync_point_id)
+            .bind("KOMGA-ONDECK")
+            .bind("On Deck")
+            .bind("2026-01-01 00:00:00")
+            .bind("2026-01-02 00:00:00")
+            .execute(&pool)
+            .await
+            .expect("readlist snapshot should be inserted");
+        }
+        sqlx::query(
+            "INSERT INTO SYNC_POINT_READLIST_BOOK (SYNC_POINT_ID, READLIST_ID, BOOK_ID) VALUES (?, ?, ?)",
+        )
+        .bind("from-sync-point")
+        .bind("KOMGA-ONDECK")
+        .bind("book-a")
+        .execute(&pool)
+        .await
+        .expect("from readlist item should be inserted");
+        sqlx::query(
+            "INSERT INTO SYNC_POINT_READLIST_BOOK (SYNC_POINT_ID, READLIST_ID, BOOK_ID) VALUES (?, ?, ?)",
+        )
+        .bind("to-sync-point")
+        .bind("KOMGA-ONDECK")
+        .bind("book-b")
+        .execute(&pool)
+        .await
+        .expect("to readlist item should be inserted");
+        sqlx::query(
+            r#"
+            INSERT INTO SYNC_POINT_BOOK (
+                SYNC_POINT_ID,
+                BOOK_ID,
+                BOOK_CREATED_DATE,
+                BOOK_LAST_MODIFIED_DATE,
+                BOOK_FILE_LAST_MODIFIED,
+                BOOK_FILE_SIZE,
+                BOOK_FILE_HASH,
+                BOOK_METADATA_LAST_MODIFIED_DATE
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind("to-sync-point")
+        .bind("book-added")
+        .bind("2026-01-01 00:00:00")
+        .bind("2026-01-01 00:00:00")
+        .bind("2026-01-01 00:00:00")
+        .bind(1_i64)
+        .bind("hash-added")
+        .bind("2026-01-01 00:00:00")
+        .execute(&pool)
+        .await
+        .expect("added book should be inserted");
+
+        let state = SqliteKoboSyncState::new(&pool);
+        let page = state
+            .load_sync_page(KoboSyncPageRequest {
+                user: sync_user(),
+                current_api_key_id: Some("api-key-1".to_string()),
+                ongoing_sync_point_id: Some("to-sync-point".to_string()),
+                last_successful_sync_point_id: Some("from-sync-point".to_string()),
+                limit: 1,
+            })
+            .await
+            .expect("sync page should load");
+
+        assert_eq!(page.books_added.len(), 1);
+        assert_eq!(page.books_added[0].book_id, "book-added");
+        assert!(page.should_continue);
+
+        let page = state
+            .load_sync_page(KoboSyncPageRequest {
+                user: sync_user(),
+                current_api_key_id: Some("api-key-1".to_string()),
+                ongoing_sync_point_id: Some("to-sync-point".to_string()),
+                last_successful_sync_point_id: Some("from-sync-point".to_string()),
+                limit: 1,
+            })
+            .await
+            .expect("next sync page should load");
+
+        assert_eq!(page.readlists_changed.len(), 1);
+        assert_eq!(page.readlists_changed[0].id, "KOMGA-ONDECK");
+        assert_eq!(page.readlists_changed[0].items, vec!["book-b"]);
+        assert!(!page.should_continue);
 
         pool.close().await;
         let _ = std::fs::remove_file(db_path);
