@@ -1,5 +1,10 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::Read,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
+use crate::runtime_sse::register_runtime_sse_event;
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -8,10 +13,11 @@ use icu::locale::locale;
 use komga_domain::discovery::{
     DiscoveryQueryContext, PageEnvelope, content_allowed_by_restrictions,
 };
+use serde_json::json;
 
 use super::{
-    CollectionListPort, CollectionReadModel, CollectionSearchPort, CollectionSeriesPort,
-    PersistedCollectionAccessRecord,
+    CollectionDetailPort, CollectionListPort, CollectionMutationPort, CollectionReadModel,
+    CollectionSearchPort, CollectionSeriesPort, PersistedCollectionAccessRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,6 +28,35 @@ pub struct CollectionListQuery {
     pub search: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionMutationInput {
+    pub name: String,
+    pub ordered: bool,
+    pub series_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionCreateResult {
+    pub collection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CollectionMutationError {
+    DuplicateName,
+    Persistence(String),
+}
+
+impl std::fmt::Display for CollectionMutationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CollectionMutationError::DuplicateName => write!(f, "Collection name already exists"),
+            CollectionMutationError::Persistence(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for CollectionMutationError {}
+
 pub struct CollectionListService<'a, C, S, R>
 where
     C: CollectionListPort + ?Sized,
@@ -31,6 +66,22 @@ where
     collections: &'a C,
     series: &'a S,
     search: &'a R,
+}
+
+pub struct CollectionVisibilityService<'a, C, S>
+where
+    C: CollectionDetailPort + ?Sized,
+    S: CollectionSeriesPort + ?Sized,
+{
+    collections: &'a C,
+    series: &'a S,
+}
+
+pub struct CollectionMutationService<'a, C>
+where
+    C: CollectionMutationPort + ?Sized,
+{
+    collections: &'a C,
 }
 
 impl<'a, C, S, R> CollectionListService<'a, C, S, R>
@@ -95,19 +146,12 @@ where
         &self,
         row: PersistedCollectionAccessRecord,
     ) -> Result<CollectionReadModel, String> {
-        let id = row.id;
-        Ok(CollectionReadModel {
-            id: id.clone(),
-            name: row.name,
-            ordered: row.ordered,
-            series_ids: self
-                .collections
-                .load_persisted_collection_series_ids(&id)
-                .await?,
-            created_date: row.created_date,
-            last_modified_date: row.last_modified_date,
-            filtered: false,
-        })
+        let id = row.id.clone();
+        let series_ids = self
+            .collections
+            .load_persisted_collection_series_ids(&id)
+            .await?;
+        Ok(collection_from_record(row, series_ids))
     }
 
     async fn apply_visibility(
@@ -127,24 +171,24 @@ where
 
             if let Some(request_context) = request_scope_context
                 && !matches_requested_scope
-                && self
-                    .series_visible_to_context(
-                        request_context,
-                        series_id,
-                        Some(series_library_id.as_str()),
-                    )
-                    .await?
-            {
-                matches_requested_scope = true;
-            }
-
-            if self
-                .series_visible_to_context(
-                    visibility_context,
+                && series_visible_to_context(
+                    self.series,
+                    request_context,
                     series_id,
                     Some(series_library_id.as_str()),
                 )
                 .await?
+            {
+                matches_requested_scope = true;
+            }
+
+            if series_visible_to_context(
+                self.series,
+                visibility_context,
+                series_id,
+                Some(series_library_id.as_str()),
+            )
+            .await?
             {
                 visible_series_ids.push(series_id.clone());
             }
@@ -161,41 +205,294 @@ where
 
         Ok(())
     }
+}
 
-    async fn series_visible_to_context(
+fn collection_from_record(
+    row: PersistedCollectionAccessRecord,
+    series_ids: Vec<String>,
+) -> CollectionReadModel {
+    CollectionReadModel {
+        id: row.id,
+        name: row.name,
+        ordered: row.ordered,
+        series_ids,
+        created_date: row.created_date,
+        last_modified_date: row.last_modified_date,
+        filtered: false,
+    }
+}
+
+async fn series_visible_to_context(
+    series: &(impl CollectionSeriesPort + ?Sized),
+    context: &DiscoveryQueryContext,
+    series_id: &str,
+    known_library_id: Option<&str>,
+) -> Result<bool, String> {
+    let library_id = match known_library_id {
+        Some(value) => value.to_string(),
+        None => {
+            let Some(row) = series.load_series_library_id(series_id).await? else {
+                return Ok(false);
+            };
+            row
+        }
+    };
+
+    if let Some(authorized_libraries) = context.authorized_library_ids.as_ref()
+        && !authorized_libraries
+            .iter()
+            .any(|candidate| candidate.as_str() == library_id.as_str())
+    {
+        return Ok(false);
+    }
+
+    let Some(restrictions) = context.restrictions.as_ref() else {
+        return Ok(true);
+    };
+
+    let restriction_record = series.load_series_restrictions(series_id).await?;
+    Ok(content_allowed_by_restrictions(
+        restrictions,
+        restriction_record.age_rating,
+        &restriction_record.labels,
+    ))
+}
+
+impl<'a, C, S> CollectionVisibilityService<'a, C, S>
+where
+    C: CollectionDetailPort + ?Sized,
+    S: CollectionSeriesPort + ?Sized,
+{
+    pub fn new(collections: &'a C, series: &'a S) -> Self {
+        Self {
+            collections,
+            series,
+        }
+    }
+
+    pub async fn collection_detail(
         &self,
         context: &DiscoveryQueryContext,
-        series_id: &str,
-        known_library_id: Option<&str>,
-    ) -> Result<bool, String> {
-        let library_id = match known_library_id {
-            Some(value) => value.to_string(),
-            None => {
-                let Some(row) = self.series.load_series_library_id(series_id).await? else {
-                    return Ok(false);
-                };
-                row
-            }
+        collection_id: &str,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let Some(collection) = self.load_collection_detail(collection_id).await? else {
+            return Ok(None);
         };
 
-        if let Some(authorized_libraries) = context.authorized_library_ids.as_ref()
-            && !authorized_libraries
-                .iter()
-                .any(|candidate| candidate.as_str() == library_id.as_str())
-        {
+        self.visible_collection(context, collection).await
+    }
+
+    pub async fn visible_collection(
+        &self,
+        context: &DiscoveryQueryContext,
+        mut collection: CollectionReadModel,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let visible_series_ids = self
+            .visible_collection_series_ids(context, &collection)
+            .await?;
+        if visible_series_ids.is_empty() {
+            return Ok(None);
+        }
+
+        collection.filtered = collection.series_ids.len() != visible_series_ids.len();
+        collection.series_ids = visible_series_ids;
+        Ok(Some(collection))
+    }
+
+    pub async fn visible_collection_series_ids(
+        &self,
+        context: &DiscoveryQueryContext,
+        collection: &CollectionReadModel,
+    ) -> Result<Vec<String>, String> {
+        let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
+        for series_id in &collection.series_ids {
+            if series_visible_to_context(self.series, context, series_id, None).await? {
+                visible_series_ids.push(series_id.clone());
+            }
+        }
+        Ok(visible_series_ids)
+    }
+
+    async fn load_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let Some(row) = self
+            .collections
+            .load_persisted_collection_detail(collection_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let series_ids = self
+            .collections
+            .load_persisted_collection_series_ids(collection_id)
+            .await?;
+
+        Ok(Some(collection_from_record(row, series_ids)))
+    }
+}
+
+impl<'a, C> CollectionMutationService<'a, C>
+where
+    C: CollectionMutationPort + ?Sized,
+{
+    pub fn new(collections: &'a C) -> Self {
+        Self { collections }
+    }
+
+    pub async fn create_collection(
+        &self,
+        input: CollectionMutationInput,
+    ) -> Result<CollectionCreateResult, CollectionMutationError> {
+        self.ensure_unique_collection_name(&input.name, None)
+            .await?;
+
+        let collection_id = generated_collection_id();
+        self.collections
+            .persist_collection_create(
+                &collection_id,
+                &input.name,
+                input.ordered,
+                &input.series_ids,
+            )
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+
+        register_runtime_sse_event(
+            "CollectionAdded",
+            json!({
+                "collectionId": collection_id,
+                "seriesIds": input.series_ids,
+            }),
+            false,
+            None,
+        );
+        self.collections
+            .upsert_collection_search_document(&collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+
+        Ok(CollectionCreateResult { collection_id })
+    }
+
+    pub async fn update_collection(
+        &self,
+        collection_id: &str,
+        input: CollectionMutationInput,
+    ) -> Result<bool, CollectionMutationError> {
+        let Some(existing) = self
+            .load_collection_for_mutation(collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?
+        else {
+            return Ok(false);
+        };
+        if !existing.name.eq_ignore_ascii_case(&input.name) {
+            self.ensure_unique_collection_name(&input.name, Some(collection_id))
+                .await?;
+        }
+
+        let updated = self
+            .collections
+            .persist_collection_update(collection_id, &input.name, input.ordered, &input.series_ids)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+        if !updated {
             return Ok(false);
         }
 
-        let Some(restrictions) = context.restrictions.as_ref() else {
-            return Ok(true);
-        };
+        register_runtime_sse_event(
+            "CollectionChanged",
+            json!({
+                "collectionId": collection_id,
+                "seriesIds": input.series_ids,
+            }),
+            false,
+            None,
+        );
+        self.collections
+            .upsert_collection_search_document(collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
 
-        let restriction_record = self.series.load_series_restrictions(series_id).await?;
-        Ok(content_allowed_by_restrictions(
-            restrictions,
-            restriction_record.age_rating,
-            &restriction_record.labels,
-        ))
+        Ok(true)
+    }
+
+    pub async fn delete_collection(
+        &self,
+        collection_id: &str,
+    ) -> Result<bool, CollectionMutationError> {
+        let existing = self
+            .load_collection_for_mutation(collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+        let deleted = self
+            .collections
+            .delete_persisted_collection(collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+        if !deleted {
+            return Ok(false);
+        }
+
+        if let Some(collection) = existing {
+            register_runtime_sse_event(
+                "CollectionDeleted",
+                json!({
+                    "collectionId": collection_id,
+                    "seriesIds": collection.series_ids,
+                }),
+                false,
+                None,
+            );
+        }
+        self.collections
+            .delete_collection_search_document(collection_id)
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+
+        Ok(true)
+    }
+
+    async fn ensure_unique_collection_name(
+        &self,
+        name: &str,
+        allowed_collection_id: Option<&str>,
+    ) -> Result<(), CollectionMutationError> {
+        let collections = self
+            .collections
+            .load_persisted_collections()
+            .await
+            .map_err(CollectionMutationError::Persistence)?;
+        let duplicate = collections.iter().any(|collection| {
+            allowed_collection_id != Some(collection.id.as_str())
+                && collection.name.eq_ignore_ascii_case(name)
+        });
+        if duplicate {
+            return Err(CollectionMutationError::DuplicateName);
+        }
+
+        Ok(())
+    }
+
+    async fn load_collection_for_mutation(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let Some(row) = self
+            .collections
+            .load_persisted_collection_detail(collection_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let series_ids = self
+            .collections
+            .load_persisted_collection_series_ids(collection_id)
+            .await?;
+
+        Ok(Some(collection_from_record(row, series_ids)))
     }
 }
 
@@ -258,20 +555,44 @@ fn collections_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
         .expect("unicode collator for collections sorting should construct")
 }
 
+fn generated_collection_id() -> String {
+    format!("collection-{}", random_hex_token(12))
+}
+
+fn random_hex_token(byte_len: usize) -> String {
+    let mut bytes = vec![0u8; byte_len];
+    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
+        let _ = file.read_exact(&mut bytes);
+    } else {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
+        }
+    }
+
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Mutex};
 
     use async_trait::async_trait;
     use komga_domain::common_ids::LibraryId;
     use komga_domain::discovery::DiscoveryQueryContext;
 
     use crate::discovery::{
-        CollectionListPort, CollectionSearchPort, CollectionSeriesPort,
-        PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
+        CollectionDetailPort, CollectionListPort, CollectionMutationPort, CollectionSearchPort,
+        CollectionSeriesPort, PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
     };
 
-    use super::{CollectionListQuery, CollectionListService};
+    use super::{
+        CollectionListQuery, CollectionListService, CollectionMutationError,
+        CollectionMutationInput, CollectionMutationService, CollectionVisibilityService,
+    };
 
     #[tokio::test]
     async fn list_collections_applies_visibility_scope_before_search_ranking() {
@@ -331,6 +652,97 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn collection_visibility_service_filters_hidden_series_for_detail() {
+        let ports = TestCollectionPorts::new();
+        let service = CollectionVisibilityService::new(&ports, &ports);
+
+        let collection = service
+            .collection_detail(
+                &context_with_libraries(["library-a", "library-b"]),
+                "collection-visible",
+            )
+            .await
+            .expect("collection detail should resolve")
+            .expect("visible collection should remain");
+
+        assert_eq!(collection.series_ids, vec!["series-a"]);
+        assert!(collection.filtered);
+    }
+
+    #[tokio::test]
+    async fn collection_mutation_service_rejects_duplicate_names_before_persistence() {
+        let ports = TestCollectionPorts::new();
+        let service = CollectionMutationService::new(&ports);
+
+        let error = service
+            .create_collection(collection_mutation_input("alpha", ["series-a"]))
+            .await
+            .expect_err("duplicate name should fail");
+
+        assert_eq!(error, CollectionMutationError::DuplicateName);
+        assert!(ports.created_collection_ids().is_empty());
+        assert!(ports.search_upserts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn collection_mutation_service_allows_unchanged_historical_duplicate_name() {
+        let mut ports = TestCollectionPorts::new();
+        ports
+            .collections
+            .push(collection_record("collection-legacy-duplicate", "Alpha"));
+        let service = CollectionMutationService::new(&ports);
+
+        let updated = service
+            .update_collection(
+                "collection-visible",
+                collection_mutation_input("Alpha", ["series-a"]),
+            )
+            .await
+            .expect("unchanged duplicate name should not fail validation");
+
+        assert!(updated);
+        assert_eq!(ports.updated_collection_ids(), vec!["collection-visible"]);
+        assert_eq!(ports.search_upserts(), vec!["collection-visible"]);
+    }
+
+    #[tokio::test]
+    async fn collection_mutation_service_syncs_search_after_create_update_and_delete() {
+        let ports = TestCollectionPorts::new();
+        let service = CollectionMutationService::new(&ports);
+
+        let created = service
+            .create_collection(collection_mutation_input("Delta", ["series-a"]))
+            .await
+            .expect("collection create should complete");
+        let updated = service
+            .update_collection(
+                "collection-visible",
+                collection_mutation_input("Alpha", ["series-a"]),
+            )
+            .await
+            .expect("collection update should complete");
+        let deleted = service
+            .delete_collection("collection-visible")
+            .await
+            .expect("collection delete should complete");
+
+        assert!(created.collection_id.starts_with("collection-"));
+        assert!(updated);
+        assert!(deleted);
+        assert_eq!(
+            ports.created_collection_ids(),
+            vec![created.collection_id.clone()]
+        );
+        assert_eq!(ports.updated_collection_ids(), vec!["collection-visible"]);
+        assert_eq!(ports.deleted_collection_ids(), vec!["collection-visible"]);
+        assert_eq!(
+            ports.search_upserts(),
+            vec![created.collection_id, "collection-visible".to_string()],
+        );
+        assert_eq!(ports.search_deletes(), vec!["collection-visible"]);
+    }
+
     fn context_with_libraries<const N: usize>(libraries: [&str; N]) -> DiscoveryQueryContext {
         DiscoveryQueryContext {
             user_id: None,
@@ -345,6 +757,11 @@ mod tests {
         collection_series: HashMap<String, Vec<String>>,
         series_libraries: HashMap<String, String>,
         search_hits: HashMap<String, Vec<String>>,
+        created_collections: Mutex<Vec<String>>,
+        updated_collections: Mutex<Vec<String>>,
+        deleted_collections: Mutex<Vec<String>>,
+        search_upserts: Mutex<Vec<String>>,
+        search_deletes: Mutex<Vec<String>>,
     }
 
     impl TestCollectionPorts {
@@ -382,7 +799,47 @@ mod tests {
                         "collection-visible".to_string(),
                     ],
                 )]),
+                created_collections: Mutex::new(Vec::new()),
+                updated_collections: Mutex::new(Vec::new()),
+                deleted_collections: Mutex::new(Vec::new()),
+                search_upserts: Mutex::new(Vec::new()),
+                search_deletes: Mutex::new(Vec::new()),
             }
+        }
+
+        fn created_collection_ids(&self) -> Vec<String> {
+            self.created_collections
+                .lock()
+                .expect("created collections lock should not be poisoned")
+                .clone()
+        }
+
+        fn updated_collection_ids(&self) -> Vec<String> {
+            self.updated_collections
+                .lock()
+                .expect("updated collections lock should not be poisoned")
+                .clone()
+        }
+
+        fn deleted_collection_ids(&self) -> Vec<String> {
+            self.deleted_collections
+                .lock()
+                .expect("deleted collections lock should not be poisoned")
+                .clone()
+        }
+
+        fn search_upserts(&self) -> Vec<String> {
+            self.search_upserts
+                .lock()
+                .expect("search upserts lock should not be poisoned")
+                .clone()
+        }
+
+        fn search_deletes(&self) -> Vec<String> {
+            self.search_deletes
+                .lock()
+                .expect("search deletes lock should not be poisoned")
+                .clone()
         }
     }
 
@@ -411,6 +868,118 @@ mod tests {
     }
 
     #[async_trait]
+    impl CollectionDetailPort for TestCollectionPorts {
+        async fn load_persisted_collection_detail(
+            &self,
+            collection_id: &str,
+        ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+            Ok(self
+                .collections
+                .iter()
+                .find(|collection| collection.id == collection_id)
+                .cloned())
+        }
+
+        async fn load_persisted_collection_series_ids(
+            &self,
+            collection_id: &str,
+        ) -> Result<Vec<String>, String> {
+            Ok(self
+                .collection_series
+                .get(collection_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+    }
+
+    #[async_trait]
+    impl CollectionMutationPort for TestCollectionPorts {
+        async fn load_persisted_collections(
+            &self,
+        ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+            Ok(self.collections.clone())
+        }
+
+        async fn load_persisted_collection_detail(
+            &self,
+            collection_id: &str,
+        ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+            CollectionDetailPort::load_persisted_collection_detail(self, collection_id).await
+        }
+
+        async fn load_persisted_collection_series_ids(
+            &self,
+            collection_id: &str,
+        ) -> Result<Vec<String>, String> {
+            CollectionDetailPort::load_persisted_collection_series_ids(self, collection_id).await
+        }
+
+        async fn persist_collection_create(
+            &self,
+            collection_id: &str,
+            _name: &str,
+            _ordered: bool,
+            _series_ids: &[String],
+        ) -> Result<(), String> {
+            self.created_collections
+                .lock()
+                .expect("created collections lock should not be poisoned")
+                .push(collection_id.to_string());
+            Ok(())
+        }
+
+        async fn persist_collection_update(
+            &self,
+            collection_id: &str,
+            _name: &str,
+            _ordered: bool,
+            _series_ids: &[String],
+        ) -> Result<bool, String> {
+            self.updated_collections
+                .lock()
+                .expect("updated collections lock should not be poisoned")
+                .push(collection_id.to_string());
+            Ok(self
+                .collections
+                .iter()
+                .any(|collection| collection.id == collection_id))
+        }
+
+        async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+            self.deleted_collections
+                .lock()
+                .expect("deleted collections lock should not be poisoned")
+                .push(collection_id.to_string());
+            Ok(self
+                .collections
+                .iter()
+                .any(|collection| collection.id == collection_id))
+        }
+
+        async fn upsert_collection_search_document(
+            &self,
+            collection_id: &str,
+        ) -> Result<bool, String> {
+            self.search_upserts
+                .lock()
+                .expect("search upserts lock should not be poisoned")
+                .push(collection_id.to_string());
+            Ok(true)
+        }
+
+        async fn delete_collection_search_document(
+            &self,
+            collection_id: &str,
+        ) -> Result<(), String> {
+            self.search_deletes
+                .lock()
+                .expect("search deletes lock should not be poisoned")
+                .push(collection_id.to_string());
+            Ok(())
+        }
+    }
+
+    #[async_trait]
     impl CollectionSeriesPort for TestCollectionPorts {
         async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
             Ok(self.series_libraries.get(series_id).cloned())
@@ -435,6 +1004,17 @@ mod tests {
             _limit: usize,
         ) -> Result<Vec<String>, String> {
             Ok(self.search_hits.get(query).cloned().unwrap_or_default())
+        }
+    }
+
+    fn collection_mutation_input<const N: usize>(
+        name: &str,
+        series_ids: [&str; N],
+    ) -> CollectionMutationInput {
+        CollectionMutationInput {
+            name: name.to_string(),
+            ordered: false,
+            series_ids: series_ids.into_iter().map(str::to_string).collect(),
         }
     }
 

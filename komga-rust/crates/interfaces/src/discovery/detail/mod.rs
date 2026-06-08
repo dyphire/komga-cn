@@ -6,10 +6,7 @@ use axum::response::{IntoResponse, Response};
 use komga_domain::discovery::PageEnvelope;
 use serde_json::{Map, Value, json};
 
-use crate::discovery_auth::context::{
-    DetailContentContext, DetailResourceContext, DiscoveryQueryContext, QueryRestrictions,
-};
-use crate::discovery_auth::principal::AgeRestrictionKind;
+use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
 use crate::helpers::{
     api_file_path, detail_access_denial_response, normalized_date_time,
     normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
@@ -22,8 +19,8 @@ use crate::state::{
     SeriesMetadataUpdateRecord,
 };
 use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, ReadListReadModel,
-    ReadlistVisibilityService,
+    BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, CollectionVisibilityService,
+    ReadListReadModel, ReadlistVisibilityService,
 };
 
 mod books_detail;
@@ -48,12 +45,7 @@ pub use collections::{
 };
 use collections_support::{
     collection_payload, collections_page_payload, collections_unpaged_payload,
-    load_persisted_collection_detail, load_persisted_collections,
-};
-pub use collections_support::{
-    delete_collection_search_document, delete_persisted_collection, load_series_library_id,
-    persist_collection_create, persist_collection_update, persisted_collections_exist,
-    series_visible_to_context, upsert_collection_search_document,
+    load_persisted_collection_detail,
 };
 pub use detail_utils::{
     format_size_bytes, internal_error_response, media_profile_for_media_type, parse_csv_values,

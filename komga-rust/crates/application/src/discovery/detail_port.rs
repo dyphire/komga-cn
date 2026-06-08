@@ -419,6 +419,138 @@ where
 }
 
 #[async_trait]
+pub trait CollectionDetailPort: Send + Sync {
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String>;
+}
+
+#[async_trait]
+impl<T> CollectionDetailPort for T
+where
+    T: CollectionPort + ?Sized,
+{
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+        CollectionPort::load_persisted_collection_detail(self, collection_id).await
+    }
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String> {
+        CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
+    }
+}
+
+#[async_trait]
+pub trait CollectionMutationPort: Send + Sync {
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String>;
+
+    async fn persist_collection_create(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<(), String>;
+
+    async fn persist_collection_update(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<bool, String>;
+
+    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String>;
+
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
+
+    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+}
+
+#[async_trait]
+impl<T> CollectionMutationPort for T
+where
+    T: CollectionPort + ?Sized,
+{
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        CollectionPort::load_persisted_collections(self).await
+    }
+
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+        CollectionPort::load_persisted_collection_detail(self, collection_id).await
+    }
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String> {
+        CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
+    }
+
+    async fn persist_collection_create(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<(), String> {
+        CollectionPort::persist_collection_create(self, collection_id, name, ordered, series_ids)
+            .await
+    }
+
+    async fn persist_collection_update(
+        &self,
+        collection_id: &str,
+        name: &str,
+        ordered: bool,
+        series_ids: &[String],
+    ) -> Result<bool, String> {
+        CollectionPort::persist_collection_update(self, collection_id, name, ordered, series_ids)
+            .await
+    }
+
+    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+        CollectionPort::delete_persisted_collection(self, collection_id).await
+    }
+
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
+        CollectionPort::upsert_collection_search_document(self, collection_id).await
+    }
+
+    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
+        CollectionPort::delete_collection_search_document(self, collection_id).await
+    }
+}
+
+#[async_trait]
 pub trait ReadlistPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,

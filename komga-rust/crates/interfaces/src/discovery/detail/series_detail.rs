@@ -94,27 +94,25 @@ pub async fn series_collections(
         .await
     {
         Ok(_) => match load_persisted_series_collections(app, &series_id).await {
-            Ok(mut collections) => {
-                for collection in &mut collections {
-                    let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-                    for related_series_id in &collection.series_ids {
-                        match series_visible_to_context(app, &context, related_series_id, None)
-                            .await
-                        {
-                            Ok(true) => visible_series_ids.push(related_series_id.clone()),
-                            Ok(false) => {}
-                            Err(error) => return internal_error_response(error),
-                        }
+            Ok(collections) => {
+                let service = CollectionVisibilityService::new(
+                    app.collection.as_ref(),
+                    app.series_detail.as_ref(),
+                );
+                let domain_context = to_domain_query_context(context);
+                let mut visible_collections = Vec::with_capacity(collections.len());
+                for collection in collections {
+                    match service
+                        .visible_collection(&domain_context, collection)
+                        .await
+                    {
+                        Ok(Some(collection)) => visible_collections.push(collection),
+                        Ok(None) => {}
+                        Err(error) => return internal_error_response(error),
                     }
-
-                    if visible_series_ids.len() != collection.series_ids.len() {
-                        collection.filtered = true;
-                    }
-                    collection.series_ids = visible_series_ids;
                 }
 
-                collections.retain(|collection| !collection.series_ids.is_empty());
-                Json(series_collections_payload(&collections)).into_response()
+                Json(series_collections_payload(&visible_collections)).into_response()
             }
             Err(error) => internal_error_response(error),
         },

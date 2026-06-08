@@ -1,4 +1,3 @@
-use super::collections_support::PersistedCollectionWriteInput;
 use super::*;
 use crate::discovery::persisted::common_helpers::decode_query_component;
 use crate::discovery::series::series_read_model_page_payload;
@@ -9,7 +8,8 @@ use crate::state::DiscoveryState;
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use komga_application::discovery::{
-    CollectionListQuery, CollectionListService, PageRequest, SeriesBrowseRequest,
+    CollectionListQuery, CollectionListService, CollectionMutationError, CollectionMutationInput,
+    CollectionMutationService, CollectionVisibilityService, PageRequest, SeriesBrowseRequest,
     parse_series_filter_from_json,
 };
 use std::collections::{BTreeSet, HashMap};
@@ -42,11 +42,16 @@ pub async fn collection_series(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
-    let visible_series_ids =
-        match visible_collection_series_ids(&app, &visible_context, &collection).await {
-            Ok(ids) => ids,
-            Err(error) => return internal_error_response(error),
-        };
+    let domain_context = to_domain_query_context(visible_context);
+    let service =
+        CollectionVisibilityService::new(app.collection.as_ref(), app.series_detail.as_ref());
+    let visible_series_ids = match service
+        .visible_collection_series_ids(&domain_context, &collection)
+        .await
+    {
+        Ok(ids) => ids,
+        Err(error) => return internal_error_response(error),
+    };
     if visible_series_ids.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -151,8 +156,6 @@ pub async fn collection_series(
         .unwrap_or(20)
         .max(1);
 
-    let domain_context = to_domain_query_context(visible_context);
-
     let result = match app
         .discovery_browse
         .list_series(
@@ -181,20 +184,6 @@ pub async fn collection_series(
     }
 
     ordered_collection_series_response(response, &visible_series_ids, &uri).await
-}
-
-async fn visible_collection_series_ids(
-    app: &DiscoveryState,
-    context: &DiscoveryQueryContext,
-    collection: &CollectionReadModel,
-) -> Result<Vec<String>, String> {
-    let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-    for series_id in &collection.series_ids {
-        if series_visible_to_context(app, context, series_id, None).await? {
-            visible_series_ids.push(series_id.clone());
-        }
-    }
-    Ok(visible_series_ids)
 }
 
 async fn ordered_collection_series_response(
@@ -426,28 +415,13 @@ pub async fn collection_create(
         Err(response) => return response,
     };
 
-    match load_persisted_collections(&app).await {
-        Ok(collections)
-            if collections
-                .iter()
-                .any(|collection| collection.name.eq_ignore_ascii_case(&input.name)) =>
-        {
-            return collection_create_bad_request("Collection name already exists");
-        }
-        Ok(_) => {}
-        Err(error) => return internal_error_response(error),
-    }
-
-    let created_id = match persist_collection_create(&app, &input).await {
-        Ok(id) => id,
-        Err(error) => return internal_error_response(error),
+    let service = CollectionMutationService::new(app.collection.as_ref());
+    let created = match service.create_collection(input).await {
+        Ok(created) => created,
+        Err(error) => return collection_mutation_error_response(error, "/api/v1/collections"),
     };
 
-    if let Err(error) = upsert_collection_search_document(&app, &created_id).await {
-        return internal_error_response(error);
-    }
-
-    match load_persisted_collection_detail(&app, &created_id).await {
+    match load_persisted_collection_detail(&app, &created.collection_id).await {
         Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -455,9 +429,7 @@ pub async fn collection_create(
 }
 
 #[allow(clippy::result_large_err)]
-fn parse_collection_create_input(
-    payload: &Value,
-) -> Result<PersistedCollectionWriteInput, Response> {
+fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationInput, Response> {
     let Some(payload) = payload.as_object() else {
         return Err(collection_create_bad_request(
             "Request body must be a JSON object",
@@ -540,7 +512,7 @@ fn parse_collection_create_input(
         return Err(validation_error_response(violations));
     }
 
-    Ok(PersistedCollectionWriteInput {
+    Ok(CollectionMutationInput {
         name: name.to_string(),
         ordered,
         series_ids,
@@ -551,8 +523,13 @@ fn collection_create_bad_request(message: &str) -> Response {
     collection_bad_request("/api/v1/collections", message)
 }
 
-fn collection_update_bad_request(collection_id: &str, message: &str) -> Response {
-    collection_bad_request(&format!("/api/v1/collections/{collection_id}"), message)
+fn collection_mutation_error_response(error: CollectionMutationError, path: &str) -> Response {
+    match error {
+        CollectionMutationError::DuplicateName => {
+            collection_bad_request(path, "Collection name already exists")
+        }
+        CollectionMutationError::Persistence(error) => internal_error_response(error),
+    }
 }
 
 fn collection_bad_request(path: &str, message: &str) -> Response {
@@ -682,18 +659,14 @@ fn parse_collection_update_input(
 fn merge_collection_patch_input(
     existing: &CollectionReadModel,
     patch: CollectionPatchInput,
-) -> PersistedCollectionWriteInput {
-    PersistedCollectionWriteInput {
+) -> CollectionMutationInput {
+    CollectionMutationInput {
         name: patch.name.unwrap_or_else(|| existing.name.clone()),
         ordered: patch.ordered.unwrap_or(existing.ordered),
         series_ids: patch
             .series_ids
             .unwrap_or_else(|| existing.series_ids.clone()),
     }
-}
-
-fn collection_names_equal_ignore_case(left: &str, right: &str) -> bool {
-    left.to_lowercase() == right.to_lowercase()
 }
 
 pub async fn collection_detail(
@@ -711,33 +684,16 @@ pub async fn collection_detail(
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    match load_persisted_collection_detail(&app, &collection_id).await {
-        Ok(Some(mut collection)) => {
-            let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-            for series_id in &collection.series_ids {
-                match series_visible_to_context(&app, &context, series_id, None).await {
-                    Ok(true) => visible_series_ids.push(series_id.clone()),
-                    Ok(false) => {}
-                    Err(error) => return internal_error_response(error),
-                }
-            }
-
-            if collection.series_ids.len() != visible_series_ids.len() {
-                collection.filtered = true;
-            }
-            collection.series_ids = visible_series_ids;
-
-            if collection.series_ids.is_empty() {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-
-            return Json(collection_payload(&collection)).into_response();
-        }
-        Ok(None) => {}
-        Err(error) => return internal_error_response(error),
+    let service =
+        CollectionVisibilityService::new(app.collection.as_ref(), app.series_detail.as_ref());
+    match service
+        .collection_detail(&to_domain_query_context(context), &collection_id)
+        .await
+    {
+        Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
     }
-
-    StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn collection_update(
@@ -762,39 +718,14 @@ pub async fn collection_update(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
-    let should_validate_duplicate_name = patch
-        .name
-        .as_ref()
-        .is_some_and(|name| !collection_names_equal_ignore_case(name, &existing.name));
     let input = merge_collection_patch_input(&existing, patch);
 
-    if should_validate_duplicate_name {
-        match load_persisted_collections(&app).await {
-            Ok(collections)
-                if collections.iter().any(|collection| {
-                    collection.id != collection_id
-                        && collection_names_equal_ignore_case(&collection.name, &input.name)
-                }) =>
-            {
-                return collection_update_bad_request(
-                    &collection_id,
-                    "Collection name already exists",
-                );
-            }
-            Ok(_) => {}
-            Err(error) => return internal_error_response(error),
-        }
-    }
-
-    match persist_collection_update(&app, &collection_id, &input).await {
-        Ok(true) => {
-            if let Err(error) = upsert_collection_search_document(&app, &collection_id).await {
-                return internal_error_response(error);
-            }
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let service = CollectionMutationService::new(app.collection.as_ref());
+    let path = format!("/api/v1/collections/{collection_id}");
+    match service.update_collection(&collection_id, input).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => collection_mutation_error_response(error, path.as_str()),
     }
 }
 
@@ -803,14 +734,10 @@ pub async fn collection_delete(
     _: Admin,
     Path(collection_id): Path<String>,
 ) -> Response {
-    match delete_persisted_collection(&app, &collection_id).await {
-        Ok(true) => {
-            if let Err(error) = delete_collection_search_document(&app, &collection_id).await {
-                return internal_error_response(error);
-            }
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let service = CollectionMutationService::new(app.collection.as_ref());
+    match service.delete_collection(&collection_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => internal_error_response(error.to_string()),
     }
 }
