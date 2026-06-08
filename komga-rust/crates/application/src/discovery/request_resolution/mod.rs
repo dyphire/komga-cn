@@ -1,4 +1,5 @@
 mod books;
+mod readlists;
 mod series;
 
 use super::{
@@ -15,6 +16,10 @@ use komga_domain::discovery::{
     AgeRatingCondition, CompositeSeriesCondition, DateCondition, DiscoveryError, FilterOperator,
     InclusionCondition, ReadStatusCondition, SeriesCondition, SeriesFilter, SeriesSort,
     SeriesStatusCondition, SeriesValueCondition, StringCondition,
+};
+pub use readlists::{
+    normalize_readlists_search, parse_readlists_sort, resolve_readlist_books_query,
+    resolve_readlists_query,
 };
 use serde_json::Value;
 use series::{

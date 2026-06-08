@@ -108,114 +108,6 @@ pub fn classify_readlist_books_query(
     Ok(ReadListBooksOwnership::DependencyOnly)
 }
 
-pub fn normalize_readlists_search(search: Option<String>) -> Option<String> {
-    search.and_then(|value| (!value.trim().is_empty()).then_some(value))
-}
-
-pub fn parse_readlists_sort(value: &str) -> ReadListsSort {
-    let mut parts = value.splitn(2, ',');
-    let field = parts.next().unwrap_or_default().trim();
-    let direction = parts.next().unwrap_or("asc").trim();
-
-    if field.eq_ignore_ascii_case("name") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::NameDesc
-        } else {
-            ReadListsSort::NameAsc
-        }
-    } else if field.eq_ignore_ascii_case("createdDate") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::CreatedDateDesc
-        } else {
-            ReadListsSort::CreatedDateAsc
-        }
-    } else if field.eq_ignore_ascii_case("lastModifiedDate") {
-        if direction.eq_ignore_ascii_case("desc") {
-            ReadListsSort::LastModifiedDateDesc
-        } else {
-            ReadListsSort::LastModifiedDateAsc
-        }
-    } else {
-        ReadListsSort::SearchOrName
-    }
-}
-
-pub fn resolve_readlists_query(query: &str) -> ReadListsQuery {
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let library_ids = {
-        let values = query_values(query, "library_id")
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then_some(values)
-    };
-    let search_values = query_values(query, "search")
-        .into_iter()
-        .map(decode_query_component)
-        .collect::<Vec<_>>();
-    let search = normalize_readlists_search(match search_values.as_slice() {
-        [] => None,
-        [single] => Some(single.clone()),
-        _ => Some(search_values.join(",")),
-    });
-    let sort = query_values(query, "sort")
-        .into_iter()
-        .map(str::trim)
-        .find(|value| !value.is_empty())
-        .map(parse_readlists_sort)
-        .unwrap_or(ReadListsSort::SearchOrName);
-
-    ReadListsQuery {
-        page,
-        size,
-        unpaged: query_bool(query, "unpaged"),
-        library_ids,
-        search,
-        sort,
-    }
-}
-
-pub fn resolve_readlist_books_query(
-    readlist_id: impl Into<String>,
-    query: &str,
-) -> ReadListBooksQuery {
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let library_ids = {
-        let values = query_values(query, "library_id")
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        (!values.is_empty()).then_some(values)
-    };
-
-    ReadListBooksQuery {
-        readlist_id: readlist_id.into(),
-        page,
-        size,
-        unpaged: query_bool(query, "unpaged"),
-        library_ids,
-        deleted: query_value(query, "deleted").map(|value| value.eq_ignore_ascii_case("true")),
-        tags: decoded_query_values(query, "tag"),
-        read_statuses: decoded_query_values(query, "read_status"),
-        media_statuses: decoded_query_values(query, "media_status"),
-        authors: decoded_query_values(query, "author"),
-    }
-}
-
 pub struct ReadlistListService<'a> {
     readlists: &'a dyn ReadlistPort,
     books: &'a dyn ReadlistBookPort,
@@ -1016,80 +908,6 @@ fn paginate_readlist_books(
     PageEnvelope::from_slice(content, query.page, query.size, total_elements)
 }
 
-fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
-    query.split('&').find_map(|pair| {
-        let mut parts = pair.splitn(2, '=');
-        let name = parts.next().unwrap_or_default();
-        if name != key {
-            return None;
-        }
-        Some(parts.next().unwrap_or_default())
-    })
-}
-
-fn query_values<'a>(query: &'a str, key: &str) -> Vec<&'a str> {
-    query
-        .split('&')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let name = parts.next().unwrap_or_default();
-            if name != key {
-                return None;
-            }
-            Some(parts.next().unwrap_or_default())
-        })
-        .collect()
-}
-
-fn query_bool(query: &str, key: &str) -> bool {
-    query_value(query, key)
-        .map(|value| value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
-fn decoded_query_values(query: &str, key: &str) -> Option<Vec<String>> {
-    let values = query_values(query, key)
-        .into_iter()
-        .map(decode_query_component)
-        .filter(|value| !value.trim().is_empty())
-        .collect::<Vec<_>>();
-
-    (!values.is_empty()).then_some(values)
-}
-
-fn decode_query_component(value: &str) -> String {
-    let mut decoded = Vec::with_capacity(value.len());
-    let bytes = value.as_bytes();
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => {
-                decoded.push(b' ');
-                index += 1;
-            }
-            b'%' if index + 2 < bytes.len() => {
-                let first = (bytes[index + 1] as char).to_digit(16);
-                let second = (bytes[index + 2] as char).to_digit(16);
-
-                if let (Some(first), Some(second)) = (first, second) {
-                    decoded.push((first * 16 + second) as u8);
-                    index += 3;
-                } else {
-                    decoded.push(bytes[index]);
-                    index += 1;
-                }
-            }
-            byte => {
-                decoded.push(byte);
-                index += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&decoded).into_owned()
-}
-
 fn parse_csv_values(raw: &str) -> Vec<String> {
     if raw.trim().is_empty() {
         return vec![];
@@ -1134,35 +952,14 @@ mod tests {
         BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
         DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
         PersistedBookResourceRecord, PersistedComicrackMatchCandidateRecord, ReadlistBookPort,
-        ReadlistPort, ReadlistSearchPort,
+        ReadlistPort, ReadlistSearchPort, resolve_readlist_books_query,
     };
 
     use super::{
         ReadListBooksOwnership, ReadListBooksQuery, ReadListsQuery, ReadListsSort,
         ReadlistListService, ReadlistMutationInput, ReadlistMutationService,
-        ReadlistVisibilityService, classify_readlist_books_query, normalize_readlists_search,
-        resolve_readlist_books_query,
+        ReadlistVisibilityService, classify_readlist_books_query,
     };
-
-    #[test]
-    fn normalize_readlists_search_returns_none_for_blank_effective_values() {
-        assert_eq!(normalize_readlists_search(None), None);
-        assert_eq!(normalize_readlists_search(Some(String::new())), None);
-        assert_eq!(
-            normalize_readlists_search(Some("   \t\n".to_string())),
-            None
-        );
-    }
-
-    #[test]
-    fn normalize_readlists_search_preserves_non_blank_value_without_trimming() {
-        let decoded = " alpha ".to_string();
-
-        assert_eq!(
-            normalize_readlists_search(Some(decoded.clone())),
-            Some(decoded),
-        );
-    }
 
     #[test]
     fn classify_readlist_books_query_accepts_unpaged_with_library_and_extra_filters() {
