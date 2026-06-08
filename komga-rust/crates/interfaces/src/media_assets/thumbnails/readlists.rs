@@ -13,11 +13,12 @@ pub async fn readlist_thumbnail(
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+    let visible_book_ids = match visible_readlist_book_ids_for_user(&app, &readlist_id, &user).await
+    {
+        Ok(Some(book_ids)) if !book_ids.is_empty() => book_ids,
+        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
-    }
+    };
 
     match app.reader.readlist_thumbnails(&readlist_id).await {
         Ok(rows) => {
@@ -28,7 +29,7 @@ pub async fn readlist_thumbnail(
                 return response;
             }
 
-            match load_readlist_mosaic_bytes(&app, &readlist_id).await {
+            match load_readlist_mosaic_bytes(&app, visible_book_ids).await {
                 Ok(Some(bytes)) => {
                     let mut response = response_from_thumbnail_bytes(&headers, bytes, "image/jpeg");
                     set_one_hour_private_cache_control(&mut response);

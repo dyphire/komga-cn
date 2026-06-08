@@ -46,7 +46,8 @@ pub(crate) mod types;
 
 use self::access_control::{
     user_can_access_book_media, user_can_access_collection_media, user_can_access_readlist_media,
-    user_can_access_series_media, visible_readlist_book_ids_for_user,
+    user_can_access_series_media, visible_collection_series_ids_for_user,
+    visible_readlist_book_ids_for_user,
 };
 use self::archive_payload::{build_stored_zip_archive, readlist_archive_entry_name};
 use self::epub_positions::load_persisted_epub_positions;

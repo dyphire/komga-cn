@@ -187,16 +187,9 @@ pub(super) async fn load_series_thumbnail_source_bytes(
 
 pub(super) async fn load_readlist_mosaic_bytes(
     app: &MediaAssetsState,
-    readlist_id: &str,
+    visible_book_ids: Vec<String>,
 ) -> Result<Option<Vec<u8>>, String> {
-    let book_ids = repeated_thumbnail_source_ids(
-        app.readlist
-            .load_persisted_readlist_book_rows(readlist_id)
-            .await?
-            .into_iter()
-            .map(|row| row.book_id)
-            .collect(),
-    );
+    let book_ids = repeated_thumbnail_source_ids(visible_book_ids);
     if book_ids.is_empty() {
         return Ok(None);
     }
@@ -215,13 +208,9 @@ pub(super) async fn load_readlist_mosaic_bytes(
 
 pub(super) async fn load_collection_mosaic_bytes(
     app: &MediaAssetsState,
-    collection_id: &str,
+    visible_series_ids: Vec<String>,
 ) -> Result<Option<Vec<u8>>, String> {
-    let series_ids = repeated_thumbnail_source_ids(
-        app.collection
-            .load_persisted_collection_series_ids(collection_id)
-            .await?,
-    );
+    let series_ids = repeated_thumbnail_source_ids(visible_series_ids);
     if series_ids.is_empty() {
         return Ok(None);
     }
