@@ -1,6 +1,7 @@
 mod books;
 mod browse;
 pub mod browse_engine;
+mod collections;
 mod detail_port;
 mod query_ports;
 mod read_models;
@@ -14,14 +15,15 @@ pub use browse::{
     FacetScope, LatestBooksRequest, PageRequest, SeriesAlphabeticalGroupsRequest,
     SeriesBrowseRequest,
 };
+pub use collections::{CollectionListQuery, CollectionListService};
 pub use detail_port::{
-    BookDetailPort, CollectionPort, DiscoveryPersistedReadlistBookRecord,
-    DiscoveryPersistedReadlistRecord, ExistingSeriesMetadataRecord, PersistedBookResourceRecord,
-    PersistedBookSiblingDirectionRecord, PersistedCollectionAccessRecord,
-    PersistedComicrackMatchCandidateRecord, PersistedSeriesCollectionRecord,
-    PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
-    ReadlistBookPort, ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort,
-    SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
+    BookDetailPort, CollectionListPort, CollectionPort, CollectionSeriesPort,
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    ExistingSeriesMetadataRecord, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+    PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
+    PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord, PersistedSeriesResourceRecord,
+    PersistedSeriesRestrictionRecord, ReadlistBookPort, ReadlistPort, SeriesAlternateTitleRecord,
+    SeriesDetailPort, SeriesMetadataLinkRecord, SeriesMetadataUpdateRecord,
 };
 pub use query_ports::{
     AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,

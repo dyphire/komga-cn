@@ -127,6 +127,11 @@ pub struct ReadListReadModel {
 pub struct CollectionReadModel {
     pub id: String,
     pub name: String,
+    pub ordered: bool,
+    pub series_ids: Vec<String>,
+    pub created_date: String,
+    pub last_modified_date: String,
+    pub filtered: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

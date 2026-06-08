@@ -22,7 +22,8 @@ use crate::state::{
     SeriesMetadataUpdateRecord,
 };
 use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookReadModel, ReadListReadModel, ReadlistVisibilityService,
+    BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, ReadListReadModel,
+    ReadlistVisibilityService,
 };
 
 mod books_detail;
@@ -72,17 +73,6 @@ pub use series_persistence::{
 use series_persistence::{load_persisted_series_collections, load_persisted_series_detail};
 
 pub(super) type BookDetailReadModel = BookReadModel;
-
-#[derive(Clone)]
-pub(super) struct CollectionReadModel {
-    id: String,
-    name: String,
-    ordered: bool,
-    series_ids: Vec<String>,
-    created_date: String,
-    last_modified_date: String,
-    filtered: bool,
-}
 
 #[derive(Clone)]
 pub(super) struct SeriesDetailReadModel {

@@ -8,13 +8,9 @@ use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
 use axum::body::{Body, to_bytes};
 use axum::extract::State;
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 use komga_application::discovery::{
-    PageRequest, SeriesBrowseRequest, parse_series_filter_from_json,
+    CollectionListQuery, CollectionListService, PageRequest, SeriesBrowseRequest,
+    parse_series_filter_from_json,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -370,21 +366,6 @@ pub async fn collections(
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-
-    let persisted_rows_exist = match persisted_collections_exist(&app).await {
-        Ok(exists) => exists,
-        Err(error) => return internal_error_response(error),
-    };
-
-    let mut content = if persisted_rows_exist {
-        match load_persisted_collections(&app).await {
-            Ok(collections) => collections,
-            Err(error) => return internal_error_response(error),
-        }
-    } else {
-        vec![]
-    };
-    let search_limit = content.len().max(1);
     let request_scope_context = if requested_library_ids.is_empty() {
         None
     } else {
@@ -402,103 +383,34 @@ pub async fn collections(
         }
     };
 
-    for collection in &mut content {
-        let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-        let mut matches_requested_scope = request_scope_context.is_none();
-        for series_id in &collection.series_ids {
-            let series_library_id = match load_series_library_id(&app, series_id).await {
-                Ok(Some(value)) => value,
-                Ok(None) => continue,
-                Err(error) => return internal_error_response(error),
-            };
-
-            if let Some(request_context) = request_scope_context.as_ref()
-                && !matches_requested_scope
-            {
-                match series_visible_to_context(
-                    &app,
-                    request_context,
-                    series_id,
-                    Some(series_library_id.as_str()),
-                )
-                .await
-                {
-                    Ok(true) => matches_requested_scope = true,
-                    Ok(false) => {}
-                    Err(error) => return internal_error_response(error),
-                }
-            }
-
-            match series_visible_to_context(
-                &app,
-                &visible_context,
-                series_id,
-                Some(series_library_id.as_str()),
-            )
-            .await
-            {
-                Ok(true) => visible_series_ids.push(series_id.clone()),
-                Ok(false) => {}
-                Err(error) => return internal_error_response(error),
-            }
-        }
-
-        if visible_series_ids.len() != collection.series_ids.len() {
-            collection.filtered = true;
-        }
-        collection.series_ids = if matches_requested_scope {
-            visible_series_ids
-        } else {
-            vec![]
-        };
-    }
-
-    content.retain(|collection| !collection.series_ids.is_empty());
-
-    if let Some(search) = search.as_ref() {
-        let ranked_ids: Vec<String> = match app
-            .collection_search
-            .search_collection_ids(search, search_limit)
-            .await
-        {
-            Ok(ids) => ids,
-            Err(error) => return internal_error_response(error),
-        };
-        let ranks = ranked_ids
-            .iter()
-            .enumerate()
-            .map(|(index, id)| (id.as_str(), index))
-            .collect::<HashMap<&str, usize>>();
-        content.retain(|collection| ranks.contains_key(collection.id.as_str()));
-        content.sort_by_key(|collection| {
-            ranks
-                .get(collection.id.as_str())
-                .copied()
-                .unwrap_or(usize::MAX)
-        });
-    } else {
-        let collator = collections_unicode_collator();
-        content.sort_by(|left, right| collator.compare(left.name.as_str(), right.name.as_str()));
-    }
+    let service = CollectionListService::new(
+        app.collection.as_ref(),
+        app.series_detail.as_ref(),
+        app.collection_search.as_ref(),
+    );
+    let domain_visible_context = to_domain_query_context(visible_context);
+    let domain_request_scope_context = request_scope_context.clone().map(to_domain_query_context);
+    let page = match service
+        .list_collections(
+            &domain_visible_context,
+            domain_request_scope_context.as_ref(),
+            CollectionListQuery {
+                page,
+                size,
+                unpaged,
+                search,
+            },
+        )
+        .await
+    {
+        Ok(page) => page,
+        Err(error) => return internal_error_response(error),
+    };
 
     if unpaged {
-        let payload = collections_unpaged_payload(content);
+        let payload = collections_unpaged_payload(page.content);
         return Json(payload).into_response();
     }
-
-    let page_size = if size == 0 { 20 } else { size };
-    let total_elements = content.len();
-    let offset = page.saturating_mul(page_size);
-    let page_content = if offset >= total_elements {
-        vec![]
-    } else {
-        content
-            .into_iter()
-            .skip(offset)
-            .take(page_size)
-            .collect::<Vec<_>>()
-    };
-    let page = PageEnvelope::from_slice(page_content, page, page_size, total_elements);
 
     Json(collections_page_payload(page)).into_response()
 }
@@ -782,13 +694,6 @@ fn merge_collection_patch_input(
 
 fn collection_names_equal_ignore_case(left: &str, right: &str) -> bool {
     left.to_lowercase() == right.to_lowercase()
-}
-
-fn collections_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for collections sorting should construct")
 }
 
 pub async fn collection_detail(

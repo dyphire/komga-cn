@@ -314,6 +314,33 @@ pub trait SeriesDetailPort: Send + Sync {
 }
 
 #[async_trait]
+pub trait CollectionSeriesPort: Send + Sync {
+    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
+
+    async fn load_series_restrictions(
+        &self,
+        series_id: &str,
+    ) -> Result<PersistedSeriesRestrictionRecord, String>;
+}
+
+#[async_trait]
+impl<T> CollectionSeriesPort for T
+where
+    T: SeriesDetailPort + ?Sized,
+{
+    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
+        SeriesDetailPort::load_series_library_id(self, series_id).await
+    }
+
+    async fn load_series_restrictions(
+        &self,
+        series_id: &str,
+    ) -> Result<PersistedSeriesRestrictionRecord, String> {
+        SeriesDetailPort::load_series_restrictions(self, series_id).await
+    }
+}
+
+#[async_trait]
 pub trait CollectionPort: Send + Sync {
     async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
@@ -352,6 +379,43 @@ pub trait CollectionPort: Send + Sync {
     async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
 
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+}
+
+#[async_trait]
+pub trait CollectionListPort: Send + Sync {
+    async fn persisted_collections_exist(&self) -> Result<bool, String>;
+
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String>;
+}
+
+#[async_trait]
+impl<T> CollectionListPort for T
+where
+    T: CollectionPort + ?Sized,
+{
+    async fn persisted_collections_exist(&self) -> Result<bool, String> {
+        CollectionPort::persisted_collections_exist(self).await
+    }
+
+    async fn load_persisted_collections(
+        &self,
+    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        CollectionPort::load_persisted_collections(self).await
+    }
+
+    async fn load_persisted_collection_series_ids(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String> {
+        CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
+    }
 }
 
 #[async_trait]
