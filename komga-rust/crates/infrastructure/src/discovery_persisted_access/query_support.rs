@@ -7,21 +7,21 @@ use komga_application::discovery::{
 };
 
 use crate::database_handle::DatabaseHandle;
-use crate::search::index_dirs::resolve_discovery_index_dir;
 use crate::search::index_lifecycle::SearchEntityType;
+use crate::search::query::SearchIndexQuery;
 
-use super::browse::{search_ids_or_empty, search_scored_ids_or_empty};
 use super::{authors, library_mappings, models, runtime_queries};
 
 #[derive(Clone)]
 pub struct DiscoveryQuerySupportAccess {
     db: DatabaseHandle,
-    index_dir: PathBuf,
+    search: SearchIndexQuery,
 }
 
 impl DiscoveryQuerySupportAccess {
     pub fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
-        Self { db, index_dir }
+        let search = SearchIndexQuery::new(db.database_file().to_path_buf(), index_dir);
+        Self { db, search }
     }
 }
 
@@ -112,13 +112,9 @@ impl CollectionSearchPort for DiscoveryQuerySupportAccess {
         query: &str,
         limit: usize,
     ) -> Result<Vec<String>, String> {
-        Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            query,
-            SearchEntityType::Collection,
-            limit,
-        ))
+        Ok(self
+            .search
+            .search_ids(query, SearchEntityType::Collection, limit))
     }
 }
 
@@ -129,12 +125,8 @@ impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
         query: &str,
         limit: usize,
     ) -> Result<Vec<(f32, String)>, String> {
-        Ok(search_scored_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            query,
-            SearchEntityType::ReadList,
-            limit,
-        ))
+        Ok(self
+            .search
+            .search_scored_ids(query, SearchEntityType::ReadList, limit))
     }
 }
