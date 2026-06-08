@@ -9,7 +9,9 @@ pub(super) async fn proxy_kobo_store_library_sync(
     query: Option<&str>,
     raw_sync_token: &str,
 ) -> Result<KoboStoreSyncMergeResult, ()> {
-    let mut target = String::from("https://storeapi.kobo.com/v1/library/sync");
+    let base_url = std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
+        .unwrap_or_else(|_| "https://storeapi.kobo.com".to_string());
+    let mut target = format!("{}/v1/library/sync", base_url.trim_end_matches('/'));
     if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
         target.push('?');
         target.push_str(query);

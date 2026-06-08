@@ -157,6 +157,95 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
 }
 
 #[tokio::test]
+async fn router_kobo_library_sync_merges_store_proxy_when_proxy_enabled() {
+    let _guard = kobo_proxy_env_lock()
+        .lock()
+        .expect("kobo proxy env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+
+    let server = spawn_single_response_server_with_headers(
+        200,
+        "application/json",
+        r#"[{"StoreOnly":true}]"#,
+        &[
+            ("x-kobo-sync", "continue"),
+            ("x-kobo-synctoken", "store.next.token"),
+        ],
+    )
+    .await;
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
+    }
+
+    let ctx = TestFixture::builder("router-kobo-library-sync-store-proxy")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+            upsert_server_setting(&paths, "KOBO_PROXY", "true").await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/library/sync")
+                .header("x-auth-token", &auth_token)
+                .header("x-kobo-synctoken", "store.raw.token")
+                .body(Body::empty())
+                .expect("kobo library store proxy request should build"),
+        )
+        .await
+        .expect("kobo library store proxy request should complete");
+
+    let status = response.status();
+    let sync_token_header = response
+        .headers()
+        .get("x-kobo-synctoken")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let should_continue = response
+        .headers()
+        .get("x-kobo-sync")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let payload = if status == StatusCode::OK {
+        response_json(response).await
+    } else {
+        Value::Null
+    };
+
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+    server.join.abort();
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(should_continue.as_deref(), Some("continue"));
+    let sync_token_header = sync_token_header
+        .as_deref()
+        .expect("store proxy sync response should include x-kobo-synctoken");
+    let sync_token_payload = sync_token_header
+        .strip_prefix("KOMGA.")
+        .and_then(|value| STANDARD_NO_PAD.decode(value).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+        .expect("store proxy sync token should decode to Komga payload");
+    assert_eq!(
+        sync_token_payload.get("rawKoboSyncToken"),
+        Some(&json!("store.next.token"))
+    );
+    assert!(
+        payload
+            .as_array()
+            .expect("store proxy sync response should be a JSON array")
+            .iter()
+            .any(|event| event == &json!({"StoreOnly": true}))
+    );
+}
+
+#[tokio::test]
 async fn router_kobo_library_sync_respects_shared_library_scope() {
     let ctx = TestFixture::builder("router-kobo-library-sync-library-scope")
         .with_seed(|paths| async move {
