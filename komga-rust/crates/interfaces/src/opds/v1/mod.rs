@@ -1,5 +1,5 @@
 use super::feeds::normalize_opds_updated;
-use super::types::{PersistedBookFeedItem, PersistedSeriesBook};
+use super::types::PersistedBookFeedItem;
 use super::*;
 use komga_application::media_assets::content_type_from_filename;
 use time::format_description::well_known::Rfc3339;

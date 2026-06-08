@@ -11,11 +11,7 @@ use super::PersistedSeries;
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
         id: entry.id,
-        library_id: entry.library_id,
         title: entry.title,
-        summary: String::new(),
-        age_rating: entry.age_rating,
-        sharing_labels: entry.sharing_labels,
         last_modified: entry.last_modified,
     }
 }

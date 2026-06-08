@@ -15,14 +15,10 @@ use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::identity_access::auth::{
     AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
-use crate::state::{
-    OpdsBookAuthorEntry, OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord,
-    PersistedSeriesBookRecord, PersistedSeriesRecord,
-};
+use crate::state::{OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord};
 
 use super::types::{
-    OpdsRestrictions, PersistedLibrary, PersistedSeries, PersistedSeriesBook,
-    PersistedSeriesSearchResult,
+    OpdsRestrictions, PersistedLibrary, PersistedSeries, PersistedSeriesSearchResult,
 };
 
 mod catalog_queries;
@@ -141,27 +137,6 @@ pub(super) async fn load_library(
     Ok(record.map(map_library_record))
 }
 
-pub(super) async fn load_series(
-    backend: &dyn OpdsPersistedPort,
-    series_id: &str,
-) -> Result<Option<PersistedSeries>, String> {
-    let record = backend.load_series(series_id).await?;
-    Ok(record.map(map_series_record))
-}
-
-pub(super) async fn load_series_books_paged(
-    backend: &dyn OpdsPersistedPort,
-    series_id: &str,
-    user_id: &str,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<PersistedSeriesBook>, String> {
-    let records = backend
-        .load_series_books_paged(series_id, user_id, offset, limit)
-        .await?;
-    Ok(records.into_iter().map(map_series_book_record).collect())
-}
-
 pub(super) async fn load_series_tags(
     backend: &dyn OpdsPersistedPort,
     series_id: &str,
@@ -271,52 +246,6 @@ fn map_library_record(row: PersistedLibraryRecord) -> PersistedLibrary {
         id: row.id,
         name: row.name,
         last_modified: row.last_modified,
-    }
-}
-
-fn map_series_record(row: PersistedSeriesRecord) -> PersistedSeries {
-    PersistedSeries {
-        id: row.id,
-        library_id: row.library_id,
-        title: row.title,
-        summary: row.summary,
-        age_rating: row.age_rating,
-        sharing_labels: row.sharing_labels,
-        last_modified: row.last_modified,
-    }
-}
-
-fn map_series_book_record(row: PersistedSeriesBookRecord) -> PersistedSeriesBook {
-    PersistedSeriesBook {
-        id: row.id,
-        series_id: row.series_id,
-        title: row.title,
-        series_title: row.series_title,
-        number: row.number,
-        number_sort: row.number_sort,
-        summary: row.summary,
-        isbn: row.isbn,
-        authors: row
-            .authors
-            .into_iter()
-            .map(|author| OpdsBookAuthorEntry {
-                name: author.name,
-                role: author.role,
-            })
-            .collect(),
-        tags: row.tags,
-        file_name: row.file_name,
-        file_size: row.file_size,
-        media_type: row.media_type,
-        page_count: row.page_count,
-        epub_divina_compatible: row.epub_divina_compatible,
-        last_read: row.last_read,
-        last_read_date: row.last_read_date,
-        library_id: row.library_id,
-        age_rating: row.age_rating,
-        sharing_labels: row.sharing_labels,
-        last_modified: row.last_modified,
-        release_date: row.release_date,
     }
 }
 

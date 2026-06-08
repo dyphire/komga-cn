@@ -12,6 +12,13 @@ pub enum OpdsLibraryScopeError {
     Forbidden,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum OpdsSeriesAccessError {
+    Load(String),
+    NotFound,
+    Forbidden,
+}
+
 pub struct OpdsReadlistDetail {
     pub readlist: PersistedReadlistRecord,
     pub books: Vec<PersistedReadlistBookRecord>,
@@ -286,6 +293,25 @@ impl<'a> OpdsPersistedService<'a> {
             .filter(|series| series_is_visible(user, series)))
     }
 
+    pub async fn visible_series(
+        &self,
+        user: &OpdsFeedUserContext,
+        series_id: &str,
+    ) -> Result<PersistedSeriesRecord, OpdsSeriesAccessError> {
+        let series = self
+            .persisted
+            .load_series(series_id)
+            .await
+            .map_err(OpdsSeriesAccessError::Load)?
+            .ok_or(OpdsSeriesAccessError::NotFound)?;
+
+        if !series_is_visible(user, &series) {
+            return Err(OpdsSeriesAccessError::Forbidden);
+        }
+
+        Ok(series)
+    }
+
     pub async fn series_books_page(
         &self,
         user: &OpdsFeedUserContext,
@@ -512,6 +538,8 @@ mod tests {
 
     #[derive(Default)]
     struct TestPersistedPort {
+        series: HashMap<String, PersistedSeriesRecord>,
+        series_books: HashMap<String, Vec<PersistedSeriesBookRecord>>,
         readlists: HashMap<String, PersistedReadlistRecord>,
         all_readlists: Vec<PersistedReadlistRecord>,
         readlist_books: HashMap<String, Vec<PersistedReadlistBookRecord>>,
@@ -548,19 +576,23 @@ mod tests {
 
         async fn load_series(
             &self,
-            _series_id: &str,
+            series_id: &str,
         ) -> Result<Option<PersistedSeriesRecord>, String> {
-            unimplemented!()
+            Ok(self.series.get(series_id).cloned())
         }
 
         async fn load_series_books_paged(
             &self,
-            _series_id: &str,
+            series_id: &str,
             _user_id: &str,
             _offset: i64,
             _limit: i64,
         ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
-            unimplemented!()
+            Ok(self
+                .series_books
+                .get(series_id)
+                .cloned()
+                .unwrap_or_default())
         }
 
         async fn load_series_tags(&self, _series_id: &str) -> Result<Vec<String>, String> {
@@ -791,6 +823,54 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn visible_series_reports_forbidden_for_content_hidden_series() {
+        let port = TestPersistedPort {
+            series: HashMap::from([(
+                "series-a".to_string(),
+                series("series-a", "lib-a", Some(18), &["adult"]),
+            )]),
+            ..Default::default()
+        };
+        let service = OpdsPersistedService::new(&port);
+
+        let result = service.visible_series(&restricted_user(), "series-a").await;
+        let Err(error) = result else {
+            panic!("content-hidden series should be forbidden");
+        };
+
+        assert_eq!(error, OpdsSeriesAccessError::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn series_books_page_filters_books_by_library_and_content_rules() {
+        let port = TestPersistedPort {
+            series_books: HashMap::from([(
+                "series-a".to_string(),
+                vec![
+                    series_book("book-a", "lib-a", Some(12), &["kids"]),
+                    series_book("book-b", "lib-a", Some(18), &["adult"]),
+                    series_book("book-c", "lib-b", Some(12), &["kids"]),
+                ],
+            )]),
+            ..Default::default()
+        };
+        let service = OpdsPersistedService::new(&port);
+
+        let books = service
+            .series_books_page(&restricted_user(), "series-a", "user-a", 0, 10)
+            .await
+            .expect("series books should load");
+
+        assert_eq!(
+            books
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-a"]
+        );
+    }
+
     fn restricted_user() -> OpdsFeedUserContext {
         OpdsFeedUserContext {
             user_id: "user-a".to_string(),
@@ -833,6 +913,56 @@ mod tests {
             age_rating,
             sharing_labels: labels(sharing_labels),
             last_modified: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn series(
+        id: &str,
+        library_id: &str,
+        age_rating: Option<u16>,
+        sharing_labels: &[&str],
+    ) -> PersistedSeriesRecord {
+        PersistedSeriesRecord {
+            id: id.to_string(),
+            library_id: library_id.to_string(),
+            title: id.to_string(),
+            summary: String::new(),
+            age_rating,
+            sharing_labels: labels(sharing_labels),
+            last_modified: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn series_book(
+        id: &str,
+        library_id: &str,
+        age_rating: Option<u16>,
+        sharing_labels: &[&str],
+    ) -> PersistedSeriesBookRecord {
+        PersistedSeriesBookRecord {
+            id: id.to_string(),
+            series_id: "series-a".to_string(),
+            title: id.to_string(),
+            series_title: "Series".to_string(),
+            number: String::new(),
+            number_sort: 0.0,
+            summary: String::new(),
+            isbn: None,
+            authors: Vec::new(),
+            tags: Vec::new(),
+            file_name: format!("{id}.epub"),
+            file_size: 1,
+            media_type: "application/epub+zip".to_string(),
+            media_status: Some("READY".to_string()),
+            page_count: 1,
+            epub_divina_compatible: false,
+            last_read: None,
+            last_read_date: None,
+            library_id: library_id.to_string(),
+            age_rating,
+            sharing_labels: labels(sharing_labels),
+            last_modified: "2026-01-01T00:00:00Z".to_string(),
+            release_date: None,
         }
     }
 

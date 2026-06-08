@@ -2,16 +2,15 @@ use super::streaming::{localized_opds_updated, series_book_page_streaming_links}
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::opds::types::PersistedSeries;
-use crate::state::{OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry, OpdsState};
+use crate::state::{
+    OpdsBookFeedEntry, OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry, OpdsState,
+};
+use komga_application::opds::OpdsSeriesAccessError;
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
         id: entry.id,
-        library_id: entry.library_id,
         title: entry.title,
-        summary: String::new(),
-        age_rating: entry.age_rating,
-        sharing_labels: entry.sharing_labels,
         last_modified: entry.last_modified,
     }
 }
@@ -24,40 +23,34 @@ pub(crate) async fn opds_v1_series_detail(
     user: &AuthUser,
 ) -> Response {
     let current_user_id = user_id(user).to_string();
-
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let Some(series) = load_series(app.opds_persisted.as_ref(), series_id)
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let series = match persisted_service
+        .visible_series(&feed_user, series_id)
         .await
-        .unwrap_or(None)
-    else {
-        return StatusCode::NOT_FOUND.into_response();
+    {
+        Ok(series) => series,
+        Err(OpdsSeriesAccessError::Forbidden) => return StatusCode::FORBIDDEN.into_response(),
+        Err(OpdsSeriesAccessError::NotFound | OpdsSeriesAccessError::Load(_)) => {
+            return StatusCode::NOT_FOUND.into_response();
+        }
     };
-    if !library_visible(&allowed_library_ids, &series.library_id) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    let restrictions = opds_restrictions_for_user(user);
-    if !content_allowed_by_restrictions(
-        restrictions.as_ref(),
-        series.age_rating,
-        &series.sharing_labels,
-    ) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
     let feed_updated = localized_opds_updated(&series.last_modified);
-    let books = load_series_books_paged(
-        app.opds_persisted.as_ref(),
-        &series.id,
-        &current_user_id,
-        page.saturating_mul(size) as i64,
-        (size + 1) as i64,
-    )
-    .await
-    .unwrap_or_default()
-    .into_iter();
+    let books = persisted_service
+        .series_books_page(
+            &feed_user,
+            &series.id,
+            &current_user_id,
+            page.saturating_mul(size) as i64,
+            (size + 1) as i64,
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter();
     let mut entries = Vec::new();
-    for book in books {
+    for book in books.map(OpdsBookFeedEntry::from) {
         let updated = localized_opds_updated(&book.last_modified);
         let extra_links = series_book_page_streaming_links(app, &headers, &book).await;
         let extension = std::path::Path::new(book.file_name.as_str())

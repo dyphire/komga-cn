@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::OpdsState;
+use crate::state::{OpdsBookFeedEntry, OpdsState};
 
 pub(super) async fn build_book_feed_acquisition_entries(
     app: &OpdsState,
@@ -68,7 +68,7 @@ pub(super) fn localized_opds_updated(value: &str) -> Option<String> {
 pub(super) async fn series_book_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
-    book: &PersistedSeriesBook,
+    book: &OpdsBookFeedEntry,
 ) -> Vec<OpdsV1XmlLink> {
     opds_book_page_streaming_links(
         app,

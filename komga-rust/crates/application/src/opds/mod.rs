@@ -15,7 +15,7 @@ pub use feed_service::{OpdsFeedService, OpdsFeedUserContext, OpdsPagedBooks, Opd
 pub use persisted_port::OpdsPersistedPort;
 pub use persisted_service::{
     OpdsCollectionDetail, OpdsLibraryScopeError, OpdsPersistedService, OpdsReadlistDetail,
-    OpdsUnifiedSearchResults,
+    OpdsSeriesAccessError, OpdsUnifiedSearchResults,
 };
 pub use records::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,

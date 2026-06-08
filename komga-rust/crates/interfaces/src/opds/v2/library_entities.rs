@@ -1,7 +1,10 @@
-use super::super::types::PersistedSeriesBook;
 use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
-use crate::state::{OpdsBookFeedEntry, OpdsFeedUserContext, OpdsPersistedService, OpdsState};
+use crate::state::{
+    OpdsBookFeedEntry, OpdsFeedUserContext, OpdsPersistedService, OpdsState,
+    PersistedSeriesBookRecord,
+};
+use komga_application::opds::OpdsSeriesAccessError;
 use serde_json::Value;
 
 pub(crate) async fn opds_v2_libraries_collections(
@@ -176,33 +179,23 @@ pub(crate) async fn opds_v2_series(
     series_id: &str,
     user: &AuthUser,
 ) -> Response {
-    let allowed_library_ids = allowed_library_ids_for_user(user);
-
-    let Some(series) = (match load_series(app.opds_persisted.as_ref(), series_id).await {
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let series = match persisted_service
+        .visible_series(&feed_user, series_id)
+        .await
+    {
         Ok(series) => series,
-        Err(error) => {
+        Err(OpdsSeriesAccessError::NotFound) => return StatusCode::NOT_FOUND.into_response(),
+        Err(OpdsSeriesAccessError::Forbidden) => return StatusCode::FORBIDDEN.into_response(),
+        Err(OpdsSeriesAccessError::Load(error)) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("load OPDS series: {error}") })),
             )
                 .into_response();
         }
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
     };
-
-    if !library_visible(&allowed_library_ids, &series.library_id) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-
-    let restrictions = opds_restrictions_for_user(user);
-    if !content_allowed_by_restrictions(
-        restrictions.as_ref(),
-        series.age_rating,
-        &series.sharing_labels,
-    ) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
     let current_user_id = user_id(user).to_string();
 
     let tag = uri.query().and_then(|raw| {
@@ -213,14 +206,9 @@ pub(crate) async fn opds_v2_series(
     });
     let (page, size) = parse_page_size(uri.query().unwrap_or_default());
 
-    let books = match load_series_books_paged(
-        app.opds_persisted.as_ref(),
-        &series.id,
-        &current_user_id,
-        0,
-        i64::MAX,
-    )
-    .await
+    let visible_books = match persisted_service
+        .series_books_page(&feed_user, &series.id, &current_user_id, 0, i64::MAX)
+        .await
     {
         Ok(books) => books,
         Err(error) => {
@@ -231,18 +219,6 @@ pub(crate) async fn opds_v2_series(
                 .into_response();
         }
     };
-
-    let visible_books = books
-        .into_iter()
-        .filter(|book| library_visible(&allowed_library_ids, &book.library_id))
-        .filter(|book| {
-            content_allowed_by_restrictions(
-                restrictions.as_ref(),
-                book.age_rating,
-                &book.sharing_labels,
-            )
-        })
-        .collect::<Vec<_>>();
 
     let series_tags = match load_series_tags(app.opds_persisted.as_ref(), &series.id).await {
         Ok(tags) => tags,
@@ -373,31 +349,8 @@ pub(crate) async fn opds_v2_series(
         .into_response()
 }
 
-fn series_book_feed_entry(book: PersistedSeriesBook) -> crate::state::OpdsBookFeedEntry {
-    crate::state::OpdsBookFeedEntry {
-        id: book.id,
-        series_id: book.series_id,
-        title: book.title,
-        series_title: book.series_title,
-        number: book.number,
-        number_sort: book.number_sort,
-        summary: book.summary,
-        isbn: book.isbn,
-        authors: book.authors,
-        tags: book.tags,
-        file_name: book.file_name,
-        file_size: book.file_size,
-        media_type: book.media_type,
-        page_count: book.page_count,
-        epub_divina_compatible: book.epub_divina_compatible,
-        last_read: book.last_read,
-        last_read_date: book.last_read_date,
-        library_id: book.library_id,
-        age_rating: book.age_rating,
-        sharing_labels: book.sharing_labels,
-        last_modified: book.last_modified,
-        release_date: book.release_date,
-    }
+fn series_book_feed_entry(book: PersistedSeriesBookRecord) -> crate::state::OpdsBookFeedEntry {
+    book.into()
 }
 
 fn series_page_link_path(self_path: &str, page: usize) -> String {
