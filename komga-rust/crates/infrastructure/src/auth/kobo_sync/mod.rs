@@ -9,7 +9,6 @@ use super::device_auth::{
     KoboMetadataRecord, PersistedReadProgressRecord, load_kobo_metadata_record, load_read_progress,
 };
 
-mod access_control;
 mod exists;
 mod mark_synced;
 mod page_loading;

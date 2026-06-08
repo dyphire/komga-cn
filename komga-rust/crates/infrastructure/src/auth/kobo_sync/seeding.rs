@@ -1,7 +1,5 @@
-use komga_application::identity_access::{AuthUser, now_sync_marker};
+use komga_application::identity_access::{AuthUser, KoboSyncAccessPolicy, now_sync_marker};
 use sqlx::{Row, Sqlite};
-
-use super::access_control::{normalized_sharing_labels, user_can_access_sync_book};
 
 #[derive(Clone)]
 struct SyncPointBookSeedRow {
@@ -33,6 +31,7 @@ pub(super) async fn seed_sync_point_books(
     sync_point_id: &str,
     user: &AuthUser,
 ) -> Result<(), sqlx::Error> {
+    let access_policy = KoboSyncAccessPolicy::new(user);
     let rows = sqlx::query(
         r#"
         SELECT
@@ -97,12 +96,12 @@ pub(super) async fn seed_sync_point_books(
             age_rating: row
                 .get::<Option<i64>, _>("AGE_RATING")
                 .and_then(|value| u16::try_from(value).ok()),
-            sharing_labels: normalized_sharing_labels(
+            sharing_labels: sharing_labels_from_group_concat(
                 row.get::<String, _>("SHARING_LABELS").as_str(),
             ),
         })
         .filter(|row| {
-            user_can_access_sync_book(user, &row.library_id, row.age_rating, &row.sharing_labels)
+            access_policy.can_access_book(&row.library_id, row.age_rating, &row.sharing_labels)
         })
         .collect::<Vec<_>>();
 
@@ -149,6 +148,7 @@ pub(super) async fn seed_sync_point_ondeck(
     sync_point_id: &str,
     user: &AuthUser,
 ) -> Result<(), sqlx::Error> {
+    let access_policy = KoboSyncAccessPolicy::new(user);
     let rows = sqlx::query(
         r#"
         SELECT
@@ -208,13 +208,13 @@ pub(super) async fn seed_sync_point_ondeck(
             age_rating: row
                 .get::<Option<i64>, _>("AGE_RATING")
                 .and_then(|value| u16::try_from(value).ok()),
-            sharing_labels: normalized_sharing_labels(
+            sharing_labels: sharing_labels_from_group_concat(
                 row.get::<String, _>("SHARING_LABELS").as_str(),
             ),
             most_recent_read_date: row.get::<Option<String>, _>("MOST_RECENT_READ_DATE"),
         })
         .filter(|row| {
-            user_can_access_sync_book(user, &row.library_id, row.age_rating, &row.sharing_labels)
+            access_policy.can_access_book(&row.library_id, row.age_rating, &row.sharing_labels)
         })
         .collect::<Vec<_>>();
 
@@ -261,4 +261,13 @@ pub(super) async fn seed_sync_point_ondeck(
     query.build().execute(&mut **tx).await?;
 
     Ok(())
+}
+
+fn sharing_labels_from_group_concat(labels: &str) -> Vec<String> {
+    labels
+        .split(',')
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_string)
+        .collect()
 }

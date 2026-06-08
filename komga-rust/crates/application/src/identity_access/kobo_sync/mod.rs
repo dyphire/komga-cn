@@ -1,3 +1,6 @@
+mod access;
+#[cfg(test)]
+mod access_tests;
 mod models;
 mod pipeline;
 #[cfg(test)]
@@ -5,6 +8,7 @@ mod pipeline_tests;
 mod sync_tokens;
 mod wire;
 
+pub use access::KoboSyncAccessPolicy;
 pub use models::{
     KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncPayload, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
     KoboStoreSyncMergeResult, KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPageRequest,
