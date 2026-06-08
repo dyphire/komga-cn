@@ -82,15 +82,10 @@ async fn load_kobo_proxy_enabled(
     server_settings: &dyn komga_application::operational::ServerSettingsPort,
 ) -> bool {
     server_settings
-        .load_map()
+        .load_settings()
         .await
         .ok()
-        .and_then(|settings| settings.get("KOBO_PROXY").cloned())
-        .and_then(|value| value)
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
+        .map(|settings| settings.kobo_proxy)
         .unwrap_or(false)
 }
 
