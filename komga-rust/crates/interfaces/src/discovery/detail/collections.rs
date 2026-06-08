@@ -5,7 +5,6 @@ use crate::discovery::series_routes::author_query_to_author_match;
 use crate::helpers::{to_domain_query_context, validation_error_response};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
-use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use komga_application::discovery::{
     CollectionListQuery, CollectionListService, CollectionMutationError, CollectionMutationInput,
@@ -147,7 +146,8 @@ pub async fn collection_series(
         }
     };
 
-    let unpaged = collection.ordered || query_bool(query_string, "unpaged");
+    let requested_unpaged = query_bool(query_string, "unpaged");
+    let unpaged = collection.ordered || requested_unpaged;
     let page = query_value(query_string, "page")
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(0);
@@ -156,7 +156,7 @@ pub async fn collection_series(
         .unwrap_or(20)
         .max(1);
 
-    let result = match app
+    let mut result = match app
         .discovery_browse
         .list_series(
             &domain_context,
@@ -177,107 +177,66 @@ pub async fn collection_series(
         Err(e) => return internal_error_response(format!("{e:?}")),
     };
 
-    let response = Json(series_read_model_page_payload(result, !unpaged, false)).into_response();
-
-    if !collection.ordered {
-        return response;
+    if collection.ordered {
+        result = ordered_collection_series_page(
+            result,
+            &visible_series_ids,
+            requested_unpaged,
+            page,
+            size,
+        );
     }
 
-    ordered_collection_series_response(response, &visible_series_ids, &uri).await
+    Json(series_read_model_page_payload(
+        result,
+        if collection.ordered {
+            !requested_unpaged
+        } else {
+            !unpaged
+        },
+        false,
+    ))
+    .into_response()
 }
 
-async fn ordered_collection_series_response(
-    response: Response,
+fn ordered_collection_series_page(
+    mut page: PageEnvelope<SeriesReadModel>,
     visible_series_ids: &[String],
-    original_uri: &Uri,
-) -> Response {
-    if response.status() != StatusCode::OK {
-        return response;
-    }
-
-    let requested_unpaged = query_bool(original_uri.query().unwrap_or_default(), "unpaged");
-    let requested_page = query_value(original_uri.query().unwrap_or_default(), "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let requested_size = query_value(original_uri.query().unwrap_or_default(), "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .max(1);
-
-    let (parts, body) = response.into_parts();
-    let bytes = match to_bytes(body, usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(_) => return Response::from_parts(parts, Body::empty()),
-    };
-    let mut payload = match serde_json::from_slice::<Value>(&bytes) {
-        Ok(payload) => payload,
-        Err(_) => return Response::from_parts(parts, Body::from(bytes)),
-    };
-
-    let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) else {
-        return Response::from_parts(parts, Body::from(bytes));
-    };
+    requested_unpaged: bool,
+    requested_page: usize,
+    requested_size: usize,
+) -> PageEnvelope<SeriesReadModel> {
     let order = visible_series_ids
         .iter()
         .enumerate()
         .map(|(index, series_id)| (series_id.as_str(), index))
         .collect::<HashMap<_, _>>();
-    content.sort_by_key(|entry| {
-        entry
-            .get("id")
-            .and_then(Value::as_str)
-            .and_then(|id| order.get(id).copied())
-            .unwrap_or(usize::MAX)
-    });
 
-    if !requested_unpaged {
-        apply_ordered_collection_series_pagination(&mut payload, requested_page, requested_size);
+    page.content
+        .sort_by_key(|series| order.get(series.id.as_str()).copied().unwrap_or(usize::MAX));
+
+    let total_elements = page.content.len();
+    if requested_unpaged {
+        return PageEnvelope::from_slice(page.content, 0, total_elements.max(1), total_elements);
     }
 
-    Response::from_parts(parts, Body::from(payload.to_string()))
-}
-
-fn apply_ordered_collection_series_pagination(payload: &mut Value, page: usize, size: usize) {
-    let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) else {
-        return;
-    };
-
-    let total_elements = content.len();
-    let offset = page.saturating_mul(size);
+    let requested_size = requested_size.max(1);
+    let offset = requested_page.saturating_mul(requested_size);
     let paged_content = if offset >= total_elements {
         vec![]
     } else {
-        content
-            .iter()
+        page.content
+            .into_iter()
             .skip(offset)
-            .take(size)
-            .cloned()
+            .take(requested_size)
             .collect::<Vec<_>>()
     };
-    *content = paged_content;
-
-    let total_pages = if total_elements == 0 {
-        0
-    } else {
-        total_elements.div_ceil(size)
-    };
-    let number_of_elements = content.len();
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-
-    payload["pageable"]["pageNumber"] = json!(page);
-    payload["pageable"]["pageSize"] = json!(size);
-    payload["pageable"]["offset"] = json!(offset);
-    payload["pageable"]["paged"] = Value::Bool(true);
-    payload["pageable"]["unpaged"] = Value::Bool(false);
-    payload["last"] = Value::Bool(last);
-    payload["totalElements"] = json!(total_elements);
-    payload["totalPages"] = json!(total_pages);
-    payload["first"] = Value::Bool(first);
-    payload["size"] = json!(size);
-    payload["number"] = json!(page);
-    payload["numberOfElements"] = json!(number_of_elements);
-    payload["empty"] = Value::Bool(number_of_elements == 0);
+    PageEnvelope::from_slice(
+        paged_content,
+        requested_page,
+        requested_size,
+        total_elements,
+    )
 }
 
 fn decoded_query_values(query: &str, key: &str) -> Vec<String> {

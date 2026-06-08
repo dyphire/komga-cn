@@ -20,7 +20,7 @@ use crate::state::{
 };
 use komga_application::discovery::{
     BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, CollectionVisibilityService,
-    ReadListReadModel, ReadlistVisibilityService,
+    ReadListReadModel, ReadlistVisibilityService, SeriesReadModel,
 };
 
 mod books_detail;
