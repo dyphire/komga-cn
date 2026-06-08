@@ -402,6 +402,21 @@ impl<'a> ReadlistVisibilityService<'a> {
         Ok(Some(paginate_readlist_books(visible_books, &query)))
     }
 
+    pub async fn visible_readlist_book_ids(
+        &self,
+        context: &DiscoveryQueryContext,
+        readlist_id: &str,
+    ) -> Result<Option<Vec<String>>, String> {
+        let query = readlist_books_visibility_query(readlist_id, None);
+        let Some(visible_books) = self.visible_readlist_books(context, &query).await? else {
+            return Ok(None);
+        };
+
+        Ok(Some(
+            visible_books.into_iter().map(|book| book.id).collect(),
+        ))
+    }
+
     pub async fn readlist_book_sibling(
         &self,
         context: &DiscoveryQueryContext,
@@ -1227,6 +1242,20 @@ mod tests {
             vec![result.readlist_id],
             "search sync belongs to the mutation boundary",
         );
+    }
+
+    #[tokio::test]
+    async fn readlist_visibility_service_exposes_visible_book_ids_for_media_boundaries() {
+        let ports = TestReadlistPorts::new();
+        let service = ReadlistVisibilityService::new(&ports, &ports);
+
+        let book_ids = service
+            .visible_readlist_book_ids(&context_with_libraries(["library-a"]), "readlist-1")
+            .await
+            .expect("readlist visibility should resolve")
+            .expect("readlist should remain visible");
+
+        assert_eq!(book_ids, vec!["book-a"]);
     }
 
     #[tokio::test]

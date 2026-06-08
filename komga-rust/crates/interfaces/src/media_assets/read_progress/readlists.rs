@@ -8,17 +8,7 @@ async fn load_tachiyomi_readlist_book_ids(
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<Option<Vec<String>>, String> {
-    let visible_books = visible_readlist_books_for_user(app, readlist_id, user).await?;
-    if visible_books.is_empty() {
-        let readlist_exists = app.reader.readlist_name(readlist_id).await?.is_some();
-        return Ok(
-            (readlist_exists && (user_shared_all_libraries(user) || user_is_admin(user)))
-                .then_some(Vec::new()),
-        );
-    }
-    Ok(Some(
-        visible_books.into_iter().map(|book| book.id).collect(),
-    ))
+    visible_readlist_book_ids_for_user(app, readlist_id, user).await
 }
 
 pub async fn readlist_tachiyomi_read_progress_get(

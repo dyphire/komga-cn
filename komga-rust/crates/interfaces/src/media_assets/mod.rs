@@ -14,7 +14,7 @@ use crate::cache::{
 use crate::discovery_auth::principal::principal_from_user_payload;
 use crate::identity_access::auth::{
     AuthUser, resolved_auth_user, resolved_request_auth_user, resolved_token, user_id,
-    user_is_admin, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
+    user_payload_json, user_shared_all_libraries, user_shared_library_ids,
 };
 use crate::state::MediaAssetsState;
 use komga_application::task_processing::{TaskKind, TaskQueueRecord, TaskRequest};
@@ -46,7 +46,7 @@ pub(crate) mod types;
 
 use self::access_control::{
     user_can_access_book_media, user_can_access_collection_media, user_can_access_readlist_media,
-    user_can_access_series_media, visible_readlist_books_for_user,
+    user_can_access_series_media, visible_readlist_book_ids_for_user,
 };
 use self::archive_payload::{build_stored_zip_archive, readlist_archive_entry_name};
 use self::epub_positions::load_persisted_epub_positions;

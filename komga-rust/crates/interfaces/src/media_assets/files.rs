@@ -10,16 +10,17 @@ pub async fn readlist_file(
     FileDownload(user): FileDownload,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    match user_can_access_readlist_media(&app, &readlist_id, &user).await {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
-    }
-
-    let visible_books = match visible_readlist_books_for_user(&app, &readlist_id, &user).await {
-        Ok(books) => books,
-        Err(error) => return internal_error_response(error),
+    let Some(visible_book_ids) =
+        (match visible_readlist_book_ids_for_user(&app, &readlist_id, &user).await {
+            Ok(books) => books,
+            Err(error) => return internal_error_response(error),
+        })
+    else {
+        return StatusCode::NOT_FOUND.into_response();
     };
+    if visible_book_ids.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
 
     match app.reader.readlist_name(&readlist_id).await {
         Ok(Some(name)) => {
@@ -27,8 +28,8 @@ pub async fn readlist_file(
             let content_disposition = attachment_disposition(&file_name);
 
             let mut archive_entries = Vec::new();
-            for (index, book) in visible_books.into_iter().enumerate() {
-                let Some(media) = (match app.reader.book_media(&book.id).await {
+            for (index, book_id) in visible_book_ids.into_iter().enumerate() {
+                let Some(media) = (match app.reader.book_media(&book_id).await {
                     Ok(media) => media,
                     Err(error) => return internal_error_response(error),
                 }) else {

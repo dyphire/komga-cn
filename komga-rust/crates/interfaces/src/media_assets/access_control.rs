@@ -1,10 +1,8 @@
 use super::*;
+use crate::discovery_auth::context::to_query_context;
+use crate::helpers::to_domain_query_context;
+use komga_application::discovery::ReadlistVisibilityService;
 use komga_application::media_assets::MediaReaderPort;
-
-#[derive(Clone)]
-pub(super) struct PersistedReadlistBookAccessRecord {
-    pub id: String,
-}
 
 pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool {
     user_shared_all_libraries(user)
@@ -70,38 +68,22 @@ pub(super) async fn user_can_access_readlist_media(
     readlist_id: &str,
     user: &AuthUser,
 ) -> Result<bool, String> {
-    Ok(!visible_readlist_books_for_user(app, readlist_id, user)
+    Ok(visible_readlist_book_ids_for_user(app, readlist_id, user)
         .await?
-        .is_empty())
+        .is_some_and(|book_ids| !book_ids.is_empty()))
 }
 
-pub(super) async fn visible_readlist_books_for_user(
+pub(super) async fn visible_readlist_book_ids_for_user(
     app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
-) -> Result<Vec<PersistedReadlistBookAccessRecord>, String> {
-    let books = app
-        .readlist
-        .load_persisted_readlist_book_rows(readlist_id)
-        .await?;
-    let mut visible_books = Vec::new();
-    for book in books {
-        if !user_can_access_library(user, &book.library_id) {
-            continue;
-        }
-
-        let (age_rating, sharing_labels) = app
-            .reader
-            .book_restrictions(&book.book_id)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or((None, Vec::new()));
-        if principal_allows_content(user, age_rating, &sharing_labels) {
-            visible_books.push(PersistedReadlistBookAccessRecord { id: book.book_id });
-        }
-    }
-    Ok(visible_books)
+) -> Result<Option<Vec<String>>, String> {
+    let principal = principal_from_user_payload(&user_payload_json(user))
+        .expect("authenticated user payload should resolve to discovery principal");
+    let context = to_domain_query_context(to_query_context(&principal, None));
+    ReadlistVisibilityService::new(app.readlist.as_ref(), app.book_detail.as_ref())
+        .visible_readlist_book_ids(&context, readlist_id)
+        .await
 }
 
 pub(super) async fn user_can_access_collection_media(
