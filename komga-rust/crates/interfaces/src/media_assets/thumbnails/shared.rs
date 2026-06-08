@@ -1,6 +1,7 @@
 use komga_application::media_assets::EntityThumbnailBinary;
 
 use crate::media_assets::page_resolution;
+use crate::media_response_policy::MediaAssetResponse;
 
 use super::*;
 
@@ -82,12 +83,9 @@ pub(crate) fn response_from_thumbnail_bytes(
     bytes: Vec<u8>,
     media_type: &str,
 ) -> Response {
-    let etag = asset_etag(bytes.as_slice());
-    if if_none_match_matches(headers, etag.as_str()) {
-        return asset_not_modified_response(Some(etag.as_str()), None);
-    }
-
-    asset_ok_response(media_type, bytes, Some(etag.as_str()), None)
+    MediaAssetResponse::new(media_type, bytes)
+        .with_etag()
+        .into_response(Some(headers))
 }
 
 pub(crate) fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec<u8>) -> Response {

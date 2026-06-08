@@ -1,5 +1,6 @@
 use super::shared::{
-    parse_thumbnail_upload, response_from_thumbnail_jpeg_bytes, thumbnail_dimensions,
+    parse_thumbnail_upload, response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
+    thumbnail_dimensions,
 };
 use super::*;
 use crate::identity_access::auth::{Admin, Authenticated};
@@ -19,16 +20,10 @@ pub async fn book_thumbnail(
 
         match app.reader.selected_book_thumbnail(&book_id).await {
             Ok(Some(thumbnail)) => {
-                let etag = asset_etag(thumbnail.thumbnail.as_slice());
-                if if_none_match_matches(&headers, etag.as_str()) {
-                    return asset_not_modified_response(Some(etag.as_str()), None);
-                }
-
-                return asset_ok_response(
-                    thumbnail.media_type.as_str(),
+                return response_from_thumbnail_bytes(
+                    &headers,
                     thumbnail.thumbnail,
-                    Some(etag.as_str()),
-                    None,
+                    thumbnail.media_type.as_str(),
                 );
             }
             Ok(None) => {}

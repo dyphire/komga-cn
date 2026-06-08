@@ -8,8 +8,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::cache::{
-    asset_etag, asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
-    if_modified_since_matches, if_none_match_matches,
+    asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
+    if_modified_since_matches,
 };
 use crate::discovery_auth::principal::principal_from_user_payload;
 use crate::identity_access::auth::{

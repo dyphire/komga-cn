@@ -1,11 +1,10 @@
 use axum::Json;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
 use crate::cache::{
-    asset_etag, asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
-    if_modified_since_matches, if_none_match_matches,
+    asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
 };
 use crate::identity_access::auth::{AuthUser, user_has_role};
 use crate::media_assets::http_helpers::{
@@ -15,6 +14,7 @@ use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
 };
+use crate::media_response_policy::MediaAssetResponse;
 use crate::state::{MediaAssetsState, OpdsState};
 use komga_application::discovery::BookDetailPort;
 use komga_application::media_assets::{
@@ -417,7 +417,6 @@ fn asset_response(
     include_etag: bool,
     include_last_modified: bool,
 ) -> Response {
-    let etag = include_etag.then(|| asset_etag(asset.bytes.as_slice()));
     let last_modified = include_last_modified
         .then(|| {
             asset
@@ -427,50 +426,30 @@ fn asset_response(
         })
         .flatten();
 
-    if let Some(headers) = headers {
-        if let Some(etag) = etag.as_deref()
-            && if_none_match_matches(headers, etag)
-        {
-            return asset_not_modified_response(Some(etag), last_modified.as_deref());
-        }
-        if let Some(last_modified) = last_modified.as_deref()
-            && if_modified_since_matches(headers, last_modified)
-        {
-            return asset_not_modified_response(etag.as_deref(), Some(last_modified));
-        }
+    let mut response = MediaAssetResponse::new(asset.content_type, asset.bytes);
+    if include_etag {
+        response = response.with_etag();
     }
 
-    let mut response = asset_ok_response(
-        asset.content_type.as_str(),
-        asset.bytes,
-        etag.as_deref(),
-        last_modified.as_deref(),
-    );
-    set_content_disposition(
-        response.headers_mut(),
-        asset.disposition,
-        asset.file_name.as_deref(),
-    );
     response
+        .with_last_modified(last_modified)
+        .with_content_disposition(content_disposition(
+            asset.disposition,
+            asset.file_name.as_deref(),
+        ))
+        .into_response(headers)
 }
 
-fn set_content_disposition(
-    headers: &mut HeaderMap,
+fn content_disposition(
     disposition: BookMediaDeliveryDisposition,
     file_name: Option<&str>,
-) {
-    let Some(file_name) = file_name else {
-        return;
-    };
-    let value = match disposition {
-        BookMediaDeliveryDisposition::Attachment => attachment_disposition(file_name),
-        BookMediaDeliveryDisposition::Inline => inline_disposition(file_name),
-        BookMediaDeliveryDisposition::None => return,
-    };
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&value).expect("content disposition should be valid"),
-    );
+) -> Option<String> {
+    let file_name = file_name?;
+    match disposition {
+        BookMediaDeliveryDisposition::Attachment => Some(attachment_disposition(file_name)),
+        BookMediaDeliveryDisposition::Inline => Some(inline_disposition(file_name)),
+        BookMediaDeliveryDisposition::None => None,
+    }
 }
 
 fn json_error_response(status: StatusCode, error: &str) -> Response {

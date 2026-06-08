@@ -1,5 +1,6 @@
 use super::*;
 use crate::identity_access::auth::FileDownload;
+use crate::media_response_policy::MediaAssetResponse;
 use crate::media_responses::BookMediaResponses;
 use crate::opds::opds_catalog_unauthorized_response;
 use crate::state::MediaAssetsState;
@@ -220,17 +221,6 @@ async fn book_resource_response(
     };
 
     let last_modified = file_last_modified_header_value(media.file_path.as_path());
-    if let Some(last_modified) = last_modified.as_deref()
-        && if_modified_since_matches(headers, last_modified)
-    {
-        let mut response = asset_not_modified_response(None, Some(last_modified));
-        response.headers_mut().insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("script-src 'none'; object-src 'none';"),
-        );
-        return response;
-    }
-
     let file_name = resource_name
         .rsplit('/')
         .next()
@@ -238,22 +228,17 @@ async fn book_resource_response(
         .unwrap_or(resource_name);
     let content_disposition = inline_disposition(file_name);
 
-    let mut response = asset_ok_response(
+    MediaAssetResponse::new(
         content_type_from_filename(resource_name, "application/octet-stream").as_str(),
         bytes,
-        None,
-        last_modified.as_deref(),
-    );
-    response.headers_mut().insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&content_disposition)
-            .expect("resource content disposition should be valid"),
-    );
-    response.headers_mut().insert(
+    )
+    .with_last_modified(last_modified)
+    .with_content_disposition(Some(content_disposition))
+    .with_header(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("script-src 'none'; object-src 'none';"),
-    );
-    response
+    )
+    .into_response(Some(headers))
 }
 
 pub async fn book_file(
