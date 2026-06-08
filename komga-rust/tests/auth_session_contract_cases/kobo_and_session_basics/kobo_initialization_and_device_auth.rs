@@ -193,9 +193,7 @@ async fn router_kobo_initialization_prefers_forwarded_host_over_kobo_port() {
 
 #[tokio::test]
 async fn router_kobo_initialization_uses_proxied_resources_and_overrides_local_urls() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(
@@ -260,9 +258,7 @@ async fn router_kobo_initialization_uses_proxied_resources_and_overrides_local_u
 
 #[tokio::test]
 async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_proxy_failure() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server =
@@ -311,9 +307,7 @@ async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_p
 
 #[tokio::test]
 async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server =
@@ -354,9 +348,7 @@ async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
 
 #[tokio::test]
 async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_request_body_echo_server().await;
@@ -413,9 +405,7 @@ async fn router_kobo_auth_device_uses_proxied_response_when_proxy_enabled() {
 
 #[tokio::test]
 async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_unauthorized() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server =

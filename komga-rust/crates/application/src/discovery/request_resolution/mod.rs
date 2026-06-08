@@ -1,4 +1,5 @@
 mod books;
+mod collections;
 mod readlists;
 mod series;
 
@@ -11,6 +12,7 @@ use books::{
     legacy_series_books_sort_from_query, normalize_release_date_date_time,
     parse_book_filter_from_json, parse_book_sorts_from_json, parse_book_sorts_from_json_values,
 };
+pub use collections::{ResolvedCollectionListRequest, resolve_collection_list_request};
 use komga_domain::common_ids::{CollectionId, LibraryId};
 use komga_domain::discovery::{
     AgeRatingCondition, CompositeSeriesCondition, DateCondition, DiscoveryError, FilterOperator,

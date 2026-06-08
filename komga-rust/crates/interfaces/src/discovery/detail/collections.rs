@@ -7,9 +7,9 @@ use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
 use axum::extract::State;
 use komga_application::discovery::{
-    CollectionListQuery, CollectionListService, CollectionMutationError, CollectionMutationInput,
+    CollectionListService, CollectionMutationError, CollectionMutationInput,
     CollectionMutationService, CollectionVisibilityService, PageRequest, SeriesBrowseRequest,
-    parse_series_filter_from_json,
+    parse_series_filter_from_json, resolve_collection_list_request,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -289,22 +289,8 @@ pub async fn collections(
     uri: Uri,
 ) -> Response {
     let query_string = uri.query().unwrap_or_default();
-    let page = query_value(query_string, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query_string, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(20);
-    let search = query_value(query_string, "search")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let requested_library_ids = query_values(query_string, "library_id")
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let unpaged = query_bool(query_string, "unpaged");
+    let resolved = resolve_collection_list_request(query_string);
+    let unpaged = resolved.query.unpaged;
 
     let visible_context = match app
         .discovery_auth
@@ -314,7 +300,7 @@ pub async fn collections(
         Some(context) => context,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-    let request_scope_context = if requested_library_ids.is_empty() {
+    let request_scope_context = if resolved.requested_library_ids.is_empty() {
         None
     } else {
         match app
@@ -322,7 +308,7 @@ pub async fn collections(
             .resolve_query_context_with_persistence(
                 &app.identity,
                 &headers,
-                Some(&requested_library_ids),
+                Some(&resolved.requested_library_ids),
             )
             .await
         {
@@ -342,12 +328,7 @@ pub async fn collections(
         .list_collections(
             &domain_visible_context,
             domain_request_scope_context.as_ref(),
-            CollectionListQuery {
-                page,
-                size,
-                unpaged,
-                search,
-            },
+            resolved.query,
         )
         .await
     {

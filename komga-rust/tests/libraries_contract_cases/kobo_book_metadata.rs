@@ -267,9 +267,7 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_is_missing_and_
 #[tokio::test]
 async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_metadata_row_is_missing()
  {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(
@@ -325,9 +323,7 @@ async fn router_kobo_book_metadata_returns_empty_array_when_book_exists_but_meta
 
 #[tokio::test]
 async fn router_kobo_book_metadata_proxies_missing_books_when_proxy_enabled() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(

@@ -86,9 +86,7 @@ async fn router_kobo_ping_returns_forbidden_for_valid_token_without_kobo_sync_ro
 
 #[tokio::test]
 async fn router_kobo_catch_all_returns_internal_error_for_non_json_upstream_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(200, "text/plain", "plain-text-body").await;
@@ -133,9 +131,7 @@ async fn router_kobo_catch_all_returns_internal_error_for_non_json_upstream_body
 
 #[tokio::test]
 async fn router_kobo_catch_all_preserves_non_success_status_for_non_json_upstream_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(503, "text/plain", "upstream error text").await;
@@ -180,9 +176,7 @@ async fn router_kobo_catch_all_preserves_non_success_status_for_non_json_upstrea
 
 #[tokio::test]
 async fn router_kobo_catch_all_does_not_passthrough_error_body_or_kobo_headers() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server_with_headers(
@@ -238,9 +232,7 @@ async fn router_kobo_catch_all_does_not_passthrough_error_body_or_kobo_headers()
 
 #[tokio::test]
 async fn router_kobo_catch_all_does_not_passthrough_json_error_body_or_kobo_headers() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server_with_headers(
@@ -296,9 +288,7 @@ async fn router_kobo_catch_all_does_not_passthrough_json_error_body_or_kobo_head
 
 #[tokio::test]
 async fn router_kobo_catch_all_returns_internal_error_for_transport_failure() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
     unsafe {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
@@ -337,9 +327,7 @@ async fn router_kobo_catch_all_returns_internal_error_for_transport_failure() {
 
 #[tokio::test]
 async fn router_kobo_catch_all_preserves_success_status_for_empty_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(204, "application/json", "").await;
@@ -384,9 +372,7 @@ async fn router_kobo_catch_all_preserves_success_status_for_empty_body() {
 
 #[tokio::test]
 async fn router_kobo_catch_all_put_returns_bad_request_for_invalid_json_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
     unsafe {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
@@ -426,9 +412,7 @@ async fn router_kobo_catch_all_put_returns_bad_request_for_invalid_json_body() {
 
 #[tokio::test]
 async fn router_kobo_catch_all_put_returns_unsupported_media_type_for_text_plain_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
     unsafe {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
@@ -468,9 +452,7 @@ async fn router_kobo_catch_all_put_returns_unsupported_media_type_for_text_plain
 
 #[tokio::test]
 async fn router_kobo_catch_all_put_returns_bad_request_for_malformed_xml_body() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
     unsafe {
         std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", "http://127.0.0.1:1");
@@ -510,9 +492,7 @@ async fn router_kobo_catch_all_put_returns_bad_request_for_malformed_xml_body() 
 
 #[tokio::test]
 async fn router_kobo_catch_all_put_reserializes_json_request_body_before_proxying() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_request_body_echo_server().await;

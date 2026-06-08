@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::filesystem::media_analysis::{self, MediaAnalysisProfile, MediaFileAnalyzer};
 pub(in crate::task_queue) use crate::filesystem::media_analysis::{
@@ -9,11 +9,11 @@ pub(in crate::task_queue) use crate::filesystem::media_analysis::{
 pub(in crate::task_queue) type BookMediaAnalysis = media_analysis::MediaFileAnalysis;
 
 pub(in crate::task_queue) fn analyze_book_media_file(
-    file_path: &PathBuf,
+    file_path: &Path,
     analyze_dimensions: bool,
 ) -> Result<BookMediaAnalysis, String> {
     MediaFileAnalyzer.analyze(
-        file_path.as_path(),
+        file_path,
         MediaAnalysisProfile::PersistedBook {
             include_dimensions: analyze_dimensions,
         },

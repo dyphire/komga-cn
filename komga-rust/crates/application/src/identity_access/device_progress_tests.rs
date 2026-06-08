@@ -93,7 +93,6 @@ async fn koreader_progress_maps_epub_locator_href_to_doc_fragment() {
                 .expect("locator should serialize"),
             ),
         }),
-        ..TestDeviceSync::default()
     };
     let reader = NoopMediaReader {
         epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),

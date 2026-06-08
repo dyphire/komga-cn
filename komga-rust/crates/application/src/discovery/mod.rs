@@ -45,9 +45,10 @@ pub use readlists::{
 };
 pub use request_resolution::{
     BrowseResponseMetadata, DiscoveryRequestError, ResolvedBooksBrowseRequest,
-    ResolvedLatestBooksRequest, ResolvedSeriesAlphabeticalGroupsRequest,
-    ResolvedSeriesBrowseRequest, normalize_readlists_search, parse_readlists_sort,
-    parse_series_filter_from_json, resolve_books_list_request, resolve_deprecated_books_request,
+    ResolvedCollectionListRequest, ResolvedLatestBooksRequest,
+    ResolvedSeriesAlphabeticalGroupsRequest, ResolvedSeriesBrowseRequest,
+    normalize_readlists_search, parse_readlists_sort, parse_series_filter_from_json,
+    resolve_books_list_request, resolve_collection_list_request, resolve_deprecated_books_request,
     resolve_deprecated_series_request, resolve_latest_books_request, resolve_readlist_books_query,
     resolve_readlists_query, resolve_series_alphabetical_groups_request,
     resolve_series_books_request, resolve_series_feed_request, resolve_series_list_request,

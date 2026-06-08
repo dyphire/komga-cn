@@ -158,9 +158,7 @@ async fn router_kobo_library_sync_returns_nested_dto_shape_and_sync_token() {
 
 #[tokio::test]
 async fn router_kobo_library_sync_merges_store_proxy_when_proxy_enabled() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server_with_headers(

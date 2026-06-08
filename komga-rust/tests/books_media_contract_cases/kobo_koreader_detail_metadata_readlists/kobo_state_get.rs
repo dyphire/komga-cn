@@ -195,9 +195,7 @@ async fn router_kobo_state_existing_progress_preserves_empty_string_locator_fiel
 
 #[tokio::test]
 async fn router_kobo_state_proxies_missing_book_when_kobo_proxy_enabled() {
-    let _guard = kobo_proxy_env_lock()
-        .lock()
-        .expect("kobo proxy env lock should not be poisoned");
+    let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
 
     let server = spawn_single_response_server(

@@ -1,9 +1,10 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use sha2::{Digest, Sha512};
 use sqlx::Row;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 use super::RuntimeDbPaths;
 

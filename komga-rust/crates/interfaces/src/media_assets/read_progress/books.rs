@@ -224,6 +224,10 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
+    if let Err(response) = load_accessible_book_media(app, book_id, user).await {
+        return response;
+    }
+
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_progression_payload();
     };
