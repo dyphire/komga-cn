@@ -24,6 +24,15 @@ pub struct PersistedAuthorEntry {
 }
 
 #[async_trait]
+pub trait ReadlistSearchPort: Send + Sync {
+    async fn search_readlist_scored_ids(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(f32, String)>, String>;
+}
+
+#[async_trait]
 pub trait DiscoverySearchService: Send + Sync {
     async fn load_author_names(
         &self,
@@ -46,12 +55,6 @@ pub trait DiscoverySearchService: Send + Sync {
 
     async fn search_collection_ids(&self, query: &str, limit: usize)
     -> Result<Vec<String>, String>;
-
-    async fn search_readlist_scored_ids(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<(f32, String)>, String>;
 
     async fn load_ondeck_books(
         &self,

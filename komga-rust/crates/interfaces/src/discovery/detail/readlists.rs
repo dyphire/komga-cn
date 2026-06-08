@@ -45,7 +45,7 @@ pub async fn readlists(
     let service = komga_application::discovery::ReadlistListService::new(
         app.readlist.as_ref(),
         app.book_detail.as_ref(),
-        app.discovery_search.as_ref(),
+        app.readlist_search.as_ref(),
     );
     let page = match service
         .list_readlists(

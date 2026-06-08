@@ -45,5 +45,6 @@ pub use request_resolution::{
 };
 pub use search_service::{
     DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
+    ReadlistSearchPort,
 };
 pub use series::{SeriesCollectionsQuery, SeriesDetailQuery};

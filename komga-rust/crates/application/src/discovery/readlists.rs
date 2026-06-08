@@ -16,7 +16,7 @@ use serde_json::json;
 
 use super::{
     BookDetailPort, BookMetadataAuthorReadModel, BookReadModel, DiscoveryPersistedReadlistRecord,
-    DiscoverySearchService, PersistedBookResourceRecord, ReadListReadModel, ReadlistPort,
+    PersistedBookResourceRecord, ReadListReadModel, ReadlistPort, ReadlistSearchPort,
 };
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
@@ -218,14 +218,14 @@ pub fn resolve_readlist_books_query(
 pub struct ReadlistListService<'a> {
     readlists: &'a dyn ReadlistPort,
     books: &'a dyn BookDetailPort,
-    search: &'a dyn DiscoverySearchService,
+    search: &'a dyn ReadlistSearchPort,
 }
 
 impl<'a> ReadlistListService<'a> {
     pub fn new(
         readlists: &'a dyn ReadlistPort,
         books: &'a dyn BookDetailPort,
-        search: &'a dyn DiscoverySearchService,
+        search: &'a dyn ReadlistSearchPort,
     ) -> Self {
         Self {
             readlists,
@@ -1132,9 +1132,8 @@ mod tests {
     use crate::discovery::{
         BookDetailPort, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
         DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
-        DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope,
-        PersistedBookBrowseEntry, PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
-        PersistedComicrackMatchCandidateRecord, ReadlistPort,
+        PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
+        PersistedComicrackMatchCandidateRecord, ReadlistPort, ReadlistSearchPort,
     };
 
     use super::{
@@ -1553,59 +1552,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl DiscoverySearchService for TestReadlistPorts {
-        async fn load_author_names(
-            &self,
-            _search: &str,
-            _authorized_library_ids: Option<&[String]>,
-        ) -> Result<Vec<String>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
-        async fn load_author_roles(
-            &self,
-            _authorized_library_ids: Option<&[String]>,
-        ) -> Result<Vec<String>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
-        async fn load_authors_by_scope(
-            &self,
-            _scope: PersistedAuthorsScope,
-            _authorized_library_ids: Option<&[String]>,
-        ) -> Result<Vec<PersistedAuthorEntry>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
-        async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
-        async fn search_collection_ids(
-            &self,
-            _query: &str,
-            _limit: usize,
-        ) -> Result<Vec<String>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
+    impl ReadlistSearchPort for TestReadlistPorts {
         async fn search_readlist_scored_ids(
             &self,
             query: &str,
             _limit: usize,
         ) -> Result<Vec<(f32, String)>, String> {
             Ok(self.search_hits.get(query).cloned().unwrap_or_default())
-        }
-
-        async fn load_ondeck_books(
-            &self,
-            _user_id: &str,
-        ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-            unimplemented!("not used by readlist list service tests")
-        }
-
-        async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
-            unimplemented!("not used by readlist list service tests")
         }
     }
 

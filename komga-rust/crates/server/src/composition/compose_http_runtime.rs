@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
     BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
-    DiscoverySearchService, ReadlistPort, SeriesDetailPort,
+    DiscoverySearchService, ReadlistPort, ReadlistSearchPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{BookImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
@@ -79,10 +79,12 @@ pub fn compose_http_runtime(
     let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
     let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
     let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
-    let discovery_search: Arc<dyn DiscoverySearchService> = Arc::new(DiscoverySearchAccess::new(
+    let discovery_search_access = Arc::new(DiscoverySearchAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
+    let discovery_search: Arc<dyn DiscoverySearchService> = discovery_search_access.clone();
+    let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_search_access;
     let discovery_browse_service = Arc::new(compose_discovery_browse_service(
         db.clone(),
         config.lucene_data_directory.clone(),
@@ -191,6 +193,7 @@ pub fn compose_http_runtime(
         opds_catalog,
         opds_persisted,
         discovery_search,
+        readlist_search,
         book_detail,
         series_detail,
         collection,
