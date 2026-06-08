@@ -232,6 +232,55 @@ impl<'a> OpdsFeedService<'a> {
             .await
     }
 
+    pub async fn library_series_page(
+        &self,
+        user: &OpdsFeedUserContext,
+        library_id: &str,
+        page: usize,
+        size: usize,
+    ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+        let visible_offset = page.saturating_mul(size);
+        let mut raw_offset = 0_i64;
+        let scan_limit = (size + 1).max(20) as i64;
+        let mut visible_seen = 0_usize;
+        let mut visible_page = Vec::with_capacity(size + 1);
+
+        let has_next = loop {
+            let batch = self
+                .catalog
+                .load_library_series(library_id, raw_offset, scan_limit)
+                .await?;
+            if batch.is_empty() {
+                break false;
+            }
+
+            let batch_len = batch.len();
+            raw_offset += batch_len as i64;
+            for series in batch
+                .into_iter()
+                .filter(|series| series_is_visible(user, series, true))
+            {
+                if visible_seen < visible_offset {
+                    visible_seen += 1;
+                    continue;
+                }
+                visible_page.push(series);
+                if visible_page.len() > size {
+                    break;
+                }
+            }
+
+            if visible_page.len() > size {
+                break true;
+            }
+            if batch_len < scan_limit as usize {
+                break false;
+            }
+        };
+
+        Ok((visible_page.into_iter().take(size).collect(), has_next))
+    }
+
     async fn load_latest_series_page(
         &self,
         user: &OpdsFeedUserContext,
@@ -349,8 +398,10 @@ mod tests {
     struct TestCatalog {
         latest_books: Mutex<Vec<OpdsBookFeedEntry>>,
         latest_series: Mutex<Vec<OpdsSeriesEntry>>,
+        library_series: Mutex<Vec<OpdsSeriesEntry>>,
         latest_books_calls: Mutex<Vec<LatestBooksCall>>,
         latest_series_calls: Mutex<Vec<(i64, i64)>>,
+        library_series_calls: Mutex<Vec<(String, i64, i64)>>,
     }
 
     #[async_trait]
@@ -451,11 +502,16 @@ mod tests {
 
         async fn load_library_series(
             &self,
-            _library_id: &str,
-            _offset: i64,
-            _limit: i64,
+            library_id: &str,
+            offset: i64,
+            limit: i64,
         ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            unimplemented!()
+            self.library_series_calls
+                .lock()
+                .expect("test calls lock should not be poisoned")
+                .push((library_id.to_string(), offset, limit));
+
+            Ok(take_page(&self.library_series, offset, limit))
         }
 
         async fn load_series_page(
@@ -627,6 +683,50 @@ mod tests {
         assert_eq!(page.total_visible_series, 2);
     }
 
+    #[tokio::test]
+    async fn library_series_page_paginates_after_restrictions_filtering() {
+        let catalog = TestCatalog {
+            library_series: Mutex::new(vec![
+                series_with_rules("blocked-label", "lib-a", false, Some(18), &["adult"]),
+                series_with_rules("blocked-library", "lib-b", false, Some(12), &["kids"]),
+                series_with_rules("visible-1", "lib-a", false, Some(12), &["kids"]),
+                series_with_rules("visible-2", "lib-a", false, Some(12), &["kids"]),
+            ]),
+            ..Default::default()
+        };
+        let service = OpdsFeedService::new(&catalog);
+        let user = OpdsFeedUserContext {
+            user_id: "user-1".to_string(),
+            allowed_library_ids: Some(HashSet::from(["lib-a".to_string()])),
+            age: Some(15),
+            age_restriction: Some(OpdsAgeRestrictionKind::AllowOnly),
+            labels_allow: vec!["kids".to_string()],
+            labels_exclude: vec!["adult".to_string()],
+        };
+
+        let (series, has_next) = service
+            .library_series_page(&user, "lib-a", 0, 1)
+            .await
+            .expect("library series page should load");
+
+        assert_eq!(
+            series
+                .iter()
+                .map(|series| series.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["visible-1"]
+        );
+        assert!(has_next);
+        assert_eq!(
+            catalog
+                .library_series_calls
+                .lock()
+                .expect("test calls lock should not be poisoned")
+                .as_slice(),
+            &[("lib-a".to_string(), 0, 20)]
+        );
+    }
+
     fn book(
         id: &str,
         library_id: &str,
@@ -663,13 +763,26 @@ mod tests {
     }
 
     fn series(id: &str, library_id: &str, one_shot: bool) -> OpdsSeriesEntry {
+        series_with_rules(id, library_id, one_shot, None, &[])
+    }
+
+    fn series_with_rules(
+        id: &str,
+        library_id: &str,
+        one_shot: bool,
+        age_rating: Option<u16>,
+        sharing_labels: &[&str],
+    ) -> OpdsSeriesEntry {
         OpdsSeriesEntry {
             id: id.to_string(),
             library_id: library_id.to_string(),
             title: id.to_string(),
             one_shot,
-            age_rating: None,
-            sharing_labels: Vec::new(),
+            age_rating,
+            sharing_labels: sharing_labels
+                .iter()
+                .map(|value| value.to_string())
+                .collect(),
             last_modified: "2026-01-01T00:00:00Z".to_string(),
         }
     }

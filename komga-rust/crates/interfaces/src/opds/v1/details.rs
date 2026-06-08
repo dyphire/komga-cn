@@ -3,7 +3,8 @@ use super::*;
 use crate::identity_access::auth::{AuthUser, user_id};
 use crate::opds::types::PersistedSeries;
 use crate::state::{
-    OpdsBookFeedEntry, OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry, OpdsState,
+    OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsSeriesEntry,
+    OpdsState,
 };
 use komga_application::opds::OpdsSeriesAccessError;
 
@@ -111,60 +112,15 @@ pub(crate) async fn opds_v1_library_detail(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let query = uri.query().unwrap_or_default();
-    let page = query_value(query, "page")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let size = query_value(query, "size")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(20)
-        .clamp(1, 100);
-    let visible_offset = page.saturating_mul(size);
-    let restrictions = opds_restrictions_for_user(user);
-    let mut raw_offset = 0_i64;
-    let batch_limit = (size + 1).max(20) as i64;
-    let mut visible_seen = 0usize;
-    let mut entries = Vec::with_capacity(size + 1);
-    let has_next = loop {
-        let batch = app
-            .opds_catalog
-            .load_library_series(library_id, raw_offset, batch_limit)
-            .await
-            .unwrap_or_default();
-        if batch.is_empty() {
-            break false;
-        }
-        let batch_len = batch.len();
-        raw_offset += batch_len as i64;
-
-        for item in batch.into_iter().filter(|item| {
-            library_visible(&allowed_library_ids, &item.library_id)
-                && content_allowed_by_restrictions(
-                    restrictions.as_ref(),
-                    item.age_rating,
-                    &item.sharing_labels,
-                )
-        }) {
-            if visible_seen < visible_offset {
-                visible_seen += 1;
-                continue;
-            }
-            entries.push(item);
-            if entries.len() > size {
-                break;
-            }
-        }
-
-        if entries.len() > size {
-            break true;
-        }
-        if batch_len < batch_limit as usize {
-            break false;
-        }
-    };
+    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let feed_user = OpdsFeedUserContext::from_auth_user(user);
+    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
+    let (entries, has_next) = feed_service
+        .library_series_page(&feed_user, library_id, page, size)
+        .await
+        .unwrap_or_else(|_| (Vec::new(), false));
     let entries = entries
         .into_iter()
-        .take(size)
         .map(persisted_series)
         .collect::<Vec<_>>();
 

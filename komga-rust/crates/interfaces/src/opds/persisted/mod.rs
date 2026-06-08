@@ -6,20 +6,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
-use komga_domain::discovery::{
-    AgeRestrictionKind as DomainAgeRestrictionKind, QueryRestrictions as DomainRestrictions,
-    content_allowed_by_restrictions as domain_content_allowed,
-};
-
-use crate::discovery_auth::principal::AgeRestrictionKind;
-use crate::identity_access::auth::{
-    AuthUser, user_payload_json, user_shared_all_libraries, user_shared_library_ids,
-};
+use crate::identity_access::auth::{AuthUser, user_shared_all_libraries, user_shared_library_ids};
 use crate::state::{OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord};
 
-use super::types::{
-    OpdsRestrictions, PersistedLibrary, PersistedSeries, PersistedSeriesSearchResult,
-};
+use super::types::{PersistedLibrary, PersistedSeries, PersistedSeriesSearchResult};
 
 mod catalog_queries;
 
@@ -40,86 +30,6 @@ pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &st
         None => true,
         Some(ids) => ids.contains(library_id),
     }
-}
-
-pub(super) fn opds_restrictions_for_user(user: &AuthUser) -> Option<OpdsRestrictions> {
-    let payload = user_payload_json(user);
-
-    let age = payload
-        .get("ageRestriction")
-        .and_then(|value| value.get("age"))
-        .and_then(Value::as_u64)
-        .and_then(|value| u16::try_from(value).ok());
-    let age_restriction = payload
-        .get("ageRestriction")
-        .and_then(|value| value.get("restriction"))
-        .and_then(Value::as_str)
-        .and_then(|value| match value.trim().to_ascii_uppercase().as_str() {
-            "ALLOW_ONLY" => Some(AgeRestrictionKind::AllowOnly),
-            "EXCLUDE" => Some(AgeRestrictionKind::Exclude),
-            _ => None,
-        });
-    let labels_allow = payload
-        .get("labelsAllow")
-        .and_then(Value::as_array)
-        .map(|labels| {
-            labels
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let labels_exclude = payload
-        .get("labelsExclude")
-        .and_then(Value::as_array)
-        .map(|labels| {
-            labels
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if age.is_none()
-        && age_restriction.is_none()
-        && labels_allow.is_empty()
-        && labels_exclude.is_empty()
-    {
-        None
-    } else {
-        Some(OpdsRestrictions {
-            age,
-            age_restriction,
-            labels_allow,
-            labels_exclude,
-        })
-    }
-}
-
-pub(super) fn content_allowed_by_restrictions(
-    restrictions: Option<&OpdsRestrictions>,
-    age_rating: Option<u16>,
-    sharing_labels: &[String],
-) -> bool {
-    let Some(restrictions) = restrictions else {
-        return true;
-    };
-    let domain_restrictions = DomainRestrictions {
-        age: restrictions.age,
-        age_restriction: restrictions.age_restriction.map(|kind| match kind {
-            AgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
-            AgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
-        }),
-        labels_allow: restrictions.labels_allow.clone(),
-        labels_exclude: restrictions.labels_exclude.clone(),
-    };
-    domain_content_allowed(&domain_restrictions, age_rating, sharing_labels)
 }
 
 pub(super) async fn load_libraries(

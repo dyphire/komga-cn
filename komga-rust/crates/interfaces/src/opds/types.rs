@@ -1,4 +1,3 @@
-use crate::discovery_auth::principal::AgeRestrictionKind;
 #[derive(Clone)]
 pub(super) struct PersistedLibrary {
     pub(super) id: String,
@@ -37,12 +36,4 @@ pub(super) struct PersistedBookFeedItem {
     pub(super) last_read: Option<i64>,
     pub(super) last_read_date: Option<String>,
     pub(super) last_modified: String,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(super) struct OpdsRestrictions {
-    pub(super) age: Option<u16>,
-    pub(super) age_restriction: Option<AgeRestrictionKind>,
-    pub(super) labels_allow: Vec<String>,
-    pub(super) labels_exclude: Vec<String>,
 }
