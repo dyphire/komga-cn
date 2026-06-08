@@ -2,13 +2,10 @@ use std::fs;
 use std::io::Read;
 
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, PageHashDeleteTarget, PageHashThumbnail, book_media_is_pdf,
+    BookMediaRecord, BookPageRecord, PageHashThumbnail, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
 };
-use komga_application::operational::{
-    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
-    PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
-};
+use komga_application::operational::PageHashUpsertCommand;
 use sqlx::SqlitePool;
 use std::io::Cursor;
 use zip::ZipArchive;
@@ -22,11 +19,7 @@ use crate::filesystem::media_access::page_content::{
 use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_library_item_path;
 use crate::sqlite::read_models::page_hashes::{
-    load_page_hash_delete_targets as load_page_hash_delete_targets_model,
-    load_page_hash_matches_page as load_page_hash_matches_page_model,
     load_page_hash_thumbnail as load_page_hash_thumbnail_model,
-    load_page_hashes_page as load_page_hashes_page_model,
-    load_page_hashes_unknown_page as load_page_hashes_unknown_page_model,
     load_unknown_page_hash_match_target, load_unknown_page_hash_source,
 };
 use crate::sqlite::write_models::page_hashes::upsert_page_hash as upsert_page_hash_model;
@@ -34,35 +27,7 @@ use std::path::Path;
 
 const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
 
-pub async fn load_page_hashes_page(
-    pool: &SqlitePool,
-    query: PageHashKnownQuery,
-) -> Result<PageHashPage<PageHashKnownEntry>, sqlx::Error> {
-    load_page_hashes_page_model(pool, query).await
-}
-
-pub async fn load_page_hashes_unknown_page(
-    pool: &SqlitePool,
-    query: PageHashUnknownQuery,
-) -> Result<PageHashPage<PageHashUnknownEntry>, sqlx::Error> {
-    load_page_hashes_unknown_page_model(pool, query).await
-}
-
-pub async fn load_page_hash_matches_page(
-    pool: &SqlitePool,
-    query: PageHashMatchesQuery,
-) -> Result<PageHashPage<PageHashMatchEntry>, sqlx::Error> {
-    load_page_hash_matches_page_model(pool, query).await
-}
-
-pub async fn load_page_hash_delete_targets(
-    pool: &SqlitePool,
-    page_hash: &str,
-) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
-    load_page_hash_delete_targets_model(pool, page_hash).await
-}
-
-pub async fn load_page_hash_thumbnail(
+pub(super) async fn load_page_hash_thumbnail(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<PageHashThumbnail>, sqlx::Error> {
@@ -81,7 +46,7 @@ pub async fn load_page_hash_thumbnail(
     Ok(Some(PageHashThumbnail { bytes, media_type }))
 }
 
-pub async fn load_unknown_page_hash_thumbnail(
+pub(super) async fn load_unknown_page_hash_thumbnail(
     read_pool: &SqlitePool,
     page_hash: &str,
     resize_to: Option<u32>,
@@ -146,7 +111,7 @@ pub async fn load_unknown_page_hash_thumbnail(
     }))
 }
 
-pub async fn upsert_page_hash(
+pub(super) async fn upsert_page_hash(
     read_pool: &SqlitePool,
     write_pool: &SqlitePool,
     command: PageHashUpsertCommand,

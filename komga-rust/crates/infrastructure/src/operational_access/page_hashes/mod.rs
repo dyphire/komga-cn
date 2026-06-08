@@ -5,7 +5,12 @@ use komga_application::operational::{
 };
 
 use crate::database_handle::DatabaseHandle;
-use crate::page_hashes_access;
+use crate::sqlite::read_models::page_hashes::{
+    load_page_hash_delete_targets, load_page_hash_matches_page, load_page_hashes_page,
+    load_page_hashes_unknown_page,
+};
+
+mod thumbnails;
 
 #[derive(Clone)]
 pub struct PageHashAccess {
@@ -24,7 +29,7 @@ impl PageHashPort for PageHashAccess {
         &self,
         query: PageHashMatchesQuery,
     ) -> Result<PageHashPage<PageHashMatchEntry>, String> {
-        page_hashes_access::load_page_hash_matches_page(self.db.read_pool(), query)
+        load_page_hash_matches_page(self.db.read_pool(), query)
             .await
             .map_err(|e| e.to_string())
     }
@@ -33,7 +38,7 @@ impl PageHashPort for PageHashAccess {
         &self,
         page_hash: &str,
     ) -> Result<Option<PageHashThumbnail>, String> {
-        page_hashes_access::load_page_hash_thumbnail(self.db.read_pool(), page_hash)
+        thumbnails::load_page_hash_thumbnail(self.db.read_pool(), page_hash)
             .await
             .map_err(|e| e.to_string())
     }
@@ -43,20 +48,16 @@ impl PageHashPort for PageHashAccess {
         page_hash: &str,
         resize_to: Option<u32>,
     ) -> Result<Option<PageHashThumbnail>, String> {
-        page_hashes_access::load_unknown_page_hash_thumbnail(
-            self.db.read_pool(),
-            page_hash,
-            resize_to,
-        )
-        .await
-        .map_err(|e| e.to_string())
+        thumbnails::load_unknown_page_hash_thumbnail(self.db.read_pool(), page_hash, resize_to)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn load_page_hashes_page(
         &self,
         query: PageHashKnownQuery,
     ) -> Result<PageHashPage<PageHashKnownEntry>, String> {
-        page_hashes_access::load_page_hashes_page(self.db.read_pool(), query)
+        load_page_hashes_page(self.db.read_pool(), query)
             .await
             .map_err(|e| e.to_string())
     }
@@ -65,7 +66,7 @@ impl PageHashPort for PageHashAccess {
         &self,
         query: PageHashUnknownQuery,
     ) -> Result<PageHashPage<PageHashUnknownEntry>, String> {
-        page_hashes_access::load_page_hashes_unknown_page(self.db.read_pool(), query)
+        load_page_hashes_unknown_page(self.db.read_pool(), query)
             .await
             .map_err(|e| e.to_string())
     }
@@ -74,13 +75,13 @@ impl PageHashPort for PageHashAccess {
         &self,
         hash: &str,
     ) -> Result<Vec<PageHashDeleteTarget>, String> {
-        page_hashes_access::load_page_hash_delete_targets(self.db.read_pool(), hash)
+        load_page_hash_delete_targets(self.db.read_pool(), hash)
             .await
             .map_err(|e| e.to_string())
     }
 
     async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String> {
-        page_hashes_access::upsert_page_hash(self.db.read_pool(), self.db.write_pool(), command)
+        thumbnails::upsert_page_hash(self.db.read_pool(), self.db.write_pool(), command)
             .await
             .map_err(|e| e.to_string())
     }
