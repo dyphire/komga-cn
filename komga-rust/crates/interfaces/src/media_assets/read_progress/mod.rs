@@ -1,7 +1,5 @@
 use super::*;
 use crate::helpers::read_progress_validation_error_response;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 mod books;
 mod epub;

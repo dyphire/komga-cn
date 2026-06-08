@@ -1,7 +1,11 @@
+mod book_access;
 mod book_import;
 mod book_media_delivery;
 #[cfg(test)]
 mod book_media_delivery_tests;
+mod book_progression;
+#[cfg(test)]
+mod book_progression_tests;
 mod manifest_builder;
 mod metadata_update;
 pub mod metadata_writer;
@@ -23,6 +27,11 @@ pub use book_media_delivery::{
     BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
     BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookThumbnailAsset,
     BookThumbnailDelivery, PersistedBookIdResolverPort,
+};
+pub use book_progression::{
+    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionReaderPort,
+    BookProgressionService, BookProgressionUpdate, EpubProgressionError,
+    normalize_book_epub_locator, progression_is_older_than_existing,
 };
 pub use manifest_builder::{
     ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,

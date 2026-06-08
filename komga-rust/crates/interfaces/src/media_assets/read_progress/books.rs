@@ -1,12 +1,13 @@
-use super::epub::{
-    load_epub_locator_for_page, locator_position, locator_progression, normalize_book_epub_locator,
-    progression_bad_request, progression_is_older_than_existing, progression_locator,
-};
+use super::epub::load_epub_locator_for_page;
 use super::*;
 use crate::identity_access::auth::Authenticated;
 use crate::opds::OpdsV2Authenticated;
 use crate::state::MediaAssetsState;
 use axum::extract::State;
+use komga_application::media_assets::{
+    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionService,
+    BookProgressionUpdate,
+};
 
 fn request_progress_token(
     identity: &crate::state::IdentityState,
@@ -223,116 +224,30 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
-    if !app.reader.book_exists(book_id).await.unwrap_or(false) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let Some(media) = (match app.reader.book_media(book_id).await {
-        Ok(media) => media,
-        Err(error) => return internal_error_response(error),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_progression_payload();
     };
-
-    let Some(modified) = payload.get("modified").and_then(Value::as_str) else {
-        return invalid_progression_payload();
-    };
-    let Some(device_id) = payload
-        .get("device")
-        .and_then(|value| value.get("id"))
-        .and_then(Value::as_str)
-    else {
-        return invalid_progression_payload();
-    };
-    let Some(device_name) = payload
-        .get("device")
-        .and_then(|value| value.get("name"))
-        .and_then(Value::as_str)
-    else {
+    let Some(update) = BookProgressionUpdate::from_payload(&payload) else {
         return invalid_progression_payload();
     };
 
-    let is_epub = book_media_is_epub(&media);
-    let page_count = media.page_count.max(1);
-    let locator = progression_locator(&payload);
-    let position = locator.and_then(locator_position);
-    let (progression, locator_to_persist) = if is_epub {
-        let Some(locator) = locator else {
-            return invalid_progression_payload();
-        };
-        let normalized_locator = match normalize_book_epub_locator(
-            app.reader.as_ref(),
-            app.content.as_ref(),
-            book_id,
-            locator,
-        )
-        .await
-        {
-            Ok(locator) => locator,
-            Err(response) => return response,
-        };
-        let Some(progression) = locator_progression(&normalized_locator) else {
-            return invalid_progression_payload();
-        };
-        (progression, Some(normalized_locator))
-    } else {
-        let Some(position) = position else {
-            return invalid_progression_payload();
-        };
-        if !(1..=page_count).contains(&position) {
-            return progression_bad_request(format!(
-                "Page argument ({position}) must be within 1 and book page count ({page_count})"
-            ));
-        }
-        (position as f64 / page_count as f64, locator.cloned())
-    };
-
-    if is_epub && !(0.0..=1.0).contains(&progression) {
-        return invalid_progression_payload();
-    }
-
-    let stale_progression = match progression_is_older_than_existing(
+    let service = BookProgressionService::new(
         app.reader.as_ref(),
-        book_id,
-        user_id(user),
-        modified,
-    )
-    .await
-    {
-        Ok(stale) => stale,
-        Err(error) => return internal_error_response(error),
-    };
-    if stale_progression {
-        return (
+        app.content.as_ref(),
+        app.progress.as_ref(),
+    );
+    match service.update_progression(user, book_id, update).await {
+        BookProgressionOutcome::Updated => StatusCode::NO_CONTENT.into_response(),
+        BookProgressionOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
+        BookProgressionOutcome::Forbidden => StatusCode::FORBIDDEN.into_response(),
+        BookProgressionOutcome::InvalidPayload => invalid_progression_payload(),
+        BookProgressionOutcome::BadRequest(error) => progression_bad_request_response(error),
+        BookProgressionOutcome::Conflict => (
             StatusCode::CONFLICT,
             Json(json!({ "error": "Progression is older than existing" })),
         )
-            .into_response();
-    }
-
-    match app
-        .progress
-        .persist_book_progression(BookProgressionInput {
-            book_id: book_id.to_string(),
-            user_id: user_id(user).to_string(),
-            progression,
-            use_locator_position_for_page: !is_epub,
-            modified: Some(modified.to_owned()),
-            device_id: Some(device_id.to_owned()),
-            device_name: Some(device_name.to_owned()),
-            locator: locator_to_persist,
-        })
-        .await
-    {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => internal_error_response(error),
+            .into_response(),
+        BookProgressionOutcome::Internal(error) => internal_error_response(error),
     }
 }
 
@@ -357,22 +272,13 @@ async fn book_progression_get_response(
     user: &AuthUser,
     book_id: &str,
 ) -> Response {
-    if !app.reader.book_exists(book_id).await.unwrap_or(false) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let Some(media) = (match app.reader.book_media(book_id).await {
-        Ok(media) => media,
-        Err(error) => return internal_error_response(error),
-    }) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-
-    match app.reader.book_progression(book_id, user_id(user)).await {
-        Ok(Some(progression)) => (
+    let service = BookProgressionService::new(
+        app.reader.as_ref(),
+        app.content.as_ref(),
+        app.progress.as_ref(),
+    );
+    match service.progression(user, book_id).await {
+        BookProgressionGetOutcome::Progression(progression) => (
             [(
                 header::CONTENT_TYPE,
                 HeaderValue::from_static(READIUM_PROGRESSION_MEDIA_TYPE),
@@ -380,7 +286,17 @@ async fn book_progression_get_response(
             Json(progression),
         )
             .into_response(),
-        Ok(None) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => internal_error_response(error),
+        BookProgressionGetOutcome::NoContent => StatusCode::NO_CONTENT.into_response(),
+        BookProgressionGetOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
+        BookProgressionGetOutcome::Forbidden => StatusCode::FORBIDDEN.into_response(),
+        BookProgressionGetOutcome::Internal(error) => internal_error_response(error),
     }
+}
+
+fn progression_bad_request_response(message: impl Into<String>) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": message.into() })),
+    )
+        .into_response()
 }
