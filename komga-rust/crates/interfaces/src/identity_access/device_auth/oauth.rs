@@ -3,6 +3,14 @@ use crate::state::IdentityAccessState;
 use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use komga_oauth::{AuthorizationSession, OAuthClientConfig};
+use serde::Deserialize;
+
+#[derive(Deserialize, Default)]
+pub struct OAuth2CallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
 
 pub async fn oauth2_authorization(
     State(app): State<IdentityAccessState>,

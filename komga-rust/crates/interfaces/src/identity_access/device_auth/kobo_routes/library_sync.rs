@@ -1,4 +1,18 @@
 use super::*;
+use komga_application::identity_access::decode_or_passthrough_sync_token;
+
+fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> Option<String> {
+    let from_header = headers
+        .get("x-kobo-synctoken")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if from_header.is_some() {
+        return from_header.and_then(|value| decode_or_passthrough_sync_token(value.as_str()));
+    }
+    None
+}
 
 pub async fn kobo_library_sync(
     State(app): State<IdentityAccessState>,

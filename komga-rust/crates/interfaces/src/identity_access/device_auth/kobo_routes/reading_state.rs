@@ -1,4 +1,48 @@
 use super::*;
+use komga_application::identity_access::KoboReadingStateUpdate;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateUpdatePayload {
+    #[serde(default)]
+    reading_states: Vec<KoboReadingStateUpdateEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateUpdateEntry {
+    last_modified: String,
+    current_bookmark: KoboReadingStateBookmark,
+    status_info: KoboReadingStateStatusInfo,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateBookmark {
+    progress_percent: Option<f64>,
+    content_source_progress_percent: Option<f64>,
+    location: Option<KoboReadingStateLocation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateLocation {
+    value: Option<String>,
+    #[serde(rename = "Type", default = "default_kobo_location_type")]
+    location_type: String,
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboReadingStateStatusInfo {
+    status: String,
+}
+
+fn default_kobo_location_type() -> String {
+    "KoboSpan".to_string()
+}
 
 pub async fn kobo_library_book_state(
     State(app): State<IdentityAccessState>,

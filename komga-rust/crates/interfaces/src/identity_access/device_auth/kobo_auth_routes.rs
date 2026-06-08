@@ -3,6 +3,18 @@ use super::*;
 use crate::state::IdentityAccessState;
 use axum::body::to_bytes;
 use axum::extract::State;
+use komga_application::identity_access::generated_kobo_token_triplet;
+use serde::Serialize;
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboDeviceAuthResponse {
+    access_token: String,
+    refresh_token: String,
+    token_type: &'static str,
+    tracking_id: String,
+    user_key: String,
+}
 
 pub async fn kobo_ping(
     State(app): State<IdentityAccessState>,

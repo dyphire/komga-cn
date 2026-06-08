@@ -1,4 +1,24 @@
 use super::*;
+use serde::Deserialize;
+use std::path::Path as FsPath;
+
+#[derive(Deserialize, Default)]
+pub struct KoboBookFileQuery {
+    convert_kepub: Option<bool>,
+}
+
+fn convert_epub_to_kepub_bytes(input_file: &FsPath) -> Option<Vec<u8>> {
+    komga_kepubify::convert_epub_file_to_bytes(input_file).ok()
+}
+
+fn kobo_kepub_file_name(file_name: &str) -> String {
+    if let Some((base, ext)) = file_name.rsplit_once('.')
+        && ext.eq_ignore_ascii_case("epub")
+    {
+        return format!("{base}.kepub.epub");
+    }
+    format!("{file_name}.kepub.epub")
+}
 
 pub async fn kobo_book_file_epub(
     State(app): State<IdentityAccessState>,

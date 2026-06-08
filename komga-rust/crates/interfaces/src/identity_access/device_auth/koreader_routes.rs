@@ -1,10 +1,21 @@
 use super::*;
 use axum::extract::State;
+use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const KOREADER_VENDOR_MEDIA_TYPE: &str = "application/vnd.koreader.v1+json";
 const KOREADER_PROGRESS_PATH: &str = "/koreader/syncs/progress";
 const KOREADER_PROGRESS_PATH_PREFIX: &str = "/koreader/syncs/progress/";
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct KoreaderProgressPayload {
+    document: String,
+    percentage: f64,
+    progress: String,
+    device: String,
+    device_id: String,
+}
 
 fn koreader_auth_failure(status: StatusCode, header_user_presented: bool) -> Response {
     if status == StatusCode::UNAUTHORIZED && !header_user_presented {
