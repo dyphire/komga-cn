@@ -6,7 +6,9 @@ use sqlx::{Row, SqlitePool};
 use crate::database_handle::DatabaseHandle;
 use komga_application::opds::{
     BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
-    OpdsCatalogPort, OpdsSeriesEntry,
+    OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCatalogPort, OpdsFeedUserContext,
+    OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
+    OpdsSeriesEntry,
 };
 
 #[derive(Clone)]
@@ -22,6 +24,33 @@ impl OpdsCatalogAccess {
 
 #[async_trait]
 impl OpdsCatalogPort for OpdsCatalogAccess {
+    async fn load_book_feed_page(
+        &self,
+        query: OpdsBookFeedQuery<'_>,
+    ) -> Result<OpdsPagedBooks, String> {
+        load_book_feed_page(self.db.read_pool(), query)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn load_latest_series_feed_page(
+        &self,
+        query: OpdsLatestSeriesFeedQuery<'_>,
+    ) -> Result<OpdsPagedSeries, String> {
+        load_latest_series_feed_page(self.db.read_pool(), query)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn load_library_series_feed_page(
+        &self,
+        query: OpdsLibrarySeriesQuery<'_>,
+    ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+        load_library_series_feed_page(self.db.read_pool(), query)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     async fn load_browse_series_navigation_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
@@ -48,95 +77,6 @@ impl OpdsCatalogPort for OpdsCatalogAccess {
         library_id: Option<&str>,
     ) -> Result<Vec<BrowsePublisherEntry>, String> {
         load_browse_publisher_entries(self.db.read_pool(), allowed_library_ids, library_id)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_keep_reading_books(
-        &self,
-        user_id: &str,
-        library_id: Option<&str>,
-    ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        load_keep_reading_books(self.db.read_pool(), user_id, library_id)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_on_deck_books(
-        &self,
-        user_id: &str,
-        library_id: Option<&str>,
-    ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        load_on_deck_books(self.db.read_pool(), user_id, library_id)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_latest_books(
-        &self,
-        library_id: Option<&str>,
-        limit: i64,
-    ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        load_latest_books(self.db.read_pool(), library_id, limit)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_latest_books_paged(
-        &self,
-        allowed_library_ids: Option<&HashSet<String>>,
-        user_id: Option<&str>,
-        library_id: Option<&str>,
-        offset: i64,
-        limit: i64,
-    ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-        load_latest_books_paged(
-            self.db.read_pool(),
-            allowed_library_ids,
-            user_id,
-            library_id,
-            offset,
-            limit,
-        )
-        .await
-        .map_err(|error| error.to_string())
-    }
-
-    async fn load_latest_series(
-        &self,
-        library_id: Option<&str>,
-        limit: i64,
-    ) -> Result<Vec<OpdsSeriesEntry>, String> {
-        load_latest_series(self.db.read_pool(), library_id, limit)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_latest_series_paged(
-        &self,
-        allowed_library_ids: Option<&HashSet<String>>,
-        library_id: Option<&str>,
-        offset: i64,
-        limit: i64,
-    ) -> Result<Vec<OpdsSeriesEntry>, String> {
-        load_latest_series_paged(
-            self.db.read_pool(),
-            allowed_library_ids,
-            library_id,
-            offset,
-            limit,
-        )
-        .await
-        .map_err(|error| error.to_string())
-    }
-
-    async fn load_library_series(
-        &self,
-        library_id: &str,
-        offset: i64,
-        limit: i64,
-    ) -> Result<Vec<OpdsSeriesEntry>, String> {
-        load_library_series(self.db.read_pool(), library_id, offset, limit)
             .await
             .map_err(|error| error.to_string())
     }
@@ -215,7 +155,192 @@ fn library_visible(allowed_library_ids: Option<&HashSet<String>>, library_id: &s
     }
 }
 
-pub async fn load_browse_series_navigation_entries(
+async fn load_book_feed_page(
+    pool: &SqlitePool,
+    query: OpdsBookFeedQuery<'_>,
+) -> Result<OpdsPagedBooks, sqlx::Error> {
+    match query.kind {
+        OpdsBookFeedKind::KeepReading => {
+            let books =
+                load_keep_reading_books(pool, &query.user.user_id, query.library_id).await?;
+            Ok(paged_books(query.user, books, query.page, query.size))
+        }
+        OpdsBookFeedKind::OnDeck => {
+            let books = load_on_deck_books(pool, &query.user.user_id, query.library_id).await?;
+            Ok(paged_books(query.user, books, query.page, query.size))
+        }
+        OpdsBookFeedKind::LatestBooks {
+            include_read_progress,
+        } => load_latest_books_feed_page(pool, query, include_read_progress).await,
+    }
+}
+
+async fn load_latest_books_feed_page(
+    pool: &SqlitePool,
+    query: OpdsBookFeedQuery<'_>,
+    include_read_progress: bool,
+) -> Result<OpdsPagedBooks, sqlx::Error> {
+    let scan_limit = query.size.max(100) as i64;
+    let start = query.page.saturating_mul(query.size);
+    let end = start.saturating_add(query.size);
+    let mut offset = 0_i64;
+    let mut total_visible_books = 0_usize;
+    let mut visible_page = Vec::new();
+
+    loop {
+        let batch = load_latest_books_paged(
+            pool,
+            query.user.allowed_library_ids(),
+            include_read_progress.then_some(query.user.user_id.as_str()),
+            query.library_id,
+            offset,
+            scan_limit,
+        )
+        .await?;
+        if batch.is_empty() {
+            break;
+        }
+
+        let batch_len = batch.len();
+        for book in batch {
+            if query.user.can_access_book_feed_entry(&book) {
+                if total_visible_books >= start && total_visible_books < end {
+                    visible_page.push(book);
+                }
+                total_visible_books += 1;
+            }
+        }
+
+        if batch_len < scan_limit as usize {
+            break;
+        }
+        offset += batch_len as i64;
+    }
+
+    Ok(OpdsPagedBooks {
+        books: visible_page,
+        total_visible_books,
+        has_next: end < total_visible_books,
+    })
+}
+
+fn paged_books(
+    user: &OpdsFeedUserContext,
+    books: Vec<OpdsBookFeedEntry>,
+    page: usize,
+    size: usize,
+) -> OpdsPagedBooks {
+    let books = books
+        .into_iter()
+        .filter(|book| user.can_access_book_feed_entry(book))
+        .collect::<Vec<_>>();
+    let total_visible_books = books.len();
+    let start = page.saturating_mul(size);
+    let end = start.saturating_add(size);
+    OpdsPagedBooks {
+        books: books.into_iter().skip(start).take(size).collect(),
+        total_visible_books,
+        has_next: end < total_visible_books,
+    }
+}
+
+async fn load_latest_series_feed_page(
+    pool: &SqlitePool,
+    query: OpdsLatestSeriesFeedQuery<'_>,
+) -> Result<OpdsPagedSeries, sqlx::Error> {
+    let scan_limit = query.size.max(100) as i64;
+    let start = query.page.saturating_mul(query.size);
+    let end = start.saturating_add(query.size);
+    let mut offset = 0_i64;
+    let mut total_visible_series = 0_usize;
+    let mut visible_page = Vec::new();
+
+    loop {
+        let batch = load_latest_series_paged(
+            pool,
+            query.user.allowed_library_ids(),
+            query.library_id,
+            offset,
+            scan_limit,
+        )
+        .await?;
+        if batch.is_empty() {
+            break;
+        }
+
+        let batch_len = batch.len();
+        for series in batch {
+            if query
+                .user
+                .can_access_series_feed_entry(&series, query.include_one_shots)
+            {
+                if total_visible_series >= start && total_visible_series < end {
+                    visible_page.push(series);
+                }
+                total_visible_series += 1;
+            }
+        }
+
+        if batch_len < scan_limit as usize {
+            break;
+        }
+        offset += batch_len as i64;
+    }
+
+    Ok(OpdsPagedSeries {
+        series: visible_page,
+        total_visible_series,
+        has_next: end < total_visible_series,
+    })
+}
+
+async fn load_library_series_feed_page(
+    pool: &SqlitePool,
+    query: OpdsLibrarySeriesQuery<'_>,
+) -> Result<(Vec<OpdsSeriesEntry>, bool), sqlx::Error> {
+    let visible_offset = query.page.saturating_mul(query.size);
+    let mut raw_offset = 0_i64;
+    let scan_limit = (query.size + 1).max(20) as i64;
+    let mut visible_seen = 0_usize;
+    let mut visible_page = Vec::with_capacity(query.size + 1);
+
+    let has_next = loop {
+        let batch = load_library_series(pool, query.library_id, raw_offset, scan_limit).await?;
+        if batch.is_empty() {
+            break false;
+        }
+
+        let batch_len = batch.len();
+        raw_offset += batch_len as i64;
+        for series in batch
+            .into_iter()
+            .filter(|series| query.user.can_access_series_feed_entry(series, true))
+        {
+            if visible_seen < visible_offset {
+                visible_seen += 1;
+                continue;
+            }
+            visible_page.push(series);
+            if visible_page.len() > query.size {
+                break;
+            }
+        }
+
+        if visible_page.len() > query.size {
+            break true;
+        }
+        if batch_len < scan_limit as usize {
+            break false;
+        }
+    };
+
+    Ok((
+        visible_page.into_iter().take(query.size).collect(),
+        has_next,
+    ))
+}
+
+async fn load_browse_series_navigation_entries(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
@@ -309,7 +434,7 @@ OFFSET ?"#,
     ))
 }
 
-pub async fn load_browse_publisher_entries(
+async fn load_browse_publisher_entries(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
@@ -348,7 +473,7 @@ ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
     Ok(navigation)
 }
 
-pub async fn load_keep_reading_books(
+async fn load_keep_reading_books(
     pool: &SqlitePool,
     user_id: &str,
     library_id: Option<&str>,
@@ -464,7 +589,7 @@ ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC"#,
         .collect())
 }
 
-pub async fn load_on_deck_books(
+async fn load_on_deck_books(
     pool: &SqlitePool,
     user_id: &str,
     library_id: Option<&str>,
@@ -604,15 +729,7 @@ ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_IN
     Ok(first_per_series)
 }
 
-pub async fn load_latest_books(
-    pool: &SqlitePool,
-    library_id: Option<&str>,
-    limit: i64,
-) -> Result<Vec<OpdsBookFeedEntry>, sqlx::Error> {
-    load_latest_books_paged(pool, None, None, library_id, 0, limit).await
-}
-
-pub async fn load_latest_books_paged(
+async fn load_latest_books_paged(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     user_id: Option<&str>,
@@ -752,15 +869,7 @@ OFFSET ?"#,
         .collect())
 }
 
-pub async fn load_latest_series(
-    pool: &SqlitePool,
-    library_id: Option<&str>,
-    limit: i64,
-) -> Result<Vec<OpdsSeriesEntry>, sqlx::Error> {
-    load_latest_series_paged(pool, None, library_id, 0, limit).await
-}
-
-pub async fn load_latest_series_paged(
+async fn load_latest_series_paged(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     library_id: Option<&str>,
@@ -826,7 +935,7 @@ OFFSET ?"#,
         .collect())
 }
 
-pub async fn load_library_series(
+async fn load_library_series(
     pool: &SqlitePool,
     library_id: &str,
     offset: i64,
@@ -871,7 +980,7 @@ OFFSET ?"#,
         .collect())
 }
 
-pub async fn load_series_page(
+async fn load_series_page(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
     search: Option<&str>,

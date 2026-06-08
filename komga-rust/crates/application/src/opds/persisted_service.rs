@@ -533,7 +533,7 @@ mod tests {
     use async_trait::async_trait;
 
     use super::*;
-    use crate::opds::feed_service::OpdsAgeRestrictionKind;
+    use crate::opds::OpdsAgeRestrictionKind;
     use crate::opds::{PersistedBookFeedRecord, PersistedLibraryRecord};
 
     #[derive(Default)]

@@ -340,10 +340,11 @@ mod tests {
 
     use super::*;
     use crate::opds::{
-        BrowsePublisherEntry, BrowseSeriesNavigationEntry, PersistedBookFeedRecord,
-        PersistedBookSearchRecord, PersistedNamedRecord, PersistedReadlistBookRecord,
-        PersistedReadlistRecord, PersistedSeriesBookRecord, PersistedSeriesRecord,
-        PersistedSeriesSearchRecord,
+        BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedKind, OpdsBookFeedQuery,
+        OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
+        PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedNamedRecord,
+        PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
+        PersistedSeriesRecord, PersistedSeriesSearchRecord,
     };
 
     type LatestBooksCall = (Option<String>, Option<String>);
@@ -363,6 +364,82 @@ mod tests {
 
     #[async_trait]
     impl OpdsCatalogPort for TestCatalog {
+        async fn load_book_feed_page(
+            &self,
+            query: OpdsBookFeedQuery<'_>,
+        ) -> Result<OpdsPagedBooks, String> {
+            let books = match query.kind {
+                OpdsBookFeedKind::KeepReading => {
+                    self.keep_reading_calls
+                        .lock()
+                        .expect("test calls lock should not be poisoned")
+                        .push(query.library_id.map(str::to_string));
+                    self.keep_reading_books
+                        .lock()
+                        .expect("test books lock should not be poisoned")
+                        .clone()
+                }
+                OpdsBookFeedKind::OnDeck => {
+                    self.on_deck_calls
+                        .lock()
+                        .expect("test calls lock should not be poisoned")
+                        .push(query.library_id.map(str::to_string));
+                    self.on_deck_books
+                        .lock()
+                        .expect("test books lock should not be poisoned")
+                        .clone()
+                }
+                OpdsBookFeedKind::LatestBooks {
+                    include_read_progress,
+                } => {
+                    self.latest_books_calls
+                        .lock()
+                        .expect("test calls lock should not be poisoned")
+                        .push((
+                            include_read_progress.then_some(query.user.user_id.clone()),
+                            query.library_id.map(str::to_string),
+                        ));
+                    self.latest_books
+                        .lock()
+                        .expect("test books lock should not be poisoned")
+                        .clone()
+                }
+            };
+
+            Ok(OpdsPagedBooks {
+                total_visible_books: books.len(),
+                books,
+                has_next: false,
+            })
+        }
+
+        async fn load_latest_series_feed_page(
+            &self,
+            query: OpdsLatestSeriesFeedQuery<'_>,
+        ) -> Result<OpdsPagedSeries, String> {
+            self.latest_series_calls
+                .lock()
+                .expect("test calls lock should not be poisoned")
+                .push(query.library_id.map(str::to_string));
+            let series = self
+                .latest_series
+                .lock()
+                .expect("test series lock should not be poisoned")
+                .clone();
+            Ok(OpdsPagedSeries {
+                total_visible_series: series.len(),
+                series,
+                has_next: false,
+            })
+        }
+
+        async fn load_library_series_feed_page(
+            &self,
+            _query: OpdsLibrarySeriesQuery<'_>,
+        ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+            unimplemented!()
+        }
+
         async fn load_browse_series_navigation_entries(
             &self,
             _allowed_library_ids: Option<&HashSet<String>>,
@@ -379,106 +456,6 @@ mod tests {
             _allowed_library_ids: Option<&HashSet<String>>,
             _library_id: Option<&str>,
         ) -> Result<Vec<BrowsePublisherEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_keep_reading_books(
-            &self,
-            _user_id: &str,
-            library_id: Option<&str>,
-        ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-            self.keep_reading_calls
-                .lock()
-                .expect("test calls lock should not be poisoned")
-                .push(library_id.map(str::to_string));
-            Ok(self
-                .keep_reading_books
-                .lock()
-                .expect("test books lock should not be poisoned")
-                .clone())
-        }
-
-        async fn load_on_deck_books(
-            &self,
-            _user_id: &str,
-            library_id: Option<&str>,
-        ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-            self.on_deck_calls
-                .lock()
-                .expect("test calls lock should not be poisoned")
-                .push(library_id.map(str::to_string));
-            Ok(self
-                .on_deck_books
-                .lock()
-                .expect("test books lock should not be poisoned")
-                .clone())
-        }
-
-        async fn load_latest_books(
-            &self,
-            _library_id: Option<&str>,
-            _limit: i64,
-        ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_latest_books_paged(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            user_id: Option<&str>,
-            library_id: Option<&str>,
-            offset: i64,
-            limit: i64,
-        ) -> Result<Vec<OpdsBookFeedEntry>, String> {
-            self.latest_books_calls
-                .lock()
-                .expect("test calls lock should not be poisoned")
-                .push((user_id.map(str::to_string), library_id.map(str::to_string)));
-            Ok(take_page(
-                &self
-                    .latest_books
-                    .lock()
-                    .expect("test books lock should not be poisoned"),
-                offset,
-                limit,
-            ))
-        }
-
-        async fn load_latest_series(
-            &self,
-            _library_id: Option<&str>,
-            _limit: i64,
-        ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_latest_series_paged(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            library_id: Option<&str>,
-            offset: i64,
-            limit: i64,
-        ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            self.latest_series_calls
-                .lock()
-                .expect("test calls lock should not be poisoned")
-                .push(library_id.map(str::to_string));
-            Ok(take_page(
-                &self
-                    .latest_series
-                    .lock()
-                    .expect("test series lock should not be poisoned"),
-                offset,
-                limit,
-            ))
-        }
-
-        async fn load_library_series(
-            &self,
-            _library_id: &str,
-            _offset: i64,
-            _limit: i64,
-        ) -> Result<Vec<OpdsSeriesEntry>, String> {
             unimplemented!()
         }
 
@@ -886,12 +863,6 @@ mod tests {
             sharing_labels: Vec::new(),
             last_modified: "2026-01-01T00:00:00Z".to_string(),
         }
-    }
-
-    fn take_page<T: Clone>(items: &[T], offset: i64, limit: i64) -> Vec<T> {
-        let start = usize::try_from(offset).expect("test offset should be non-negative");
-        let limit = usize::try_from(limit).expect("test limit should be non-negative");
-        items.iter().skip(start).take(limit).cloned().collect()
     }
 
     fn assert_publication_ids(content: &OpdsV2FeedContent, expected: &[&str]) {
