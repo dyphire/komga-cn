@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
 use crate::media_assets::{
-    BookProgressionInput, BookProgressionPageSource, ContentResolverPort, EpubProgressionError,
-    MediaReaderPort, ProgressWriterPort, normalize_book_epub_locator as normalize_epub_locator,
+    BookProgressionInput, BookProgressionPageSource, ContentResolverPort, EpubNavigation,
+    EpubNavigationError, EpubNavigationLoadError, MediaReaderPort, ProgressWriterPort,
+    load_book_epub_navigation,
     progression_is_older_than_existing as book_progression_is_older_than_existing,
     resolve_book_progression_write,
 };
@@ -129,8 +130,10 @@ impl<'a> DeviceProgressService<'a> {
                 },
             });
 
-            self.normalize_book_epub_locator(book_id, &request_locator)
+            self.book_epub_navigation(book_id)
                 .await?
+                .normalize_locator(&request_locator)
+                .map_err(device_progress_error_from_epub_error)?
         };
 
         if self
@@ -305,52 +308,22 @@ impl<'a> DeviceProgressService<'a> {
         book_id: &str,
         progress: &str,
     ) -> Result<(f64, BookProgressionPageSource, Value), DeviceProgressError> {
-        let (_extension_class, blob) = self
-            .reader
-            .epub_extension_blob(book_id)
-            .await
-            .map_err(|_| DeviceProgressError::Persistence)?
-            .ok_or_else(|| {
-                DeviceProgressError::BadRequest("Epub extension not found".to_string())
-            })?;
-        let extension = self
-            .content
-            .decode_epub_positions_extension(&blob)
-            .map_err(|_| DeviceProgressError::Persistence)?;
-        let unique_hrefs = dedup_epub_hrefs(&extension.positions);
-        let Some(resource_index) = parse_koreader_epub_resource_index(progress) else {
-            return Err(DeviceProgressError::BadRequest(format!(
-                "Could not get Epub resource index from progress: {progress}"
-            )));
-        };
-        let Some(href) = unique_hrefs.get(resource_index) else {
-            return Err(DeviceProgressError::Persistence);
-        };
-        let Some(matched_position) = extension
-            .positions
-            .iter()
-            .find(|position| position.get("href").and_then(Value::as_str) == Some(href.as_str()))
-        else {
-            return Err(DeviceProgressError::BadRequest(format!(
-                "Could not get Epub resource index from progress: {progress}"
-            )));
-        };
+        let locator = self
+            .book_epub_navigation(book_id)
+            .await?
+            .koreader_locator_for_progress(progress)
+            .map_err(device_progress_error_from_epub_error)?;
 
-        Ok((
-            0.0,
-            BookProgressionPageSource::TotalProgression,
-            koreader_epub_locator(href, matched_position),
-        ))
+        Ok((0.0, BookProgressionPageSource::TotalProgression, locator))
     }
 
-    async fn normalize_book_epub_locator(
+    async fn book_epub_navigation(
         &self,
         book_id: &str,
-        locator: &Value,
-    ) -> Result<Value, DeviceProgressError> {
-        normalize_epub_locator(self.reader, self.content, book_id, locator)
+    ) -> Result<EpubNavigation, DeviceProgressError> {
+        load_book_epub_navigation(self.reader, self.content, book_id)
             .await
-            .map_err(device_progress_error_from_epub_error)
+            .map_err(device_progress_error_from_epub_load_error)
     }
 
     async fn progression_is_older_than_existing(
@@ -365,19 +338,10 @@ impl<'a> DeviceProgressService<'a> {
     }
 
     async fn koreader_epub_progress_value(&self, book_id: &str, locator: &Value) -> Option<String> {
-        let href = locator.get("href").and_then(Value::as_str)?.trim();
-        if href.is_empty() {
-            return None;
-        }
-
-        let (_extension_class, blob) = self.reader.epub_extension_blob(book_id).await.ok()??;
-        let extension = self.content.decode_epub_positions_extension(&blob).ok()?;
-        let unique_hrefs = dedup_epub_hrefs(&extension.positions);
-
-        unique_hrefs
-            .iter()
-            .position(|value| value == href)
-            .map(|index| format!("/body/DocFragment[{}].0", index + 1))
+        self.book_epub_navigation(book_id)
+            .await
+            .ok()?
+            .koreader_progress_for_locator(locator)
     }
 }
 
@@ -398,35 +362,6 @@ fn koreader_media_profile(media_type: &str) -> Option<KoreaderMediaProfile> {
 
 fn parse_koreader_progress_page(progress: &str) -> Option<u64> {
     progress.parse::<u64>().ok().filter(|value| *value > 0)
-}
-
-fn parse_koreader_epub_resource_index(progress: &str) -> Option<usize> {
-    let normalized = progress.trim().to_ascii_lowercase();
-
-    if let Some(index) =
-        parse_koreader_doc_fragment_index(normalized.as_str(), "docfragment[", ']', true)
-    {
-        return Some(index);
-    }
-
-    parse_koreader_doc_fragment_index(normalized.as_str(), "#_doc_fragment_", '_', false)
-}
-
-fn parse_koreader_doc_fragment_index(
-    progress: &str,
-    prefix: &str,
-    suffix: char,
-    one_based: bool,
-) -> Option<usize> {
-    let start = progress.find(prefix)? + prefix.len();
-    let tail = &progress[start..];
-    let end = tail.find(suffix)?;
-    let index = tail[..end].parse::<usize>().ok()?;
-    if one_based {
-        index.checked_sub(1)
-    } else {
-        Some(index)
-    }
 }
 
 fn parse_locator_payload(locator: Option<&[u8]>) -> Value {
@@ -521,53 +456,20 @@ fn kobo_reading_state_payload(
     })
 }
 
-fn dedup_epub_hrefs(positions: &[Value]) -> Vec<String> {
-    let mut unique_hrefs = Vec::<String>::new();
-    for position in positions {
-        let Some(position_href) = position.get("href").and_then(Value::as_str) else {
-            continue;
-        };
-        let position_href = position_href.trim();
-        if position_href.is_empty() || unique_hrefs.iter().any(|value| value == position_href) {
-            continue;
-        }
-        unique_hrefs.push(position_href.to_string());
-    }
-    unique_hrefs
-}
-
-fn device_progress_error_from_epub_error(error: EpubProgressionError) -> DeviceProgressError {
+fn device_progress_error_from_epub_error(error: EpubNavigationError) -> DeviceProgressError {
     match error {
-        EpubProgressionError::BadRequest(error) => DeviceProgressError::BadRequest(error),
-        EpubProgressionError::Internal(_) => DeviceProgressError::Persistence,
+        EpubNavigationError::BadRequest(error) => DeviceProgressError::BadRequest(error),
+        EpubNavigationError::Internal(_) => DeviceProgressError::Persistence,
     }
 }
 
-fn koreader_epub_locator(href: &str, matched_position: &Value) -> Value {
-    let mut locator = json!({
-        "href": href,
-        "type": matched_position
-            .get("type")
-            .cloned()
-            .unwrap_or_else(|| Value::String("application/xhtml+xml".to_string())),
-        "locations": {
-            "progression": 0.0,
-            "totalProgression": matched_position
-                .get("locations")
-                .and_then(|value| value.get("totalProgression"))
-                .cloned()
-                .unwrap_or(Value::Null),
-        },
-    });
-
-    if let Some(kobo_span) = matched_position.get("koboSpan").cloned()
-        && !kobo_span.is_null()
-    {
-        locator
-            .as_object_mut()
-            .expect("koreader epub locator should be an object")
-            .insert("koboSpan".to_string(), kobo_span);
+fn device_progress_error_from_epub_load_error(
+    error: EpubNavigationLoadError,
+) -> DeviceProgressError {
+    match error {
+        EpubNavigationLoadError::MissingExtension => {
+            DeviceProgressError::BadRequest("Epub extension not found".to_string())
+        }
+        EpubNavigationLoadError::Internal(_) => DeviceProgressError::Persistence,
     }
-
-    locator
 }

@@ -700,7 +700,7 @@ fn generated_pdf_rows_use_detected_page_count_when_media_count_missing() {
 }
 
 #[test]
-fn decode_epub_positions_blob_returns_positions_array() {
+fn decode_epub_positions_extension_returns_positions_array() {
     let payload = json!({
         "positions": [
             {
@@ -721,12 +721,14 @@ fn decode_epub_positions_blob_returns_positions_array() {
         .expect("gzip payload should be writable");
     let blob = encoder.finish().expect("gzip payload should finalize");
 
-    let positions =
-        komga_infrastructure::filesystem::media_access::epub::decode_epub_positions_blob(&blob)
-            .expect("epub positions should decode");
-    assert_eq!(positions.len(), 2);
+    let extension =
+        komga_infrastructure::filesystem::media_access::epub::decode_epub_positions_extension(
+            &blob,
+        )
+        .expect("epub positions should decode");
+    assert_eq!(extension.positions.len(), 2);
     assert_eq!(
-        positions[0].get("href"),
+        extension.positions[0].get("href"),
         Some(&Value::String("/chap-1.xhtml".to_string()))
     );
 }

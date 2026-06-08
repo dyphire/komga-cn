@@ -62,10 +62,6 @@ pub fn decode_epub_positions_extension(blob: &[u8]) -> Result<EpubPositionsExten
     })
 }
 
-pub fn decode_epub_positions_blob(blob: &[u8]) -> Result<Vec<Value>, String> {
-    decode_epub_positions_extension(blob).map(|extension| extension.positions)
-}
-
 pub async fn load_epub_archive_positions(media: &BookMediaRecord) -> Option<Vec<Value>> {
     if !book_media_is_epub(media) {
         return None;

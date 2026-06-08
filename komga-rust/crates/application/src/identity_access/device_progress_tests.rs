@@ -95,7 +95,10 @@ async fn koreader_progress_maps_epub_locator_href_to_doc_fragment() {
         }),
     };
     let reader = NoopMediaReader {
-        epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        epub_extension_blob: Some((
+            "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            Vec::new(),
+        )),
         ..NoopMediaReader::default()
     };
     let content = NoopContentResolver {
@@ -181,7 +184,10 @@ async fn kobo_reading_state_update_normalizes_locator_and_persists_progression()
     let device_sync = TestDeviceSync::default();
     let reader = NoopMediaReader {
         media_files: vec!["/book-1.xhtml".to_string()],
-        epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        epub_extension_blob: Some((
+            "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            Vec::new(),
+        )),
         page_count: Some(10),
         ..NoopMediaReader::default()
     };
@@ -247,7 +253,10 @@ async fn kobo_reading_state_update_accepts_fixed_layout_single_position() {
     let device_sync = TestDeviceSync::default();
     let reader = NoopMediaReader {
         media_files: vec!["/fixed.xhtml".to_string()],
-        epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        epub_extension_blob: Some((
+            "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            Vec::new(),
+        )),
         page_count: Some(10),
         ..NoopMediaReader::default()
     };

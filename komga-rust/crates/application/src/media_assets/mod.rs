@@ -6,6 +6,9 @@ mod book_media_delivery_tests;
 mod book_progression;
 #[cfg(test)]
 mod book_progression_tests;
+mod epub_navigation;
+#[cfg(test)]
+mod epub_navigation_tests;
 mod manifest_builder;
 mod metadata_update;
 pub mod metadata_writer;
@@ -30,9 +33,12 @@ pub use book_media_delivery::{
 };
 pub use book_progression::{
     BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionPageSource,
-    BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate, EpubProgressionError,
-    ResolvedBookProgression, normalize_book_epub_locator, progression_is_older_than_existing,
-    resolve_book_progression_write,
+    BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate,
+    ResolvedBookProgression, progression_is_older_than_existing, resolve_book_progression_write,
+};
+pub use epub_navigation::{
+    EpubNavigation, EpubNavigationError, EpubNavigationLoadError, EpubNavigationReaderPort,
+    load_book_epub_navigation, normalized_href_base,
 };
 pub use manifest_builder::{
     ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,

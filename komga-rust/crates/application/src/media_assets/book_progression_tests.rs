@@ -9,7 +9,7 @@ use crate::identity_access::AuthUser;
 use super::{
     BookMediaRecord, BookPageRecord, BookProgressionInput, BookProgressionOutcome,
     BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate, ContentResolverPort,
-    EpubPositionsExtension, ProgressWriterPort,
+    EpubNavigationReaderPort, EpubPositionsExtension, ProgressWriterPort,
 };
 
 #[tokio::test]
@@ -23,7 +23,10 @@ async fn book_progression_update_normalizes_epub_locator_and_persists_progressio
             page_count: 10,
         }),
         media_files: vec!["/chapter-1.xhtml".to_string()],
-        epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        epub_extension_blob: Some((
+            "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            Vec::new(),
+        )),
         ..TestProgressionReader::default()
     };
     let content = TestContentResolver {
@@ -111,7 +114,10 @@ impl BookProgressionReaderPort for TestProgressionReader {
     ) -> Result<Option<Value>, String> {
         Ok(self.book_progression.clone())
     }
+}
 
+#[async_trait]
+impl EpubNavigationReaderPort for TestProgressionReader {
     async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
         Ok(self.media_files.clone())
     }
