@@ -306,54 +306,6 @@ fn write_single_page_pdf(path: &std::path::Path) {
 }
 
 #[test]
-fn page_api_support_depends_on_image_or_known_page_count() {
-    let image_media = PersistedBookMedia {
-        library_id: "lib".to_string(),
-        file_name: "cover.jpg".to_string(),
-        file_path: PathBuf::from("/tmp/cover.jpg"),
-        media_type: "image/jpeg".to_string(),
-        page_count: 0,
-    };
-    assert!(book_media_supports_page_api(&image_media));
-
-    let paged_archive = PersistedBookMedia {
-        library_id: "lib".to_string(),
-        file_name: "book.cbz".to_string(),
-        file_path: PathBuf::from("/tmp/book.cbz"),
-        media_type: "application/vnd.comicbook+zip".to_string(),
-        page_count: 25,
-    };
-    assert!(book_media_supports_page_api(&paged_archive));
-
-    let unknown_media = PersistedBookMedia {
-        library_id: "lib".to_string(),
-        file_name: "book.cbz".to_string(),
-        file_path: PathBuf::from("/tmp/book.cbz"),
-        media_type: "application/vnd.comicbook+zip".to_string(),
-        page_count: 0,
-    };
-    assert!(book_media_supports_page_api(&unknown_media));
-
-    let rar_media = PersistedBookMedia {
-        library_id: "lib".to_string(),
-        file_name: "book.cbr".to_string(),
-        file_path: PathBuf::from("/tmp/book.cbr"),
-        media_type: "application/vnd.comicbook-rar".to_string(),
-        page_count: 0,
-    };
-    assert!(book_media_supports_page_api(&rar_media));
-
-    let pdf_media = PersistedBookMedia {
-        library_id: "lib".to_string(),
-        file_name: "book.pdf".to_string(),
-        file_path: PathBuf::from("/tmp/book.pdf"),
-        media_type: "application/pdf".to_string(),
-        page_count: 0,
-    };
-    assert!(book_media_supports_page_api(&pdf_media));
-}
-
-#[test]
 fn if_modified_since_uses_http_date_ordering() {
     let resource_time = UNIX_EPOCH + std::time::Duration::from_secs(10);
     let expected_last_modified =

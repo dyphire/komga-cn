@@ -169,6 +169,22 @@ pub trait ContentResolverPort: Send + Sync {
 
     async fn read_media_file_size(&self, path: &Path) -> Option<i64>;
 
+    async fn read_media_image_dimensions(&self, _path: &Path) -> Option<(i64, i64)> {
+        None
+    }
+
+    fn convert_image_bytes(
+        &self,
+        bytes: &[u8],
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> Option<Vec<u8>> {
+        if source_content_type.eq_ignore_ascii_case(target_content_type) {
+            return Some(bytes.to_vec());
+        }
+        None
+    }
+
     fn is_font_resource(&self, resource_name: &str) -> bool;
 
     async fn read_epub_resource_bytes(

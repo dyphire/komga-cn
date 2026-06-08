@@ -1,4 +1,7 @@
 mod book_import;
+mod book_media_delivery;
+#[cfg(test)]
+mod book_media_delivery_tests;
 mod manifest_builder;
 mod metadata_update;
 pub mod metadata_writer;
@@ -15,6 +18,11 @@ pub use book_import::{
     ImportCopyMode, QueuedBookImportPayload, RuntimeBookImportEvent,
     current_runtime_book_import_event_cursor, generate_prefixed_id, parse_books_import_payload,
     pending_runtime_book_import_events, register_runtime_book_import_event,
+};
+pub use book_media_delivery::{
+    BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
+    BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookThumbnailAsset,
+    BookThumbnailDelivery, PersistedBookIdResolverPort,
 };
 pub use manifest_builder::{
     ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,

@@ -382,3 +382,36 @@ pub async fn read_media_file_size(path: &Path) -> Option<i64> {
         .ok()
         .and_then(|value| i64::try_from(value.len()).ok())
 }
+
+pub async fn read_media_image_dimensions(path: &Path) -> Option<(i64, i64)> {
+    let bytes = read_media_file_bytes(path).await?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    Some((i64::from(image.width()), i64::from(image.height())))
+}
+
+pub fn convert_image_bytes(
+    bytes: &[u8],
+    source_content_type: &str,
+    target_content_type: &str,
+) -> Option<Vec<u8>> {
+    if source_content_type.eq_ignore_ascii_case(target_content_type) {
+        return Some(bytes.to_vec());
+    }
+
+    if !source_content_type
+        .to_ascii_lowercase()
+        .starts_with("image/")
+    {
+        return None;
+    }
+
+    let source = image::load_from_memory(bytes).ok()?;
+    let target_format = match target_content_type {
+        "image/jpeg" => image::ImageFormat::Jpeg,
+        "image/png" => image::ImageFormat::Png,
+        _ => return None,
+    };
+    let mut output = std::io::Cursor::new(Vec::new());
+    source.write_to(&mut output, target_format).ok()?;
+    Some(output.into_inner())
+}

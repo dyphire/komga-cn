@@ -38,32 +38,12 @@ pub(crate) fn book_media_is_single_image(media: &PersistedBookMedia) -> bool {
     book_media_supports_page_image(media)
 }
 
-pub(crate) fn book_media_is_zip_archive(media: &PersistedBookMedia) -> bool {
-    matches!(
-        content_type_from_filename(&media.file_name, &media.media_type).as_str(),
-        "application/vnd.comicbook+zip" | "application/epub+zip" | "application/zip"
-    )
-}
-
-pub(crate) fn book_media_is_rar_archive(media: &PersistedBookMedia) -> bool {
-    content_type_from_filename(&media.file_name, &media.media_type)
-        == "application/vnd.comicbook-rar"
-}
-
 pub(crate) fn book_media_is_epub(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type) == "application/epub+zip"
 }
 
 pub(crate) fn book_media_is_pdf(media: &PersistedBookMedia) -> bool {
     content_type_from_filename(&media.file_name, &media.media_type) == "application/pdf"
-}
-
-pub(crate) fn book_media_supports_page_api(media: &PersistedBookMedia) -> bool {
-    book_media_is_single_image(media)
-        || media.page_count > 0
-        || book_media_is_zip_archive(media)
-        || book_media_is_rar_archive(media)
-        || book_media_is_pdf(media)
 }
 
 #[cfg(test)]

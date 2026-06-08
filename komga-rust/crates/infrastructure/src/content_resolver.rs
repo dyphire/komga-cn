@@ -76,6 +76,19 @@ impl ContentResolverPort for ContentResolver {
         page_content::read_media_file_size(path).await
     }
 
+    async fn read_media_image_dimensions(&self, path: &Path) -> Option<(i64, i64)> {
+        page_content::read_media_image_dimensions(path).await
+    }
+
+    fn convert_image_bytes(
+        &self,
+        bytes: &[u8],
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> Option<Vec<u8>> {
+        page_content::convert_image_bytes(bytes, source_content_type, target_content_type)
+    }
+
     // --- EPUB ---
 
     fn is_font_resource(&self, resource_name: &str) -> bool {
