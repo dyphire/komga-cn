@@ -86,6 +86,50 @@ async fn book_progression_update_normalizes_epub_locator_and_persists_progressio
     );
 }
 
+#[tokio::test]
+async fn book_progression_update_validates_epub_locator_before_extension_lookup() {
+    let reader = TestProgressionReader {
+        media: Some(BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.epub".to_string(),
+            file_path: PathBuf::from("/library/book.epub"),
+            media_type: "application/epub+zip".to_string(),
+            page_count: 10,
+        }),
+        ..TestProgressionReader::default()
+    };
+    let content = TestContentResolver {
+        positions_extension: EpubPositionsExtension {
+            positions: Vec::new(),
+            is_fixed_layout: false,
+        },
+    };
+    let progress = TestProgressWriter::default();
+    let service = BookProgressionService::new(&reader, &content, &progress);
+
+    let outcome = service
+        .update_progression(
+            &admin_user(),
+            "book-1",
+            BookProgressionUpdate {
+                modified: "2026-03-27T10:00:00Z".to_string(),
+                device_id: "device-1".to_string(),
+                device_name: "Readium".to_string(),
+                locator: Some(json!({
+                    "href": "chapter-1.xhtml",
+                    "locations": { "position": 15 }
+                })),
+            },
+        )
+        .await;
+
+    assert_eq!(
+        outcome,
+        BookProgressionOutcome::BadRequest("location.progression is required".to_string())
+    );
+    assert!(progress.persisted.lock().unwrap().is_empty());
+}
+
 #[derive(Default)]
 struct TestProgressionReader {
     media: Option<BookMediaRecord>,

@@ -75,6 +75,29 @@ async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
     );
 }
 
+#[tokio::test]
+async fn epub_navigation_loads_existing_blob_without_extension_class_gate() {
+    let reader = TestEpubNavigationReader {
+        media_files: Vec::new(),
+        extension_blob: Some(("legacy.extension.Class".to_string(), Vec::new())),
+    };
+    let content = TestContentResolver {
+        extension: EpubPositionsExtension {
+            positions: vec![json!({
+                "href": "chapter-1.xhtml",
+                "locations": { "progression": 0.0 }
+            })],
+            is_fixed_layout: false,
+        },
+    };
+
+    let navigation = load_book_epub_navigation(&reader, &content, "book-1")
+        .await
+        .expect("existing EPUB positions blob should be enough to load navigation");
+
+    assert_eq!(navigation.positions().len(), 1);
+}
+
 struct TestEpubNavigationReader {
     media_files: Vec<String>,
     extension_blob: Option<(String, Vec<u8>)>,

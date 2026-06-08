@@ -9,7 +9,7 @@ use super::book_access::BookAccessContext;
 use super::{
     BookMediaPort, BookMediaRecord, BookProgressionInput, ContentAccessPort, ContentResolverPort,
     EpubNavigationError, EpubNavigationLoadError, EpubNavigationReaderPort, ProgressWriterPort,
-    ReadProgressReadPort, book_media_is_epub, load_book_epub_navigation,
+    ReadProgressReadPort, book_media_is_epub, load_book_epub_navigation, normalized_href_base,
 };
 
 pub struct BookProgressionService<'a, R, C, W>
@@ -182,6 +182,9 @@ where
             let Some(locator) = locator else {
                 return BookProgressionOutcome::InvalidPayload;
             };
+            if let Err(error) = validate_epub_locator_payload(locator) {
+                return book_progression_outcome_from_epub_error(error);
+            }
             let navigation =
                 match load_book_epub_navigation(self.reader, self.content, book_id).await {
                     Ok(navigation) => navigation,
@@ -364,6 +367,28 @@ fn book_progression_outcome_from_epub_error(error: EpubNavigationError) -> BookP
         EpubNavigationError::BadRequest(error) => BookProgressionOutcome::BadRequest(error),
         EpubNavigationError::Internal(error) => BookProgressionOutcome::Internal(error),
     }
+}
+
+fn validate_epub_locator_payload(locator: &Value) -> Result<(), EpubNavigationError> {
+    let href_base = normalized_href_base(
+        locator
+            .get("href")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if href_base.is_empty() {
+        return Err(EpubNavigationError::BadRequest(
+            "Resource does not exist in book: ".to_string(),
+        ));
+    }
+
+    if locator_progression(locator).is_none() {
+        return Err(EpubNavigationError::BadRequest(
+            "location.progression is required".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 fn book_progression_outcome_from_epub_load_error(

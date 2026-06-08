@@ -515,6 +515,41 @@ async fn router_book_positions_returns_not_found_without_epub_extension_position
 }
 
 #[tokio::test]
+async fn router_book_positions_ignores_non_epub_extension_class() {
+    let ctx = TestFixture::new("router-book-positions-non-epub-extension-class").await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for non-epub extension positions seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("legacy.extension.Class")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("non-epub extension positions should be seeded");
+    pool.close().await;
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book positions non-epub extension request should build"),
+        )
+        .await
+        .expect("book positions non-epub extension request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn router_book_positions_does_not_return_not_modified_when_positions_are_missing() {
     let ctx = TestFixture::new("router-book-positions-no-extension-not-modified").await;
     write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");

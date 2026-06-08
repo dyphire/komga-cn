@@ -59,20 +59,13 @@ where
         .book_media_files(book_id)
         .await
         .map_err(EpubNavigationLoadError::Internal)?;
-    let Some((extension_class, blob)) = reader
+    let Some((_extension_class, blob)) = reader
         .epub_extension_blob(book_id)
         .await
         .map_err(EpubNavigationLoadError::Internal)?
     else {
         return Err(EpubNavigationLoadError::MissingExtension);
     };
-    if !extension_class.is_empty()
-        && !extension_class
-            .to_ascii_lowercase()
-            .contains("mediaextensionepub")
-    {
-        return Err(EpubNavigationLoadError::MissingExtension);
-    }
 
     let extension = content
         .decode_epub_positions_extension(&blob)
