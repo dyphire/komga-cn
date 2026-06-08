@@ -3,7 +3,7 @@ use axum::extract::FromRef;
 use komga_application::discovery::{DiscoveryBrowseService, DiscoveryFacetService};
 
 pub use komga_application::discovery::{
-    BookDetailPort, CollectionPort, DiscoveryPersistedReadlistBookRecord,
+    BookDetailPort, CollectionPort, CollectionSearchPort, DiscoveryPersistedReadlistBookRecord,
     DiscoveryPersistedReadlistRecord, DiscoverySearchService, ExistingSeriesMetadataRecord,
     PersistedBookResourceRecord, PersistedBookSiblingDirectionRecord,
     PersistedCollectionAccessRecord, PersistedComicrackMatchCandidateRecord,
@@ -17,6 +17,7 @@ pub struct DiscoveryState {
     pub(crate) discovery_auth: DiscoveryAuthState,
     pub(crate) identity: IdentityState,
     pub(crate) discovery_search: Arc<dyn DiscoverySearchService>,
+    pub(crate) collection_search: Arc<dyn CollectionSearchPort>,
     pub(crate) readlist_search: Arc<dyn ReadlistSearchPort>,
     pub(crate) book_detail: Arc<dyn BookDetailPort>,
     pub(crate) series_detail: Arc<dyn SeriesDetailPort>,
@@ -32,6 +33,7 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
             discovery_auth: app.discovery_auth.clone(),
             identity: IdentityState::from_ref(app),
             discovery_search: app.services.discovery_search.clone(),
+            collection_search: app.services.collection_search.clone(),
             readlist_search: app.services.readlist_search.clone(),
             book_detail: app.services.book_detail.clone(),
             series_detail: app.services.series_detail.clone(),

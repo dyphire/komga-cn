@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
-    BookDetailPort, CollectionPort, DiscoveryBrowseService, DiscoveryFacetService,
-    DiscoverySearchService, ReadlistPort, ReadlistSearchPort, SeriesDetailPort,
+    BookDetailPort, CollectionPort, CollectionSearchPort, DiscoveryBrowseService,
+    DiscoveryFacetService, DiscoverySearchService, ReadlistPort, ReadlistSearchPort,
+    SeriesDetailPort,
 };
 use komga_application::media_assets::{BookImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
@@ -84,6 +85,7 @@ pub fn compose_http_runtime(
         config.lucene_data_directory.clone(),
     ));
     let discovery_search: Arc<dyn DiscoverySearchService> = discovery_search_access.clone();
+    let collection_search: Arc<dyn CollectionSearchPort> = discovery_search_access.clone();
     let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_search_access;
     let discovery_browse_service = Arc::new(compose_discovery_browse_service(
         db.clone(),
@@ -193,6 +195,7 @@ pub fn compose_http_runtime(
         opds_catalog,
         opds_persisted,
         discovery_search,
+        collection_search,
         readlist_search,
         book_detail,
         series_detail,

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use komga_application::discovery::{
-    DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry,
-    ReadlistSearchPort,
+    CollectionSearchPort, DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope,
+    PersistedBookBrowseEntry, ReadlistSearchPort,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -83,20 +83,6 @@ impl DiscoverySearchService for DiscoverySearchAccess {
         library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
 
-    async fn search_collection_ids(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
-        Ok(search_ids_or_empty(
-            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
-                .as_path(),
-            query,
-            SearchEntityType::Collection,
-            limit,
-        ))
-    }
-
     async fn load_ondeck_books(
         &self,
         user_id: &str,
@@ -110,6 +96,23 @@ impl DiscoverySearchService for DiscoverySearchAccess {
         runtime_queries::load_persisted_duplicate_books(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
+    }
+}
+
+#[async_trait]
+impl CollectionSearchPort for DiscoverySearchAccess {
+    async fn search_collection_ids(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        Ok(search_ids_or_empty(
+            resolve_discovery_index_dir(self.db.database_file(), self.index_dir.as_path())
+                .as_path(),
+            query,
+            SearchEntityType::Collection,
+            limit,
+        ))
     }
 }
 
