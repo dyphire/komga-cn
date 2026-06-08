@@ -43,26 +43,7 @@ async fn library_sync_pipeline_skips_store_proxy_until_local_page_is_final() {
     assert!(response.events.is_empty());
     assert!(response.should_continue);
     assert_eq!(*store.calls.lock().unwrap(), 0);
-    let requests = state.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].current_api_key_id.as_deref(), Some("api-key-1"));
-    assert_eq!(
-        requests[0].ongoing_sync_point_id.as_deref(),
-        Some("sync-existing"),
-    );
-    assert_eq!(
-        requests[0].last_successful_sync_point_id.as_deref(),
-        Some("sync-previous"),
-    );
-    assert_eq!(requests[0].limit, 200);
-    let token = parse_komga_sync_token_payload(response.sync_token_payload.as_str())
-        .expect("sync token should be valid");
-    assert_eq!(token.raw_kobo_sync_token, "store.raw.token");
-    assert_eq!(token.ongoing_sync_point_id.as_deref(), Some("sync-1"));
-    assert_eq!(
-        token.last_successful_sync_point_id.as_deref(),
-        Some("sync-previous")
-    );
+    assert_eq!(state.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

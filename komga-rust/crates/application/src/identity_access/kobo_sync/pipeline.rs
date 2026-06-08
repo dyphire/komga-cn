@@ -3,14 +3,13 @@ use serde_json::Value;
 
 use crate::identity_access::{KoboMetadataRecord, PersistedReadProgressRecord, user_id};
 
+use super::lifecycle::KoboSyncLifecycle;
 use super::{
     KoboLibrarySyncRequest, KoboLibrarySyncResponse, KoboStoreSyncMergeResult,
     KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPageRequest, KoboSyncReadProgressSnapshot,
     build_kobo_changed_entitlement_removed, build_kobo_changed_product_metadata,
     build_kobo_changed_reading_state, build_kobo_changed_tag, build_kobo_deleted_tag,
-    build_kobo_new_entitlement, build_kobo_new_tag, build_komga_sync_token_payload,
-    decode_or_passthrough_sync_token, is_kobo_store_sync_token_candidate,
-    parse_komga_sync_token_payload,
+    build_kobo_new_entitlement, build_kobo_new_tag,
 };
 
 pub struct KoboLibrarySyncService<'a> {
@@ -55,47 +54,21 @@ impl<'a> KoboLibrarySyncService<'a> {
         &self,
         request: KoboLibrarySyncRequest,
     ) -> Result<KoboLibrarySyncResponse, String> {
-        let decoded_sync_token = request
-            .sync_token
-            .as_deref()
-            .and_then(decode_or_passthrough_sync_token);
-        let sync_token_payload = decoded_sync_token
-            .as_deref()
-            .and_then(parse_komga_sync_token_payload);
-        let sync_page_request = KoboSyncPageRequest {
-            user: request.user.clone(),
-            current_api_key_id: request.current_api_key_id.clone(),
-            ongoing_sync_point_id: sync_token_payload
-                .as_ref()
-                .and_then(|token| token.ongoing_sync_point_id.clone()),
-            last_successful_sync_point_id: sync_token_payload
-                .as_ref()
-                .and_then(|token| token.last_successful_sync_point_id.clone()),
-            limit: request.limit,
-        };
-        let sync_page = self.state.load_sync_page(sync_page_request).await?;
+        let lifecycle = KoboSyncLifecycle::from_sync_token(request.sync_token.as_deref());
+        let sync_page = self
+            .state
+            .load_sync_page(lifecycle.page_request(&request))
+            .await?;
         let response_events = self.build_sync_events_page(&request, &sync_page).await?;
 
-        let from_sync_point_id = sync_page.from_sync_point_id.clone();
-        let to_sync_point_id = sync_page.to_sync_point_id.clone();
         let mut merged_events = response_events;
         let mut merged_should_continue = sync_page.should_continue;
-        let mut merged_raw_kobo_sync_token = sync_token_payload
-            .as_ref()
-            .map(|payload| payload.raw_kobo_sync_token.clone())
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                decoded_sync_token
-                    .as_deref()
-                    .filter(|value| is_kobo_store_sync_token_candidate(value))
-                    .map(str::to_string)
-            });
+        let mut merged_raw_kobo_sync_token = lifecycle.raw_kobo_sync_token();
 
         if !sync_page.should_continue
             && request.store_sync_enabled
-            && let Some(raw_store_sync_token) = merged_raw_kobo_sync_token
-                .as_deref()
-                .filter(|value| is_kobo_store_sync_token_candidate(value))
+            && let Some(raw_store_sync_token) =
+                lifecycle.store_sync_token(&merged_raw_kobo_sync_token)
             && let Ok(store_response) = self
                 .store
                 .sync_store_library(
@@ -114,25 +87,15 @@ impl<'a> KoboLibrarySyncService<'a> {
             }
         }
 
-        if !merged_should_continue
-            && let Some(from_sync_point_id) = from_sync_point_id.as_deref()
-            && from_sync_point_id != to_sync_point_id
+        if let Some(sync_point_id) =
+            lifecycle.sync_point_to_remove(&sync_page, merged_should_continue)
         {
-            self.state.remove_sync_point(from_sync_point_id).await?;
+            self.state.remove_sync_point(sync_point_id).await?;
         }
 
-        let sync_token_payload_sanitized = sync_token_payload.map(|mut payload| {
-            payload.ongoing_sync_point_id =
-                sync_page.should_continue.then(|| to_sync_point_id.clone());
-            if let Some(raw) = merged_raw_kobo_sync_token.as_ref() {
-                payload.raw_kobo_sync_token = raw.clone();
-            }
-            payload
-        });
-        let sync_token_payload = build_komga_sync_token_payload(
-            sync_token_payload_sanitized,
+        let sync_token_payload = lifecycle.outgoing_sync_token_payload(
+            &sync_page,
             merged_raw_kobo_sync_token,
-            to_sync_point_id.as_str(),
             merged_should_continue,
         );
 

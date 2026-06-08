@@ -1,6 +1,9 @@
 mod access;
 #[cfg(test)]
 mod access_tests;
+mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 mod models;
 mod pipeline;
 #[cfg(test)]
