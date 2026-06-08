@@ -216,33 +216,6 @@ pub async fn persist_book_progression(
     pool: &SqlitePool,
     input: BookProgressionInput,
 ) -> Result<(), String> {
-    let page_count = load_book_page_count(pool, &input.book_id)
-        .await?
-        .unwrap_or(1)
-        .max(1);
-    let total_progression = input
-        .locator
-        .as_ref()
-        .and_then(|value| value.get("locations"))
-        .and_then(|value| value.get("totalProgression"))
-        .and_then(Value::as_f64);
-    let effective_progression = total_progression.unwrap_or(input.progression);
-    let page_from_progression = (effective_progression * page_count as f64)
-        .round()
-        .clamp(0.0, page_count as f64) as u64;
-    let page = if input.use_locator_position_for_page {
-        input
-            .locator
-            .as_ref()
-            .and_then(|value| value.get("locations"))
-            .and_then(|value| value.get("position"))
-            .and_then(Value::as_u64)
-            .filter(|value| *value >= 1)
-            .unwrap_or(page_from_progression)
-    } else {
-        page_from_progression
-    };
-    let completed = effective_progression >= 0.99;
     require_user_exists(pool, &input.user_id, "progression").await?;
 
     sqlx::query(
@@ -257,8 +230,8 @@ pub async fn persist_book_progression(
     )
     .bind(&input.book_id)
     .bind(&input.user_id)
-    .bind(page as i64)
-    .bind(completed)
+    .bind(input.page as i64)
+    .bind(input.completed)
     .bind(input.modified)
     .bind(input.device_id.unwrap_or_default())
     .bind(input.device_name.unwrap_or_default())

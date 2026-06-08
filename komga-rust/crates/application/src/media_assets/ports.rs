@@ -19,8 +19,8 @@ pub struct EpubPositionsExtension {
 pub struct BookProgressionInput {
     pub book_id: String,
     pub user_id: String,
-    pub progression: f64,
-    pub use_locator_position_for_page: bool,
+    pub page: u64,
+    pub completed: bool,
     pub modified: Option<String>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,

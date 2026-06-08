@@ -78,6 +78,45 @@ pub enum EpubProgressionError {
     Internal(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResolvedBookProgression {
+    pub page: u64,
+    pub completed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BookProgressionPageSource {
+    TotalProgression,
+    LocatorPosition,
+}
+
+pub fn resolve_book_progression_write(
+    page_count: u64,
+    progression: f64,
+    page_source: BookProgressionPageSource,
+    locator: Option<&Value>,
+) -> ResolvedBookProgression {
+    let page_count = page_count.max(1);
+    let effective_progression = locator
+        .and_then(locator_total_progression)
+        .unwrap_or(progression);
+    let page_from_progression = (effective_progression * page_count as f64)
+        .round()
+        .clamp(0.0, page_count as f64) as u64;
+    let page = match page_source {
+        BookProgressionPageSource::LocatorPosition => locator
+            .and_then(locator_position)
+            .filter(|value| *value >= 1)
+            .unwrap_or(page_from_progression),
+        BookProgressionPageSource::TotalProgression => page_from_progression,
+    };
+
+    ResolvedBookProgression {
+        page,
+        completed: effective_progression >= 0.99,
+    }
+}
+
 #[async_trait]
 pub trait BookProgressionReaderPort: Send + Sync {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
@@ -160,7 +199,7 @@ where
         let is_epub = book_media_is_epub(&media);
         let page_count = media.page_count.max(1);
         let locator = update.locator.as_ref();
-        let (progression, use_locator_position_for_page, locator_to_persist) = if is_epub {
+        let (progression, page_source, locator_to_persist) = if is_epub {
             let Some(locator) = locator else {
                 return BookProgressionOutcome::InvalidPayload;
             };
@@ -181,7 +220,11 @@ where
             if !(0.0..=1.0).contains(&progression) {
                 return BookProgressionOutcome::InvalidPayload;
             }
-            (progression, false, Some(normalized_locator))
+            (
+                progression,
+                BookProgressionPageSource::TotalProgression,
+                Some(normalized_locator),
+            )
         } else {
             let Some(position) = locator.and_then(locator_position) else {
                 return BookProgressionOutcome::InvalidPayload;
@@ -193,7 +236,7 @@ where
             }
             (
                 position as f64 / page_count as f64,
-                true,
+                BookProgressionPageSource::LocatorPosition,
                 update.locator.clone(),
             )
         };
@@ -211,13 +254,20 @@ where
             Err(error) => return BookProgressionOutcome::Internal(error),
         }
 
+        let resolved = resolve_book_progression_write(
+            page_count,
+            progression,
+            page_source,
+            locator_to_persist.as_ref(),
+        );
+
         match self
             .writer
             .persist_book_progression(BookProgressionInput {
                 book_id: book_id.to_string(),
                 user_id: user_id(user).to_string(),
-                progression,
-                use_locator_position_for_page,
+                page: resolved.page,
+                completed: resolved.completed,
                 modified: Some(update.modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device_name),
@@ -404,6 +454,13 @@ pub fn locator_position(locator: &Value) -> Option<u64> {
         .get("locations")
         .and_then(|value| value.get("position"))
         .and_then(Value::as_u64)
+}
+
+fn locator_total_progression(locator: &Value) -> Option<f64> {
+    locator
+        .get("locations")
+        .and_then(|value| value.get("totalProgression"))
+        .and_then(Value::as_f64)
 }
 
 pub fn normalized_href_base(href: &str) -> String {

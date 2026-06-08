@@ -65,8 +65,8 @@ async fn book_progression_update_normalizes_epub_locator_and_persists_progressio
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].book_id, "book-1");
     assert_eq!(persisted[0].user_id, "admin");
-    assert_eq!(persisted[0].progression, 0.5);
-    assert!(!persisted[0].use_locator_position_for_page);
+    assert_eq!(persisted[0].page, 2);
+    assert!(!persisted[0].completed);
     assert_eq!(
         persisted[0]
             .locator

@@ -29,9 +29,10 @@ pub use book_media_delivery::{
     BookThumbnailDelivery, PersistedBookIdResolverPort,
 };
 pub use book_progression::{
-    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionReaderPort,
-    BookProgressionService, BookProgressionUpdate, EpubProgressionError,
-    normalize_book_epub_locator, progression_is_older_than_existing,
+    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionPageSource,
+    BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate, EpubProgressionError,
+    ResolvedBookProgression, normalize_book_epub_locator, progression_is_older_than_existing,
+    resolve_book_progression_write,
 };
 pub use manifest_builder::{
     ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,

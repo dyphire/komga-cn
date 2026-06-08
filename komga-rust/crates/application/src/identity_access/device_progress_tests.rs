@@ -54,8 +54,8 @@ async fn koreader_visual_progress_update_persists_typed_book_progression() {
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].book_id, "book-1");
     assert_eq!(persisted[0].user_id, "user-1");
-    assert_eq!(persisted[0].progression, 0.7);
-    assert!(persisted[0].use_locator_position_for_page);
+    assert_eq!(persisted[0].page, 7);
+    assert!(!persisted[0].completed);
     assert_eq!(
         persisted[0].locator,
         Some(json!({
@@ -182,6 +182,7 @@ async fn kobo_reading_state_update_normalizes_locator_and_persists_progression()
     let reader = NoopMediaReader {
         media_files: vec!["/book-1.xhtml".to_string()],
         epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        page_count: Some(10),
         ..NoopMediaReader::default()
     };
     let content = NoopContentResolver {
@@ -225,7 +226,8 @@ async fn kobo_reading_state_update_normalizes_locator_and_persists_progression()
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].book_id, "book-1");
     assert_eq!(persisted[0].user_id, "user-1");
-    assert_eq!(persisted[0].progression, 0.5);
+    assert_eq!(persisted[0].page, 2);
+    assert!(!persisted[0].completed);
     assert_eq!(
         persisted[0]
             .locator
@@ -246,6 +248,7 @@ async fn kobo_reading_state_update_accepts_fixed_layout_single_position() {
     let reader = NoopMediaReader {
         media_files: vec!["/fixed.xhtml".to_string()],
         epub_extension_blob: Some(("EPUB".to_string(), Vec::new())),
+        page_count: Some(10),
         ..NoopMediaReader::default()
     };
     let content = NoopContentResolver {
@@ -286,7 +289,8 @@ async fn kobo_reading_state_update_accepts_fixed_layout_single_position() {
 
     let persisted = progress.persisted.lock().unwrap();
     assert_eq!(persisted.len(), 1);
-    assert_eq!(persisted[0].progression, 0.9);
+    assert_eq!(persisted[0].page, 7);
+    assert!(!persisted[0].completed);
     assert_eq!(
         persisted[0]
             .locator
@@ -524,6 +528,7 @@ struct NoopMediaReader {
     media_files: Vec<String>,
     epub_extension_blob: Option<(String, Vec<u8>)>,
     book_progression: Option<Value>,
+    page_count: Option<u64>,
 }
 
 #[async_trait]
@@ -730,6 +735,6 @@ impl ReadProgressReadPort for NoopMediaReader {
     }
 
     async fn book_page_count(&self, _book_id: &str) -> Result<Option<u64>, String> {
-        Ok(None)
+        Ok(self.page_count)
     }
 }

@@ -1,9 +1,10 @@
 use serde_json::{Value, json};
 
 use crate::media_assets::{
-    BookProgressionInput, ContentResolverPort, EpubProgressionError, MediaReaderPort,
-    ProgressWriterPort, normalize_book_epub_locator as normalize_epub_locator,
+    BookProgressionInput, BookProgressionPageSource, ContentResolverPort, EpubProgressionError,
+    MediaReaderPort, ProgressWriterPort, normalize_book_epub_locator as normalize_epub_locator,
     progression_is_older_than_existing as book_progression_is_older_than_existing,
+    resolve_book_progression_write,
 };
 
 use super::DeviceSyncPort;
@@ -148,13 +149,26 @@ impl<'a> DeviceProgressService<'a> {
             } else {
                 content_source_progress
             });
+        let page_count = self
+            .reader
+            .book_page_count(book_id)
+            .await
+            .map_err(|_| DeviceProgressError::Persistence)?
+            .unwrap_or(1)
+            .max(1);
+        let resolved = resolve_book_progression_write(
+            page_count,
+            locator_progression,
+            BookProgressionPageSource::TotalProgression,
+            Some(&locator),
+        );
 
         self.progress
             .persist_book_progression(BookProgressionInput {
                 book_id: book_id.to_string(),
                 user_id: user_id.to_string(),
-                progression: locator_progression,
-                use_locator_position_for_page: false,
+                page: resolved.page,
+                completed: resolved.completed,
                 modified: Some(update.last_modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device_name),
@@ -179,24 +193,29 @@ impl<'a> DeviceProgressService<'a> {
             })?
             .ok_or(DeviceProgressError::NotFound)?;
 
-        let (progression, use_locator_position_for_page, locator) =
-            match koreader_media_profile(&target.media_type) {
-                Some(KoreaderMediaProfile::Visual) => {
-                    self.koreader_visual_progression(&target, &update.progress)?
-                }
-                Some(KoreaderMediaProfile::Epub) => {
-                    self.koreader_epub_progression(&target.id, &update.progress)
-                        .await?
-                }
-                None => return Err(DeviceProgressError::UnsupportedMediaProfile),
-            };
+        let (progression, page_source, locator) = match koreader_media_profile(&target.media_type) {
+            Some(KoreaderMediaProfile::Visual) => {
+                self.koreader_visual_progression(&target, &update.progress)?
+            }
+            Some(KoreaderMediaProfile::Epub) => {
+                self.koreader_epub_progression(&target.id, &update.progress)
+                    .await?
+            }
+            None => return Err(DeviceProgressError::UnsupportedMediaProfile),
+        };
+        let resolved = resolve_book_progression_write(
+            target.page_count,
+            progression,
+            page_source,
+            Some(&locator),
+        );
 
         self.progress
             .persist_book_progression(BookProgressionInput {
                 book_id: target.id,
                 user_id: user_id.to_string(),
-                progression,
-                use_locator_position_for_page,
+                page: resolved.page,
+                completed: resolved.completed,
                 modified: Some(update.modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device),
@@ -259,7 +278,7 @@ impl<'a> DeviceProgressService<'a> {
         &self,
         target: &super::KoreaderBookTarget,
         progress: &str,
-    ) -> Result<(f64, bool, Value), DeviceProgressError> {
+    ) -> Result<(f64, BookProgressionPageSource, Value), DeviceProgressError> {
         let Some(page) = parse_koreader_progress_page(progress).map(|value| value as i64) else {
             return Err(DeviceProgressError::Persistence);
         };
@@ -270,7 +289,7 @@ impl<'a> DeviceProgressService<'a> {
         let progression = page as f64 / target.page_count.max(1) as f64;
         Ok((
             progression,
-            true,
+            BookProgressionPageSource::LocatorPosition,
             json!({
                 "koreaderProgress": progress,
                 "locations": {
@@ -285,7 +304,7 @@ impl<'a> DeviceProgressService<'a> {
         &self,
         book_id: &str,
         progress: &str,
-    ) -> Result<(f64, bool, Value), DeviceProgressError> {
+    ) -> Result<(f64, BookProgressionPageSource, Value), DeviceProgressError> {
         let (_extension_class, blob) = self
             .reader
             .epub_extension_blob(book_id)
@@ -317,7 +336,11 @@ impl<'a> DeviceProgressService<'a> {
             )));
         };
 
-        Ok((0.0, false, koreader_epub_locator(href, matched_position)))
+        Ok((
+            0.0,
+            BookProgressionPageSource::TotalProgression,
+            koreader_epub_locator(href, matched_position),
+        ))
     }
 
     async fn normalize_book_epub_locator(
