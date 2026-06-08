@@ -9,8 +9,8 @@ mod common;
 pub mod facets;
 pub mod library_mappings;
 pub mod models;
+pub mod query_support;
 pub mod runtime_queries;
-pub mod search;
 pub mod series;
 
 use models::{

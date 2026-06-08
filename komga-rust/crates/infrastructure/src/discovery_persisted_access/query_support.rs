@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use komga_application::discovery::{
-    CollectionSearchPort, DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope,
-    PersistedBookBrowseEntry, ReadlistSearchPort,
+    AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,
+    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry, ReadlistSearchPort,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -14,12 +14,12 @@ use super::browse::{search_ids_or_empty, search_scored_ids_or_empty};
 use super::{authors, library_mappings, models, runtime_queries};
 
 #[derive(Clone)]
-pub struct DiscoverySearchAccess {
+pub struct DiscoveryQuerySupportAccess {
     db: DatabaseHandle,
     index_dir: PathBuf,
 }
 
-impl DiscoverySearchAccess {
+impl DiscoveryQuerySupportAccess {
     pub fn new(db: DatabaseHandle, index_dir: PathBuf) -> Self {
         Self { db, index_dir }
     }
@@ -35,7 +35,7 @@ fn persisted_book_browse_entry(row: models::BookBrowseEntry) -> PersistedBookBro
 }
 
 #[async_trait]
-impl DiscoverySearchService for DiscoverySearchAccess {
+impl AuthorFacetPort for DiscoveryQuerySupportAccess {
     async fn load_author_names(
         &self,
         search: &str,
@@ -78,11 +78,17 @@ impl DiscoverySearchService for DiscoverySearchAccess {
             })
             .collect())
     }
+}
 
+#[async_trait]
+impl LibraryIdMappingPort for DiscoveryQuerySupportAccess {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
+}
 
+#[async_trait]
+impl BookSpecialListPort for DiscoveryQuerySupportAccess {
     async fn load_ondeck_books(
         &self,
         user_id: &str,
@@ -100,7 +106,7 @@ impl DiscoverySearchService for DiscoverySearchAccess {
 }
 
 #[async_trait]
-impl CollectionSearchPort for DiscoverySearchAccess {
+impl CollectionSearchPort for DiscoveryQuerySupportAccess {
     async fn search_collection_ids(
         &self,
         query: &str,
@@ -117,7 +123,7 @@ impl CollectionSearchPort for DiscoverySearchAccess {
 }
 
 #[async_trait]
-impl ReadlistSearchPort for DiscoverySearchAccess {
+impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
     async fn search_readlist_scored_ids(
         &self,
         query: &str,

@@ -2,10 +2,10 @@ mod books;
 mod browse;
 pub mod browse_engine;
 mod detail_port;
+mod query_ports;
 mod read_models;
 mod readlists;
 mod request_resolution;
-mod search_service;
 mod series;
 
 pub use books::{BookDetailQuery, BookReadlistsQuery, BookSiblingQuery};
@@ -22,6 +22,10 @@ pub use detail_port::{
     PersistedSeriesDetailRecord, PersistedSeriesResourceRecord, PersistedSeriesRestrictionRecord,
     ReadlistPort, SeriesAlternateTitleRecord, SeriesDetailPort, SeriesMetadataLinkRecord,
     SeriesMetadataUpdateRecord,
+};
+pub use query_ports::{
+    AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,
+    PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry, ReadlistSearchPort,
 };
 pub use read_models::{
     BookDetailReadModel, BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
@@ -42,9 +46,5 @@ pub use request_resolution::{
     resolve_deprecated_books_request, resolve_deprecated_series_request,
     resolve_latest_books_request, resolve_series_alphabetical_groups_request,
     resolve_series_books_request, resolve_series_feed_request, resolve_series_list_request,
-};
-pub use search_service::{
-    CollectionSearchPort, DiscoverySearchService, PersistedAuthorEntry, PersistedAuthorsScope,
-    PersistedBookBrowseEntry, ReadlistSearchPort,
 };
 pub use series::{SeriesCollectionsQuery, SeriesDetailQuery};

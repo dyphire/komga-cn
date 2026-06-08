@@ -39,7 +39,7 @@ pub trait ReadlistSearchPort: Send + Sync {
 }
 
 #[async_trait]
-pub trait DiscoverySearchService: Send + Sync {
+pub trait AuthorFacetPort: Send + Sync {
     async fn load_author_names(
         &self,
         search: &str,
@@ -56,9 +56,15 @@ pub trait DiscoverySearchService: Send + Sync {
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<&[String]>,
     ) -> Result<Vec<PersistedAuthorEntry>, String>;
+}
 
+#[async_trait]
+pub trait LibraryIdMappingPort: Send + Sync {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
+}
 
+#[async_trait]
+pub trait BookSpecialListPort: Send + Sync {
     async fn load_ondeck_books(
         &self,
         user_id: &str,

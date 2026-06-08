@@ -94,7 +94,7 @@ pub async fn authors_names(
     };
 
     match app
-        .discovery_search
+        .author_facets
         .load_author_names(&search, context.authorized_library_ids.as_deref())
         .await
     {
@@ -122,7 +122,7 @@ pub async fn authors_roles(
     };
 
     match app
-        .discovery_search
+        .author_facets
         .load_author_roles(context.authorized_library_ids.as_deref())
         .await
     {
@@ -172,7 +172,7 @@ pub(crate) async fn authors_deprecated_get(
     };
 
     let mut authors = match app
-        .discovery_search
+        .author_facets
         .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
     {
@@ -250,7 +250,7 @@ pub async fn authors_v2(
     };
 
     let mut authors = match app
-        .discovery_search
+        .author_facets
         .load_authors_by_scope(scope, context.authorized_library_ids.as_deref())
         .await
     {

@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use komga_application::discovery::{
-    BookDetailPort, CollectionPort, CollectionSearchPort, DiscoveryBrowseService,
-    DiscoveryFacetService, DiscoverySearchService, ReadlistPort, ReadlistSearchPort,
-    SeriesDetailPort,
+    AuthorFacetPort, BookDetailPort, BookSpecialListPort, CollectionPort, CollectionSearchPort,
+    DiscoveryBrowseService, DiscoveryFacetService, LibraryIdMappingPort, ReadlistPort,
+    ReadlistSearchPort, SeriesDetailPort,
 };
 use komga_application::media_assets::{BookImportService, MetadataWriter, ReadProgressService};
 use komga_application::operational::{
@@ -20,7 +20,7 @@ use komga_infrastructure::content_resolver::ContentResolver;
 use komga_infrastructure::database_handle::DatabaseHandle;
 use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
 use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
-use komga_infrastructure::discovery_persisted_access::search::DiscoverySearchAccess;
+use komga_infrastructure::discovery_persisted_access::query_support::DiscoveryQuerySupportAccess;
 use komga_infrastructure::event_emitter_adapter::SseBookEventEmitter;
 use komga_infrastructure::filesystem::import::FilesystemBookImport;
 use komga_infrastructure::library_catalog::LibraryCatalogAccess;
@@ -80,13 +80,15 @@ pub fn compose_http_runtime(
     let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
     let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
     let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
-    let discovery_search_access = Arc::new(DiscoverySearchAccess::new(
+    let discovery_query_support = Arc::new(DiscoveryQuerySupportAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
-    let discovery_search: Arc<dyn DiscoverySearchService> = discovery_search_access.clone();
-    let collection_search: Arc<dyn CollectionSearchPort> = discovery_search_access.clone();
-    let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_search_access;
+    let author_facets: Arc<dyn AuthorFacetPort> = discovery_query_support.clone();
+    let library_id_mapping: Arc<dyn LibraryIdMappingPort> = discovery_query_support.clone();
+    let book_special_lists: Arc<dyn BookSpecialListPort> = discovery_query_support.clone();
+    let collection_search: Arc<dyn CollectionSearchPort> = discovery_query_support.clone();
+    let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_query_support;
     let discovery_browse_service = Arc::new(compose_discovery_browse_service(
         db.clone(),
         config.lucene_data_directory.clone(),
@@ -194,7 +196,9 @@ pub fn compose_http_runtime(
         ))),
         opds_catalog,
         opds_persisted,
-        discovery_search,
+        author_facets,
+        library_id_mapping,
+        book_special_lists,
         collection_search,
         readlist_search,
         book_detail,

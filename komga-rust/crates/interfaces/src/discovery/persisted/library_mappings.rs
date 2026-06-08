@@ -1,4 +1,4 @@
-use crate::state::DiscoverySearchService;
+use crate::state::LibraryIdMappingPort;
 
 fn push_unique(values: &mut Vec<String>, value: &str) {
     if !values.iter().any(|candidate| candidate == value) {
@@ -7,7 +7,7 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
 }
 
 pub async fn remap_requested_library_ids_for_persisted(
-    backend: &dyn DiscoverySearchService,
+    backend: &dyn LibraryIdMappingPort,
     requested: Option<&Vec<String>>,
 ) -> Option<Vec<String>> {
     let requested = requested?;
