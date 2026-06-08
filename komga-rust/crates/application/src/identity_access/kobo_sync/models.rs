@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -86,13 +84,6 @@ pub struct KoboSyncReadListSnapshot {
     pub created: String,
     pub last_modified: String,
     pub items: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct KoboSyncSnapshot {
-    pub books: HashMap<String, KoboSyncBookSnapshot>,
-    pub progress: HashMap<String, KoboSyncReadProgressSnapshot>,
-    pub readlists: HashMap<String, KoboSyncReadListSnapshot>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
