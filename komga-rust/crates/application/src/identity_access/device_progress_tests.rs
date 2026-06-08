@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::identity_access::{
     DeviceProgressService, DeviceSyncPort, KoboReadingStateUpdate, KoreaderBookLookupError,
-    KoreaderBookTarget, PersistedReadProgressRecord, ReadProgressWithLocatorInput,
+    KoreaderBookTarget, PersistedReadProgressRecord,
 };
 use crate::media_assets::{
     BookMediaRecord, BookPageRecord, BookProgressionInput, CollectionThumbnailRecord,
@@ -359,13 +359,6 @@ impl DeviceSyncPort for TestDeviceSync {
 
     async fn persisted_book_exists(&self, _book_id: &str) -> Result<bool, String> {
         Ok(false)
-    }
-
-    async fn persist_read_progress_with_locator(
-        &self,
-        _input: ReadProgressWithLocatorInput,
-    ) -> Result<(), String> {
-        Ok(())
     }
 }
 

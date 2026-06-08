@@ -4,16 +4,6 @@ use serde_json::Value;
 use super::super::device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
-pub struct ReadProgressWithLocatorInput {
-    pub book_id: String,
-    pub user_id: String,
-    pub page: i64,
-    pub completed: bool,
-    pub device_id: String,
-    pub device_name: String,
-    pub timestamp: String,
-    pub locator: Option<Value>,
-}
 
 #[async_trait]
 pub trait DeviceSyncPort: Send + Sync {
@@ -46,9 +36,4 @@ pub trait DeviceSyncPort: Send + Sync {
     ) -> Result<Option<(String, Vec<u8>)>, String>;
 
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, String>;
-
-    async fn persist_read_progress_with_locator(
-        &self,
-        input: ReadProgressWithLocatorInput,
-    ) -> Result<(), String>;
 }

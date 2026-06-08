@@ -8,7 +8,6 @@ use crate::resolve_optional_library_item_path;
 
 pub use komga_application::identity_access::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
-    ReadProgressWithLocatorInput,
 };
 
 fn decode_epub_extension_is_fixed_layout(blob: &[u8]) -> bool {
@@ -269,59 +268,6 @@ pub async fn load_read_progress(
             .ok()
             .flatten(),
     }))
-}
-
-pub async fn persist_read_progress_with_locator(
-    pool: &SqlitePool,
-    input: &ReadProgressWithLocatorInput,
-) -> Result<(), String> {
-    let user_exists = sqlx::query(
-        r#"SELECT 1
- FROM USER
- WHERE ID = ?
- LIMIT 1"#,
-    )
-    .bind(&input.user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|error| format!("query read-progress user: {error}"))?
-    .is_some();
-
-    if !user_exists {
-        return Err("read-progress user not found".to_string());
-    }
-
-    let locator_blob = input
-        .locator
-        .as_ref()
-        .and_then(|value| serde_json::to_vec(value).ok())
-        .unwrap_or_default();
-
-    sqlx::query(
-        r#"INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, DEVICE_ID, DEVICE_NAME,
-                           LAST_MODIFIED_DATE, LOCATOR)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?)
- ON CONFLICT(BOOK_ID, USER_ID) DO UPDATE
- SET PAGE = excluded.PAGE,
-     COMPLETED = excluded.COMPLETED,
-     DEVICE_ID = excluded.DEVICE_ID,
-     DEVICE_NAME = excluded.DEVICE_NAME,
-     LOCATOR = excluded.LOCATOR,
-     LAST_MODIFIED_DATE = excluded.LAST_MODIFIED_DATE"#,
-    )
-    .bind(&input.book_id)
-    .bind(&input.user_id)
-    .bind(input.page.max(0))
-    .bind(input.completed)
-    .bind(&input.device_id)
-    .bind(&input.device_name)
-    .bind(&input.timestamp)
-    .bind(locator_blob)
-    .execute(pool)
-    .await
-    .map_err(|error| format!("persist read-progress with locator: {error}"))?;
-
-    Ok(())
 }
 
 pub async fn load_koreader_book_target(

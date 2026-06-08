@@ -6,7 +6,6 @@ use crate::state::MediaAssetsState;
 use axum::extract::State;
 use komga_application::media_assets::{
     BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionService,
-    BookProgressionUpdate,
 };
 
 fn request_progress_token(
@@ -224,23 +223,15 @@ async fn book_progression_response(
     book_id: &str,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = load_accessible_book_media(app, book_id, user).await {
-        return response;
-    }
-
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_progression_payload();
     };
-    let Some(update) = BookProgressionUpdate::from_payload(&payload) else {
-        return invalid_progression_payload();
-    };
-
     let service = BookProgressionService::new(
         app.reader.as_ref(),
         app.content.as_ref(),
         app.progress.as_ref(),
     );
-    match service.update_progression(user, book_id, update).await {
+    match service.update_progression(user, book_id, &payload).await {
         BookProgressionOutcome::Updated => StatusCode::NO_CONTENT.into_response(),
         BookProgressionOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookProgressionOutcome::Forbidden => StatusCode::FORBIDDEN.into_response(),

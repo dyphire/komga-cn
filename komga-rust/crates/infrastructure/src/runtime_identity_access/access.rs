@@ -3,8 +3,8 @@ use komga_application::identity_access::{
     AuthActivityPort, AuthOutcome, AuthUser, AuthenticationPort, CreateAuthUserInput,
     DeviceSyncPort, KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncPage, KoboSyncPageRequest,
     KoboSyncStatePort, PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
-    ReadProgressWithLocatorInput, ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort,
-    UpdateAuthUserInput, UpdateAuthUserResult, UserAdminPort,
+    ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort, UpdateAuthUserInput,
+    UpdateAuthUserResult, UserAdminPort,
 };
 use serde_json::Value;
 
@@ -333,13 +333,6 @@ impl DeviceSyncPort for IdentityAccess {
         device_auth::persisted_book_exists(self.db.read_pool(), book_id)
             .await
             .map_err(|e| e.to_string())
-    }
-
-    async fn persist_read_progress_with_locator(
-        &self,
-        input: ReadProgressWithLocatorInput,
-    ) -> Result<(), String> {
-        device_auth::persist_read_progress_with_locator(self.db.write_pool(), &input).await
     }
 }
 

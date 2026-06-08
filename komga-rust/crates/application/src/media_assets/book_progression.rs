@@ -1,15 +1,17 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::identity_access::{AuthUser, user_id};
 
 use super::book_access::BookAccessContext;
+use super::book_progression_write::{
+    BookProgressionConflictPolicy, BookProgressionWrite, BookProgressionWriteError,
+    BookProgressionWriteService, BookProgressionWriteSource,
+};
 use super::{
-    BookMediaPort, BookMediaRecord, BookProgressionInput, ContentAccessPort, ContentResolverPort,
-    EpubNavigationError, EpubNavigationLoadError, EpubNavigationReaderPort, ProgressWriterPort,
-    ReadProgressReadPort, book_media_is_epub, load_book_epub_navigation, normalized_href_base,
+    BookMediaPort, BookMediaRecord, ContentAccessPort, ContentResolverPort, EpubNavigationError,
+    EpubNavigationLoadError, EpubNavigationReaderPort, ProgressWriterPort, ReadProgressReadPort,
+    book_media_is_epub, load_book_epub_navigation, normalized_href_base,
 };
 
 pub struct BookProgressionService<'a, R, C, W>
@@ -24,15 +26,15 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BookProgressionUpdate {
-    pub modified: String,
-    pub device_id: String,
-    pub device_name: String,
-    pub locator: Option<Value>,
+struct BookProgressionUpdate {
+    modified: String,
+    device_id: String,
+    device_name: String,
+    locator: Option<Value>,
 }
 
 impl BookProgressionUpdate {
-    pub fn from_payload(payload: &Value) -> Option<Self> {
+    fn from_payload(payload: &Value) -> Option<Self> {
         let modified = payload.get("modified").and_then(Value::as_str)?.to_string();
         let device_id = payload
             .get("device")
@@ -71,45 +73,6 @@ pub enum BookProgressionGetOutcome {
     NotFound,
     Forbidden,
     Internal(String),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ResolvedBookProgression {
-    pub page: u64,
-    pub completed: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BookProgressionPageSource {
-    TotalProgression,
-    LocatorPosition,
-}
-
-pub fn resolve_book_progression_write(
-    page_count: u64,
-    progression: f64,
-    page_source: BookProgressionPageSource,
-    locator: Option<&Value>,
-) -> ResolvedBookProgression {
-    let page_count = page_count.max(1);
-    let effective_progression = locator
-        .and_then(locator_total_progression)
-        .unwrap_or(progression);
-    let page_from_progression = (effective_progression * page_count as f64)
-        .round()
-        .clamp(0.0, page_count as f64) as u64;
-    let page = match page_source {
-        BookProgressionPageSource::LocatorPosition => locator
-            .and_then(locator_position)
-            .filter(|value| *value >= 1)
-            .unwrap_or(page_from_progression),
-        BookProgressionPageSource::TotalProgression => page_from_progression,
-    };
-
-    ResolvedBookProgression {
-        page,
-        completed: effective_progression >= 0.99,
-    }
 }
 
 #[async_trait]
@@ -168,17 +131,20 @@ where
         &self,
         user: &AuthUser,
         book_id: &str,
-        update: BookProgressionUpdate,
+        payload: &Value,
     ) -> BookProgressionOutcome {
         let media = match self.accessible_book_media(user, book_id).await {
             Ok(media) => media,
             Err(outcome) => return outcome,
         };
+        let Some(update) = BookProgressionUpdate::from_payload(payload) else {
+            return BookProgressionOutcome::InvalidPayload;
+        };
 
         let is_epub = book_media_is_epub(&media);
         let page_count = media.page_count.max(1);
         let locator = update.locator.as_ref();
-        let (progression, page_source, locator_to_persist) = if is_epub {
+        let source = if is_epub {
             let Some(locator) = locator else {
                 return BookProgressionOutcome::InvalidPayload;
             };
@@ -200,11 +166,11 @@ where
             if !(0.0..=1.0).contains(&progression) {
                 return BookProgressionOutcome::InvalidPayload;
             }
-            (
+
+            BookProgressionWriteSource::TotalProgression {
                 progression,
-                BookProgressionPageSource::TotalProgression,
-                Some(normalized_locator),
-            )
+                locator: Some(normalized_locator),
+            }
         } else {
             let Some(position) = locator.and_then(locator_position) else {
                 return BookProgressionOutcome::InvalidPayload;
@@ -214,49 +180,31 @@ where
                     "Page argument ({position}) must be within 1 and book page count ({page_count})"
                 ));
             }
-            (
-                position as f64 / page_count as f64,
-                BookProgressionPageSource::LocatorPosition,
-                update.locator.clone(),
-            )
+            BookProgressionWriteSource::Position {
+                progression: position as f64 / page_count as f64,
+                locator: update.locator.clone(),
+            }
         };
 
-        match progression_is_older_than_existing(
-            self.reader,
-            book_id,
-            user_id(user),
-            &update.modified,
-        )
-        .await
-        {
-            Ok(true) => return BookProgressionOutcome::Conflict,
-            Ok(false) => {}
-            Err(error) => return BookProgressionOutcome::Internal(error),
-        }
-
-        let resolved = resolve_book_progression_write(
-            page_count,
-            progression,
-            page_source,
-            locator_to_persist.as_ref(),
-        );
-
-        match self
-            .writer
-            .persist_book_progression(BookProgressionInput {
+        let writer = BookProgressionWriteService::new(self.reader, self.writer);
+        match writer
+            .persist(BookProgressionWrite {
                 book_id: book_id.to_string(),
                 user_id: user_id(user).to_string(),
-                page: resolved.page,
-                completed: resolved.completed,
+                page_count,
+                source,
                 modified: Some(update.modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device_name),
-                locator: locator_to_persist,
+                conflict_policy: BookProgressionConflictPolicy::RejectStale,
             })
             .await
         {
             Ok(()) => BookProgressionOutcome::Updated,
-            Err(error) => BookProgressionOutcome::Internal(error),
+            Err(BookProgressionWriteError::Stale) => BookProgressionOutcome::Conflict,
+            Err(BookProgressionWriteError::Internal(error)) => {
+                BookProgressionOutcome::Internal(error)
+            }
         }
     }
 
@@ -315,51 +263,18 @@ where
     }
 }
 
-pub async fn progression_is_older_than_existing<R>(
-    reader: &R,
-    book_id: &str,
-    user_id: &str,
-    modified: &str,
-) -> Result<bool, String>
-where
-    R: BookProgressionReaderPort + ?Sized,
-{
-    let Ok(new_modified) = OffsetDateTime::parse(modified, &Rfc3339) else {
-        return Ok(false);
-    };
-    let Some(existing_progression) = reader.book_progression(book_id, user_id).await? else {
-        return Ok(false);
-    };
-    let Some(existing_modified) = existing_progression.get("modified").and_then(Value::as_str)
-    else {
-        return Ok(false);
-    };
-    let Ok(existing_modified) = OffsetDateTime::parse(existing_modified, &Rfc3339) else {
-        return Ok(false);
-    };
-
-    Ok(new_modified <= existing_modified)
-}
-
-pub fn locator_progression(locator: &Value) -> Option<f64> {
+pub(super) fn locator_progression(locator: &Value) -> Option<f64> {
     locator
         .get("locations")
         .and_then(|value| value.get("progression"))
         .and_then(Value::as_f64)
 }
 
-pub fn locator_position(locator: &Value) -> Option<u64> {
+pub(super) fn locator_position(locator: &Value) -> Option<u64> {
     locator
         .get("locations")
         .and_then(|value| value.get("position"))
         .and_then(Value::as_u64)
-}
-
-fn locator_total_progression(locator: &Value) -> Option<f64> {
-    locator
-        .get("locations")
-        .and_then(|value| value.get("totalProgression"))
-        .and_then(Value::as_f64)
 }
 
 fn book_progression_outcome_from_epub_error(error: EpubNavigationError) -> BookProgressionOutcome {

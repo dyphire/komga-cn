@@ -8,7 +8,7 @@ use crate::identity_access::AuthUser;
 
 use super::{
     BookMediaRecord, BookPageRecord, BookProgressionInput, BookProgressionOutcome,
-    BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate, ContentResolverPort,
+    BookProgressionReaderPort, BookProgressionService, ContentResolverPort,
     EpubNavigationReaderPort, EpubPositionsExtension, ProgressWriterPort,
 };
 
@@ -51,15 +51,17 @@ async fn book_progression_update_normalizes_epub_locator_and_persists_progressio
         .update_progression(
             &admin_user(),
             "book-1",
-            BookProgressionUpdate {
-                modified: "2026-03-27T10:00:00Z".to_string(),
-                device_id: "device-1".to_string(),
-                device_name: "Readium".to_string(),
-                locator: Some(json!({
+            &json!({
+                "modified": "2026-03-27T10:00:00Z",
+                "device": {
+                    "id": "device-1",
+                    "name": "Readium"
+                },
+                "locator": {
                     "href": "/chapter-1.xhtml#frag",
                     "locations": { "progression": 0.5 }
-                })),
-            },
+                }
+            }),
         )
         .await;
 
@@ -111,15 +113,17 @@ async fn book_progression_update_validates_epub_locator_before_extension_lookup(
         .update_progression(
             &admin_user(),
             "book-1",
-            BookProgressionUpdate {
-                modified: "2026-03-27T10:00:00Z".to_string(),
-                device_id: "device-1".to_string(),
-                device_name: "Readium".to_string(),
-                locator: Some(json!({
+            &json!({
+                "modified": "2026-03-27T10:00:00Z",
+                "device": {
+                    "id": "device-1",
+                    "name": "Readium"
+                },
+                "locator": {
                     "href": "chapter-1.xhtml",
                     "locations": { "position": 15 }
-                })),
-            },
+                }
+            }),
         )
         .await;
 

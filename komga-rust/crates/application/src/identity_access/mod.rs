@@ -18,8 +18,8 @@ pub use device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 pub use ports::{
-    AuthActivityPort, AuthenticationPort, DeviceSyncPort, ReadProgressWithLocatorInput,
-    SessionLifecyclePort, SessionResolverPort, UserAdminPort,
+    AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,
+    SessionResolverPort, UserAdminPort,
 };
 
 pub use device_tokens::{

@@ -6,6 +6,9 @@ mod book_media_delivery_tests;
 mod book_progression;
 #[cfg(test)]
 mod book_progression_tests;
+mod book_progression_write;
+#[cfg(test)]
+mod book_progression_write_tests;
 mod epub_navigation;
 #[cfg(test)]
 mod epub_navigation_tests;
@@ -32,9 +35,12 @@ pub use book_media_delivery::{
     BookThumbnailDelivery, PersistedBookIdResolverPort,
 };
 pub use book_progression::{
-    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionPageSource,
-    BookProgressionReaderPort, BookProgressionService, BookProgressionUpdate,
-    ResolvedBookProgression, progression_is_older_than_existing, resolve_book_progression_write,
+    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionReaderPort,
+    BookProgressionService,
+};
+pub(crate) use book_progression_write::{
+    BookProgressionConflictPolicy, BookProgressionWrite, BookProgressionWriteError,
+    BookProgressionWriteService, BookProgressionWriteSource,
 };
 pub use epub_navigation::{
     EpubNavigation, EpubNavigationError, EpubNavigationLoadError, EpubNavigationReaderPort,

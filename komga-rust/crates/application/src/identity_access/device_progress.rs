@@ -1,11 +1,10 @@
 use serde_json::{Value, json};
 
 use crate::media_assets::{
-    BookProgressionInput, BookProgressionPageSource, ContentResolverPort, EpubNavigation,
+    BookProgressionConflictPolicy, BookProgressionWrite, BookProgressionWriteError,
+    BookProgressionWriteService, BookProgressionWriteSource, ContentResolverPort, EpubNavigation,
     EpubNavigationError, EpubNavigationLoadError, MediaReaderPort, ProgressWriterPort,
     load_book_epub_navigation,
-    progression_is_older_than_existing as book_progression_is_older_than_existing,
-    resolve_book_progression_write,
 };
 
 use super::DeviceSyncPort;
@@ -136,13 +135,6 @@ impl<'a> DeviceProgressService<'a> {
                 .map_err(device_progress_error_from_epub_error)?
         };
 
-        if self
-            .progression_is_older_than_existing(book_id, user_id, &update.last_modified)
-            .await?
-        {
-            return Err(DeviceProgressError::Persistence);
-        }
-
         let locator_progression = locator
             .get("locations")
             .and_then(|value| value.get("progression"))
@@ -159,26 +151,24 @@ impl<'a> DeviceProgressService<'a> {
             .map_err(|_| DeviceProgressError::Persistence)?
             .unwrap_or(1)
             .max(1);
-        let resolved = resolve_book_progression_write(
-            page_count,
-            locator_progression,
-            BookProgressionPageSource::TotalProgression,
-            Some(&locator),
-        );
 
-        self.progress
-            .persist_book_progression(BookProgressionInput {
+        let writer = BookProgressionWriteService::new(self.reader, self.progress);
+        writer
+            .persist(BookProgressionWrite {
                 book_id: book_id.to_string(),
                 user_id: user_id.to_string(),
-                page: resolved.page,
-                completed: resolved.completed,
+                page_count,
+                source: BookProgressionWriteSource::TotalProgression {
+                    progression: locator_progression,
+                    locator: Some(locator),
+                },
                 modified: Some(update.last_modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device_name),
-                locator: Some(locator),
+                conflict_policy: BookProgressionConflictPolicy::RejectStale,
             })
             .await
-            .map_err(|_| DeviceProgressError::Persistence)
+            .map_err(device_progress_error_from_write_error)
     }
 
     pub async fn update_koreader_progress(
@@ -196,7 +186,7 @@ impl<'a> DeviceProgressService<'a> {
             })?
             .ok_or(DeviceProgressError::NotFound)?;
 
-        let (progression, page_source, locator) = match koreader_media_profile(&target.media_type) {
+        let source = match koreader_media_profile(&target.media_type) {
             Some(KoreaderMediaProfile::Visual) => {
                 self.koreader_visual_progression(&target, &update.progress)?
             }
@@ -206,26 +196,21 @@ impl<'a> DeviceProgressService<'a> {
             }
             None => return Err(DeviceProgressError::UnsupportedMediaProfile),
         };
-        let resolved = resolve_book_progression_write(
-            target.page_count,
-            progression,
-            page_source,
-            Some(&locator),
-        );
 
-        self.progress
-            .persist_book_progression(BookProgressionInput {
+        let writer = BookProgressionWriteService::new(self.reader, self.progress);
+        writer
+            .persist(BookProgressionWrite {
                 book_id: target.id,
                 user_id: user_id.to_string(),
-                page: resolved.page,
-                completed: resolved.completed,
+                page_count: target.page_count,
+                source,
                 modified: Some(update.modified),
                 device_id: Some(update.device_id),
                 device_name: Some(update.device),
-                locator: Some(locator),
+                conflict_policy: BookProgressionConflictPolicy::Overwrite,
             })
             .await
-            .map_err(|_| DeviceProgressError::Persistence)
+            .map_err(device_progress_error_from_write_error)
     }
 
     pub async fn koreader_progress(
@@ -281,7 +266,7 @@ impl<'a> DeviceProgressService<'a> {
         &self,
         target: &super::KoreaderBookTarget,
         progress: &str,
-    ) -> Result<(f64, BookProgressionPageSource, Value), DeviceProgressError> {
+    ) -> Result<BookProgressionWriteSource, DeviceProgressError> {
         let Some(page) = parse_koreader_progress_page(progress).map(|value| value as i64) else {
             return Err(DeviceProgressError::Persistence);
         };
@@ -290,31 +275,33 @@ impl<'a> DeviceProgressService<'a> {
         }
 
         let progression = page as f64 / target.page_count.max(1) as f64;
-        Ok((
+        Ok(BookProgressionWriteSource::Position {
             progression,
-            BookProgressionPageSource::LocatorPosition,
-            json!({
+            locator: Some(json!({
                 "koreaderProgress": progress,
                 "locations": {
                     "position": page,
                     "totalProgression": progression,
                 },
-            }),
-        ))
+            })),
+        })
     }
 
     async fn koreader_epub_progression(
         &self,
         book_id: &str,
         progress: &str,
-    ) -> Result<(f64, BookProgressionPageSource, Value), DeviceProgressError> {
+    ) -> Result<BookProgressionWriteSource, DeviceProgressError> {
         let locator = self
             .book_epub_navigation(book_id)
             .await?
             .koreader_locator_for_progress(progress)
             .map_err(device_progress_error_from_epub_error)?;
 
-        Ok((0.0, BookProgressionPageSource::TotalProgression, locator))
+        Ok(BookProgressionWriteSource::TotalProgression {
+            progression: 0.0,
+            locator: Some(locator),
+        })
     }
 
     async fn book_epub_navigation(
@@ -326,22 +313,19 @@ impl<'a> DeviceProgressService<'a> {
             .map_err(device_progress_error_from_epub_load_error)
     }
 
-    async fn progression_is_older_than_existing(
-        &self,
-        book_id: &str,
-        user_id: &str,
-        modified: &str,
-    ) -> Result<bool, DeviceProgressError> {
-        book_progression_is_older_than_existing(self.reader, book_id, user_id, modified)
-            .await
-            .map_err(|_| DeviceProgressError::Persistence)
-    }
-
     async fn koreader_epub_progress_value(&self, book_id: &str, locator: &Value) -> Option<String> {
         self.book_epub_navigation(book_id)
             .await
             .ok()?
             .koreader_progress_for_locator(locator)
+    }
+}
+
+fn device_progress_error_from_write_error(error: BookProgressionWriteError) -> DeviceProgressError {
+    match error {
+        BookProgressionWriteError::Stale | BookProgressionWriteError::Internal(_) => {
+            DeviceProgressError::Persistence
+        }
     }
 }
 
