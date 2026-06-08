@@ -6,10 +6,10 @@ use crate::search::analyzer_profiles::query_tokenizer_profile_name;
 use tantivy::schema::{FieldType, IndexRecordOption};
 
 use super::{
-    ANALYZER_VERSION_MARKER_FILE, SearchDocument, SearchEntityType, SearchError, SearchFieldClass,
-    SearchFieldEntry, SearchIndexLifecycle, SearchQueryLifecycle, SearchStartupLifecycle,
-    build_query_tokenizer_manager, build_schema, decide_startup_lifecycle,
-    index_tokenizer_profile_name, retained_query_field_contracts, search_analyzer_version,
+    ANALYZER_VERSION_MARKER_FILE, SearchDocument, SearchEntityType, SearchError, SearchField,
+    SearchFieldClass, SearchFieldEntry, SearchIndexLifecycle, SearchQueryLifecycle,
+    SearchStartupLifecycle, build_query_tokenizer_manager, build_schema, decide_startup_lifecycle,
+    index_tokenizer_profile_name, retained_query_fields, search_analyzer_version,
 };
 
 #[test]
@@ -126,10 +126,7 @@ fn query_bootstrap_succeeds_while_writer_lifecycle_is_alive() {
             entity_type: SearchEntityType::Collection,
             id: "collection-1".to_string(),
             title: "MIKI Shelf".to_string(),
-            fields: vec![SearchFieldEntry {
-                field: "name".to_string(),
-                value: "MIKI Shelf".to_string(),
-            }],
+            fields: vec![SearchFieldEntry::new(SearchField::Name, "MIKI Shelf")],
         }])
         .expect("writer lifecycle should index collection fixture");
 
@@ -190,6 +187,15 @@ fn bootstrap_refuses_existing_runtime_index_with_stale_analyzer_version() {
 }
 
 #[test]
+fn search_field_entries_use_typed_schema_contracts() {
+    let entry = SearchFieldEntry::new(SearchField::Name, "Alpha Shelf");
+
+    assert_eq!(entry.field, SearchField::Name);
+    assert_eq!(entry.field.public_name(), "name");
+    assert_eq!(entry.value, "Alpha Shelf");
+}
+
+#[test]
 fn search_preserves_fielded_kotlin_visible_queries() {
     let index_dir = temp_index_dir("search-preserves-fielded-kotlin-queries");
     let index =
@@ -201,19 +207,13 @@ fn search_preserves_fielded_kotlin_visible_queries() {
                 entity_type: SearchEntityType::Collection,
                 id: "collection-1".to_string(),
                 title: "Alpha Shelf".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "name".to_string(),
-                    value: "Alpha Shelf".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(SearchField::Name, "Alpha Shelf")],
             },
             SearchDocument {
                 entity_type: SearchEntityType::Collection,
                 id: "collection-2".to_string(),
                 title: "Beta Rack".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "name".to_string(),
-                    value: "Beta Rack".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(SearchField::Name, "Beta Rack")],
             },
         ])
         .expect("index rebuild should insert fixtures");
@@ -265,9 +265,9 @@ fn retained_query_field_contract_freezes_field_inventory_and_classes() {
         ("book_count", SearchFieldClass::ExactTerm),
     ];
 
-    let actual = retained_query_field_contracts()
+    let actual = retained_query_fields()
         .iter()
-        .map(|field| (field.public_name, field.class))
+        .map(|field| (field.public_name(), field.class()))
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -278,19 +278,19 @@ fn retained_query_field_contract_freezes_field_inventory_and_classes() {
 
 #[test]
 fn retained_query_field_contract_has_no_duplicates_and_only_two_classes() {
-    let contracts = retained_query_field_contracts();
-    let unique_names = contracts
+    let fields = retained_query_fields();
+    let unique_names = fields
         .iter()
-        .map(|field| field.public_name)
+        .map(|field| field.public_name())
         .collect::<BTreeSet<_>>();
-    let unique_classes = contracts
+    let unique_classes = fields
         .iter()
-        .map(|field| field.class)
+        .map(|field| field.class())
         .collect::<BTreeSet<_>>();
 
     assert_eq!(
         unique_names.len(),
-        contracts.len(),
+        fields.len(),
         "every retained public query field must be classified exactly once",
     );
     assert_eq!(
@@ -307,27 +307,29 @@ fn retained_query_field_contract_has_no_duplicates_and_only_two_classes() {
 fn retained_query_fields_use_explicit_index_tokenizer_profiles() {
     let schema = build_schema();
 
-    for contract in retained_query_field_contracts() {
-        let field = schema
-            .get_field(contract.public_name)
+    for search_field in retained_query_fields() {
+        let schema_field = schema
+            .get_field(search_field.public_name())
             .expect("retained query field should exist in schema");
-        let tokenizer_name = match schema.get_field_entry(field).field_type() {
+        let tokenizer_name = match schema.get_field_entry(schema_field).field_type() {
             FieldType::Str(text_options) => text_options
                 .get_indexing_options()
                 .expect("retained query fields should stay indexed")
                 .tokenizer(),
             other => panic!(
                 "retained query field '{}' must remain text, got {:?}",
-                contract.public_name, other
+                search_field.public_name(),
+                other
             ),
         };
 
-        let expected = index_tokenizer_profile_name(contract.class);
+        let expected = index_tokenizer_profile_name(search_field.class());
 
         assert_eq!(
-            tokenizer_name, expected,
+            tokenizer_name,
+            expected,
             "retained query field '{}' should use its explicit index analyzer profile",
-            contract.public_name,
+            search_field.public_name(),
         );
     }
 }
@@ -336,30 +338,32 @@ fn retained_query_fields_use_explicit_index_tokenizer_profiles() {
 fn retained_query_fields_bind_schema_index_options_by_analyzer_class() {
     let schema = build_schema();
 
-    for contract in retained_query_field_contracts() {
-        let field = schema
-            .get_field(contract.public_name)
+    for search_field in retained_query_fields() {
+        let schema_field = schema
+            .get_field(search_field.public_name())
             .expect("retained query field should exist in schema");
-        let index_option = match schema.get_field_entry(field).field_type() {
+        let index_option = match schema.get_field_entry(schema_field).field_type() {
             FieldType::Str(text_options) => text_options
                 .get_indexing_options()
                 .expect("retained query fields should stay indexed")
                 .index_option(),
             other => panic!(
                 "retained query field '{}' must remain text, got {:?}",
-                contract.public_name, other
+                search_field.public_name(),
+                other
             ),
         };
 
-        let expected = match contract.class {
+        let expected = match search_field.class() {
             SearchFieldClass::MultilingualFullText => IndexRecordOption::WithFreqsAndPositions,
             SearchFieldClass::ExactTerm => IndexRecordOption::Basic,
         };
 
         assert_eq!(
-            index_option, expected,
+            index_option,
+            expected,
             "retained query field '{}' should bind schema index options through its analyzer class",
-            contract.public_name,
+            search_field.public_name(),
         );
     }
 }
@@ -418,14 +422,8 @@ fn exact_term_fields_do_not_match_partial_hyphenated_terms() {
             id: "book-1".to_string(),
             title: "One Shot".to_string(),
             fields: vec![
-                SearchFieldEntry {
-                    field: "isbn".to_string(),
-                    value: "978-1-23".to_string(),
-                },
-                SearchFieldEntry {
-                    field: "status".to_string(),
-                    value: "ONGOING".to_string(),
-                },
+                SearchFieldEntry::new(SearchField::Isbn, "978-1-23"),
+                SearchFieldEntry::new(SearchField::Status, "ONGOING"),
             ],
         }])
         .expect("index rebuild should insert exact-term fixture");
@@ -559,19 +557,16 @@ fn search_preserves_fielded_role_queries() {
                 entity_type: SearchEntityType::Book,
                 id: "book-1".to_string(),
                 title: "Moon Hero".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "writer".to_string(),
-                    value: "Naoko Takeuchi".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(SearchField::Writer, "Naoko Takeuchi")],
             },
             SearchDocument {
                 entity_type: SearchEntityType::Book,
                 id: "book-2".to_string(),
                 title: "Other Hero".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "writer".to_string(),
-                    value: "Rumiko Takahashi".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(
+                    SearchField::Writer,
+                    "Rumiko Takahashi",
+                )],
             },
         ])
         .expect("index rebuild should insert role fixtures");
@@ -745,19 +740,13 @@ fn search_multilingual_fields_match_chinese_substring_queries() {
                 entity_type: SearchEntityType::Book,
                 id: "book-1".to_string(),
                 title: "不道德公會 河添太一 東立 搬运".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "author".to_string(),
-                    value: "河添太一".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(SearchField::Author, "河添太一")],
             },
             SearchDocument {
                 entity_type: SearchEntityType::Book,
                 id: "book-2".to_string(),
                 title: "正义联盟 英文版".to_string(),
-                fields: vec![SearchFieldEntry {
-                    field: "author".to_string(),
-                    value: "Jane Writer".to_string(),
-                }],
+                fields: vec![SearchFieldEntry::new(SearchField::Author, "Jane Writer")],
             },
         ])
         .expect("index rebuild should insert chinese substring fixtures");

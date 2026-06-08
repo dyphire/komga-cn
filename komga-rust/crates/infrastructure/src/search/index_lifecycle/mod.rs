@@ -22,133 +22,143 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
 const LUCENE_ARTIFACT_PREFIXES: &[&str] = &["segments_", "write.lock", "segments.gen"];
 const ANALYZER_VERSION_MARKER_FILE: &str = ".komga-search-analyzer-version";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SearchFieldContract {
-    public_name: &'static str,
-    class: SearchFieldClass,
-}
-
-const RETAINED_QUERY_FIELD_CONTRACTS: &[SearchFieldContract] = &[
-    SearchFieldContract {
-        public_name: "title",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "isbn",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "name",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "publisher",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "status",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "reading_direction",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "age_rating",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "language",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "genre",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "sharing_label",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "tag",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "series_tag",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "book_tag",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "author",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "writer",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "penciller",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "penciler",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "inker",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "colorist",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "letterer",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "cover",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "editor",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "translator",
-        class: SearchFieldClass::MultilingualFullText,
-    },
-    SearchFieldContract {
-        public_name: "release_date",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "deleted",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "oneshot",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "complete",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "total_book_count",
-        class: SearchFieldClass::ExactTerm,
-    },
-    SearchFieldContract {
-        public_name: "book_count",
-        class: SearchFieldClass::ExactTerm,
-    },
+const RETAINED_QUERY_FIELDS: &[SearchField] = &[
+    SearchField::Title,
+    SearchField::Isbn,
+    SearchField::Name,
+    SearchField::Publisher,
+    SearchField::Status,
+    SearchField::ReadingDirection,
+    SearchField::AgeRating,
+    SearchField::Language,
+    SearchField::Genre,
+    SearchField::SharingLabel,
+    SearchField::Tag,
+    SearchField::SeriesTag,
+    SearchField::BookTag,
+    SearchField::Author,
+    SearchField::Writer,
+    SearchField::Penciller,
+    SearchField::Penciler,
+    SearchField::Inker,
+    SearchField::Colorist,
+    SearchField::Letterer,
+    SearchField::Cover,
+    SearchField::Editor,
+    SearchField::Translator,
+    SearchField::ReleaseDate,
+    SearchField::Deleted,
+    SearchField::Oneshot,
+    SearchField::Complete,
+    SearchField::TotalBookCount,
+    SearchField::BookCount,
 ];
 
-fn retained_query_field_contracts() -> &'static [SearchFieldContract] {
-    RETAINED_QUERY_FIELD_CONTRACTS
+fn retained_query_fields() -> &'static [SearchField] {
+    RETAINED_QUERY_FIELDS
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum SearchField {
+    Title,
+    Isbn,
+    Name,
+    Publisher,
+    Status,
+    ReadingDirection,
+    AgeRating,
+    Language,
+    Genre,
+    SharingLabel,
+    Tag,
+    SeriesTag,
+    BookTag,
+    Author,
+    Writer,
+    Penciller,
+    Penciler,
+    Inker,
+    Colorist,
+    Letterer,
+    Cover,
+    Editor,
+    Translator,
+    ReleaseDate,
+    Deleted,
+    Oneshot,
+    Complete,
+    TotalBookCount,
+    BookCount,
+}
+
+impl SearchField {
+    pub fn public_name(self) -> &'static str {
+        match self {
+            SearchField::Title => "title",
+            SearchField::Isbn => "isbn",
+            SearchField::Name => "name",
+            SearchField::Publisher => "publisher",
+            SearchField::Status => "status",
+            SearchField::ReadingDirection => "reading_direction",
+            SearchField::AgeRating => "age_rating",
+            SearchField::Language => "language",
+            SearchField::Genre => "genre",
+            SearchField::SharingLabel => "sharing_label",
+            SearchField::Tag => "tag",
+            SearchField::SeriesTag => "series_tag",
+            SearchField::BookTag => "book_tag",
+            SearchField::Author => "author",
+            SearchField::Writer => "writer",
+            SearchField::Penciller => "penciller",
+            SearchField::Penciler => "penciler",
+            SearchField::Inker => "inker",
+            SearchField::Colorist => "colorist",
+            SearchField::Letterer => "letterer",
+            SearchField::Cover => "cover",
+            SearchField::Editor => "editor",
+            SearchField::Translator => "translator",
+            SearchField::ReleaseDate => "release_date",
+            SearchField::Deleted => "deleted",
+            SearchField::Oneshot => "oneshot",
+            SearchField::Complete => "complete",
+            SearchField::TotalBookCount => "total_book_count",
+            SearchField::BookCount => "book_count",
+        }
+    }
+
+    fn class(self) -> SearchFieldClass {
+        match self {
+            SearchField::Title
+            | SearchField::Name
+            | SearchField::Publisher
+            | SearchField::Genre
+            | SearchField::SharingLabel
+            | SearchField::Tag
+            | SearchField::SeriesTag
+            | SearchField::BookTag
+            | SearchField::Author
+            | SearchField::Writer
+            | SearchField::Penciller
+            | SearchField::Penciler
+            | SearchField::Inker
+            | SearchField::Colorist
+            | SearchField::Letterer
+            | SearchField::Cover
+            | SearchField::Editor
+            | SearchField::Translator => SearchFieldClass::MultilingualFullText,
+            SearchField::Isbn
+            | SearchField::Status
+            | SearchField::ReadingDirection
+            | SearchField::AgeRating
+            | SearchField::Language
+            | SearchField::ReleaseDate
+            | SearchField::Deleted
+            | SearchField::Oneshot
+            | SearchField::Complete
+            | SearchField::TotalBookCount
+            | SearchField::BookCount => SearchFieldClass::ExactTerm,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,12 +179,12 @@ impl SearchEntityType {
         }
     }
 
-    fn default_fields(&self) -> &'static [&'static str] {
+    fn default_fields(&self) -> &'static [SearchField] {
         match self {
-            SearchEntityType::Book => &["title", "isbn"],
-            SearchEntityType::Series => &["title"],
-            SearchEntityType::Collection => &["name"],
-            SearchEntityType::ReadList => &["name"],
+            SearchEntityType::Book => &[SearchField::Title, SearchField::Isbn],
+            SearchEntityType::Series => &[SearchField::Title],
+            SearchEntityType::Collection => &[SearchField::Name],
+            SearchEntityType::ReadList => &[SearchField::Name],
         }
     }
 }
@@ -189,8 +199,17 @@ pub struct SearchDocument {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchFieldEntry {
-    pub field: String,
+    pub field: SearchField,
     pub value: String,
+}
+
+impl SearchFieldEntry {
+    pub fn new(field: SearchField, value: impl Into<String>) -> Self {
+        Self {
+            field,
+            value: value.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -302,33 +321,33 @@ struct SearchFields {
     doc_key: Field,
     entity_type: Field,
     entity_id: Field,
-    title: Field,
-    query_fields: BTreeMap<String, Field>,
+    query_fields: BTreeMap<SearchField, Field>,
 }
 
 impl SearchFields {
     fn from_schema(schema: &Schema) -> Result<Self, SearchError> {
         let mut query_fields = BTreeMap::new();
-        for contract in retained_query_field_contracts() {
+        for field in retained_query_fields() {
+            let public_name = field.public_name();
             let schema_field = schema
-                .get_field(contract.public_name)
-                .map_err(|_| SearchError::MissingStoredField(contract.public_name))?;
+                .get_field(public_name)
+                .map_err(|_| SearchError::MissingStoredField(public_name))?;
             let tokenizer_name = match schema.get_field_entry(schema_field).field_type() {
                 FieldType::Str(text_options) => text_options
                     .get_indexing_options()
                     .map(|indexing_options| indexing_options.tokenizer())
-                    .ok_or(SearchError::MissingStoredField(contract.public_name))?,
-                _ => return Err(SearchError::MissingStoredField(contract.public_name)),
+                    .ok_or(SearchError::MissingStoredField(public_name))?,
+                _ => return Err(SearchError::MissingStoredField(public_name)),
             };
-            let expected_tokenizer = index_tokenizer_profile_name(contract.class);
+            let expected_tokenizer = index_tokenizer_profile_name(field.class());
             if tokenizer_name != expected_tokenizer {
                 return Err(SearchError::UnexpectedTokenizerProfile {
-                    field: contract.public_name,
+                    field: public_name,
                     expected: expected_tokenizer,
                     actual: tokenizer_name.to_string(),
                 });
             }
-            query_fields.insert(contract.public_name.to_string(), schema_field);
+            query_fields.insert(*field, schema_field);
         }
 
         Ok(Self {
@@ -341,11 +360,15 @@ impl SearchFields {
             entity_id: schema
                 .get_field("entity_id")
                 .map_err(|_| SearchError::MissingStoredField("entity_id"))?,
-            title: schema
-                .get_field("title")
-                .map_err(|_| SearchError::MissingStoredField("title"))?,
             query_fields,
         })
+    }
+
+    fn query_field(&self, field: SearchField) -> Field {
+        self.query_fields
+            .get(&field)
+            .copied()
+            .expect("retained search field should exist in the runtime schema")
     }
 }
 
@@ -648,12 +671,7 @@ fn build_query_parser(
     let default_fields = entity_type
         .default_fields()
         .iter()
-        .filter_map(|field_name| {
-            fields
-                .query_fields
-                .get(translate_public_field_name(field_name))
-                .copied()
-        })
+        .map(|field| fields.query_field(*field))
         .collect::<Vec<_>>();
     let mut parser = QueryParser::new(
         index.schema(),
@@ -683,10 +701,10 @@ fn build_schema() -> Schema {
     schema.add_text_field("doc_key", STRING | STORED);
     schema.add_text_field("entity_type", STRING | STORED);
     schema.add_text_field("entity_id", STRING | STORED);
-    for contract in retained_query_field_contracts() {
+    for field in retained_query_fields() {
         schema.add_text_field(
-            contract.public_name,
-            search_text_field_options(contract.class),
+            field.public_name(),
+            search_text_field_options(field.class()),
         );
     }
     schema.build()
@@ -698,30 +716,21 @@ fn add_doc(
     document: &SearchDocument,
 ) -> Result<(), SearchError> {
     let doc_key = document_key(document.entity_type, &document.id);
+    let title = fields.query_field(SearchField::Title);
     let mut tantivy_document = doc!(
         fields.doc_key => doc_key,
         fields.entity_type => document.entity_type.as_str(),
         fields.entity_id => document.id.clone(),
-        fields.title => document.title.clone(),
+        title => document.title.clone(),
     );
 
     for extra in &document.fields {
-        let field_name = translate_public_field_name(&extra.field);
-        if field_name == "title" {
-            tantivy_document.add_text(fields.title, extra.value.clone());
-            continue;
-        }
-        if let Some(field) = fields.query_fields.get(field_name) {
-            tantivy_document.add_text(*field, extra.value.clone());
-        }
+        let field = fields.query_field(extra.field);
+        tantivy_document.add_text(field, extra.value.clone());
     }
 
     writer.add_document(tantivy_document)?;
     Ok(())
-}
-
-fn translate_public_field_name(field_name: &str) -> &str {
-    field_name
 }
 
 fn document_key(entity_type: SearchEntityType, id: &str) -> String {

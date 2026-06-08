@@ -1,25 +1,21 @@
 use sqlx::Row;
 
-use crate::search::index_lifecycle::{SearchDocument, SearchEntityType, SearchFieldEntry};
+use crate::search::index_lifecycle::{
+    SearchDocument, SearchEntityType, SearchField, SearchFieldEntry,
+};
 
 const AUTHOR_ROLE_DELIMITER: &str = "::";
 
-fn search_field(field: &str, value: String) -> SearchFieldEntry {
-    SearchFieldEntry {
-        field: field.to_string(),
-        value,
-    }
+fn search_field(field: SearchField, value: String) -> SearchFieldEntry {
+    SearchFieldEntry::new(field, value)
 }
 
-fn search_fields(field: &str, values: String) -> Vec<SearchFieldEntry> {
+fn search_fields(field: SearchField, values: String) -> Vec<SearchFieldEntry> {
     values
         .split('|')
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| SearchFieldEntry {
-            field: field.to_string(),
-            value: value.to_string(),
-        })
+        .map(|value| SearchFieldEntry::new(field, value))
         .collect()
 }
 
@@ -318,32 +314,53 @@ async fn load_all_readlist_search_documents(
 
 fn build_book_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
     let mut fields = vec![
-        search_field("isbn", row.get::<String, _>("ISBN")),
-        search_field("status", row.get::<String, _>("MEDIA_STATUS")),
-        search_field("publisher", row.get::<String, _>("ONESHOT_PUBLISHER")),
-        search_field("status", row.get::<String, _>("ONESHOT_STATUS")),
+        search_field(SearchField::Isbn, row.get::<String, _>("ISBN")),
+        search_field(SearchField::Status, row.get::<String, _>("MEDIA_STATUS")),
         search_field(
-            "reading_direction",
+            SearchField::Publisher,
+            row.get::<String, _>("ONESHOT_PUBLISHER"),
+        ),
+        search_field(SearchField::Status, row.get::<String, _>("ONESHOT_STATUS")),
+        search_field(
+            SearchField::ReadingDirection,
             row.get::<String, _>("ONESHOT_READING_DIRECTION"),
         ),
-        search_field("age_rating", row.get::<String, _>("ONESHOT_AGE_RATING")),
-        search_field("language", row.get::<String, _>("ONESHOT_LANGUAGE")),
-        search_field("release_date", row.get::<String, _>("RELEASE_YEAR")),
-        search_field("deleted", row.get::<String, _>("DELETED")),
-        search_field("oneshot", row.get::<String, _>("ONESHOT")),
+        search_field(
+            SearchField::AgeRating,
+            row.get::<String, _>("ONESHOT_AGE_RATING"),
+        ),
+        search_field(
+            SearchField::Language,
+            row.get::<String, _>("ONESHOT_LANGUAGE"),
+        ),
+        search_field(
+            SearchField::ReleaseDate,
+            row.get::<String, _>("RELEASE_YEAR"),
+        ),
+        search_field(SearchField::Deleted, row.get::<String, _>("DELETED")),
+        search_field(SearchField::Oneshot, row.get::<String, _>("ONESHOT")),
     ];
-    fields.extend(search_fields("book_tag", row.get::<String, _>("BOOK_TAGS")));
-    fields.extend(search_fields("tag", row.get::<String, _>("BOOK_TAGS")));
-    fields.extend(search_fields("author", row.get::<String, _>("AUTHORS")));
+    fields.extend(search_fields(
+        SearchField::BookTag,
+        row.get::<String, _>("BOOK_TAGS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Tag,
+        row.get::<String, _>("BOOK_TAGS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Author,
+        row.get::<String, _>("AUTHORS"),
+    ));
     fields.extend(search_role_author_fields(
         row.get::<String, _>("AUTHOR_ROLES"),
     ));
     fields.extend(search_fields(
-        "genre",
+        SearchField::Genre,
         row.get::<String, _>("ONESHOT_GENRES"),
     ));
     fields.extend(search_fields(
-        "sharing_label",
+        SearchField::SharingLabel,
         row.get::<String, _>("ONESHOT_SHARING_LABELS"),
     ));
 
@@ -357,37 +374,58 @@ fn build_book_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
 
 fn build_series_document(row: sqlx::sqlite::SqliteRow) -> SearchDocument {
     let mut fields = vec![
-        search_field("title", row.get::<String, _>("TITLE_SORT")),
-        search_field("publisher", row.get::<String, _>("PUBLISHER")),
-        search_field("status", row.get::<String, _>("STATUS")),
+        search_field(SearchField::Title, row.get::<String, _>("TITLE_SORT")),
+        search_field(SearchField::Publisher, row.get::<String, _>("PUBLISHER")),
+        search_field(SearchField::Status, row.get::<String, _>("STATUS")),
         search_field(
-            "reading_direction",
+            SearchField::ReadingDirection,
             row.get::<String, _>("READING_DIRECTION"),
         ),
-        search_field("age_rating", row.get::<String, _>("AGE_RATING")),
-        search_field("language", row.get::<String, _>("LANGUAGE")),
-        search_field("release_date", row.get::<String, _>("RELEASE_YEAR")),
-        search_field("deleted", row.get::<String, _>("DELETED")),
-        search_field("oneshot", row.get::<String, _>("ONESHOT")),
-        search_field("complete", row.get::<String, _>("COMPLETE")),
-        search_field("total_book_count", row.get::<String, _>("TOTAL_BOOK_COUNT")),
-        search_field("book_count", row.get::<String, _>("BOOK_COUNT")),
+        search_field(SearchField::AgeRating, row.get::<String, _>("AGE_RATING")),
+        search_field(SearchField::Language, row.get::<String, _>("LANGUAGE")),
+        search_field(
+            SearchField::ReleaseDate,
+            row.get::<String, _>("RELEASE_YEAR"),
+        ),
+        search_field(SearchField::Deleted, row.get::<String, _>("DELETED")),
+        search_field(SearchField::Oneshot, row.get::<String, _>("ONESHOT")),
+        search_field(SearchField::Complete, row.get::<String, _>("COMPLETE")),
+        search_field(
+            SearchField::TotalBookCount,
+            row.get::<String, _>("TOTAL_BOOK_COUNT"),
+        ),
+        search_field(SearchField::BookCount, row.get::<String, _>("BOOK_COUNT")),
     ];
     fields.extend(search_fields(
-        "series_tag",
+        SearchField::SeriesTag,
         row.get::<String, _>("SERIES_TAGS"),
     ));
-    fields.extend(search_fields("book_tag", row.get::<String, _>("BOOK_TAGS")));
-    fields.extend(search_fields("tag", row.get::<String, _>("SERIES_TAGS")));
-    fields.extend(search_fields("tag", row.get::<String, _>("BOOK_TAGS")));
-    fields.extend(search_fields("genre", row.get::<String, _>("GENRES")));
     fields.extend(search_fields(
-        "sharing_label",
+        SearchField::BookTag,
+        row.get::<String, _>("BOOK_TAGS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Tag,
+        row.get::<String, _>("SERIES_TAGS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Tag,
+        row.get::<String, _>("BOOK_TAGS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Genre,
+        row.get::<String, _>("GENRES"),
+    ));
+    fields.extend(search_fields(
+        SearchField::SharingLabel,
         row.get::<String, _>("SHARING_LABELS"),
     ));
-    fields.extend(search_fields("author", row.get::<String, _>("AUTHORS")));
     fields.extend(search_fields(
-        "title",
+        SearchField::Author,
+        row.get::<String, _>("AUTHORS"),
+    ));
+    fields.extend(search_fields(
+        SearchField::Title,
         row.get::<String, _>("ALTERNATE_TITLES"),
     ));
     fields.extend(search_role_author_fields(
@@ -410,7 +448,10 @@ fn build_named_document(
         entity_type,
         id: row.get::<String, _>("ID"),
         title: row.get::<String, _>("NAME"),
-        fields: vec![search_field("name", row.get::<String, _>("NAME"))],
+        fields: vec![search_field(
+            SearchField::Name,
+            row.get::<String, _>("NAME"),
+        )],
     }
 }
 
@@ -429,23 +470,23 @@ fn search_role_author_fields(values: String) -> Vec<SearchFieldEntry> {
             continue;
         }
         for role_field in normalize_author_role_fields(role) {
-            fields.push(search_field(role_field, name.to_string()));
+            fields.push(search_field(*role_field, name.to_string()));
         }
     }
     fields
 }
 
-fn normalize_author_role_fields(role: &str) -> &'static [&'static str] {
+fn normalize_author_role_fields(role: &str) -> &'static [SearchField] {
     match role.trim().to_ascii_lowercase().as_str() {
-        "writer" => &["writer"],
-        "penciller" => &["penciller", "penciler"],
-        "penciler" => &["penciler", "penciller"],
-        "inker" => &["inker"],
-        "colorist" => &["colorist"],
-        "letterer" => &["letterer"],
-        "cover" => &["cover"],
-        "editor" => &["editor"],
-        "translator" => &["translator"],
+        "writer" => &[SearchField::Writer],
+        "penciller" => &[SearchField::Penciller, SearchField::Penciler],
+        "penciler" => &[SearchField::Penciler, SearchField::Penciller],
+        "inker" => &[SearchField::Inker],
+        "colorist" => &[SearchField::Colorist],
+        "letterer" => &[SearchField::Letterer],
+        "cover" => &[SearchField::Cover],
+        "editor" => &[SearchField::Editor],
+        "translator" => &[SearchField::Translator],
         _ => &[],
     }
 }

@@ -60,7 +60,7 @@ mod tests {
     use super::SearchIndexQuery;
     use crate::search::index_dirs::register_discovery_index_dir;
     use crate::search::index_lifecycle::{
-        SearchDocument, SearchEntityType, SearchFieldEntry, SearchIndexLifecycle,
+        SearchDocument, SearchEntityType, SearchField, SearchFieldEntry, SearchIndexLifecycle,
         SearchQueryLifecycle,
     };
 
@@ -127,10 +127,7 @@ mod tests {
             entity_type: SearchEntityType::Collection,
             id: id.to_string(),
             title: name.to_string(),
-            fields: vec![SearchFieldEntry {
-                field: "name".to_string(),
-                value: name.to_string(),
-            }],
+            fields: vec![SearchFieldEntry::new(SearchField::Name, name)],
         }
     }
 
