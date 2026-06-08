@@ -1,7 +1,7 @@
 use super::*;
 use crate::discovery_auth::context::to_query_context;
 use crate::helpers::to_domain_query_context;
-use komga_application::discovery::ReadlistVisibilityService;
+use komga_application::discovery::{CollectionVisibilityService, ReadlistVisibilityService};
 use komga_application::media_assets::MediaReaderPort;
 
 pub(super) fn user_can_access_library(user: &AuthUser, library_id: &str) -> bool {
@@ -103,16 +103,14 @@ pub(super) async fn visible_collection_series_ids_for_user(
     collection_id: &str,
     user: &AuthUser,
 ) -> Result<Vec<String>, String> {
-    let series_ids = app
-        .collection
-        .load_persisted_collection_series_ids(collection_id)
-        .await?;
-    let mut visible_series_ids = Vec::new();
-    for series_id in series_ids {
-        if user_can_access_series_media(app, &series_id, user).await? {
-            visible_series_ids.push(series_id);
-        }
-    }
-
-    Ok(visible_series_ids)
+    let principal = principal_from_user_payload(&user_payload_json(user))
+        .expect("authenticated user payload should resolve to discovery principal");
+    let context = to_domain_query_context(to_query_context(&principal, None));
+    Ok(
+        CollectionVisibilityService::new(app.collection.as_ref(), app.series_detail.as_ref())
+            .collection_detail(&context, collection_id)
+            .await?
+            .map(|collection| collection.series_ids)
+            .unwrap_or_default(),
+    )
 }
