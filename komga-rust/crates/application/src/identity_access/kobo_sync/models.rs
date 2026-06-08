@@ -14,7 +14,7 @@ pub struct KoboStoreSyncMergeResult {
 pub struct KoboLibrarySyncRequest {
     pub user: AuthUser,
     pub current_api_key_id: Option<String>,
-    pub sync_token_raw: Option<String>,
+    pub sync_token: Option<String>,
     pub store_sync_enabled: bool,
     pub forwarded_headers: Vec<(String, String)>,
     pub query: Option<String>,

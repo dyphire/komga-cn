@@ -1,18 +1,4 @@
 use super::*;
-use komga_application::identity_access::decode_or_passthrough_sync_token;
-
-fn kobo_sync_token_from_request(headers: &HeaderMap, _uri: &axum::http::Uri) -> Option<String> {
-    let from_header = headers
-        .get("x-kobo-synctoken")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    if from_header.is_some() {
-        return from_header.and_then(|value| decode_or_passthrough_sync_token(value.as_str()));
-    }
-    None
-}
 
 pub async fn kobo_library_sync(
     State(app): State<IdentityAccessState>,
@@ -40,7 +26,12 @@ pub async fn kobo_library_sync(
     )
     .await
     .map(|(id, _)| id);
-    let sync_token_raw = kobo_sync_token_from_request(&headers, &uri);
+    let sync_token = headers
+        .get("x-kobo-synctoken")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let base_url = kobo_request_base_url(&app, &headers).await;
     let forwarded_headers = headers
         .iter()
@@ -56,7 +47,7 @@ pub async fn kobo_library_sync(
         .sync_library(KoboLibrarySyncRequest {
             user: current_user,
             current_api_key_id,
-            sync_token_raw,
+            sync_token,
             store_sync_enabled,
             forwarded_headers,
             query: uri.query().map(str::to_string),

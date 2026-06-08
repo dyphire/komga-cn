@@ -262,7 +262,7 @@ mod tests {
             .sync_library(KoboLibrarySyncRequest {
                 user: sync_user(),
                 current_api_key_id: Some("api-key-1".to_string()),
-                sync_token_raw: None,
+                sync_token: None,
                 store_sync_enabled: false,
                 forwarded_headers: Vec::new(),
                 query: None,

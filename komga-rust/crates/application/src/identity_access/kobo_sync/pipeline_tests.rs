@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use serde_json::json;
 
 use crate::identity_access::{
@@ -31,7 +32,7 @@ async fn library_sync_pipeline_skips_store_proxy_until_local_page_is_final() {
     let service = KoboLibrarySyncService::new(&state, &store);
 
     let response = service
-        .sync_library(request(Some(komga_sync_token_raw(
+        .sync_library(request(Some(encoded_komga_sync_token(
             "store.raw.token",
             Some("sync-existing"),
             Some("sync-previous"),
@@ -107,7 +108,7 @@ async fn library_sync_pipeline_merges_store_proxy_after_local_page_is_final() {
     );
 }
 
-fn request(sync_token_raw: Option<String>) -> KoboLibrarySyncRequest {
+fn request(sync_token: Option<String>) -> KoboLibrarySyncRequest {
     KoboLibrarySyncRequest {
         user: AuthUser {
             id: "user-1".to_string(),
@@ -121,7 +122,7 @@ fn request(sync_token_raw: Option<String>) -> KoboLibrarySyncRequest {
             age_restriction: None,
         },
         current_api_key_id: Some("api-key-1".to_string()),
-        sync_token_raw,
+        sync_token,
         store_sync_enabled: true,
         forwarded_headers: vec![("accept".to_string(), "application/json".to_string())],
         query: Some("limit=50".to_string()),
@@ -143,6 +144,21 @@ fn komga_sync_token_raw(
         "lastSuccessfulSyncPointId": last_successful_sync_point_id,
     })
     .to_string()
+}
+
+fn encoded_komga_sync_token(
+    raw_kobo_sync_token: &str,
+    ongoing_sync_point_id: Option<&str>,
+    last_successful_sync_point_id: Option<&str>,
+) -> String {
+    format!(
+        "KOMGA.{}",
+        STANDARD_NO_PAD.encode(komga_sync_token_raw(
+            raw_kobo_sync_token,
+            ongoing_sync_point_id,
+            last_successful_sync_point_id,
+        ))
+    )
 }
 
 struct TestSyncState {

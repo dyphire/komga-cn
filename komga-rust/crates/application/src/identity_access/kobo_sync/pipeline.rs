@@ -9,7 +9,8 @@ use super::{
     build_kobo_changed_entitlement_removed, build_kobo_changed_product_metadata,
     build_kobo_changed_reading_state, build_kobo_changed_tag, build_kobo_deleted_tag,
     build_kobo_new_entitlement, build_kobo_new_tag, build_komga_sync_token_payload,
-    is_kobo_store_sync_token_candidate, parse_komga_sync_token_payload,
+    decode_or_passthrough_sync_token, is_kobo_store_sync_token_candidate,
+    parse_komga_sync_token_payload,
 };
 
 pub struct KoboLibrarySyncService<'a> {
@@ -54,8 +55,11 @@ impl<'a> KoboLibrarySyncService<'a> {
         &self,
         request: KoboLibrarySyncRequest,
     ) -> Result<KoboLibrarySyncResponse, String> {
-        let sync_token_payload = request
-            .sync_token_raw
+        let decoded_sync_token = request
+            .sync_token
+            .as_deref()
+            .and_then(decode_or_passthrough_sync_token);
+        let sync_token_payload = decoded_sync_token
             .as_deref()
             .and_then(parse_komga_sync_token_payload);
         let sync_page_request = KoboSyncPageRequest {
@@ -81,8 +85,7 @@ impl<'a> KoboLibrarySyncService<'a> {
             .map(|payload| payload.raw_kobo_sync_token.clone())
             .filter(|value| !value.trim().is_empty())
             .or_else(|| {
-                request
-                    .sync_token_raw
+                decoded_sync_token
                     .as_deref()
                     .filter(|value| is_kobo_store_sync_token_candidate(value))
                     .map(str::to_string)
