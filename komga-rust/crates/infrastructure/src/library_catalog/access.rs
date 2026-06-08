@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use komga_application::library_catalog::{
     CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
-    LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryRecord,
-    LibraryTaskResult, LibraryTaskService, UpdateLibraryService,
+    LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryDetailAccess,
+    LibraryRecord, LibraryTaskResult, LibraryTaskService, UpdateLibraryService,
 };
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
@@ -40,6 +40,16 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
     ) -> Result<Option<LibraryRecord>, DiscoveryError> {
         LibraryCatalogQueryService::new(self.adapter.clone())
             .get_library(&context, library_id)
+            .await
+    }
+
+    async fn library_detail_access(
+        &self,
+        context: DiscoveryQueryContext,
+        library_id: &str,
+    ) -> Result<LibraryDetailAccess, DiscoveryError> {
+        LibraryCatalogQueryService::new(self.adapter.clone())
+            .library_detail_access(&context, library_id)
             .await
     }
 

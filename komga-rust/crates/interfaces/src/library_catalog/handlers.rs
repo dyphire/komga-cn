@@ -3,14 +3,12 @@ use axum::extract::Path;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::library_catalog::LibraryRecord;
+use komga_application::library_catalog::{LibraryDetailAccess, LibraryRecord};
 use komga_domain::discovery::DiscoveryError;
 use serde_json::{Value, json};
 
-use crate::discovery_auth::context::{
-    DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext,
-};
-use crate::helpers::{detail_access_denial_response, to_domain_query_context};
+use crate::discovery_auth::context::DiscoveryQueryContext;
+use crate::helpers::to_domain_query_context;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::LibraryCatalogState;
 
@@ -43,21 +41,13 @@ pub async fn library_detail_route(
     headers: HeaderMap,
     Path(library_id): Path<String>,
 ) -> Response {
-    let detail_context = DetailResourceContext {
-        library_id: Some(library_id.clone()),
-        content: None,
-    };
-
     let context = match app
         .discovery_auth
-        .resolve_detail_query_context_with_persistence(&app.identity, &headers, &detail_context)
+        .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Ok(context) => context,
-        Err(DetailAccessDenial::Forbidden) => {
-            return forbidden_library_detail_response(&app, &library_id).await;
-        }
-        Err(denial) => return detail_access_denial_response(denial),
+        Some(context) => context,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
     runtime_owned_library_detail_response(context, &app, &library_id).await
@@ -148,21 +138,6 @@ pub(super) fn bad_request_response(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
 }
 
-async fn forbidden_library_detail_response(
-    app: &LibraryCatalogState,
-    library_id: &str,
-) -> Response {
-    match library_exists(app, library_id).await {
-        Ok(true) => StatusCode::FORBIDDEN.into_response(),
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": discovery_error_message(&error) })),
-        )
-            .into_response(),
-    }
-}
-
 fn discovery_error_message(error: &DiscoveryError) -> String {
     match error {
         DiscoveryError::UnsupportedSemantics(details) => format!("{details:?}"),
@@ -194,11 +169,14 @@ async fn runtime_owned_library_detail_response(
     let domain_context = to_domain_query_context(context.clone());
     match app
         .library_catalog
-        .get_library(domain_context, library_id)
+        .library_detail_access(domain_context, library_id)
         .await
     {
-        Ok(Some(library)) => Json(library_payload(&library, context.is_admin)).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(LibraryDetailAccess::Visible(library)) => {
+            Json(library_payload(&library, context.is_admin)).into_response()
+        }
+        Ok(LibraryDetailAccess::Forbidden) => StatusCode::FORBIDDEN.into_response(),
+        Ok(LibraryDetailAccess::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": discovery_error_message(&error) })),
@@ -213,40 +191,4 @@ async fn runtime_owned_libraries(
 ) -> Result<Vec<LibraryRecord>, DiscoveryError> {
     let domain_context = to_domain_query_context(context);
     app.library_catalog.list_libraries(domain_context).await
-}
-
-async fn library_exists(
-    app: &LibraryCatalogState,
-    library_id: &str,
-) -> Result<bool, DiscoveryError> {
-    Ok(
-        runtime_owned_libraries(admin_discovery_query_context(), app)
-            .await?
-            .into_iter()
-            .any(|library| library.id == library_id),
-    )
-}
-
-fn admin_discovery_query_context() -> DiscoveryQueryContext {
-    DiscoveryQueryContext {
-        user_id: None,
-        is_admin: true,
-        authorized_library_ids: None,
-        restrictions: None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::admin_discovery_query_context;
-
-    #[test]
-    fn admin_discovery_query_context_has_no_filters() {
-        let context = admin_discovery_query_context();
-
-        assert!(context.is_admin);
-        assert!(context.user_id.is_none());
-        assert!(context.authorized_library_ids.is_none());
-        assert!(context.restrictions.is_none());
-    }
 }

@@ -12,7 +12,7 @@ pub use catalog_port::LibraryCatalogPort;
 pub use create_library::CreateLibraryService;
 pub use delete_library::DeleteLibraryService;
 pub use models::{LibraryChangeSet, LibraryRecord};
-pub use queries::LibraryCatalogQueryService;
+pub use queries::{LibraryCatalogQueryService, LibraryDetailAccess};
 pub use repository::{
     CreateLibraryResult, LibraryCatalogMutationError, LibraryCatalogMutationPort,
     LibraryCatalogReadPort, LibraryTaskResult,

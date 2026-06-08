@@ -179,6 +179,59 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
 }
 
 #[tokio::test]
+async fn router_api_library_detail_distinguishes_forbidden_from_missing_library() {
+    let ctx = TestFixture::builder("router-api-library-detail-forbidden-vs-missing")
+        .with_seed(|paths| async move {
+            seed_router_library_restricted_user(
+                &paths,
+                "library-restricted-user",
+                "library-restricted@example.org",
+                "router-contract-library-restricted-123",
+                &[],
+            )
+            .await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "library-restricted@example.org",
+            "router-contract-library-restricted-123",
+        )
+        .await;
+
+    let forbidden_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("forbidden library detail request should build"),
+        )
+        .await
+        .expect("forbidden library detail request should complete");
+    assert_eq!(forbidden_response.status(), StatusCode::FORBIDDEN);
+
+    let missing_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/libraries/missing-library")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing library detail request should build"),
+        )
+        .await
+        .expect("missing library detail request should complete");
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clear() {
     let ctx = TestFixture::new("router-api-library-patch-null-exclusions").await;
 

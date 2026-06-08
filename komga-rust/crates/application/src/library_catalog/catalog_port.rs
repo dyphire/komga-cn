@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::{
-    CreateLibraryResult, LibraryCatalogMutationError, LibraryChangeSet, LibraryRecord,
-    LibraryTaskResult,
+    CreateLibraryResult, LibraryCatalogMutationError, LibraryChangeSet, LibraryDetailAccess,
+    LibraryRecord, LibraryTaskResult,
 };
 
 /// Port for library catalog operations (CRUD + task triggers).
@@ -19,6 +19,12 @@ pub trait LibraryCatalogPort: Send + Sync {
         context: DiscoveryQueryContext,
         library_id: &str,
     ) -> Result<Option<LibraryRecord>, DiscoveryError>;
+
+    async fn library_detail_access(
+        &self,
+        context: DiscoveryQueryContext,
+        library_id: &str,
+    ) -> Result<LibraryDetailAccess, DiscoveryError>;
 
     async fn create_library(
         &self,
