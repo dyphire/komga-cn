@@ -323,6 +323,50 @@ async fn search_index_sync_recovers_corrupted_index_before_applying_delete() {
     fixture.cleanup().await;
 }
 
+#[tokio::test]
+async fn search_index_sync_recovers_corrupted_index_before_scoped_rebuild() {
+    let fixture = SearchSyncFixture::new("sync-scoped-rebuild-corruption-recovery").await;
+    seed_collection(
+        &fixture.pool,
+        "collection-1",
+        "Scoped Drift Collection Before",
+    )
+    .await;
+
+    let sync = fixture.sync(true);
+    sync.rebuild_all()
+        .await
+        .expect("initial full rebuild should succeed");
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "Before",
+        SearchEntityType::Collection,
+        &["collection-1"],
+    );
+
+    std::fs::remove_file(fixture.index_dir.join(".komga-search-analyzer-version"))
+        .expect("analyzer marker should be removable");
+    rename_collection(
+        &fixture.pool,
+        "collection-1",
+        "Scoped Drift Collection After",
+    )
+    .await;
+
+    sync.rebuild_entities(&[SearchEntityType::Collection])
+        .await
+        .expect("scoped rebuild should recover the index before applying");
+
+    assert_search_hits(
+        fixture.index_dir.as_path(),
+        "After",
+        SearchEntityType::Collection,
+        &["collection-1"],
+    );
+
+    fixture.cleanup().await;
+}
+
 async fn seed_library(pool: &SqlitePool) {
     sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
         .bind("library-1")

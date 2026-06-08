@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
@@ -22,6 +23,38 @@ pub struct SearchIndexSync {
 enum SearchEventAttempt {
     Applied,
     RebuildRequired,
+}
+
+struct SearchIndexMutationRunner<'a> {
+    pool: &'a SqlitePool,
+    index_dir: &'a Path,
+}
+
+impl<'a> SearchIndexMutationRunner<'a> {
+    fn new(pool: &'a SqlitePool, index_dir: &'a Path) -> Self {
+        Self { pool, index_dir }
+    }
+
+    async fn run<F, Fut>(&self, attempt: F) -> Result<(), String>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<SearchEventAttempt, String>>,
+    {
+        match attempt().await? {
+            SearchEventAttempt::Applied => Ok(()),
+            SearchEventAttempt::RebuildRequired => {
+                recover_search_index(self.pool, self.index_dir).await?;
+
+                match attempt().await? {
+                    SearchEventAttempt::Applied => Ok(()),
+                    SearchEventAttempt::RebuildRequired => Err(format!(
+                        "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
+                        self.index_dir.display()
+                    )),
+                }
+            }
+        }
+    }
 }
 
 impl SearchIndexSync {
@@ -171,20 +204,9 @@ async fn rebuild_search_index_for_entities(
     index_dir: &Path,
     entity_types: &[SearchEntityType],
 ) -> Result<(), String> {
-    match try_rebuild_search_index_for_entities(pool, index_dir, entity_types).await? {
-        SearchEventAttempt::Applied => Ok(()),
-        SearchEventAttempt::RebuildRequired => {
-            recover_search_index(pool, index_dir).await?;
-
-            match try_rebuild_search_index_for_entities(pool, index_dir, entity_types).await? {
-                SearchEventAttempt::Applied => Ok(()),
-                SearchEventAttempt::RebuildRequired => Err(format!(
-                    "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
-                    index_dir.display()
-                )),
-            }
-        }
-    }
+    SearchIndexMutationRunner::new(pool, index_dir)
+        .run(|| try_rebuild_search_index_for_entities(pool, index_dir, entity_types))
+        .await
 }
 
 async fn try_apply_search_event(
@@ -213,20 +235,9 @@ async fn apply_search_event(
     index_dir: &Path,
     event: SearchEvent,
 ) -> Result<(), String> {
-    match try_apply_search_event(index_dir, event.clone()).await? {
-        SearchEventAttempt::Applied => Ok(()),
-        SearchEventAttempt::RebuildRequired => {
-            recover_search_index(pool, index_dir).await?;
-
-            match try_apply_search_event(index_dir, event).await? {
-                SearchEventAttempt::Applied => Ok(()),
-                SearchEventAttempt::RebuildRequired => Err(format!(
-                    "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
-                    index_dir.display()
-                )),
-            }
-        }
-    }
+    SearchIndexMutationRunner::new(pool, index_dir)
+        .run(|| try_apply_search_event(index_dir, event.clone()))
+        .await
 }
 
 async fn sync_entity_upsert_from_database(
