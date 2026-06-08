@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use komga_application::library_catalog::{
-    CreateLibraryResult, CreateLibraryService, DeleteLibraryService, LibraryCatalogMutationError,
+    CreateLibraryResult, LibraryCatalogCommandService, LibraryCatalogMutationError,
     LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryDetailAccess,
-    LibraryRecord, LibraryTaskResult, LibraryTaskService, UpdateLibraryService,
+    LibraryRecord, LibraryTaskResult,
 };
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
@@ -57,7 +57,7 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         &self,
         changes: LibraryChangeSet,
     ) -> Result<CreateLibraryResult, LibraryCatalogMutationError> {
-        CreateLibraryService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .create_library(changes)
             .await
     }
@@ -67,13 +67,13 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         library_id: &str,
         changes: LibraryChangeSet,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        UpdateLibraryService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .update_library(library_id, changes)
             .await
     }
 
     async fn delete_library(&self, library_id: &str) -> Result<bool, LibraryCatalogMutationError> {
-        DeleteLibraryService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .delete_library(library_id)
             .await
     }
@@ -83,7 +83,7 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         library_id: &str,
         deep_scan: bool,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        LibraryTaskService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .scan_library(library_id, deep_scan)
             .await
     }
@@ -92,7 +92,7 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        LibraryTaskService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .analyze_library(library_id)
             .await
     }
@@ -101,7 +101,7 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        LibraryTaskService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .refresh_metadata(library_id)
             .await
     }
@@ -110,7 +110,7 @@ impl LibraryCatalogPort for LibraryCatalogAccess {
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        LibraryTaskService::new(self.adapter.clone())
+        LibraryCatalogCommandService::new(self.adapter.clone())
             .empty_trash(library_id)
             .await
     }

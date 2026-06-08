@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
-use crate::task_processing::TaskQueueRecord;
-
 use super::LibraryRecord;
 
 type LibrarySeriesAndBookIds = Option<(Vec<String>, Vec<(String, String)>)>;
@@ -18,17 +16,6 @@ impl LibraryCatalogMutationError {
     pub fn persistence(error: impl Into<String>) -> Self {
         Self::Persistence(error.into())
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CreateLibraryResult {
-    pub library: LibraryRecord,
-    pub task_records: Vec<TaskQueueRecord>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LibraryTaskResult {
-    pub task_records: Vec<TaskQueueRecord>,
 }
 
 #[async_trait]
