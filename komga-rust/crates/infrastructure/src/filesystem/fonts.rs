@@ -1,49 +1,86 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 
-#[derive(Clone, PartialEq, Eq)]
-struct FontCharacteristics {
-    style: &'static str,
-    weight: &'static str,
-}
+use komga_application::operational::{build_font_family_css, is_supported_font_file};
 
-pub fn list_font_families(fonts_directory: &Path) -> Vec<String> {
-    let mut families = fs::read_dir(fonts_directory)
-        .ok()
-        .into_iter()
-        .flat_map(|items| items.filter_map(Result::ok))
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            if !file_type.is_dir() {
-                return None;
-            }
-            Some(entry.file_name().to_string_lossy().to_string())
-        })
-        .collect::<Vec<_>>();
+pub(crate) fn list_font_families(fonts_directory: &Path) -> Result<Vec<String>, String> {
+    let entries = match fs::read_dir(fonts_directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "read fonts directory '{}': {error}",
+                fonts_directory.display()
+            ));
+        }
+    };
+
+    let mut families = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "read fonts directory entry '{}': {error}",
+                fonts_directory.display()
+            )
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "read fonts directory entry type '{}': {error}",
+                entry.path().display()
+            )
+        })?;
+        if file_type.is_dir() {
+            families.push(entry.file_name().to_string_lossy().to_string());
+        }
+    }
     families.sort();
-    families
+    Ok(families)
 }
 
-pub fn load_font_file(
+pub(crate) fn load_font_file(
     fonts_directory: &Path,
     font_family: &str,
     font_file: &str,
-) -> Option<Vec<u8>> {
-    fs::read(fonts_directory.join(font_family).join(font_file)).ok()
+) -> Result<Option<Vec<u8>>, String> {
+    let path = fonts_directory.join(font_family).join(font_file);
+    match fs::read(&path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("read font file '{}': {error}", path.display())),
+    }
 }
 
-pub fn load_font_family_css(fonts_directory: &Path, font_family: &str) -> Option<String> {
+pub(crate) fn load_font_family_css(
+    fonts_directory: &Path,
+    font_family: &str,
+) -> Result<Option<String>, String> {
     let family_dir = fonts_directory.join(font_family);
-    let Ok(entries) = fs::read_dir(&family_dir) else {
-        return None;
+    let entries = match fs::read_dir(&family_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "read font family directory '{}': {error}",
+                family_dir.display()
+            ));
+        }
     };
 
     let mut font_files = Vec::new();
-    for entry in entries.filter_map(Result::ok) {
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(_) => continue,
-        };
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "read font family directory entry '{}': {error}",
+                family_dir.display()
+            )
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "read font family directory entry type '{}': {error}",
+                entry.path().display()
+            )
+        })?;
         if !file_type.is_file() {
             continue;
         }
@@ -53,108 +90,14 @@ pub fn load_font_family_css(fonts_directory: &Path, font_family: &str) -> Option
             Some(value) => value,
             None => continue,
         };
-        if font_format(file_name).is_none() {
+        if !is_supported_font_file(file_name) {
             continue;
         }
 
         font_files.push(file_name.to_string());
     }
 
-    font_files.sort_by_key(|file_name| file_name.to_ascii_lowercase());
-
-    let mut groups: Vec<(FontCharacteristics, Vec<String>)> = Vec::new();
-    for file_name in font_files {
-        let characteristics = font_characteristics(&file_name);
-        if let Some((_, files)) = groups
-            .iter_mut()
-            .find(|(current, _)| *current == characteristics)
-        {
-            files.push(file_name);
-        } else {
-            groups.push((characteristics, vec![file_name]));
-        }
-    }
-
-    let blocks = groups
-        .into_iter()
-        .map(|(characteristics, files)| {
-            build_font_face_block(font_family, &characteristics, &files)
-        })
-        .collect::<Vec<_>>();
-
-    if blocks.is_empty() {
-        return Some(String::new());
-    }
-
-    Some(blocks.join("\n"))
-}
-
-fn font_extension(file_name: &str) -> Option<&str> {
-    file_name
-        .rsplit_once('.')
-        .map(|(_, extension)| extension)
-        .map(|extension| extension.to_ascii_lowercase())
-        .filter(|extension| matches!(extension.as_str(), "woff" | "woff2" | "ttf" | "otf"))
-        .map(|extension| {
-            if extension == "woff2" {
-                "woff2"
-            } else if extension == "woff" {
-                "woff"
-            } else if extension == "ttf" {
-                "ttf"
-            } else {
-                "otf"
-            }
-        })
-}
-
-fn font_format(file_name: &str) -> Option<&'static str> {
-    match font_extension(file_name) {
-        Some("ttf") => Some("truetype"),
-        Some("otf") => Some("opentype"),
-        Some("woff") => Some("woff"),
-        Some("woff2") => Some("woff2"),
-        _ => None,
-    }
-}
-
-fn font_characteristics(file_name: &str) -> FontCharacteristics {
-    let lower = file_name.to_ascii_lowercase();
-    FontCharacteristics {
-        style: if lower.contains("italic") {
-            "italic"
-        } else {
-            "normal"
-        },
-        weight: if lower.contains("bold") {
-            "bold"
-        } else {
-            "normal"
-        },
-    }
-}
-
-fn build_font_face_block(
-    font_family: &str,
-    characteristics: &FontCharacteristics,
-    files: &[String],
-) -> String {
-    let src = files
-        .iter()
-        .map(|file_name| {
-            format!(
-                "url('{}') format('{}')",
-                file_name,
-                font_format(file_name).expect("font format should exist for grouped files")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        "@font-face {{\n    font-family: '{}';\n    src: {};\n    font-weight: {};\n    font-style: {};\n}}\n",
-        font_family, src, characteristics.weight, characteristics.style,
-    )
+    Ok(build_font_family_css(font_family, font_files))
 }
 
 #[cfg(test)]
@@ -165,11 +108,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
-        let millis = SystemTime::now()
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
-            .as_millis();
-        std::env::temp_dir().join(format!("{prefix}-{millis}"))
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{nanos}-{}", std::process::id()))
     }
 
     #[test]
@@ -179,7 +122,7 @@ mod tests {
         fs::create_dir_all(root.join("Alpha")).expect("alpha dir should be created");
         fs::write(root.join("ignore.txt"), "not a family").expect("file should be created");
 
-        let families = list_font_families(root.as_path());
+        let families = list_font_families(root.as_path()).expect("font families should list");
 
         assert_eq!(families, vec!["Alpha".to_string(), "Beta".to_string()]);
 
@@ -194,7 +137,8 @@ mod tests {
         fs::write(family_dir.join("Demo-Regular.ttf"), b"font-bytes")
             .expect("font file should be created");
 
-        let bytes = load_font_file(root.as_path(), "Demo", "Demo-Regular.ttf");
+        let bytes = load_font_file(root.as_path(), "Demo", "Demo-Regular.ttf")
+            .expect("font file should load");
 
         assert_eq!(bytes.as_deref(), Some(&b"font-bytes"[..]));
 
@@ -215,7 +159,8 @@ mod tests {
         fs::write(family_dir.join("notes.txt"), b"ignore")
             .expect("non-font file should be created");
 
-        let css = load_font_family_css(root.as_path(), "Demo Family");
+        let css = load_font_family_css(root.as_path(), "Demo Family")
+            .expect("font family CSS should load");
 
         let css = css.expect("css should be generated");
         assert_eq!(
@@ -223,6 +168,57 @@ mod tests {
             "@font-face {\n    font-family: 'Demo Family';\n    src: url('Demo-BoldItalic.woff') format('woff'),url('Demo-BoldItalic.woff2') format('woff2');\n    font-weight: bold;\n    font-style: italic;\n}\n\n@font-face {\n    font-family: 'Demo Family';\n    src: url('Demo-Regular.ttf') format('truetype');\n    font-weight: normal;\n    font-style: normal;\n}\n"
         );
         assert!(!css.contains("notes.txt"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_font_families_propagates_directory_read_errors() {
+        let root = unique_temp_dir("komga-fonts-list-error");
+        fs::write(&root, b"not-a-directory").expect("file fixture should be written");
+
+        let error = list_font_families(root.as_path())
+            .expect_err("read_dir errors must not become an empty font family list");
+
+        assert!(
+            error.contains("read fonts directory"),
+            "unexpected font family listing error: {error}"
+        );
+
+        let _ = fs::remove_file(root);
+    }
+
+    #[test]
+    fn load_font_file_propagates_read_errors() {
+        let root = unique_temp_dir("komga-fonts-file-error");
+        let font_path = root.join("Demo").join("Demo-Regular.ttf");
+        fs::create_dir_all(&font_path).expect("directory fixture should be created at font path");
+
+        let error = load_font_file(root.as_path(), "Demo", "Demo-Regular.ttf")
+            .expect_err("font read errors must not become missing fonts");
+
+        assert!(
+            error.contains("read font file"),
+            "unexpected font file read error: {error}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_font_family_css_propagates_directory_read_errors() {
+        let root = unique_temp_dir("komga-fonts-css-error");
+        fs::create_dir_all(&root).expect("font root should be created");
+        fs::write(root.join("Demo"), b"not-a-directory")
+            .expect("file fixture should be written at family path");
+
+        let error = load_font_family_css(root.as_path(), "Demo")
+            .expect_err("font CSS read_dir errors must not become missing CSS");
+
+        assert!(
+            error.contains("read font family directory"),
+            "unexpected font family CSS error: {error}"
+        );
 
         let _ = fs::remove_dir_all(root);
     }

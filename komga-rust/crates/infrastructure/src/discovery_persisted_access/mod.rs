@@ -1,19 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
-
-pub mod authors;
-pub mod books;
-pub mod browse;
+mod authors;
+mod books;
+mod browse;
 mod common;
-pub mod facets;
-pub mod library_mappings;
-pub mod models;
-pub mod query_support;
-pub mod runtime_queries;
-pub mod series;
+mod facets;
+mod library_mappings;
+mod models;
+mod query_support;
+pub(crate) mod runtime_queries;
+mod series;
 
-use models::{
-    AuthorEntry, AuthorsScope, BookBrowseEntry, BookPosterSummary, BookSummary, BookTagsScope,
-    SeriesSummary,
-};
+pub use browse::SqliteDiscoveryBrowseService;
+pub use query_support::DiscoveryQuerySupportAccess;
+pub(crate) use series::load_persisted_series_read_models;

@@ -11,7 +11,7 @@ use super::text_matching::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, normalized_text_matches,
 };
 
-pub fn evaluate(
+pub(super) fn evaluate(
     row: &SeriesRow,
     condition: &SeriesCondition,
     ctx: &SeriesEvaluationContext,
@@ -73,10 +73,10 @@ fn evaluate_value(
             matches_string_values_condition(row.labels.iter().map(String::as_str), condition)
         }
         SeriesValueCondition::SeriesStatus(SeriesStatusCondition::Include(values)) => {
-            any_ignore_ascii_case([row.status.as_str()], values)
+            values.contains(&row.status)
         }
         SeriesValueCondition::SeriesStatus(SeriesStatusCondition::Exclude(values)) => {
-            !any_ignore_ascii_case([row.status.as_str()], values)
+            !values.contains(&row.status)
         }
         SeriesValueCondition::Complete(value) => ctx
             .total_book_counts
@@ -162,10 +162,10 @@ fn matches_series_read_status_condition(
     match condition {
         ReadStatusCondition::Include(values) => values
             .iter()
-            .any(|status| series_matches_read_status(row.books_count, read_progress, status)),
+            .any(|status| series_matches_read_status(row.books_count, read_progress, *status)),
         ReadStatusCondition::Exclude(values) => !values
             .iter()
-            .any(|status| series_matches_read_status(row.books_count, read_progress, status)),
+            .any(|status| series_matches_read_status(row.books_count, read_progress, *status)),
     }
 }
 
@@ -259,26 +259,30 @@ fn matches_string_values_condition<'a>(
     }
 }
 
-fn matches_age_rating_condition(actual: Option<u16>, condition: &AgeRatingCondition) -> bool {
+fn matches_age_rating_condition(actual: Option<u32>, condition: &AgeRatingCondition) -> bool {
     match condition {
         AgeRatingCondition::Exact(InclusionCondition::Include(values)) => {
-            actual.is_some_and(|actual| values.contains(&actual))
+            actual.is_some_and(|actual| contains_age_rating(values, actual))
         }
         AgeRatingCondition::Exact(InclusionCondition::Exclude(values)) => actual
-            .map(|actual| !values.contains(&actual))
+            .map(|actual| !contains_age_rating(values, actual))
             .unwrap_or(true),
         AgeRatingCondition::ExactOrEmpty(values) => actual
-            .map(|actual| values.contains(&actual))
+            .map(|actual| contains_age_rating(values, actual))
             .unwrap_or(true),
-        AgeRatingCondition::GreaterThan(value) => {
-            actual.map(|actual| actual > *value).unwrap_or(false)
-        }
-        AgeRatingCondition::LessThan(value) => {
-            actual.map(|actual| actual < *value).unwrap_or(false)
-        }
+        AgeRatingCondition::GreaterThan(value) => actual
+            .map(|actual| actual > u32::from(*value))
+            .unwrap_or(false),
+        AgeRatingCondition::LessThan(value) => actual
+            .map(|actual| actual < u32::from(*value))
+            .unwrap_or(false),
         AgeRatingCondition::IsEmpty => actual.is_none(),
         AgeRatingCondition::IsNotEmpty => actual.is_some(),
     }
+}
+
+fn contains_age_rating(values: &[u16], actual: u32) -> bool {
+    values.iter().any(|value| actual == u32::from(*value))
 }
 
 fn matches_author_condition(row: &SeriesRow, condition: &StringCondition) -> bool {

@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
-
 use super::{
-    ActuatorHealthSnapshot, ActuatorInfoSnapshot, ActuatorMetricProbeSnapshot,
-    ActuatorMetricService, OperationalMetricsPort, actuator_health_payload, actuator_info_payload,
-    actuator_metrics_index_payload, actuator_root_payload,
+    ActuatorHealthReport, ActuatorHealthSnapshot, ActuatorInfoSnapshot, ActuatorMetricDetail,
+    ActuatorMetricProbeSnapshot, ActuatorMetricService, OperationalMetricsPort,
+    actuator_health_report, actuator_metric_names,
 };
 
 pub trait ActuatorSnapshotPort: Send + Sync {
@@ -29,30 +27,26 @@ impl<'a> ActuatorService<'a> {
         Self { snapshots, metrics }
     }
 
-    pub fn root_payload() -> Value {
-        actuator_root_payload()
+    pub fn health_report(&self) -> ActuatorHealthReport {
+        actuator_health_report(self.snapshots.health_snapshot())
     }
 
-    pub fn health_payload(&self, include_details: bool) -> Value {
-        actuator_health_payload(self.snapshots.health_snapshot(), include_details)
+    pub fn info_snapshot(&self) -> ActuatorInfoSnapshot {
+        self.snapshots.info_snapshot()
     }
 
-    pub fn info_payload(&self) -> Value {
-        actuator_info_payload(self.snapshots.info_snapshot())
+    pub fn metric_names() -> Vec<&'static str> {
+        actuator_metric_names()
     }
 
-    pub fn metrics_index_payload() -> Value {
-        actuator_metrics_index_payload()
-    }
-
-    pub async fn metric_detail_payload(
+    pub async fn metric_detail(
         &self,
         metric_name: &str,
         tag_filters: &HashMap<String, String>,
-    ) -> Result<Option<Value>, String> {
+    ) -> Result<Option<ActuatorMetricDetail>, String> {
         let probes = self.snapshots.metric_probe_snapshot();
         ActuatorMetricService::new(self.metrics)
-            .metric_detail_payload(metric_name, &probes, tag_filters)
+            .metric_detail(metric_name, &probes, tag_filters)
             .await
     }
 }

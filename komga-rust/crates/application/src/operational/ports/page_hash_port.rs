@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
-use crate::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 use crate::operational::{
-    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
-    PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+    PageHashDeleteTarget, PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry,
+    PageHashMatchesQuery, PageHashPage, PageHashThumbnail, PageHashUnknownEntry,
+    PageHashUnknownQuery, PageHashUpsertCommand,
 };
 
 #[async_trait]

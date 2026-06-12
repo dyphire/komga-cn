@@ -1,18 +1,7 @@
-use serde_json::{Value, json};
+use komga_application::media_assets::SeriesTachiyomiProgressBook;
 use sqlx::{Row, SqlitePool};
 
-fn empty_series_tachiyomi_progress_payload() -> Value {
-    json!({
-        "booksCount": 0,
-        "booksReadCount": 0,
-        "booksUnreadCount": 0,
-        "booksInProgressCount": 0,
-        "lastReadContinuousNumberSort": 0.0,
-        "maxNumberSort": 0.0,
-    })
-}
-
-pub async fn refresh_series_read_progress_row(
+pub(crate) async fn refresh_series_read_progress_row(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
@@ -47,7 +36,7 @@ pub async fn refresh_series_read_progress_row(
     Ok(())
 }
 
-pub async fn delete_series_read_progress_row(
+pub(crate) async fn delete_series_read_progress_row(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
@@ -61,81 +50,52 @@ pub async fn delete_series_read_progress_row(
     Ok(())
 }
 
-pub async fn load_series_tachiyomi_progress(
+pub(crate) async fn load_series_tachiyomi_progress_books(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
-) -> Result<Option<Value>, String> {
+) -> Result<Vec<SeriesTachiyomiProgressBook>, String> {
     let rows = sqlx::query(
-        r#"SELECT COALESCE(bm.NUMBER_SORT, 0) AS NUMBER_SORT, rp.COMPLETED AS COMPLETED
+        r#"SELECT COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS NUMBER_SORT, rp.COMPLETED AS COMPLETED
          FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
          LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND (rp.USER_ID = ? OR rp.USER_ID IS NULL)
          WHERE b.SERIES_ID = ?
-         ORDER BY COALESCE(bm.NUMBER_SORT, 0) ASC, b.ID ASC"#,
+         ORDER BY COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) ASC, b.ID ASC"#,
     )
     .bind(user_id_value)
     .bind(series_id)
     .fetch_all(pool)
     .await
     .map_err(|error| format!("query series tachiyomi rows: {error}"))?;
-    if rows.is_empty() {
-        return Ok(Some(empty_series_tachiyomi_progress_payload()));
-    }
-    let mut books_count = 0usize;
-    let mut books_read_count = 0usize;
-    let mut books_in_progress_count = 0usize;
-    let mut last_read_continuous_number_sort = 0.0f64;
-    let mut max_number_sort = 0.0f64;
-    let mut all_previous_completed = true;
-    for row in rows {
-        books_count += 1;
-        let number_sort = row.get::<f64, _>("NUMBER_SORT");
-        let completed = row.get::<Option<i64>, _>("COMPLETED");
-        if number_sort > max_number_sort {
-            max_number_sort = number_sort;
-        }
-        match completed {
-            Some(value) if value != 0 => {
-                books_read_count += 1;
-                if all_previous_completed {
-                    last_read_continuous_number_sort = number_sort;
-                }
-            }
-            Some(_) => {
-                books_in_progress_count += 1;
-                all_previous_completed = false;
-            }
-            None => {
-                all_previous_completed = false;
-            }
-        }
-    }
-    let books_unread_count = books_count
-        .saturating_sub(books_read_count)
-        .saturating_sub(books_in_progress_count);
-    Ok(Some(json!({
-        "booksCount": books_count,
-        "booksReadCount": books_read_count,
-        "booksUnreadCount": books_unread_count,
-        "booksInProgressCount": books_in_progress_count,
-        "lastReadContinuousNumberSort": last_read_continuous_number_sort,
-        "maxNumberSort": max_number_sort,
-    })))
+    Ok(rows
+        .into_iter()
+        .map(|row| SeriesTachiyomiProgressBook {
+            number_sort: row.get::<f64, _>("NUMBER_SORT"),
+            completed: row
+                .get::<Option<i64>, _>("COMPLETED")
+                .map(|value| value != 0),
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::empty_series_tachiyomi_progress_payload;
+    use super::load_series_tachiyomi_progress_books;
+    use crate::test_support::BootstrappedBookFixture;
 
-    #[test]
-    fn empty_series_tachiyomi_progress_payload_returns_zeroed_counts() {
-        let payload = empty_series_tachiyomi_progress_payload();
+    #[tokio::test]
+    async fn load_series_tachiyomi_progress_books_defaults_number_sort_without_metadata() {
+        let fixture = BootstrappedBookFixture::open("tachiyomi-progress-number-sort").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
 
-        assert_eq!(payload["booksCount"], 0);
-        assert_eq!(payload["booksReadCount"], 0);
-        assert_eq!(payload["booksUnreadCount"], 0);
-        assert_eq!(payload["booksInProgressCount"], 0);
-        assert_eq!(payload["lastReadContinuousNumberSort"], 0.0);
-        assert_eq!(payload["maxNumberSort"], 0.0);
+        let books = load_series_tachiyomi_progress_books(&fixture.pool, "series-1", "user-1")
+            .await
+            .expect("book without metadata should load");
+
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].number_sort, 0.0);
+        assert_eq!(books[0].completed, None);
+        fixture.close().await;
     }
 }

@@ -1,9 +1,11 @@
-use super::common_helpers::{PagePayloadMetadata, page_payload};
-use super::*;
-
 use crate::helpers::{normalized_date_time, normalized_file_last_modified};
+use komga_domain::discovery::PageEnvelope;
+use serde_json::{Value, json};
 
-pub(crate) fn series_page_payload(
+use super::super::common_helpers::{PagePayloadMetadata, page_payload};
+use super::super::models::PersistedSeriesSummary;
+
+pub(in crate::discovery) fn series_page_payload(
     page: PageEnvelope<PersistedSeriesSummary>,
     paged: bool,
     sorted: bool,

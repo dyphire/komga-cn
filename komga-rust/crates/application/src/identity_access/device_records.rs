@@ -1,3 +1,5 @@
+use crate::media_assets::EpubNavigationContentPort;
+
 /// Read progress entry surfaced to KOReader/Kobo device handlers.
 ///
 /// `locator` carries the raw stored locator blob; callers decode it lazily.
@@ -42,6 +44,19 @@ pub struct KoboMetadataRecord {
     pub oneshot: bool,
     pub is_kepub: bool,
     pub is_pre_paginated: bool,
+}
+
+pub fn kobo_metadata_pre_paginated(
+    content: &dyn EpubNavigationContentPort,
+    extension_blob: Option<&[u8]>,
+) -> Result<bool, String> {
+    let Some(blob) = extension_blob else {
+        return Ok(false);
+    };
+
+    content
+        .decode_epub_navigation_extension(blob)
+        .map(|extension| extension.is_fixed_layout)
 }
 
 /// Errors returned when KOReader resolves a book by content hash.

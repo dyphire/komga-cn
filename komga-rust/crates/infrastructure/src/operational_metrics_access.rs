@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use komga_application::operational::{OperationalMetricsPort, SqlitePoolSnapshot};
+use komga_application::operational::{
+    DatabasePoolSnapshot, LibraryMetricValue, OperationalMetricsPort, TaskExecutionMetricValue,
+};
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
@@ -21,7 +23,7 @@ impl OperationalMetricsAccess {
 
 #[async_trait]
 impl OperationalMetricsPort for OperationalMetricsAccess {
-    async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String> {
         load_task_execution_values(self.tasks_db.read_pool()).await
     }
 
@@ -29,19 +31,21 @@ impl OperationalMetricsPort for OperationalMetricsAccess {
         load_libraries_count(self.main_db.read_pool()).await
     }
 
-    async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_series_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         load_series_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         load_books_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_filesize_grouped_by_library(
+        &self,
+    ) -> Result<Vec<LibraryMetricValue>, String> {
         load_books_filesize_grouped_by_library(self.main_db.read_pool()).await
     }
 
-    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         load_sidecars_grouped_by_library(self.main_db.read_pool()).await
     }
 
@@ -57,13 +61,13 @@ impl OperationalMetricsPort for OperationalMetricsAccess {
         load_task_failure_count(self.main_db.read_pool()).await
     }
 
-    async fn load_sqlite_pool_snapshots(
+    async fn load_database_pool_snapshots(
         &self,
         paths: &[PathBuf],
-    ) -> Result<Vec<SqlitePoolSnapshot>, String> {
+    ) -> Result<Vec<DatabasePoolSnapshot>, String> {
         Ok(shared_pool_snapshots_for_paths(paths)
             .into_iter()
-            .map(|s| SqlitePoolSnapshot {
+            .map(|s| DatabasePoolSnapshot {
                 path: s.path,
                 max_connections: s.max_connections,
                 min_connections: s.min_connections,
@@ -76,22 +80,9 @@ impl OperationalMetricsPort for OperationalMetricsAccess {
     }
 }
 
-pub fn load_sqlite_pool_snapshots(paths: &[PathBuf]) -> Vec<SqlitePoolSnapshot> {
-    shared_pool_snapshots_for_paths(paths)
-        .into_iter()
-        .map(|s| SqlitePoolSnapshot {
-            path: s.path,
-            max_connections: s.max_connections,
-            min_connections: s.min_connections,
-            total_connections: s.total_connections,
-            idle_connections: s.idle_connections,
-            in_use_connections: s.in_use_connections,
-            is_closed: s.is_closed,
-        })
-        .collect()
-}
-
-pub async fn load_task_execution_values(pool: &SqlitePool) -> Result<Vec<(String, f64)>, String> {
+async fn load_task_execution_values(
+    pool: &SqlitePool,
+) -> Result<Vec<TaskExecutionMetricValue>, String> {
     let rows = sqlx::query(
         r#"SELECT SIMPLE_TYPE, CAST(COUNT(*) AS REAL) AS VALUE
 FROM TASK
@@ -104,16 +95,14 @@ ORDER BY SIMPLE_TYPE"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            (
-                row.get::<String, _>("SIMPLE_TYPE"),
-                row.get::<f64, _>("VALUE"),
-            )
+        .map(|row| TaskExecutionMetricValue {
+            task_type: row.get::<String, _>("SIMPLE_TYPE"),
+            count: row.get::<f64, _>("VALUE"),
         })
         .collect())
 }
 
-pub async fn load_libraries_count(pool: &SqlitePool) -> Result<f64, String> {
+async fn load_libraries_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
 FROM LIBRARY"#,
@@ -125,9 +114,9 @@ FROM LIBRARY"#,
     Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
-pub async fn load_series_grouped_by_library(
+async fn load_series_grouped_by_library(
     pool: &SqlitePool,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<LibraryMetricValue>, String> {
     let rows = sqlx::query(
         r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(s.ID) AS COUNT
 FROM SERIES s
@@ -140,18 +129,16 @@ GROUP BY l.NAME"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            (
-                row.get::<String, _>("LIBRARY_NAME"),
-                row.get::<i64, _>("COUNT") as f64,
-            )
+        .map(|row| LibraryMetricValue {
+            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())
 }
 
-pub async fn load_books_grouped_by_library(
+async fn load_books_grouped_by_library(
     pool: &SqlitePool,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<LibraryMetricValue>, String> {
     let rows = sqlx::query(
         r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(b.ID) AS COUNT
 FROM BOOK b
@@ -164,18 +151,16 @@ GROUP BY l.NAME"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            (
-                row.get::<String, _>("LIBRARY_NAME"),
-                row.get::<i64, _>("COUNT") as f64,
-            )
+        .map(|row| LibraryMetricValue {
+            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())
 }
 
-pub async fn load_books_filesize_grouped_by_library(
+async fn load_books_filesize_grouped_by_library(
     pool: &SqlitePool,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<LibraryMetricValue>, String> {
     let rows = sqlx::query(
         r#"SELECT l.NAME AS LIBRARY_NAME, COALESCE(SUM(b.FILE_SIZE), 0) AS TOTAL_SIZE
 FROM BOOK b
@@ -188,18 +173,16 @@ GROUP BY l.NAME"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            (
-                row.get::<String, _>("LIBRARY_NAME"),
-                row.get::<i64, _>("TOTAL_SIZE") as f64,
-            )
+        .map(|row| LibraryMetricValue {
+            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            value: row.get::<i64, _>("TOTAL_SIZE") as f64,
         })
         .collect())
 }
 
-pub async fn load_sidecars_grouped_by_library(
+async fn load_sidecars_grouped_by_library(
     pool: &SqlitePool,
-) -> Result<Vec<(String, f64)>, String> {
+) -> Result<Vec<LibraryMetricValue>, String> {
     let rows = sqlx::query(
         r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(sc.ID) AS COUNT
 FROM SIDECAR sc
@@ -213,16 +196,14 @@ GROUP BY l.NAME"#,
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            (
-                row.get::<String, _>("LIBRARY_NAME"),
-                row.get::<i64, _>("COUNT") as f64,
-            )
+        .map(|row| LibraryMetricValue {
+            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())
 }
 
-pub async fn load_collections_count(pool: &SqlitePool) -> Result<f64, String> {
+async fn load_collections_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
 FROM COLLECTION"#,
@@ -234,7 +215,7 @@ FROM COLLECTION"#,
     Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
-pub async fn load_readlists_count(pool: &SqlitePool) -> Result<f64, String> {
+async fn load_readlists_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
 FROM READLIST"#,
@@ -246,7 +227,7 @@ FROM READLIST"#,
     Ok(row.get::<i64, _>("COUNT") as f64)
 }
 
-pub async fn load_task_failure_count(pool: &SqlitePool) -> Result<f64, String> {
+async fn load_task_failure_count(pool: &SqlitePool) -> Result<f64, String> {
     let row = sqlx::query(
         r#"SELECT CAST(COUNT(*) AS REAL) AS VALUE
 FROM HISTORICAL_EVENT

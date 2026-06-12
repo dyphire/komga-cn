@@ -1,17 +1,19 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use komga_application::media_assets::{
     BookImportPort, BooksImportEntry, ImportBookOutcome, ImportCopyMode,
 };
+use komga_domain::media_assets::ThumbnailType;
 use sqlx::{Row, SqlitePool};
 
-use crate::{resolve_library_item_path, resolve_rooted_path, resolve_stored_path};
+use crate::{
+    random_hex_token, resolve_library_item_path, resolve_rooted_path, resolve_stored_path,
+};
 
 #[derive(Clone, Debug)]
 pub struct FilesystemBookImport {
@@ -45,12 +47,12 @@ async fn import_book_impl(
     copy_mode: ImportCopyMode,
     entry: BooksImportEntry,
 ) -> Result<Option<ImportBookOutcome>, String> {
-    if !entry.source_file.exists() {
+    if !path_exists(entry.source_file.as_path(), "inspect import source file")? {
         return Err("source file does not exist".to_string());
     }
 
-    let library_roots = load_library_roots(read_pool).await.unwrap_or_default();
-    if source_inside_library_roots(entry.source_file.as_path(), &library_roots) {
+    let library_roots = load_library_roots(read_pool).await?;
+    if source_inside_library_roots(entry.source_file.as_path(), &library_roots)? {
         return Err("cannot import file that is part of an existing library".to_string());
     }
 
@@ -118,13 +120,16 @@ async fn import_book_impl(
     if let Some(upgrade_file) = upgrade_file.as_ref()
         && destination_file == *upgrade_file
     {
-        let _ = fs::remove_file(upgrade_file);
+        remove_import_upgrade_path(upgrade_file, "remove previous upgraded book file")?;
     }
     for upgrade_sidecar in &upgrade_sidecars {
-        let _ = fs::remove_file(upgrade_sidecar);
+        remove_import_upgrade_path(upgrade_sidecar, "remove previous upgraded book sidecar")?;
     }
 
-    if destination_file.exists() {
+    if path_exists(
+        destination_file.as_path(),
+        "inspect import destination file",
+    )? {
         return Err(format!(
             "destination file already exists: {}",
             destination_file.display()
@@ -143,7 +148,7 @@ async fn import_book_impl(
     if let Some(upgrade_file) = upgrade_file.as_ref()
         && destination_file != *upgrade_file
     {
-        let _ = fs::remove_file(upgrade_file);
+        remove_import_upgrade_path(upgrade_file, "remove previous upgraded book file")?;
     }
 
     let imported_book_id = scanner_book_id_for_path(&destination_file);
@@ -159,7 +164,7 @@ async fn import_book_impl(
         .await?;
     }
 
-    let _ = persist_book_imported_event(
+    persist_book_imported_event(
         write_pool,
         imported_book_id.as_str(),
         target.series_id.as_str(),
@@ -167,7 +172,7 @@ async fn import_book_impl(
         entry.source_file.as_path(),
         entry.upgrade_book_id.is_some(),
     )
-    .await;
+    .await?;
 
     Ok(Some(ImportBookOutcome {
         library_id: target.library_id,
@@ -198,6 +203,13 @@ enum ImportBookSidecarType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct ImportBookSidecarClassification {
+    sidecar_type: ImportBookSidecarType,
+    suffix: String,
+    extension: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ImportBookSidecarTransfer {
     source_path: PathBuf,
     destination_path: PathBuf,
@@ -216,7 +228,7 @@ async fn load_import_series_target(
 ) -> Result<Option<ImportSeriesTarget>, String> {
     let row = sqlx::query(
         r#"SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL,
-            l.ROOT AS LIBRARY_ROOT, COALESCE(s.oneshot, 0) AS ONESHOT
+            l.ROOT AS LIBRARY_ROOT, s.ONESHOT AS ONESHOT
         FROM SERIES s
         JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
         WHERE s.ID = ?
@@ -287,12 +299,38 @@ async fn load_library_roots(pool: &SqlitePool) -> Result<Vec<PathBuf>, String> {
         .collect())
 }
 
-fn source_inside_library_roots(source_file: &Path, library_roots: &[PathBuf]) -> bool {
-    let source = fs::canonicalize(source_file).unwrap_or_else(|_| source_file.to_path_buf());
-    library_roots.iter().any(|root| {
-        let root = fs::canonicalize(root).unwrap_or_else(|_| root.clone());
-        source.starts_with(root)
-    })
+fn source_inside_library_roots(
+    source_file: &Path,
+    library_roots: &[PathBuf],
+) -> Result<bool, String> {
+    let source = match fs::canonicalize(source_file) {
+        Ok(source) => source,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(format!(
+                "canonicalize import source file '{}': {error}",
+                source_file.display()
+            ));
+        }
+    };
+
+    for root in library_roots {
+        let root = match fs::canonicalize(root) {
+            Ok(root) => root,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "canonicalize import library root '{}': {error}",
+                    root.display()
+                ));
+            }
+        };
+        if source.starts_with(root) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn resolve_import_destination_name(
@@ -323,14 +361,15 @@ fn apply_import_copy_mode(
     destination_file: &Path,
     replace_existing: bool,
 ) -> Result<(), String> {
-    if !source_file.exists() {
+    if !path_exists(source_file, "inspect import source file")? {
         return Err("source file does not exist".to_string());
     }
 
-    if replace_existing && destination_file.exists() {
+    let destination_exists = path_exists(destination_file, "inspect import destination file")?;
+    if replace_existing && destination_exists {
         fs::remove_file(destination_file)
             .map_err(|error| format!("remove existing destination file: {error}"))?;
-    } else if destination_file.exists() {
+    } else if destination_exists {
         return Err(format!(
             "destination file already exists: {}",
             destination_file.display()
@@ -366,6 +405,22 @@ fn apply_import_copy_mode(
     }
 }
 
+fn path_exists(path: &Path, context: &str) -> Result<bool, String> {
+    match fs::metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("{context} '{}': {error}", path.display())),
+    }
+}
+
+fn remove_import_upgrade_path(path: &Path, context: &str) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("{context} '{}': {error}", path.display())),
+    }
+}
+
 fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> {
     let Some(book_dir) = book_file.parent() else {
         return Ok(Vec::new());
@@ -382,13 +437,28 @@ fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> 
     })?;
 
     let mut sidecar_paths = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "read book sidecar directory entry '{}' for import: {error}",
+                book_dir.display()
+            )
+        })?;
         let path = entry.path();
-        if path == book_file || !path.is_file() {
+        if path == book_file {
             continue;
         }
 
         if classify_import_book_sidecar(path.as_path(), book_base_name).is_some() {
+            let metadata = fs::metadata(&path).map_err(|error| {
+                format!(
+                    "read book sidecar metadata '{}' for import: {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.is_file() {
+                continue;
+            }
             sidecar_paths.push(path);
         }
     }
@@ -415,17 +485,20 @@ fn collect_import_book_sidecars(
 
     let mut transfers = Vec::new();
     for source_path in collect_book_sidecar_paths(source_file)? {
-        let Some((sidecar_type, suffix, extension)) =
+        let Some(classification) =
             classify_import_book_sidecar(source_path.as_path(), source_base_name)
         else {
             continue;
         };
 
-        let destination_name = format!("{destination_base_name}{suffix}.{extension}");
+        let destination_name = format!(
+            "{}{}.{}",
+            destination_base_name, classification.suffix, classification.extension
+        );
         transfers.push(ImportBookSidecarTransfer {
             source_path,
             destination_path: destination_dir.join(destination_name),
-            sidecar_type,
+            sidecar_type: classification.sidecar_type,
         });
     }
     transfers.sort_by(|left, right| left.source_path.cmp(&right.source_path));
@@ -435,17 +508,17 @@ fn collect_import_book_sidecars(
 fn classify_import_book_sidecar(
     sidecar_path: &Path,
     book_base_name: &str,
-) -> Option<(ImportBookSidecarType, String, String)> {
+) -> Option<ImportBookSidecarClassification> {
     let extension = sidecar_path.extension().and_then(|value| value.to_str())?;
     let extension_lower = extension.to_ascii_lowercase();
     let sidecar_stem = sidecar_path.file_stem().and_then(|value| value.to_str())?;
 
     if extension_lower == "xml" && sidecar_stem.eq_ignore_ascii_case(book_base_name) {
-        return Some((
-            ImportBookSidecarType::Metadata,
-            String::new(),
-            extension.to_string(),
-        ));
+        return Some(ImportBookSidecarClassification {
+            sidecar_type: ImportBookSidecarType::Metadata,
+            suffix: String::new(),
+            extension: extension.to_string(),
+        });
     }
 
     if !is_supported_book_artwork_extension(extension_lower.as_str()) {
@@ -453,11 +526,11 @@ fn classify_import_book_sidecar(
     }
 
     import_book_artwork_suffix(sidecar_stem, book_base_name).map(|suffix| {
-        (
-            ImportBookSidecarType::Artwork,
+        ImportBookSidecarClassification {
+            sidecar_type: ImportBookSidecarType::Artwork,
             suffix,
-            extension.to_string(),
-        )
+            extension: extension.to_string(),
+        }
     })
 }
 
@@ -627,21 +700,23 @@ async fn migrate_upgraded_book_identity(
         .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
     }
 
-    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'USER_UPLOADED'")
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = ?")
         .bind(new_book_id)
+        .bind(ThumbnailType::UserUploaded.persisted_name())
         .execute(&mut *tx)
         .await
         .map_err(|error| {
             format!("delete destination user-uploaded thumbnails before upgrade migration: {error}")
         })?;
-    sqlx::query(
-        "UPDATE THUMBNAIL_BOOK SET BOOK_ID = ? WHERE BOOK_ID = ? AND TYPE = 'USER_UPLOADED'",
-    )
-    .bind(new_book_id)
-    .bind(old_book_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("move user-uploaded thumbnails during upgrade migration: {error}"))?;
+    sqlx::query("UPDATE THUMBNAIL_BOOK SET BOOK_ID = ? WHERE BOOK_ID = ? AND TYPE = ?")
+        .bind(new_book_id)
+        .bind(old_book_id)
+        .bind(ThumbnailType::UserUploaded.persisted_name())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            format!("move user-uploaded thumbnails during upgrade migration: {error}")
+        })?;
 
     sqlx::query(
         r#"INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) SELECT READLIST_ID, ?, NUMBER
@@ -752,23 +827,6 @@ fn generated_historical_event_id() -> String {
 
 fn random_prefixed_id(prefix: &str) -> String {
     format!("{prefix}-{}", random_hex_token(12))
-}
-
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(29);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

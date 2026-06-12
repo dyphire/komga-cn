@@ -4,7 +4,7 @@ use komga_application::media_assets::{
     BookMediaRecord, book_media_is_epub, book_media_is_pdf, book_media_is_single_image,
 };
 use pdfium_render::prelude::*;
-use rxing::{BarcodeFormat, DecodeHints, helpers as rxing_helpers};
+use rxing::{BarcodeFormat, DecodeHints, Exceptions, helpers as rxing_helpers};
 use sqlx::SqlitePool;
 
 use crate::filesystem::media_access::page_content::{
@@ -30,7 +30,7 @@ pub(super) async fn refresh_barcode_isbn(pool: &SqlitePool, book_id: &str) -> Re
         else {
             continue;
         };
-        let Some(isbn) = decode_ean13_isbn(&image_bytes) else {
+        let Some(isbn) = decode_ean13_isbn(&image_bytes)? else {
             continue;
         };
 
@@ -90,13 +90,13 @@ async fn load_barcode_candidate_image_bytes(
     {
         Some(page)
     } else {
-        load_archive_page_row(media, page_number).await
+        load_archive_page_row(media, page_number).await?
     };
     let Some(page) = page else {
         return Ok(None);
     };
 
-    Ok(resolve_book_page_bytes(media, &page, page_number).await)
+    resolve_book_page_bytes(media, &page, page_number).await
 }
 
 fn render_pdf_page_image_for_barcode(
@@ -155,18 +155,32 @@ fn render_pdf_page_image_for_barcode(
     Ok(output.into_inner())
 }
 
-fn decode_ean13_isbn(image_bytes: &[u8]) -> Option<String> {
+fn decode_ean13_isbn(image_bytes: &[u8]) -> Result<Option<String>, String> {
     let mut hints = DecodeHints {
         TryHarder: Some(true),
         AlsoInverted: Some(true),
         ..Default::default()
     };
 
-    let result = rxing_helpers::detect_in_buffer_with_hints(
+    let result = match rxing_helpers::detect_in_buffer_with_hints(
         image_bytes,
         Some(BarcodeFormat::EAN_13),
         &mut hints,
-    )
-    .ok()?;
-    normalize_isbn13(result.getText())
+    ) {
+        Ok(result) => result,
+        Err(Exceptions::IllegalArgumentException(error)) => {
+            return Err(format!("failed to decode barcode candidate image: {error}"));
+        }
+        Err(
+            Exceptions::NotFoundException(_)
+            | Exceptions::FormatException(_)
+            | Exceptions::ChecksumException(_)
+            | Exceptions::ReaderException(_)
+            | Exceptions::ReaderDecodeException(),
+        ) => return Ok(None),
+        Err(error) => {
+            return Err(format!("failed to decode barcode candidate image: {error}"));
+        }
+    };
+    Ok(normalize_isbn13(result.getText()))
 }

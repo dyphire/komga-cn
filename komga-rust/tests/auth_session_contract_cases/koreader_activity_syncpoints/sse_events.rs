@@ -3,7 +3,8 @@ use http_body_util::BodyExt;
 use komga_application::media_assets::{
     BookImportService, BooksImportEntry, BooksImportPayload, ImportCopyMode,
 };
-use komga_infrastructure::filesystem::import::FilesystemBookImport;
+use komga_application::runtime_sse::RuntimeSseEventSink;
+use komga_infrastructure::FilesystemBookImport;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -225,16 +226,17 @@ fn missing_import_source_file(case_id: &str, file_name: &str) -> PathBuf {
 
 async fn import_book_for_sse(
     main_db: &Path,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
     source_file: &Path,
     expected_success: bool,
 ) -> Result<(), String> {
-    let pool = komga_infrastructure::sqlite::connect_test_pool(main_db, 1)
+    let pool = crate::support::sqlite::connect_test_pool(main_db, 1)
         .await
         .map_err(|error| format!("open import db for sse test: {error}"))?;
-    let service = BookImportService::new(Arc::new(FilesystemBookImport::new(
-        pool.clone(),
-        pool.clone(),
-    )));
+    let service = BookImportService::new(
+        Arc::new(FilesystemBookImport::new(pool.clone(), pool.clone())),
+        runtime_events,
+    );
     let result = service
         .process_books_payload(
             BooksImportPayload {
@@ -402,9 +404,14 @@ async fn router_sse_events_emit_book_import_for_successful_runtime_import() {
 
     let mut body = response.into_body();
     let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
-    import_book_for_sse(ctx.paths().main_db.as_path(), source_file.as_path(), true)
-        .await
-        .expect("runtime import should succeed");
+    import_book_for_sse(
+        ctx.paths().main_db.as_path(),
+        ctx.runtime_events_arc(),
+        source_file.as_path(),
+        true,
+    )
+    .await
+    .expect("runtime import should succeed");
 
     read_sse_until_buffered(
         &mut body,
@@ -456,9 +463,14 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
 
     let mut body = response.into_body();
     let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
-    import_book_for_sse(ctx.paths().main_db.as_path(), source_file.as_path(), false)
-        .await
-        .expect("runtime import should fail");
+    import_book_for_sse(
+        ctx.paths().main_db.as_path(),
+        ctx.runtime_events_arc(),
+        source_file.as_path(),
+        false,
+    )
+    .await
+    .expect("runtime import should fail");
 
     read_sse_until_buffered(
         &mut body,
@@ -483,6 +495,65 @@ async fn router_sse_events_emit_book_import_failure_for_failed_runtime_import() 
                     .is_some_and(|message| message.contains("source file does not exist"))
         }),
         "admin SSE should emit failed BookImported events with error details: {body}"
+    );
+}
+
+#[tokio::test]
+async fn router_sse_events_keep_collection_thumbnail_wire_names() {
+    let ctx = TestFixture::new("router-sse-events-collection-thumbnail-wire-name").await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sse/v1/events")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("sse collection thumbnail request should build"),
+        )
+        .await
+        .expect("sse collection thumbnail request should complete");
+
+    let mut body = response.into_body();
+    let mut body_buffer = read_initial_sse_heartbeat(&mut body).await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, upload_body) =
+        multipart_image_upload_body("file", "collection.png", "image/png", true, &image_bytes);
+    let upload = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(upload_body))
+                .expect("collection thumbnail SSE upload request should build"),
+        )
+        .await
+        .expect("collection thumbnail SSE upload request should complete");
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    read_sse_until_buffered(
+        &mut body,
+        &mut body_buffer,
+        |raw| raw.contains("event: ThumbnailSeriesCollectionAdded"),
+        Duration::from_secs(3),
+    )
+    .await;
+    let body = body_buffer;
+    let parsed =
+        parse_event_log(&body).expect("collection thumbnail wire-name SSE body should parse");
+    assert!(
+        parsed.events.iter().any(|event| {
+            event.name == "ThumbnailSeriesCollectionAdded"
+                && event.payload.get("collectionId")
+                    == Some(&Value::String("collection-1".to_string()))
+                && event.payload.get("selected") == Some(&Value::Bool(true))
+        }),
+        "SSE should preserve collection thumbnail wire event names expected by the WebUI: {body}"
     );
 }
 

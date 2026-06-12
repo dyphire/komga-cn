@@ -1,7 +1,8 @@
 use super::common_helpers::{PagePayloadMetadata, page_payload};
-use super::*;
+use komga_application::discovery::PersistedAuthorEntry;
+use serde_json::{Value, json};
 
-pub fn authors_v2_page_payload(
+pub(in crate::discovery) fn authors_v2_page_payload(
     authors: Vec<PersistedAuthorEntry>,
     page: usize,
     size: usize,

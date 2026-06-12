@@ -1,5 +1,8 @@
-use super::*;
 use std::collections::BTreeSet;
+
+use komga_application::task_processing::TaskProcessingError;
+
+use super::runtime_context::JobRuntime;
 
 pub(super) async fn refresh_book_metadata(
     runtime: &JobRuntime<'_>,
@@ -12,6 +15,7 @@ pub(super) async fn refresh_book_metadata(
 
     let outcome = crate::metadata::refresh_book_metadata(
         runtime.database().write_pool(),
+        runtime.runtime_events(),
         book_id,
         capabilities,
     )
@@ -41,9 +45,13 @@ pub(super) async fn refresh_series_metadata(
         return Ok(());
     }
 
-    crate::metadata::refresh_series_metadata(runtime.database().write_pool(), series_id)
-        .await
-        .map_err(TaskProcessingError::runtime)?;
+    crate::metadata::refresh_series_metadata(
+        runtime.database().write_pool(),
+        runtime.runtime_events(),
+        series_id,
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)?;
 
     runtime
         .search_engine()
@@ -62,9 +70,13 @@ pub(super) async fn aggregate_series_metadata(
         return Ok(());
     }
 
-    crate::metadata::aggregate_series_metadata(runtime.database().write_pool(), series_id)
-        .await
-        .map_err(TaskProcessingError::runtime)?;
+    crate::metadata::aggregate_series_metadata(
+        runtime.database().write_pool(),
+        runtime.runtime_events(),
+        series_id,
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)?;
 
     runtime
         .search_engine()
@@ -83,9 +95,13 @@ pub(super) async fn refresh_book_local_artwork(
         return Ok(());
     }
 
-    crate::metadata::refresh_book_local_artwork(runtime.database().write_pool(), book_id)
-        .await
-        .map_err(TaskProcessingError::runtime)
+    crate::metadata::refresh_book_local_artwork(
+        runtime.database().write_pool(),
+        runtime.runtime_events(),
+        book_id,
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)
 }
 
 pub(super) async fn generate_book_thumbnail(
@@ -96,9 +112,14 @@ pub(super) async fn generate_book_thumbnail(
         return Ok(());
     }
 
-    crate::metadata::generate_book_thumbnail(runtime.database().write_pool(), book_id)
-        .await
-        .map_err(TaskProcessingError::runtime)
+    crate::metadata::generate_book_thumbnail(
+        runtime.database().write_pool(),
+        runtime.runtime_events(),
+        book_id,
+        runtime.thumbnail_regeneration_policy(),
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)
 }
 
 pub(super) async fn refresh_series_local_artwork(
@@ -109,7 +130,11 @@ pub(super) async fn refresh_series_local_artwork(
         return Ok(());
     }
 
-    crate::metadata::refresh_series_local_artwork(runtime.database().write_pool(), series_id)
-        .await
-        .map_err(TaskProcessingError::runtime)
+    crate::metadata::refresh_series_local_artwork(
+        runtime.database().write_pool(),
+        runtime.runtime_events(),
+        series_id,
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)
 }

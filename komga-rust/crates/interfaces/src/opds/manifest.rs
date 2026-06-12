@@ -1,13 +1,14 @@
-use crate::identity_access::auth::AuthUser;
 use axum::Json;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::AuthUser;
 use komga_application::media_assets::{
     ManifestBuildOutcome, ManifestVariant, build_persisted_book_manifest,
 };
 use serde_json::{Value, json};
 
-use crate::request_urls::{absolutize_json_hrefs, app_absolute_url};
+use crate::media_assets::manifest_renderer::{ManifestHrefSurface, render_manifest_payload};
+use crate::request_urls::app_absolute_url;
 use crate::state::OpdsState;
 
 const OPDS_MANIFEST_CONTENT_TYPE: &str = "application/opds-publication+json";
@@ -46,27 +47,28 @@ async fn opds_manifest_variant(
     };
 
     match build_persisted_book_manifest(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        app.series_detail.as_ref(),
+        app.manifest_reader.as_ref(),
+        app.manifest_content.as_ref(),
+        app.manifest_metadata.as_ref(),
         user,
         book_id,
         variant,
     )
     .await
     {
-        Ok(ManifestBuildOutcome::Found(mut manifest)) => {
+        Ok(ManifestBuildOutcome::Found(manifest)) => {
+            let mut payload =
+                render_manifest_payload(&headers, &manifest, ManifestHrefSurface::OpdsV2);
             adapt_manifest_payload_to_opds(
-                &mut manifest.payload,
+                &mut payload,
                 &headers,
-                book_id,
+                manifest.book_id.as_str(),
                 manifest.series_id.as_deref(),
             );
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, OPDS_MANIFEST_CONTENT_TYPE)],
-                Json(manifest.payload),
+                Json(payload),
             )
                 .into_response()
         }
@@ -99,31 +101,10 @@ fn adapt_manifest_payload_to_opds(
     book_id: &str,
     series_id: Option<&str>,
 ) {
-    rewrite_api_hrefs_to_opds(payload);
-    absolutize_json_hrefs(headers, payload);
     add_series_links_to_belongs_to(payload, headers, series_id);
     add_auth_properties_to_manifest_links(payload, headers);
     add_auth_properties_to_thumbnail_resources(payload, headers);
     add_progression_link(payload, headers, book_id);
-}
-
-fn rewrite_api_hrefs_to_opds(value: &mut Value) {
-    match value {
-        Value::Array(entries) => {
-            for entry in entries {
-                rewrite_api_hrefs_to_opds(entry);
-            }
-        }
-        Value::Object(entries) => {
-            if let Some(Value::String(href)) = entries.get_mut("href") {
-                *href = href.replacen("/api/v1/", "/opds/v2/", 1);
-            }
-            for entry in entries.values_mut() {
-                rewrite_api_hrefs_to_opds(entry);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn add_series_links_to_belongs_to(

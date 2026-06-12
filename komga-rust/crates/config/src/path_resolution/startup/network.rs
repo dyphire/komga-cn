@@ -1,4 +1,16 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+
+use config::Config as LayeredConfig;
+
+use super::paths::{preferred_string, read_string};
+use crate::cli_args::{ADDR_ENV, RuntimeCli, SERVER_CONTEXT_PATH_ENV, SERVER_PORT_ENV};
+use crate::error::ConfigError;
+
+pub(crate) struct StartupNetworkConfig {
+    pub(crate) bind_address: SocketAddr,
+    pub(crate) server_context_path: String,
+}
 
 fn resolve_server_port(
     env: &BTreeMap<String, String>,
@@ -8,8 +20,16 @@ fn resolve_server_port(
         return parse_port(raw);
     }
 
-    if let Ok(port) = layered.get_int("server.port") {
-        return u16::try_from(port).map_err(|_| ConfigError::InvalidPort(port.to_string()));
+    match layered.get_int("server.port") {
+        Ok(port) => {
+            return u16::try_from(port).map_err(|_| ConfigError::InvalidPort(port.to_string()));
+        }
+        Err(config::ConfigError::NotFound(_)) => {}
+        Err(_) => match layered.get_string("server.port") {
+            Ok(port) => return parse_port(&port),
+            Err(config::ConfigError::NotFound(_)) => {}
+            Err(_) => return Err(ConfigError::InvalidPort("server.port".to_string())),
+        },
     }
 
     Ok(25600)
@@ -19,7 +39,7 @@ pub(crate) fn resolve_bind_address_and_context_path(
     cli: &RuntimeCli,
     env: &BTreeMap<String, String>,
     layered: &LayeredConfig,
-) -> Result<(SocketAddr, String), ConfigError> {
+) -> Result<StartupNetworkConfig, ConfigError> {
     let bind_address = match preferred_string(
         cli.address.as_deref(),
         env.get(ADDR_ENV).map(String::as_str),
@@ -42,7 +62,10 @@ pub(crate) fn resolve_bind_address_and_context_path(
         return Err(ConfigError::InvalidContextPath(server_context_path));
     }
 
-    Ok((bind_address, server_context_path))
+    Ok(StartupNetworkConfig {
+        bind_address,
+        server_context_path,
+    })
 }
 
 fn parse_port(raw: &str) -> Result<u16, ConfigError> {
@@ -63,4 +86,29 @@ pub(crate) fn is_valid_startup_context_path(value: &str) -> bool {
     value
         .chars()
         .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use config::Config as LayeredConfig;
+
+    use crate::error::ConfigError;
+
+    use super::resolve_server_port;
+
+    #[test]
+    fn rejects_invalid_server_port_from_application_config() {
+        let layered = LayeredConfig::builder()
+            .set_override("server.port", "not-a-port")
+            .expect("test config override should be accepted")
+            .build()
+            .expect("test config should build");
+
+        let error = resolve_server_port(&BTreeMap::new(), &layered)
+            .expect_err("invalid config server port should fail startup config resolution");
+
+        assert!(matches!(error, ConfigError::InvalidPort(value) if value == "not-a-port"));
+    }
 }

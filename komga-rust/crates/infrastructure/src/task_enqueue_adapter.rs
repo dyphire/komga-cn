@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use komga_application::media_assets::metadata_writer::TaskEnqueuePort;
+use komga_application::media_assets::TaskEnqueuePort;
 use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin, TaskQueueRecord};
 
 #[derive(Clone)]

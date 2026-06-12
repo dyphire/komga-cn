@@ -2,12 +2,14 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
+use komga_application::task_processing::TaskProcessingError;
+use komga_domain::media_assets::ThumbnailType;
 use sqlx::{Row, SqlitePool};
 use tokio::fs;
 
-use super::*;
+use super::runtime_context::JobRuntime;
+use crate::{resolve_library_item_path, resolve_optional_library_item_path};
 
 pub(super) async fn delete_book_task(
     runtime: &JobRuntime<'_>,
@@ -17,53 +19,42 @@ pub(super) async fn delete_book_task(
         return Ok(());
     }
 
-    let target = load_book_delete_target(runtime, book_id).await?;
-    let Some((series_id, oneshot)) = target else {
+    let Some(target) = load_book_delete_decision(runtime.database().read_pool(), book_id)
+        .await
+        .map_err(TaskProcessingError::runtime)?
+    else {
         return Ok(());
     };
 
-    if oneshot {
-        delete_series(runtime, &series_id).await
+    if target.oneshot {
+        delete_series(runtime, &target.series_id).await
     } else {
         delete_book(runtime, book_id).await
     }
 }
 
-async fn load_book_delete_target(
-    runtime: &JobRuntime<'_>,
+fn emit_book_changed_after_file_delete(
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
-) -> Result<Option<(String, bool)>, TaskProcessingError> {
-    Ok(
-        load_book_delete_decision(runtime.database().read_pool(), book_id)
-            .await
-            .map_err(TaskProcessingError::runtime)?
-            .map(|target| (target.series_id, target.oneshot)),
-    )
+    series_id: &str,
+    library_id: &str,
+) {
+    runtime_events.register(RuntimeSseEvent::BookChanged {
+        book_id: book_id.to_string(),
+        series_id: series_id.to_string(),
+        library_id: library_id.to_string(),
+    });
 }
 
-fn emit_book_changed_after_file_delete(book_id: &str, series_id: &str, library_id: &str) {
-    register_runtime_sse_event(
-        "BookChanged",
-        json!({
-            "bookId": book_id,
-            "seriesId": series_id,
-            "libraryId": library_id,
-        }),
-        false,
-        None,
-    );
-}
-
-fn emit_series_changed_after_file_delete(series_id: &str, library_id: &str) {
-    register_runtime_sse_event(
-        "SeriesChanged",
-        json!({
-            "seriesId": series_id,
-            "libraryId": library_id,
-        }),
-        false,
-        None,
-    );
+fn emit_series_changed_after_file_delete(
+    runtime_events: &dyn RuntimeSseEventSink,
+    series_id: &str,
+    library_id: &str,
+) {
+    runtime_events.register(RuntimeSseEvent::SeriesChanged {
+        series_id: series_id.to_string(),
+        library_id: library_id.to_string(),
+    });
 }
 
 async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), TaskProcessingError> {
@@ -84,9 +75,9 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
     let sidecar_thumbnail_paths = work.sidecar_thumbnail_paths.clone();
     // Delete tasks must still reconcile database state when the target file already vanished
     // before the worker runs; only existing paths should block on writability checks.
-    if (fs::metadata(&book_path).await.is_ok() && !deletion_prerequisites_met(&book_path).await)
+    if (delete_target_exists(&book_path).await? && !deletion_prerequisites_met(&book_path).await?)
         || !empty_parent_directory_cleanup_prerequisites_met(&book_path, &sidecar_thumbnail_paths)
-            .await
+            .await?
     {
         return Ok(());
     }
@@ -104,7 +95,12 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    emit_book_changed_after_file_delete(book_id, &context.series_id, &context.library_id);
+    emit_book_changed_after_file_delete(
+        runtime.runtime_events(),
+        book_id,
+        &context.series_id,
+        &context.library_id,
+    );
 
     Ok(())
 }
@@ -118,17 +114,27 @@ async fn remove_empty_parent_directory(target_path: &Path) -> Result<(), TaskPro
 
 async fn empty_parent_directory_cleanup_prerequisites_met(
     target_path: &Path,
-    sidecar_thumbnail_paths: &[std::path::PathBuf],
-) -> bool {
+    sidecar_thumbnail_paths: &[PathBuf],
+) -> Result<bool, TaskProcessingError> {
     let Some(parent_directory) = target_path.parent() else {
-        return true;
+        return Ok(true);
     };
-    if fs::metadata(parent_directory).await.is_err() {
-        return true;
+    match fs::metadata(parent_directory).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to inspect parent directory {} before deletion: {error}",
+                parent_directory.display()
+            )));
+        }
     }
-    let Ok(mut entries) = fs::read_dir(parent_directory).await else {
-        return false;
-    };
+    let mut entries = fs::read_dir(parent_directory).await.map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "failed to list parent directory {} before deletion: {error}",
+            parent_directory.display()
+        ))
+    })?;
 
     let mut pending_deletions = sidecar_thumbnail_paths
         .iter()
@@ -141,11 +147,16 @@ async fn empty_parent_directory_cleanup_prerequisites_met(
         match entries.next_entry().await {
             Ok(Some(entry)) => {
                 if !pending_deletions.iter().any(|path| path == &entry.path()) {
-                    return true;
+                    return Ok(true);
                 }
             }
             Ok(None) => break,
-            Err(_) => return false,
+            Err(error) => {
+                return Err(TaskProcessingError::runtime(format!(
+                    "failed to read parent directory {} before deletion: {error}",
+                    parent_directory.display()
+                )));
+            }
         }
     }
 
@@ -156,8 +167,15 @@ async fn empty_parent_directory_cleanup_prerequisites_met(
 }
 
 async fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskProcessingError> {
-    if fs::metadata(target_directory).await.is_err() {
-        return Ok(());
+    match fs::metadata(target_directory).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to inspect directory {} before deletion: {error}",
+                target_directory.display()
+            )));
+        }
     }
     let mut entries = fs::read_dir(target_directory).await.map_err(|error| {
         TaskProcessingError::runtime(format!(
@@ -181,28 +199,52 @@ async fn remove_empty_directory(target_directory: &Path) -> Result<(), TaskProce
     Ok(())
 }
 
-async fn deletion_prerequisites_met(target_path: &Path) -> bool {
-    let Ok(metadata) = fs::metadata(target_path).await else {
-        return false;
+async fn delete_target_exists(target_path: &Path) -> Result<bool, TaskProcessingError> {
+    match fs::metadata(target_path).await {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(TaskProcessingError::runtime(format!(
+            "failed to inspect delete target {}: {error}",
+            target_path.display()
+        ))),
+    }
+}
+
+async fn deletion_prerequisites_met(target_path: &Path) -> Result<bool, TaskProcessingError> {
+    let metadata = match fs::metadata(target_path).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to inspect delete target {}: {error}",
+                target_path.display()
+            )));
+        }
     };
     if metadata.is_dir() {
         return directory_delete_prerequisites_met(target_path).await;
     }
-    fs::OpenOptions::new()
+    Ok(fs::OpenOptions::new()
         .write(true)
         .open(target_path)
         .await
-        .is_ok()
+        .is_ok())
 }
 
-async fn directory_delete_prerequisites_met(target_directory: &Path) -> bool {
+async fn directory_delete_prerequisites_met(
+    target_directory: &Path,
+) -> Result<bool, TaskProcessingError> {
     // Windows can still allow child-file creation inside a readonly directory while refusing to
     // remove the directory itself, so delete preconditions must reject readonly metadata before
     // treating the directory as safe for book/series cleanup.
     match fs::metadata(target_directory).await {
-        Ok(metadata) if metadata.permissions().readonly() => false,
-        Ok(_) => directory_is_writable(target_directory).await,
-        Err(_) => false,
+        Ok(metadata) if metadata.permissions().readonly() => Ok(false),
+        Ok(_) => Ok(directory_is_writable(target_directory).await),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(TaskProcessingError::runtime(format!(
+            "failed to inspect delete directory {}: {error}",
+            target_directory.display()
+        ))),
     }
 }
 
@@ -211,7 +253,7 @@ async fn remove_sidecar_thumbnail_files<T: AsRef<Path>>(
 ) -> Result<(), TaskProcessingError> {
     for sidecar_thumbnail_path in sidecar_thumbnail_paths {
         let sidecar_thumbnail_path = sidecar_thumbnail_path.as_ref();
-        if deletion_prerequisites_met(sidecar_thumbnail_path).await {
+        if deletion_prerequisites_met(sidecar_thumbnail_path).await? {
             delete_file_if_exists(sidecar_thumbnail_path, "sidecar thumbnail file").await?;
         }
     }
@@ -243,7 +285,7 @@ pub(super) async fn delete_series(
     // A delete-series task promises to remove the series directory itself. If that directory is
     // already missing or cannot be deleted safely, abort before cascading into child soft-deletes
     // so the database never drifts ahead of the filesystem preconditions.
-    let can_delete_series = deletion_prerequisites_met(&series_path_for_check).await;
+    let can_delete_series = deletion_prerequisites_met(&series_path_for_check).await?;
     if !can_delete_series {
         return Ok(());
     }
@@ -276,7 +318,7 @@ pub(super) async fn delete_series(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    emit_series_changed_after_file_delete(series_id, &context.library_id);
+    emit_series_changed_after_file_delete(runtime.runtime_events(), series_id, &context.library_id);
 
     Ok(())
 }
@@ -334,46 +376,44 @@ async fn directory_is_writable(target_directory: &Path) -> bool {
     false
 }
 
-use crate::{resolve_library_item_path, resolve_optional_library_item_path};
-
 #[derive(Clone, Debug)]
-pub struct PersistedDeleteBookDecision {
-    pub series_id: String,
-    pub oneshot: bool,
+pub(in crate::task_queue) struct PersistedDeleteBookDecision {
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) oneshot: bool,
 }
 
 #[derive(Clone, Debug)]
-pub struct PersistedDeleteBookSseContext {
-    pub series_id: String,
-    pub library_id: String,
+pub(in crate::task_queue) struct PersistedDeleteBookSseContext {
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) library_id: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct PersistedDeleteBookWork {
-    pub series_id: String,
-    pub book_path: PathBuf,
-    pub sidecar_thumbnail_paths: Vec<PathBuf>,
+pub(in crate::task_queue) struct PersistedDeleteBookWork {
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) book_path: PathBuf,
+    pub(in crate::task_queue) sidecar_thumbnail_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PersistedDeleteSeriesWork {
-    pub book_ids: Vec<String>,
-    pub series_path: Option<PathBuf>,
-    pub sidecar_thumbnail_paths: Vec<PathBuf>,
+pub(in crate::task_queue) struct PersistedDeleteSeriesWork {
+    pub(in crate::task_queue) book_ids: Vec<String>,
+    pub(in crate::task_queue) series_path: Option<PathBuf>,
+    pub(in crate::task_queue) sidecar_thumbnail_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PersistedDeleteSeriesSseContext {
-    pub library_id: String,
+pub(in crate::task_queue) struct PersistedDeleteSeriesSseContext {
+    pub(in crate::task_queue) library_id: String,
 }
 
-pub async fn load_book_delete_decision(
+pub(in crate::task_queue) async fn load_book_delete_decision(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedDeleteBookDecision>, String> {
     let row = sqlx::query(
         r#"
-        SELECT SERIES_ID, COALESCE(oneshot, 0) AS ONESHOT
+        SELECT SERIES_ID, oneshot AS ONESHOT
         FROM BOOK
         WHERE ID = ?
         LIMIT 1
@@ -390,7 +430,7 @@ pub async fn load_book_delete_decision(
     }))
 }
 
-pub async fn load_book_delete_sse_context(
+pub(in crate::task_queue) async fn load_book_delete_sse_context(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedDeleteBookSseContext>, String> {
@@ -413,7 +453,7 @@ pub async fn load_book_delete_sse_context(
     }))
 }
 
-pub async fn load_book_delete_work(
+pub(in crate::task_queue) async fn load_book_delete_work(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedDeleteBookWork>, String> {
@@ -442,12 +482,13 @@ pub async fn load_book_delete_work(
         JOIN BOOK b ON b.ID = tb.BOOK_ID
         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
         WHERE tb.BOOK_ID = ?
-          AND tb.TYPE = 'SIDECAR'
+          AND tb.TYPE = ?
           AND tb.URL IS NOT NULL
         ORDER BY tb.ID ASC
         "#,
     )
     .bind(book_id)
+    .bind(ThumbnailType::Sidecar.persisted_name())
     .fetch_all(pool)
     .await
     .map_err(|error| format!("failed to load sidecar thumbnails for '{book_id}': {error}"))?;
@@ -470,7 +511,7 @@ pub async fn load_book_delete_work(
     }))
 }
 
-pub async fn soft_delete_book_rows(
+pub(in crate::task_queue) async fn soft_delete_book_rows(
     pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
@@ -521,7 +562,7 @@ pub async fn soft_delete_book_rows(
     Ok(())
 }
 
-pub async fn load_series_delete_sse_context(
+pub(in crate::task_queue) async fn load_series_delete_sse_context(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedDeleteSeriesSseContext>, String> {
@@ -545,7 +586,7 @@ pub async fn load_series_delete_sse_context(
     }))
 }
 
-pub async fn load_series_delete_work(
+pub(in crate::task_queue) async fn load_series_delete_work(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<PersistedDeleteSeriesWork, String> {
@@ -588,12 +629,13 @@ pub async fn load_series_delete_work(
         JOIN SERIES s ON s.ID = ts.SERIES_ID
         JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
         WHERE ts.SERIES_ID = ?
-          AND ts.TYPE = 'SIDECAR'
+          AND ts.TYPE = ?
           AND ts.URL IS NOT NULL
         ORDER BY ts.ID ASC
         "#,
     )
     .bind(series_id)
+    .bind(ThumbnailType::Sidecar.persisted_name())
     .fetch_all(pool)
     .await
     .map_err(|error| {
@@ -623,7 +665,10 @@ pub async fn load_series_delete_work(
     })
 }
 
-pub async fn soft_delete_series_rows(pool: &SqlitePool, series_id: &str) -> Result<(), String> {
+pub(in crate::task_queue) async fn soft_delete_series_rows(
+    pool: &SqlitePool,
+    series_id: &str,
+) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|error| {
         format!("failed to start soft-delete-series transaction for '{series_id}': {error}")
     })?;
@@ -648,7 +693,7 @@ pub async fn soft_delete_series_rows(pool: &SqlitePool, series_id: &str) -> Resu
     Ok(())
 }
 
-pub async fn soft_delete_series_book_rows(
+pub(in crate::task_queue) async fn soft_delete_series_book_rows(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<(), String> {
@@ -698,4 +743,97 @@ pub async fn soft_delete_series_book_rows(
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn remove_empty_directory_propagates_non_missing_metadata_errors() {
+        let root = unique_delete_task_path("remove-empty-directory-metadata-error");
+        fs::create_dir_all(&root)
+            .await
+            .expect("delete task test root should be created");
+        let file_component = root.join("not-a-directory");
+        fs::write(&file_component, b"not a directory")
+            .await
+            .expect("file component should be created");
+
+        let target = file_component.join("child");
+        let error = remove_empty_directory(&target)
+            .await
+            .expect_err("ENOTDIR metadata errors must not be treated as a missing directory");
+        assert!(
+            error.message.contains("failed to inspect directory"),
+            "unexpected error: {}",
+            error.message,
+        );
+
+        let missing = root.join("missing");
+        remove_empty_directory(&missing)
+            .await
+            .expect("missing directory should stay a no-op");
+
+        let _ = fs::remove_dir_all(&root).await;
+    }
+
+    #[tokio::test]
+    async fn empty_parent_cleanup_prerequisites_propagates_parent_metadata_errors() {
+        let root = unique_delete_task_path("parent-cleanup-metadata-error");
+        fs::create_dir_all(&root)
+            .await
+            .expect("delete task test root should be created");
+        let file_component = root.join("not-a-directory");
+        fs::write(&file_component, b"not a directory")
+            .await
+            .expect("file component should be created");
+
+        let target = file_component.join("child").join("book.cbz");
+        let error = empty_parent_directory_cleanup_prerequisites_met(&target, &[])
+            .await
+            .expect_err("parent metadata errors must fail delete cleanup preconditions");
+        assert!(
+            error.message.contains("failed to inspect parent directory"),
+            "unexpected error: {}",
+            error.message,
+        );
+
+        let _ = fs::remove_dir_all(&root).await;
+    }
+
+    #[tokio::test]
+    async fn deletion_prerequisites_propagate_target_metadata_errors() {
+        let root = unique_delete_task_path("target-metadata-error");
+        fs::create_dir_all(&root)
+            .await
+            .expect("delete task test root should be created");
+        let file_component = root.join("not-a-directory");
+        fs::write(&file_component, b"not a directory")
+            .await
+            .expect("file component should be created");
+
+        let target = file_component.join("book.cbz");
+        let error = deletion_prerequisites_met(&target)
+            .await
+            .expect_err("target metadata errors must fail delete preconditions");
+        assert!(
+            error.message.contains("failed to inspect delete target"),
+            "unexpected error: {}",
+            error.message,
+        );
+
+        let _ = fs::remove_dir_all(&root).await;
+    }
+
+    fn unique_delete_task_path(case: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "komga-delete-task-{case}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 }

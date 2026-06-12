@@ -2,75 +2,127 @@ use super::shared::{
     parse_thumbnail_upload, response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     thumbnail_dimensions,
 };
-use super::*;
-use crate::identity_access::auth::{Admin, Authenticated};
-use crate::state::MediaAssetsState;
-use axum::extract::State;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::Multipart;
+use komga_application::identity_access::AuthUser;
+use serde_json::json;
 
-pub async fn book_thumbnail(
+use crate::identity_access::auth::{Admin, Authenticated};
+use crate::media_assets::types::PersistedBookMedia;
+use crate::state::MediaAssetsState;
+
+use super::super::access_control::user_can_access_book_media;
+use super::super::http_helpers::internal_error_response;
+
+async fn load_thumbnail_book_media(
+    app: &MediaAssetsState,
+    book_id: &str,
+) -> Result<Option<PersistedBookMedia>, Response> {
+    app.thumbnail_reader
+        .book_media(book_id)
+        .await
+        .map_err(internal_error_response)
+}
+
+async fn ensure_thumbnail_book_access(
+    app: &MediaAssetsState,
+    book_id: &str,
+    user: &AuthUser,
+    media: &PersistedBookMedia,
+) -> Result<(), Response> {
+    match user_can_access_book_media(app.book_media_reader.as_ref(), book_id, user, media).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(StatusCode::FORBIDDEN.into_response()),
+        Err(error) => Err(internal_error_response(error)),
+    }
+}
+
+pub(crate) async fn book_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Ok(Some(media)) = app.reader.book_media(&book_id).await {
-        if !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await {
-            return StatusCode::FORBIDDEN.into_response();
-        }
+    let media = match load_thumbnail_book_media(&app, &book_id).await {
+        Ok(Some(media)) => media,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await {
+        return response;
+    }
 
-        match app.reader.selected_book_thumbnail(&book_id).await {
-            Ok(Some(thumbnail)) => {
-                return response_from_thumbnail_bytes(
-                    &headers,
-                    thumbnail.thumbnail,
-                    thumbnail.media_type.as_str(),
-                );
-            }
-            Ok(None) => {}
-            Err(error) => return internal_error_response(error),
+    match app.thumbnail_reader.selected_book_thumbnail(&book_id).await {
+        Ok(Some(thumbnail)) => {
+            return response_from_thumbnail_bytes(
+                &headers,
+                thumbnail.thumbnail,
+                thumbnail.media_type.as_str(),
+            );
         }
-
-        return StatusCode::NOT_FOUND.into_response();
+        Ok(None) => {}
+        Err(error) => return internal_error_response(error),
     }
 
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn book_thumbnail_by_id(
+pub(crate) async fn book_thumbnail_by_id(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if let Ok(Some(media)) = app.reader.book_media(&book_id).await
-        && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
-    {
-        return StatusCode::FORBIDDEN.into_response();
+    match load_thumbnail_book_media(&app, &book_id).await {
+        Ok(Some(media)) => {
+            if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await
+            {
+                return response;
+            }
+        }
+        Ok(None) => {}
+        Err(response) => return response,
     }
 
-    match app.reader.book_thumbnail_by_id(&thumbnail_id).await {
+    match app
+        .thumbnail_reader
+        .book_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
         Ok(Some(thumbnail)) => response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
-pub async fn book_thumbnails(
+pub(crate) async fn book_thumbnails(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    if let Ok(Some(media)) = app.reader.book_media(&book_id).await
-        && !user_can_access_book_media(app.reader.as_ref(), &book_id, &user, &media).await
-    {
-        return StatusCode::FORBIDDEN.into_response();
+    match load_thumbnail_book_media(&app, &book_id).await {
+        Ok(Some(media)) => {
+            if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await
+            {
+                return response;
+            }
+        }
+        Ok(None) => {}
+        Err(response) => return response,
     }
 
-    match app.reader.book_thumbnails(&book_id).await {
+    match app.thumbnail_reader.book_thumbnails(&book_id).await {
         Ok(rows) => {
             if rows.is_empty() {
-                if app.reader.book_exists(&book_id).await.unwrap_or(false) {
-                    return Json(json!([])).into_response();
+                match app.thumbnail_reader.book_exists(&book_id).await {
+                    Ok(true) => {
+                        return Json(json!([])).into_response();
+                    }
+                    Ok(false) => {}
+                    Err(error) => return internal_error_response(error),
                 }
 
                 return StatusCode::NOT_FOUND.into_response();
@@ -82,7 +134,7 @@ pub async fn book_thumbnails(
                         json!({
                             "id": row.id,
                             "bookId": row.book_id,
-                            "type": row.thumbnail_type,
+                            "type": row.thumbnail_type.persisted_name(),
                             "selected": row.selected,
                             "mediaType": row.media_type,
                             "fileSize": row.file_size,
@@ -98,22 +150,23 @@ pub async fn book_thumbnails(
     }
 }
 
-pub async fn book_thumbnail_upload(
+pub(crate) async fn book_thumbnail_upload(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(book_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !app.reader.book_exists(&book_id).await.unwrap_or(false) {
-        return StatusCode::NOT_FOUND.into_response();
+    match app.thumbnail_reader.book_exists(&book_id).await {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
-    let (thumbnail_bytes, media_type, selected) =
-        match parse_thumbnail_upload(multipart, "book").await {
-            Ok(parsed) => parsed,
-            Err(response) => return response,
-        };
-    let Some((width, height)) = thumbnail_dimensions(&thumbnail_bytes) else {
+    let upload = match parse_thumbnail_upload(multipart, "book").await {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
@@ -121,18 +174,18 @@ pub async fn book_thumbnail_upload(
         .thumbnails
         .insert_book(
             &book_id,
-            &thumbnail_bytes,
-            media_type.as_str(),
-            width,
-            height,
-            selected,
+            &upload.bytes,
+            upload.media_type.as_str(),
+            dimensions.width,
+            dimensions.height,
+            upload.selected,
         )
         .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
             "bookId": thumbnail.book_id,
-            "type": thumbnail.thumbnail_type,
+            "type": thumbnail.thumbnail_type.persisted_name(),
             "selected": thumbnail.selected,
             "mediaType": thumbnail.media_type,
             "fileSize": thumbnail.file_size,
@@ -144,7 +197,7 @@ pub async fn book_thumbnail_upload(
     }
 }
 
-pub async fn book_thumbnail_select(
+pub(crate) async fn book_thumbnail_select(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,
@@ -156,7 +209,7 @@ pub async fn book_thumbnail_select(
     }
 }
 
-pub async fn book_thumbnail_delete(
+pub(crate) async fn book_thumbnail_delete(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((_book_id, thumbnail_id)): Path<(String, String)>,

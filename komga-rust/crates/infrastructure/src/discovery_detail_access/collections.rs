@@ -2,15 +2,15 @@ use sqlx::{Row, SqlitePool};
 
 use super::common;
 
-pub use komga_application::discovery::{
+use komga_application::discovery::{
     PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
 
-pub async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
+pub(super) async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
     common::table_has_rows(pool, "COLLECTION", "persisted collections").await
 }
 
-pub async fn load_persisted_collections(
+pub(super) async fn load_persisted_collections(
     pool: &SqlitePool,
 ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
     let rows = sqlx::query(
@@ -34,7 +34,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
         .collect())
 }
 
-pub async fn load_persisted_collection_detail(
+pub(super) async fn load_persisted_collection_detail(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
@@ -57,7 +57,7 @@ WHERE ID = ?"#,
     }))
 }
 
-pub async fn load_persisted_collection_series_ids(
+pub(super) async fn load_persisted_collection_series_ids(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Vec<String>, String> {
@@ -78,7 +78,7 @@ ORDER BY NUMBER ASC"#,
         .collect())
 }
 
-pub async fn load_series_library_id(
+pub(super) async fn load_series_library_id(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<String>, String> {
@@ -96,7 +96,7 @@ LIMIT 1"#,
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
 
-pub async fn load_series_restrictions(
+pub(super) async fn load_series_restrictions(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<PersistedSeriesRestrictionRecord, String> {
@@ -123,7 +123,7 @@ WHERE SERIES_ID = ?"#,
 
     let age_rating = age_row
         .and_then(|row| row.get::<Option<i64>, _>("AGE_RATING"))
-        .and_then(|value| u16::try_from(value).ok());
+        .map(common::clamp_kotlin_int_u32);
     let labels = label_rows
         .into_iter()
         .map(|row| row.get::<String, _>("LABEL"))
@@ -132,7 +132,7 @@ WHERE SERIES_ID = ?"#,
     Ok(PersistedSeriesRestrictionRecord { age_rating, labels })
 }
 
-pub async fn persist_collection_create(
+pub(super) async fn persist_collection_create(
     pool: &SqlitePool,
     collection_id: &str,
     name: &str,
@@ -175,7 +175,7 @@ VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
     Ok(())
 }
 
-pub async fn persist_collection_update(
+pub(super) async fn persist_collection_update(
     pool: &SqlitePool,
     collection_id: &str,
     name: &str,
@@ -226,7 +226,7 @@ WHERE ID = ?"#,
     Ok(true)
 }
 
-pub async fn delete_persisted_collection(
+pub(super) async fn delete_persisted_collection(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<bool, String> {

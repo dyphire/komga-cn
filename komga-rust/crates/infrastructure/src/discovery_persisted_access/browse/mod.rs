@@ -1,24 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
-use async_trait::async_trait;
-use komga_application::discovery::{
-    BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
-    FacetKind, FacetScope, LatestBooksRequest, SeriesAlphabeticalGroupsRequest,
-    SeriesBrowseRequest, SeriesReadModel,
-};
-use komga_domain::discovery::{
-    AgeRestrictionKind, BookSort, DiscoveryError,
-    DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope, SeriesSort,
-};
-use serde_json::{Value, json};
-
 use crate::database_handle::DatabaseHandle;
 use crate::discovery_persisted_access::{
     books, facets, library_mappings, models as persisted_models, runtime_queries, series,
 };
 use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
+use async_trait::async_trait;
+use komga_application::discovery::{
+    BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
+    FacetKind, FacetScope, LatestBooksRequest, ScoredSearchHit, SeriesAlphabeticalGroup,
+    SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest, SeriesReadModel,
+    SeriesReadProgressCounts, SeriesReadingDirection,
+};
+use komga_domain::discovery::{
+    BookSort, DiscoveryError, DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
+    QueryRestrictions, SeriesSort, SeriesStatus,
+};
 
 mod books_queries;
 mod common_helpers;
@@ -31,14 +30,6 @@ use models::{
     PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
     PersistedWebLinkEntry, SeriesFilterCriteria,
 };
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct QueryRestrictions {
-    age: Option<u16>,
-    age_restriction: Option<AgeRestrictionKind>,
-    labels_allow: Vec<String>,
-    labels_exclude: Vec<String>,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DiscoveryQueryContext {
@@ -89,7 +80,7 @@ trait PersistedDiscoveryBrowseDataSource: Send + Sync {
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, (i64, i64)>, String>;
+    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String>;
 
     async fn load_series_read_dates(
         &self,
@@ -113,7 +104,7 @@ trait PersistedDiscoveryBrowseDataSource: Send + Sync {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, String>;
+    ) -> Result<Vec<ScoredSearchHit>, String>;
 }
 
 #[derive(Clone)]
@@ -137,15 +128,7 @@ fn to_browse_context(context: &DomainDiscoveryQueryContext) -> DiscoveryQueryCon
             .authorized_library_ids
             .as_ref()
             .map(|ids| ids.iter().map(|id| id.as_str().to_string()).collect()),
-        restrictions: context
-            .restrictions
-            .as_ref()
-            .map(|restrictions| QueryRestrictions {
-                age: restrictions.age,
-                age_restriction: restrictions.age_restriction,
-                labels_allow: restrictions.labels_allow.clone(),
-                labels_exclude: restrictions.labels_exclude.clone(),
-            }),
+        restrictions: context.restrictions.clone(),
     }
 }
 
@@ -243,9 +226,9 @@ fn persisted_series_to_read_model(series: &PersistedSeriesSummary) -> SeriesRead
         books_read_count: series.books_read_count,
         books_unread_count: series.books_unread_count,
         books_in_progress_count: series.books_in_progress_count,
-        status: series.status.clone(),
+        status: SeriesStatus::parse(&series.status).unwrap_or(SeriesStatus::Ongoing),
         summary: series.summary.clone(),
-        reading_direction: series.reading_direction.clone(),
+        reading_direction: SeriesReadingDirection::parse(&series.reading_direction),
         publisher: series.publisher.clone(),
         age_rating: series.age_rating,
         language: series.language.clone(),
@@ -473,7 +456,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, (i64, i64)>, String> {
+    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String> {
         runtime_queries::load_series_read_progress_counts(self.db.read_pool(), user_id).await
     }
 
@@ -508,19 +491,23 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     }
 
     async fn search_book_ids(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
-        Ok(self
-            .search
-            .search_ids_or_empty(query, SearchEntityType::Book, limit))
+        self.search.search_ids(query, SearchEntityType::Book, limit)
     }
 
     async fn search_series_scored_ids(
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
+    ) -> Result<Vec<ScoredSearchHit>, String> {
         Ok(self
             .search
-            .search_scored_ids_or_empty(query, SearchEntityType::Series, limit))
+            .search_scored_ids(query, SearchEntityType::Series, limit)?
+            .into_iter()
+            .map(|hit| ScoredSearchHit {
+                score: hit.score,
+                id: hit.id,
+            })
+            .collect())
     }
 }
 
@@ -542,9 +529,10 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
         )
         .with_condition(request.filter.condition);
 
-        let page = series_queries::load_persisted_series_page(self, &context, persisted_query)
-            .await
-            .map_err(DiscoveryError::Persistence)?;
+        let page =
+            series_queries::filtering::load_persisted_series_page(self, &context, persisted_query)
+                .await
+                .map_err(DiscoveryError::Persistence)?;
         Ok(map_series_page(page))
     }
 
@@ -595,9 +583,9 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
         &self,
         context: &DomainDiscoveryQueryContext,
         request: SeriesAlphabeticalGroupsRequest,
-    ) -> Result<Vec<serde_json::Value>, DiscoveryError> {
+    ) -> Result<Vec<SeriesAlphabeticalGroup>, DiscoveryError> {
         let context = to_browse_context(context);
-        series_queries::load_persisted_alphabetical_groups(
+        series_queries::groups::load_persisted_alphabetical_groups(
             self,
             &context,
             request.filter.condition,
@@ -680,11 +668,10 @@ mod tests {
     };
     use komga_domain::common_ids::{LibraryId, UserId};
     use komga_domain::discovery::{
-        BookCondition, BookFilter, BookValueCondition, CompositeBookCondition,
+        AgeRestrictionKind, BookCondition, BookFilter, BookValueCondition, CompositeBookCondition,
         CompositeSeriesCondition, DiscoveryQueryContext, FilterOperator, InclusionCondition,
         QueryRestrictions, SeriesCondition, SeriesFilter, SeriesValueCondition, StringCondition,
     };
-    use serde_json::json;
     use sqlx::SqlitePool;
 
     use super::*;
@@ -781,6 +768,45 @@ mod tests {
             labels_allow: labels.iter().map(|label| label.to_string()).collect(),
             labels_exclude: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn list_search_propagates_missing_index_errors() {
+        let fixture = BrowseFixture::new("missing-index-search-error").await;
+
+        let book_error = DiscoveryBrowseService::list_books(
+            &fixture.service,
+            &unrestricted_context(),
+            BooksBrowseRequest {
+                search: Some("anything".to_string()),
+                ..BooksBrowseRequest::default()
+            },
+        )
+        .await
+        .expect_err("missing search index should fail book search");
+        assert!(matches!(
+            book_error,
+            DiscoveryError::Persistence(message)
+                if message.contains("failed to open search index for query")
+        ));
+
+        let series_error = DiscoveryBrowseService::list_series(
+            &fixture.service,
+            &unrestricted_context(),
+            SeriesBrowseRequest {
+                search: Some("anything".to_string()),
+                ..SeriesBrowseRequest::default()
+            },
+        )
+        .await
+        .expect_err("missing search index should fail series search");
+        assert!(matches!(
+            series_error,
+            DiscoveryError::Persistence(message)
+                if message.contains("failed to open search index for query")
+        ));
+
+        fixture.cleanup().await;
     }
 
     async fn insert_library(pool: &SqlitePool, id: &str) {
@@ -1129,7 +1155,13 @@ mod tests {
         .await
         .expect("alphabetical groups should load");
 
-        assert_eq!(groups, vec![json!({ "group": "a", "count": 1 })]);
+        assert_eq!(
+            groups,
+            vec![SeriesAlphabeticalGroup {
+                group: "a".to_string(),
+                count: 1,
+            }]
+        );
         fixture.cleanup().await;
     }
 

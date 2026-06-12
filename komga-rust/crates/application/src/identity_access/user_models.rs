@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use std::collections::BTreeSet;
+
+use komga_domain::discovery::{AgeRestrictionKind as DomainAgeRestrictionKind, QueryRestrictions};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedApiKey {
@@ -37,7 +37,7 @@ pub struct AuthUser {
     pub id: String,
     pub email: String,
     pub password: String,
-    pub roles: Vec<String>,
+    pub roles: Vec<AuthUserRole>,
     pub shared_all_libraries: bool,
     pub shared_library_ids: Vec<String>,
     pub labels_allow: Vec<String>,
@@ -66,7 +66,13 @@ pub struct AuthUserAgeRestrictionSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthUserAgeRestriction {
     pub age: i64,
-    pub restriction: String,
+    pub restriction: AuthUserAgeRestrictionKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthUserAgeRestrictionKind {
+    AllowOnly,
+    Exclude,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +80,102 @@ pub enum AuthOutcome {
     Valid(Box<AuthUser>),
     Invalid,
     Missing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum AuthUserRole {
+    Admin,
+    FileDownload,
+    PageStreaming,
+    KoboSync,
+    KoreaderSync,
+}
+
+impl AuthUserRole {
+    pub const CLAIM_ROLES: [Self; 5] = [
+        Self::Admin,
+        Self::FileDownload,
+        Self::PageStreaming,
+        Self::KoboSync,
+        Self::KoreaderSync,
+    ];
+    pub const VIRTUAL_USER_ROLE_NAME: &'static str = "USER";
+
+    pub fn claim_roles() -> impl Iterator<Item = Self> {
+        Self::CLAIM_ROLES.into_iter()
+    }
+
+    pub fn claim_role_names() -> impl Iterator<Item = &'static str> {
+        Self::claim_roles().map(Self::persisted_name)
+    }
+
+    pub fn persisted_name(self) -> &'static str {
+        match self {
+            Self::Admin => "ADMIN",
+            Self::FileDownload => "FILE_DOWNLOAD",
+            Self::PageStreaming => "PAGE_STREAMING",
+            Self::KoboSync => "KOBO_SYNC",
+            Self::KoreaderSync => "KOREADER_SYNC",
+        }
+    }
+
+    pub fn from_persisted_name(value: &str) -> Option<Self> {
+        match value {
+            "ADMIN" => Some(Self::Admin),
+            "FILE_DOWNLOAD" => Some(Self::FileDownload),
+            "PAGE_STREAMING" => Some(Self::PageStreaming),
+            "KOBO_SYNC" => Some(Self::KoboSync),
+            "KOREADER_SYNC" => Some(Self::KoreaderSync),
+            _ => None,
+        }
+    }
+}
+
+impl AuthUserAgeRestrictionKind {
+    pub fn persisted_name(self) -> &'static str {
+        match self {
+            Self::AllowOnly => "ALLOW_ONLY",
+            Self::Exclude => "EXCLUDE",
+        }
+    }
+
+    pub fn from_persisted_name(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "ALLOW_ONLY" => Some(Self::AllowOnly),
+            "EXCLUDE" => Some(Self::Exclude),
+            _ => None,
+        }
+    }
+
+    pub fn from_allow_only(value: bool) -> Self {
+        if value {
+            Self::AllowOnly
+        } else {
+            Self::Exclude
+        }
+    }
+}
+
+pub fn user_age_restriction_from_persisted_columns(
+    age: Option<i64>,
+    allow_only: Option<bool>,
+) -> Option<AuthUserAgeRestriction> {
+    match (age, allow_only) {
+        (Some(age), Some(allow_only)) => Some(AuthUserAgeRestriction {
+            age,
+            restriction: AuthUserAgeRestrictionKind::from_allow_only(allow_only),
+        }),
+        _ => None,
+    }
+}
+
+impl From<AuthUserAgeRestrictionKind> for DomainAgeRestrictionKind {
+    fn from(value: AuthUserAgeRestrictionKind) -> Self {
+        match value {
+            AuthUserAgeRestrictionKind::AllowOnly => Self::AllowOnly,
+            AuthUserAgeRestrictionKind::Exclude => Self::Exclude,
+        }
+    }
 }
 
 impl PersistedApiKey {
@@ -159,11 +261,38 @@ pub fn user_id(user: &AuthUser) -> &str {
 }
 
 pub fn user_is_admin(user: &AuthUser) -> bool {
-    user.roles.iter().any(|role| role == "ADMIN")
+    user_has_role(user, AuthUserRole::Admin)
 }
 
-pub fn user_has_role(user: &AuthUser, role: &str) -> bool {
-    user.roles.iter().any(|candidate| candidate == role)
+pub fn user_has_role(user: &AuthUser, role: AuthUserRole) -> bool {
+    user.roles.contains(&role)
+}
+
+pub fn user_persisted_role_names(user: &AuthUser) -> impl Iterator<Item = &'static str> + '_ {
+    user.roles.iter().copied().map(AuthUserRole::persisted_name)
+}
+
+pub fn user_response_role_names(user: &AuthUser) -> Vec<&'static str> {
+    let mut roles = user_persisted_role_names(user).collect::<Vec<_>>();
+    roles.push(AuthUserRole::VIRTUAL_USER_ROLE_NAME);
+    roles.sort_unstable();
+    roles.dedup();
+    roles
+}
+
+pub fn user_roles_from_persisted_names<I, S>(roles: I) -> Vec<AuthUserRole>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut roles = roles
+        .into_iter()
+        .filter(|role| role.as_ref() != AuthUserRole::VIRTUAL_USER_ROLE_NAME)
+        .filter_map(|role| AuthUserRole::from_persisted_name(role.as_ref()))
+        .collect::<Vec<_>>();
+    roles.sort_unstable();
+    roles.dedup();
+    roles
 }
 
 pub fn user_shared_all_libraries(user: &AuthUser) -> bool {
@@ -174,40 +303,28 @@ pub fn user_shared_library_ids(user: &AuthUser) -> &[String] {
     user.shared_library_ids.as_slice()
 }
 
-pub fn user_payload_json(user: &AuthUser) -> Value {
-    let mut roles = BTreeSet::new();
-    for role in &user.roles {
-        let role = role.trim();
-        if role.is_empty() {
-            continue;
-        }
-        roles.insert(role.to_string());
+pub fn user_query_restrictions(user: &AuthUser) -> QueryRestrictions {
+    QueryRestrictions {
+        age: user
+            .age_restriction
+            .as_ref()
+            .and_then(|restriction| u16::try_from(restriction.age).ok()),
+        age_restriction: user
+            .age_restriction
+            .as_ref()
+            .map(|restriction| restriction.restriction.into()),
+        labels_allow: normalized_user_labels(&user.labels_allow),
+        labels_exclude: normalized_user_labels(&user.labels_exclude),
     }
-    roles.insert("USER".to_string());
-
-    let mut payload = json!({
-        "id": user.id,
-        "email": user.email,
-        "roles": roles,
-        "sharedAllLibraries": user.shared_all_libraries,
-        "sharedLibrariesIds": user.shared_library_ids,
-        "labelsAllow": user.labels_allow,
-        "labelsExclude": user.labels_exclude,
-    });
-    if let Some(age_restriction) = &user.age_restriction {
-        payload["ageRestriction"] = json!({
-            "age": age_restriction.age,
-            "restriction": age_restriction.restriction,
-        });
-    }
-    payload
 }
 
 pub fn user_session_snapshot(user: &AuthUser) -> AuthUserSessionSnapshot {
     AuthUserSessionSnapshot {
         id: user.id.clone(),
         email: user.email.clone(),
-        roles: user.roles.clone(),
+        roles: user_persisted_role_names(user)
+            .map(str::to_string)
+            .collect(),
         shared_all_libraries: user.shared_all_libraries,
         shared_library_ids: user.shared_library_ids.clone(),
         labels_allow: user.labels_allow.clone(),
@@ -215,27 +332,118 @@ pub fn user_session_snapshot(user: &AuthUser) -> AuthUserSessionSnapshot {
         age_restriction: user.age_restriction.as_ref().map(|age_restriction| {
             AuthUserAgeRestrictionSnapshot {
                 age: age_restriction.age,
-                restriction: age_restriction.restriction.clone(),
+                restriction: age_restriction.restriction.persisted_name().to_string(),
             }
         }),
     }
 }
 
 pub fn user_from_session_snapshot(snapshot: &AuthUserSessionSnapshot) -> AuthUser {
+    let age_restriction = snapshot.age_restriction.as_ref().map(|age_restriction| {
+        let restriction =
+            AuthUserAgeRestrictionKind::from_persisted_name(&age_restriction.restriction)
+                .expect("session snapshot age restriction kind should use a known value");
+        AuthUserAgeRestriction {
+            age: age_restriction.age,
+            restriction,
+        }
+    });
+
     AuthUser {
         id: snapshot.id.clone(),
         email: snapshot.email.clone(),
         password: String::new(),
-        roles: snapshot.roles.clone(),
+        roles: user_roles_from_persisted_names(&snapshot.roles),
         shared_all_libraries: snapshot.shared_all_libraries,
         shared_library_ids: snapshot.shared_library_ids.clone(),
         labels_allow: snapshot.labels_allow.clone(),
         labels_exclude: snapshot.labels_exclude.clone(),
-        age_restriction: snapshot.age_restriction.as_ref().map(|age_restriction| {
-            AuthUserAgeRestriction {
-                age: age_restriction.age,
-                restriction: age_restriction.restriction.clone(),
-            }
-        }),
+        age_restriction,
+    }
+}
+
+fn normalized_user_labels(labels: &[String]) -> Vec<String> {
+    labels
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn age_restriction_kind_survives_session_snapshot_as_persisted_name() {
+        let user = AuthUser {
+            id: "user-1".to_string(),
+            email: "user@example.org".to_string(),
+            password: String::new(),
+            roles: vec![AuthUserRole::PageStreaming],
+            shared_all_libraries: true,
+            shared_library_ids: Vec::new(),
+            labels_allow: Vec::new(),
+            labels_exclude: Vec::new(),
+            age_restriction: Some(AuthUserAgeRestriction {
+                age: 16,
+                restriction: AuthUserAgeRestrictionKind::Exclude,
+            }),
+        };
+
+        let snapshot = user_session_snapshot(&user);
+
+        assert_eq!(
+            snapshot.age_restriction,
+            Some(AuthUserAgeRestrictionSnapshot {
+                age: 16,
+                restriction: "EXCLUDE".to_string(),
+            })
+        );
+        assert_eq!(user_from_session_snapshot(&snapshot), user);
+    }
+
+    #[test]
+    fn user_response_role_names_include_virtual_user_role() {
+        let user = AuthUser {
+            id: "user-1".to_string(),
+            email: "user@example.org".to_string(),
+            password: String::new(),
+            roles: vec![AuthUserRole::PageStreaming],
+            shared_all_libraries: true,
+            shared_library_ids: Vec::new(),
+            labels_allow: Vec::new(),
+            labels_exclude: Vec::new(),
+            age_restriction: None,
+        };
+
+        assert_eq!(
+            user_response_role_names(&user),
+            vec!["PAGE_STREAMING", "USER"]
+        );
+    }
+
+    #[test]
+    fn persisted_user_roles_ignore_virtual_user_role() {
+        let roles = user_roles_from_persisted_names(["USER", "PAGE_STREAMING"]);
+
+        assert_eq!(roles, vec![AuthUserRole::PageStreaming]);
+    }
+
+    #[test]
+    fn persisted_user_age_restriction_restores_complete_columns() {
+        assert_eq!(
+            user_age_restriction_from_persisted_columns(None, None),
+            None
+        );
+        assert_eq!(
+            user_age_restriction_from_persisted_columns(Some(16), Some(false)),
+            Some(AuthUserAgeRestriction {
+                age: 16,
+                restriction: AuthUserAgeRestrictionKind::Exclude,
+            })
+        );
     }
 }

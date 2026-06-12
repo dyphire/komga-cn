@@ -42,7 +42,8 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
             1_000,
             Some("book-1".to_string()),
         ))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler.process_available(&runtime.job()).await.expect(
         "book local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
@@ -189,7 +190,8 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
             TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
                 .with_simple_type("RefreshBookLocalArtwork"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -276,7 +278,8 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
             TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
                 .with_simple_type("RefreshBookLocalArtwork"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler.process_available(&runtime.job()).await.expect(
         "book local artwork refresh should preserve existing non-generated selections cleanly",
     );
@@ -368,7 +371,8 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
             TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
                 .with_simple_type("RefreshBookLocalArtwork"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -423,7 +427,6 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
 
 #[tokio::test]
 async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() {
-    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-book-local-artwork-sse-events").await;
 
     let sidecar_dir = ctx.paths().config_dir.join("books");
@@ -448,37 +451,35 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
         .expect("existing thumbnails should be cleared before local artwork sse test");
     pool.close().await;
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(ctx.paths()).await;
+    let cursor = ctx.runtime_events().current_cursor();
+    let runtime =
+        runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("RefreshBookLocalArtwork_book-1", 1_000, None)
                 .with_simple_type("RefreshBookLocalArtwork"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
         .expect("book local artwork refresh should complete for sse contract");
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
     let thumbnail_events = events
         .iter()
-        .filter(|event| event.name == "ThumbnailBookAdded")
-        .filter(|event| {
-            event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
-        })
-        .filter(|event| {
-            event
-                .payload
-                .get("seriesId")
-                .and_then(|value| value.as_str())
-                == Some("series-1")
+        .filter_map(|event| match &event.event {
+            RuntimeSseEvent::ThumbnailBookAdded {
+                book_id,
+                series_id,
+                selected,
+            } if book_id == "book-1" && series_id == "series-1" => Some(*selected),
+            _ => None,
         })
         .collect::<Vec<_>>();
 
@@ -488,7 +489,7 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
     );
     let selected_states = thumbnail_events
         .iter()
-        .filter_map(|event| event.payload.get("selected").and_then(Value::as_bool))
+        .copied()
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         selected_states,

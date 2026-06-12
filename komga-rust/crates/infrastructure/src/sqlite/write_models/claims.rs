@@ -1,9 +1,10 @@
+use komga_application::identity_access::AuthUserRole;
 use sqlx::{Row, SqlitePool};
 
 #[derive(Clone, Debug)]
-pub struct CreatedClaimedUser {
-    pub id: String,
-    pub email: String,
+pub(crate) struct CreatedClaimedUser {
+    pub(crate) id: String,
+    pub(crate) email: String,
 }
 
 pub async fn load_persisted_user_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
@@ -14,7 +15,7 @@ pub async fn load_persisted_user_count(pool: &SqlitePool) -> Result<i64, sqlx::E
     Ok(count)
 }
 
-pub async fn persist_initial_admin_user(
+pub(crate) async fn persist_initial_admin_user(
     pool: &SqlitePool,
     user_id: &str,
     email: &str,
@@ -42,7 +43,7 @@ pub async fn persist_initial_admin_user(
     .execute(&mut *tx)
     .await?;
 
-    for role in claim_user_roles() {
+    for role in AuthUserRole::claim_role_names() {
         sqlx::query(r#"INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)"#)
             .bind(user_id)
             .bind(role)
@@ -56,14 +57,4 @@ pub async fn persist_initial_admin_user(
         id: user_id.to_string(),
         email: email.to_string(),
     })
-}
-
-fn claim_user_roles() -> &'static [&'static str] {
-    &[
-        "ADMIN",
-        "FILE_DOWNLOAD",
-        "PAGE_STREAMING",
-        "KOBO_SYNC",
-        "KOREADER_SYNC",
-    ]
 }

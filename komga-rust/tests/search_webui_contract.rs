@@ -1,18 +1,17 @@
+use crate::support::sqlite::connect_test_pool;
 use axum::body::Body;
 use axum::body::to_bytes;
 use axum::http::{Request, StatusCode, header};
-use komga_infrastructure::sqlite::connect_test_pool;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 mod support;
 
+use komga_interfaces::router as router_impl;
 use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
     RuntimeDbPaths, log_capture::*, media_file_fixtures::*, response_helpers::*,
 };
-
-use komga_interfaces::access_log as access_log_impl;
 
 async fn enrich_book_contract_fixture(paths: &RuntimeDbPaths) {
     let pool = connect_test_pool(paths.main_db.as_path(), 1)
@@ -324,7 +323,6 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
     use axum::routing::get;
     use http_body::Frame;
     use komga_application::operational::HttpServerRequestsState;
-    use tower_http::trace::TraceLayer;
 
     struct FailingBody {
         emitted_chunk: bool,
@@ -364,8 +362,8 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
 
         let (logs, read_result) = capture_router_logs_async_result(&config, async move {
             let metrics = HttpServerRequestsState::default();
-            let app = Router::new()
-                .route(
+            let app = router_impl::with_access_logging(
+                Router::new().route(
                     "/api/v1/books/{book_id}/file",
                     get(|| async {
                         axum::response::Response::builder()
@@ -375,18 +373,9 @@ fn router_access_log_tracks_first_byte_for_streaming_downloads_and_deferred_erro
                             }))
                             .expect("failing body response should build")
                     }),
-                )
-                .route_layer(axum::middleware::from_fn_with_state(
-                    metrics.clone(),
-                    access_log_impl::prepare_access_log_middleware,
-                ))
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(access_log_impl::make_request_span)
-                        .on_request(access_log_impl::on_request)
-                        .on_response(access_log_impl::on_response)
-                        .on_failure(access_log_impl::on_failure),
-                );
+                ),
+                metrics.clone(),
+            );
 
             let response = app
                 .oneshot(

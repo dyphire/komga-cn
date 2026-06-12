@@ -1,15 +1,11 @@
 use std::collections::HashMap;
 
-use komga_application::discovery::browse_engine::{
-    self,
-    models::{
-        AgeRestrictionKind as EngineAgeRestrictionKind, AuthorEntry, BookBrowseQuery,
-        BookEvaluationContext, BookPosterRow, BookRow, BookSortMode, BrowseContext,
-        BrowseRestrictions, ReadProgressRow, WebLinkEntry,
-    },
-};
 use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadProgressReadModel,
+    AuthorEntry, BookBrowseQuery, BookEvaluationContext, BookMetadataAuthorReadModel,
+    BookMetadataLinkReadModel, BookPosterRow, BookReadProgressReadModel, BookRow, BookSortMode,
+    BrowseContext, ReadProgressRow, WebLinkEntry, book_condition_needs_posters,
+    book_condition_needs_readlist_memberships, collect_book_release_date_offsets,
+    filter_and_paginate_books,
 };
 use komga_domain::discovery::{
     BookCondition, BookValueCondition, InclusionCondition, PageEnvelope,
@@ -34,7 +30,7 @@ fn first_readlist_sort_id(condition: Option<&BookCondition>) -> Option<&str> {
     condition.and_then(visit)
 }
 
-pub(crate) async fn load_persisted_books_page(
+pub(super) async fn load_persisted_books_page(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,
@@ -110,7 +106,7 @@ pub(crate) async fn load_persisted_books_page(
         readlist_order,
     };
 
-    let page = browse_engine::filter_and_paginate_books(rows, &browse_ctx, engine_query, eval_ctx)?;
+    let page = filter_and_paginate_books(rows, &browse_ctx, engine_query, eval_ctx)?;
 
     Ok(PageEnvelope::from_slice(
         page.content
@@ -129,53 +125,50 @@ async fn build_book_eval_context(
     context: &DiscoveryQueryContext,
     condition: Option<&BookCondition>,
 ) -> Result<BookEvaluationContext, String> {
-    let (readlist_memberships, posters, release_date_cutoffs) = match condition {
-        Some(condition) => {
-            let readlist_memberships =
-                if browse_engine::book_condition_needs_readlist_memberships(condition) {
-                    Some(backend.load_readlist_memberships().await?)
-                } else {
-                    None
-                };
-            let posters = if browse_engine::book_condition_needs_posters(condition) {
-                Some(
-                    backend
-                        .load_book_poster_summaries()
-                        .await?
-                        .into_iter()
-                        .map(|(id, posters)| {
-                            (
-                                id,
-                                posters
-                                    .into_iter()
-                                    .map(|p| BookPosterRow {
-                                        thumbnail_type: p.thumbnail_type,
-                                        selected: p.selected,
-                                    })
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
-                )
-            } else {
-                None
-            };
-            let offsets = browse_engine::collect_book_release_date_offsets(condition);
-            let mut cutoffs = HashMap::new();
-            for days in offsets {
-                cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
-            }
-            (readlist_memberships, posters, cutoffs)
-        }
-        None => (None, None, HashMap::new()),
+    let mut eval_context = BookEvaluationContext {
+        user_id_present: context.user_id.is_some(),
+        readlist_memberships: None,
+        posters: None,
+        release_date_cutoffs: HashMap::new(),
     };
 
-    Ok(BookEvaluationContext {
-        user_id_present: context.user_id.is_some(),
-        readlist_memberships,
-        posters,
-        release_date_cutoffs,
-    })
+    let Some(condition) = condition else {
+        return Ok(eval_context);
+    };
+
+    if book_condition_needs_readlist_memberships(condition) {
+        eval_context.readlist_memberships = Some(backend.load_readlist_memberships().await?);
+    }
+
+    if book_condition_needs_posters(condition) {
+        eval_context.posters = Some(
+            backend
+                .load_book_poster_summaries()
+                .await?
+                .into_iter()
+                .map(|(id, posters)| {
+                    (
+                        id,
+                        posters
+                            .into_iter()
+                            .map(|p| BookPosterRow {
+                                thumbnail_type: p.thumbnail_type,
+                                selected: p.selected,
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
+        );
+    }
+
+    for days in collect_book_release_date_offsets(condition) {
+        eval_context
+            .release_date_cutoffs
+            .insert(days, backend.persisted_utc_date_minus_days(days).await?);
+    }
+
+    Ok(eval_context)
 }
 
 fn to_browse_context(context: &DiscoveryQueryContext) -> BrowseContext {
@@ -183,19 +176,7 @@ fn to_browse_context(context: &DiscoveryQueryContext) -> BrowseContext {
         user_id: context.user_id.clone(),
         is_admin: context.is_admin,
         authorized_library_ids: context.authorized_library_ids.clone(),
-        restrictions: context.restrictions.as_ref().map(|r| BrowseRestrictions {
-            age: r.age,
-            age_restriction: r.age_restriction.map(|kind| match kind {
-                komga_domain::discovery::AgeRestrictionKind::Exclude => {
-                    EngineAgeRestrictionKind::Exclude
-                }
-                komga_domain::discovery::AgeRestrictionKind::AllowOnly => {
-                    EngineAgeRestrictionKind::AllowOnly
-                }
-            }),
-            labels_allow: r.labels_allow.clone(),
-            labels_exclude: r.labels_exclude.clone(),
-        }),
+        restrictions: context.restrictions.clone(),
     }
 }
 

@@ -1,12 +1,15 @@
 use axum::Json;
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::{
-    DiscoveryRequestError, ResolvedBooksBrowseRequest, ResolvedLatestBooksRequest,
-    ResolvedSeriesAlphabeticalGroupsRequest, ResolvedSeriesBrowseRequest,
-};
+use komga_application::discovery::{ReadListBooksQuery, ReadListsQuery};
 use komga_domain::discovery::SeriesSort;
 use serde_json::Value;
+
+use super::request_resolution::{
+    DiscoveryRequestError, ResolvedBooksBrowseRequest, ResolvedCollectionListRequest,
+    ResolvedLatestBooksRequest, ResolvedSeriesAlphabeticalGroupsRequest,
+    ResolvedSeriesBrowseRequest,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::discovery) enum QueryResolveError {
@@ -22,7 +25,7 @@ impl QueryResolveError {
         }
     }
 
-    pub fn into_response(self) -> Response {
+    pub(super) fn into_response(self) -> Response {
         match self {
             Self::BadRequest => StatusCode::BAD_REQUEST.into_response(),
             Self::InvalidSemantics(error) => (
@@ -47,7 +50,7 @@ pub(in crate::discovery) fn resolve_books_list_request(
     uri: &Uri,
     payload: Value,
 ) -> Result<ResolvedBooksBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_books_list_request(query(uri), payload)
+    super::request_resolution::resolve_books_list_request(query(uri), payload)
         .map_err(QueryResolveError::from)
 }
 
@@ -56,7 +59,7 @@ pub(in crate::discovery) fn resolve_deprecated_books_request(
     library_ids: Option<Vec<String>>,
     empty_page_on_unmapped_library: bool,
 ) -> Result<ResolvedBooksBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_deprecated_books_request(
+    super::request_resolution::resolve_deprecated_books_request(
         query(uri),
         library_ids,
         empty_page_on_unmapped_library,
@@ -68,7 +71,7 @@ pub(in crate::discovery) fn resolve_series_books_request(
     series_id: &str,
     uri: &Uri,
 ) -> Result<ResolvedBooksBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_series_books_request(series_id, query(uri))
+    super::request_resolution::resolve_series_books_request(series_id, query(uri))
         .map_err(QueryResolveError::from)
 }
 
@@ -76,21 +79,21 @@ pub(in crate::discovery) fn resolve_latest_books_request(
     uri: &Uri,
     library_ids: Option<Vec<String>>,
 ) -> ResolvedLatestBooksRequest {
-    komga_application::discovery::resolve_latest_books_request(query(uri), library_ids)
+    super::request_resolution::resolve_latest_books_request(query(uri), library_ids)
 }
 
 pub(in crate::discovery) fn resolve_series_list_request(
     uri: &Uri,
     payload: Value,
 ) -> Result<ResolvedSeriesBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_series_list_request(query(uri), payload)
+    super::request_resolution::resolve_series_list_request(query(uri), payload)
         .map_err(QueryResolveError::from)
 }
 
 pub(in crate::discovery) fn resolve_deprecated_series_request(
     uri: &Uri,
 ) -> Result<ResolvedSeriesBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_deprecated_series_request(query(uri))
+    super::request_resolution::resolve_deprecated_series_request(query(uri))
         .map_err(QueryResolveError::from)
 }
 
@@ -100,7 +103,7 @@ pub(in crate::discovery) fn resolve_series_feed_request(
     exclude_newly_added: bool,
     kotlin_unpaged_page_shape: bool,
 ) -> Result<ResolvedSeriesBrowseRequest, QueryResolveError> {
-    komga_application::discovery::resolve_series_feed_request(
+    super::request_resolution::resolve_series_feed_request(
         query(uri),
         sort,
         exclude_newly_added,
@@ -112,8 +115,33 @@ pub(in crate::discovery) fn resolve_series_feed_request(
 pub(in crate::discovery) fn resolve_series_alphabetical_groups_request(
     body: Value,
 ) -> Result<ResolvedSeriesAlphabeticalGroupsRequest, QueryResolveError> {
-    komga_application::discovery::resolve_series_alphabetical_groups_request(body)
+    super::request_resolution::resolve_series_alphabetical_groups_request(body)
         .map_err(QueryResolveError::from)
+}
+
+pub(in crate::discovery) fn resolve_readlists_query(uri: &Uri) -> ReadListsQuery {
+    super::request_resolution::resolve_readlists_query(query(uri))
+}
+
+pub(in crate::discovery) fn resolve_readlist_books_query(
+    readlist_id: impl Into<String>,
+    uri: &Uri,
+) -> Result<ReadListBooksQuery, QueryResolveError> {
+    super::request_resolution::resolve_readlist_books_query(readlist_id, query(uri))
+        .map_err(DiscoveryRequestError::from)
+        .map_err(QueryResolveError::from)
+}
+
+pub(in crate::discovery) fn resolve_collection_list_request(
+    uri: &Uri,
+) -> ResolvedCollectionListRequest {
+    super::request_resolution::resolve_collection_list_request(query(uri))
+}
+
+pub(in crate::discovery) fn parse_series_filter_from_json(
+    condition: Option<&Value>,
+) -> Result<komga_domain::discovery::SeriesFilter, komga_domain::discovery::DiscoveryError> {
+    super::request_resolution::parse_series_filter_from_json(condition)
 }
 
 fn query(uri: &Uri) -> &str {
@@ -123,9 +151,10 @@ fn query(uri: &Uri) -> &str {
 #[cfg(test)]
 mod tests {
     use axum::http::Uri;
+    use komga_application::discovery::ReadListsSort;
     use komga_domain::common_ids::LibraryId;
     use komga_domain::discovery::{
-        BookCondition, BookSort, BookValueCondition, InclusionCondition, SeriesSort,
+        BookCondition, BookSort, BookValueCondition, InclusionCondition, MediaStatus, SeriesSort,
     };
     use serde_json::json;
 
@@ -161,6 +190,22 @@ mod tests {
         assert_eq!(resolved.request.search.as_deref(), Some("robot"));
         assert_eq!(resolved.request.sort, vec![BookSort::RelevanceAsc]);
         assert!(resolved.response.sorted);
+    }
+
+    #[test]
+    fn books_list_rejects_invalid_media_status_inside_interfaces_boundary() {
+        let uri: Uri = "/api/v1/books/list".parse().unwrap();
+        let body = json!({
+            "condition": {
+                "type": "MediaStatus",
+                "operator": "is",
+                "value": "BROKEN_STATUS"
+            }
+        });
+
+        let error = super::resolve_books_list_request(&uri, body).unwrap_err();
+
+        assert_eq!(error.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -226,5 +271,32 @@ mod tests {
         let error = super::resolve_deprecated_series_request(&uri).unwrap_err();
 
         assert_eq!(error.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn readlists_query_parsing_lives_at_the_interfaces_boundary() {
+        let uri: Uri = "/api/v1/readlists?search=space&search=opera&sort=name,desc"
+            .parse()
+            .unwrap();
+
+        let query = super::resolve_readlists_query(&uri);
+
+        assert_eq!(query.search.as_deref(), Some("space,opera"));
+        assert_eq!(query.sort, ReadListsSort::NameDesc);
+    }
+
+    #[test]
+    fn readlist_books_query_parses_media_statuses_inside_interfaces_boundary() {
+        let uri: Uri =
+            "/api/v1/readlists/readlist-1/books?media_status=ready&media_status=OUTDATED"
+                .parse()
+                .unwrap();
+
+        let query = super::resolve_readlist_books_query("readlist-1", &uri).unwrap();
+
+        assert_eq!(
+            query.media_statuses,
+            Some(vec![MediaStatus::Ready, MediaStatus::Outdated])
+        );
     }
 }

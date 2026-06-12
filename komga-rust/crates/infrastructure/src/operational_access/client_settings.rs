@@ -1,5 +1,9 @@
-use komga_application::operational::ClientSettingsPort;
-use serde_json::Value;
+use std::collections::BTreeMap;
+
+use komga_application::operational::{
+    ClientGlobalSetting, ClientGlobalSettings, ClientSettingsPort, ClientUserSetting,
+    ClientUserSettings,
+};
 use sqlx::SqlitePool;
 
 use crate::database_handle::DatabaseHandle;
@@ -30,13 +34,13 @@ impl ClientSettingsPort for ClientSettingsAccess {
     async fn load_client_settings_global(
         &self,
         allow_unauthorized_only: bool,
-    ) -> Result<Value, String> {
+    ) -> Result<ClientGlobalSettings, String> {
         load_client_settings_global(self.db.read_pool(), allow_unauthorized_only)
             .await
             .map_err(|e| e.to_string())
     }
 
-    async fn load_client_settings_user(&self, user_id: &str) -> Result<Value, String> {
+    async fn load_client_settings_user(&self, user_id: &str) -> Result<ClientUserSettings, String> {
         load_client_settings_user(self.db.read_pool(), user_id)
             .await
             .map_err(|e| e.to_string())
@@ -44,7 +48,7 @@ impl ClientSettingsPort for ClientSettingsAccess {
 
     async fn upsert_client_settings_global(
         &self,
-        settings: &[(String, String, bool)],
+        settings: &ClientGlobalSettings,
     ) -> Result<(), String> {
         upsert_client_settings_global(self.db.write_pool(), settings)
             .await
@@ -54,7 +58,7 @@ impl ClientSettingsPort for ClientSettingsAccess {
     async fn upsert_client_settings_user(
         &self,
         user_id: &str,
-        settings: &[(String, String)],
+        settings: &ClientUserSettings,
     ) -> Result<(), String> {
         upsert_client_settings_user(self.db.write_pool(), user_id, settings)
             .await
@@ -81,20 +85,36 @@ impl ClientSettingsPort for ClientSettingsAccess {
 pub(crate) async fn load_client_settings_global(
     pool: &SqlitePool,
     allow_unauthorized_only: bool,
-) -> Result<Value, sqlx::Error> {
-    load_client_settings_global_model(pool, allow_unauthorized_only).await
+) -> Result<ClientGlobalSettings, sqlx::Error> {
+    let rows = load_client_settings_global_model(pool, allow_unauthorized_only).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.key,
+                ClientGlobalSetting {
+                    value: row.value,
+                    allow_unauthorized: row.allow_unauthorized,
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>())
 }
 
 pub(crate) async fn load_client_settings_user(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<Value, sqlx::Error> {
-    load_client_settings_user_model(pool, user_id).await
+) -> Result<ClientUserSettings, sqlx::Error> {
+    let rows = load_client_settings_user_model(pool, user_id).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.key, ClientUserSetting { value: row.value }))
+        .collect::<BTreeMap<_, _>>())
 }
 
 pub(crate) async fn upsert_client_settings_global(
     pool: &SqlitePool,
-    settings: &[(String, String, bool)],
+    settings: &ClientGlobalSettings,
 ) -> Result<(), sqlx::Error> {
     upsert_client_settings_global_model(pool, settings).await
 }
@@ -102,7 +122,7 @@ pub(crate) async fn upsert_client_settings_global(
 pub(crate) async fn upsert_client_settings_user(
     pool: &SqlitePool,
     user_id: &str,
-    settings: &[(String, String)],
+    settings: &ClientUserSettings,
 ) -> Result<(), sqlx::Error> {
     upsert_client_settings_user_model(pool, user_id, settings).await
 }

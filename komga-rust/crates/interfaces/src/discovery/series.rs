@@ -11,6 +11,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use komga_application::discovery::SeriesAlphabeticalGroup;
 use komga_domain::discovery::{DiscoveryError, PageEnvelope, SeriesSort};
 use serde_json::{Value, json};
 
@@ -54,8 +55,9 @@ async fn series_feed(
         )
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -81,7 +83,7 @@ async fn series_feed(
     }
 }
 
-pub async fn series_latest(
+pub(crate) async fn series_latest(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -98,7 +100,7 @@ pub async fn series_latest(
     .await
 }
 
-pub async fn series_deprecated_get(
+pub(crate) async fn series_deprecated_get(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -120,8 +122,9 @@ pub async fn series_deprecated_get(
         )
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -140,7 +143,7 @@ pub async fn series_deprecated_get(
     }
 }
 
-pub async fn series_alphabetical_groups(
+pub(crate) async fn series_alphabetical_groups(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -157,8 +160,9 @@ pub async fn series_alphabetical_groups(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -167,12 +171,25 @@ pub async fn series_alphabetical_groups(
         .list_series_alphabetical_groups(&context, resolved.request)
         .await
     {
-        Ok(groups) => Json(Value::Array(groups)).into_response(),
+        Ok(groups) => Json(Value::Array(
+            groups
+                .into_iter()
+                .map(series_alphabetical_group_payload)
+                .collect(),
+        ))
+        .into_response(),
         Err(e) => internal_error_response(format!("{e:?}")),
     }
 }
 
-pub async fn series_list(
+fn series_alphabetical_group_payload(group: SeriesAlphabeticalGroup) -> Value {
+    json!({
+        "group": group.group,
+        "count": group.count,
+    })
+}
+
+pub(crate) async fn series_list(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
@@ -193,8 +210,9 @@ pub async fn series_list(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(ctx) => ctx,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(ctx)) => ctx,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -221,7 +239,7 @@ pub async fn series_list(
     }
 }
 
-pub async fn series_new(
+pub(crate) async fn series_new(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -238,7 +256,7 @@ pub async fn series_new(
     .await
 }
 
-pub async fn series_updated(
+pub(crate) async fn series_updated(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,

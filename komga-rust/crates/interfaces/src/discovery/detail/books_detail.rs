@@ -1,9 +1,23 @@
-use super::*;
+use axum::Json;
+use axum::extract::Path;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use komga_application::discovery::resolve_persisted_book_id;
+use serde_json::Value;
+
+use super::books_persistence::{
+    PersistedBookSiblingDirection, load_persisted_book_resource, load_persisted_book_sibling_detail,
+};
+use super::detail_utils::internal_error_response;
+use super::readlists_support::readlist_payload;
+use super::{book_detail_payload, load_persisted_book_detail};
+use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
+use crate::helpers::{detail_access_denial_response, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
-use axum::extract::State;
 
-pub async fn book_detail(
+pub(crate) async fn book_detail(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -19,7 +33,7 @@ pub async fn book_detail(
     let detail_context = DetailResourceContext {
         library_id: Some(resource.library_id),
         content: Some(DetailContentContext {
-            age_rating: resource.age_rating.map(u32::from),
+            age_rating: resource.age_rating,
             sharing_labels: resource.sharing_labels,
         }),
     };
@@ -42,13 +56,13 @@ pub async fn book_detail(
     }
 }
 
-pub async fn book_sibling_previous(
+pub(crate) async fn book_sibling_previous(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
+    let book_id = resolve_persisted_book_id(app.book_id_resolver.as_ref(), &book_id).await;
 
     let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
@@ -60,7 +74,7 @@ pub async fn book_sibling_previous(
     let detail_context = DetailResourceContext {
         library_id: Some(resource.library_id),
         content: Some(DetailContentContext {
-            age_rating: resource.age_rating.map(u32::from),
+            age_rating: resource.age_rating,
             sharing_labels: resource.sharing_labels,
         }),
     };
@@ -89,13 +103,13 @@ pub async fn book_sibling_previous(
     }
 }
 
-pub async fn book_sibling_next(
+pub(crate) async fn book_sibling_next(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
+    let book_id = resolve_persisted_book_id(app.book_id_resolver.as_ref(), &book_id).await;
 
     let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
@@ -107,7 +121,7 @@ pub async fn book_sibling_next(
     let detail_context = DetailResourceContext {
         library_id: Some(resource.library_id),
         content: Some(DetailContentContext {
-            age_rating: resource.age_rating.map(u32::from),
+            age_rating: resource.age_rating,
             sharing_labels: resource.sharing_labels,
         }),
     };
@@ -136,13 +150,13 @@ pub async fn book_sibling_next(
     }
 }
 
-pub async fn book_readlists(
+pub(crate) async fn book_readlists(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let book_id = resolve_book_id_for_persisted(&app, &book_id).await;
+    let book_id = resolve_persisted_book_id(app.book_id_resolver.as_ref(), &book_id).await;
 
     let Some(resource) = (match load_persisted_book_resource(&app, &book_id).await {
         Ok(resource) => resource,
@@ -154,7 +168,7 @@ pub async fn book_readlists(
     let detail_context = DetailResourceContext {
         library_id: Some(resource.library_id),
         content: Some(DetailContentContext {
-            age_rating: resource.age_rating.map(u32::from),
+            age_rating: resource.age_rating,
             sharing_labels: resource.sharing_labels,
         }),
     };
@@ -168,17 +182,18 @@ pub async fn book_readlists(
         Err(denial) => return detail_access_denial_response(denial),
     };
     let candidate_library_ids = detail_query_context.authorized_library_ids.clone();
-    let Some(visibility_context) = app
+    let visibility_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let service =
-        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
-    let visible_readlists = match service
+    let visible_readlists = match app
+        .persisted_sets
         .readlists_for_book(
             candidate_library_ids.as_deref(),
             &to_domain_query_context(visibility_context),

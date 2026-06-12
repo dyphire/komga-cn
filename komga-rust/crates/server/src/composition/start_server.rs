@@ -1,8 +1,10 @@
 use axum::Router;
 use komga_application::operational::StartupTimingState;
-use komga_infrastructure::sqlite::close_all_shared_pools;
+use komga_infrastructure::close_all_shared_pools;
+use komga_interfaces::state::RuntimeSseEventHub;
 use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
@@ -11,8 +13,10 @@ use tokio::signal;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
-use crate::composition::compose_http_runtime::compose_http_runtime;
-use crate::runtime::{TaskRuntimeMode, start_task_runtime};
+use super::compose_http_runtime::compose_http_runtime;
+use crate::runtime::{
+    TaskRouterParts, TaskRuntimeMode, start_task_runtime, start_task_runtime_with_events,
+};
 use komga_config::env_config::RuntimeConfig;
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
@@ -24,6 +28,26 @@ pub(crate) async fn build_router(
     startup_timing: StartupTimingState,
 ) -> std::io::Result<Router> {
     let router_parts = start_task_runtime(config, mode).await?;
+    build_router_from_parts(config, router_parts, shutdown_trigger, startup_timing)
+}
+
+pub(crate) async fn build_router_with_runtime_events(
+    config: &RuntimeConfig,
+    mode: TaskRuntimeMode,
+    shutdown_trigger: Option<watch::Sender<bool>>,
+    startup_timing: StartupTimingState,
+    runtime_events: Arc<RuntimeSseEventHub>,
+) -> std::io::Result<Router> {
+    let router_parts = start_task_runtime_with_events(config, mode, runtime_events).await?;
+    build_router_from_parts(config, router_parts, shutdown_trigger, startup_timing)
+}
+
+fn build_router_from_parts(
+    config: &RuntimeConfig,
+    router_parts: TaskRouterParts,
+    shutdown_trigger: Option<watch::Sender<bool>>,
+    startup_timing: StartupTimingState,
+) -> std::io::Result<Router> {
     let app = compose_http_runtime(
         config,
         router_parts.http,
@@ -57,6 +81,21 @@ pub(crate) async fn build_router_without_runtime_workers(
         TaskRuntimeMode::WorkersDisabled,
         None,
         startup_timing,
+    )
+    .await
+}
+
+pub(crate) async fn build_router_without_runtime_workers_with_runtime_events(
+    config: &RuntimeConfig,
+    startup_timing: StartupTimingState,
+    runtime_events: Arc<RuntimeSseEventHub>,
+) -> std::io::Result<Router> {
+    build_router_with_runtime_events(
+        config,
+        TaskRuntimeMode::WorkersDisabled,
+        None,
+        startup_timing,
+        runtime_events,
     )
     .await
 }

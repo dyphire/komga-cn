@@ -1,11 +1,3 @@
-use super::feeds::normalize_opds_updated;
-use super::types::PersistedBookFeedItem;
-use super::*;
-use komga_application::media_assets::content_type_from_filename;
-use time::format_description::well_known::Rfc3339;
-use time::macros::format_description;
-use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
-
 mod browse;
 mod details;
 mod helpers;

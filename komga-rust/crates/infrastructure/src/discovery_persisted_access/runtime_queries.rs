@@ -1,6 +1,11 @@
-use super::*;
+use std::collections::{BTreeSet, HashMap};
 
-pub async fn load_persisted_ondeck_books(
+use komga_application::discovery::SeriesReadProgressCounts;
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+
+use super::models::{BookBrowseEntry, BookTagsScope};
+
+pub(super) async fn load_persisted_ondeck_books(
     pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<BookBrowseEntry>, String> {
@@ -43,7 +48,7 @@ pub async fn load_persisted_ondeck_books(
         .collect())
 }
 
-pub async fn load_persisted_duplicate_books(
+pub(super) async fn load_persisted_duplicate_books(
     pool: &SqlitePool,
 ) -> Result<Vec<BookBrowseEntry>, String> {
     let rows = sqlx::query(
@@ -74,7 +79,7 @@ pub async fn load_persisted_duplicate_books(
         .collect())
 }
 
-pub async fn load_persisted_book_tags(
+pub(super) async fn load_persisted_book_tags(
     pool: &SqlitePool,
     scope: Option<&BookTagsScope>,
     authorized_library_ids: Option<&[String]>,
@@ -192,7 +197,7 @@ pub async fn load_persisted_book_tags(
     Ok(tags)
 }
 
-pub async fn persisted_utc_date_minus_days(
+pub(crate) async fn persisted_utc_date_minus_days(
     pool: &SqlitePool,
     days: i64,
 ) -> Result<Option<String>, String> {
@@ -211,10 +216,10 @@ pub async fn persisted_utc_date_minus_days(
     Ok(row.get::<Option<String>, _>("CUTOFF"))
 }
 
-pub async fn load_series_read_progress_counts(
+pub(crate) async fn load_series_read_progress_counts(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<HashMap<String, (i64, i64)>, String> {
+) -> Result<HashMap<String, SeriesReadProgressCounts>, String> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT
          FROM READ_PROGRESS_SERIES
@@ -229,16 +234,16 @@ pub async fn load_series_read_progress_counts(
     for row in rows {
         counts.insert(
             row.get::<String, _>("SERIES_ID"),
-            (
-                row.get::<i64, _>("READ_COUNT"),
-                row.get::<i64, _>("IN_PROGRESS_COUNT"),
-            ),
+            SeriesReadProgressCounts {
+                read_count: row.get::<i64, _>("READ_COUNT"),
+                in_progress_count: row.get::<i64, _>("IN_PROGRESS_COUNT"),
+            },
         );
     }
     Ok(counts)
 }
 
-pub async fn load_series_read_dates(
+pub(crate) async fn load_series_read_dates(
     pool: &SqlitePool,
     user_id: &str,
 ) -> Result<HashMap<String, String>, String> {
@@ -264,7 +269,7 @@ pub async fn load_series_read_dates(
     Ok(dates)
 }
 
-pub async fn load_series_total_book_counts(
+pub(crate) async fn load_series_total_book_counts(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, i64>, String> {
     let rows = sqlx::query(

@@ -128,8 +128,8 @@ pub(crate) async fn execute_and_enqueue(
     runtime: &TaskRuntimeContext,
     task: &TaskQueueRecord,
 ) -> Option<Result<(), TaskProcessingError>> {
-    let outcome = super::task_job_pipeline::TaskJobPipeline::new(runtime.job())
-        .execute(task)
+    let outcome = super::task_job_dispatch::TaskJobDispatcher::new(runtime.job())
+        .execute_record(task)
         .await;
     Some(
         finalize_task_execution(

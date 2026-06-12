@@ -1,4 +1,4 @@
 pub(crate) mod device_auth;
 pub(crate) mod kobo_sync;
-pub mod runtime_identity_access;
-pub mod session_store;
+pub(crate) mod runtime_identity_access;
+pub(crate) mod session_store;

@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use komga_domain::discovery::{BookCondition, SeriesCondition};
+use super::super::reading_direction::SeriesReadingDirection;
+use komga_domain::discovery::{
+    BookCondition, MediaStatus, QueryRestrictions, ReadStatus, SeriesCondition, SeriesStatus,
+};
+use komga_domain::media_assets::ThumbnailType;
 
 #[derive(Clone)]
 pub struct AuthorEntry {
@@ -27,7 +31,7 @@ pub struct ReadProgressRow {
 
 #[derive(Clone)]
 pub struct BookPosterRow {
-    pub thumbnail_type: String,
+    pub thumbnail_type: ThumbnailType,
     pub selected: bool,
 }
 
@@ -46,13 +50,13 @@ pub struct BookRow {
     pub last_modified: String,
     pub file_last_modified: String,
     pub size_bytes: u64,
-    pub media_status: String,
+    pub media_status: MediaStatus,
     pub media_type: String,
     pub media_pages_count: u32,
     pub media_comment: String,
     pub media_epub_divina_compatible: bool,
     pub media_epub_is_kepub: bool,
-    pub read_status: String,
+    pub read_status: ReadStatus,
     pub metadata_title_lock: bool,
     pub metadata_summary: String,
     pub metadata_summary_lock: bool,
@@ -76,7 +80,7 @@ pub struct BookRow {
     pub genres: Vec<String>,
     pub language: Option<String>,
     pub publisher: Option<String>,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub metadata_tags: Vec<String>,
     pub metadata_authors: Vec<AuthorEntry>,
     pub metadata_links: Vec<WebLinkEntry>,
@@ -97,11 +101,11 @@ pub struct SeriesRow {
     pub books_read_count: u64,
     pub books_unread_count: u64,
     pub books_in_progress_count: u64,
-    pub status: String,
+    pub status: SeriesStatus,
     pub summary: String,
-    pub reading_direction: String,
+    pub reading_direction: Option<SeriesReadingDirection>,
     pub publisher: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub language: String,
     pub genres: Vec<String>,
     pub tags: Vec<String>,
@@ -117,6 +121,12 @@ pub struct SeriesRow {
     pub books_metadata_last_modified: String,
     pub deleted: bool,
     pub oneshot: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SeriesReadProgressCounts {
+    pub read_count: i64,
+    pub in_progress_count: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -207,20 +217,7 @@ pub struct BrowseContext {
     pub user_id: Option<String>,
     pub is_admin: bool,
     pub authorized_library_ids: Option<Vec<String>>,
-    pub restrictions: Option<BrowseRestrictions>,
-}
-
-pub struct BrowseRestrictions {
-    pub age: Option<u16>,
-    pub age_restriction: Option<AgeRestrictionKind>,
-    pub labels_allow: Vec<String>,
-    pub labels_exclude: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AgeRestrictionKind {
-    Exclude,
-    AllowOnly,
+    pub restrictions: Option<QueryRestrictions>,
 }
 
 pub struct BookEvaluationContext {
@@ -233,7 +230,7 @@ pub struct BookEvaluationContext {
 pub struct SeriesEvaluationContext {
     pub user_id_present: bool,
     pub collection_memberships: Option<BTreeMap<String, BTreeSet<String>>>,
-    pub read_progress: Option<HashMap<String, (i64, i64)>>,
+    pub read_progress: Option<HashMap<String, SeriesReadProgressCounts>>,
     pub total_book_counts: Option<HashMap<String, i64>>,
     pub read_dates: Option<HashMap<String, String>>,
     pub release_date_cutoffs: HashMap<i64, Option<String>>,

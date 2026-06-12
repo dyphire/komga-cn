@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+use crate::library_catalog::LibraryScanInterval;
+
 use super::contracts::{TaskProcessingError, TaskQueueRecord};
 use super::protocol::LibraryTaskBatch;
 
@@ -22,6 +24,13 @@ impl LibraryScanScheduleState {
         self.elapsed_since_last_run_by_library
             .insert(library_id.into(), elapsed);
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibraryScanProfile {
+    pub library_id: String,
+    pub scan_startup: bool,
+    pub scan_interval: LibraryScanInterval,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

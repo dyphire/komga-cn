@@ -1,10 +1,10 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::sqlite::{
+use komga_infrastructure::DatabaseHandle;
+use komga_infrastructure::TaskRuntimeOwnershipOverrides;
+use komga_infrastructure::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
-use komga_infrastructure::task_queue::TaskRuntimeOwnershipOverrides;
 
 #[tokio::test]
 async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_external_owned() {
@@ -48,7 +48,8 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -111,10 +112,12 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
             1000,
             Some("book-1".to_string()),
         ))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     let error = scheduler
         .process_available(&runtime.job())
@@ -187,7 +190,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     .expect("claimed task row should be inserted");
     tasks_pool.close().await;
 
-    let _background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
+    let _background = komga_infrastructure::prepare_task_queue(
         runtime_task_context_from_config(&fixture.config).await,
         None,
     )
@@ -272,11 +275,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         owns_search_index: Some(false),
     });
 
-    let background = komga_infrastructure::task_queue::worker_runtime::prepare_task_queue(
-        runtime,
-        Some("RebuildIndex"),
-    )
-    .await;
+    let background = komga_infrastructure::prepare_task_queue(runtime, Some("RebuildIndex")).await;
 
     let verify_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
@@ -303,8 +302,10 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         task_rows, 1,
         "startup must not enqueue persisted search tasks when tasks database writer is external-owned",
     );
-    let queue = background.task_queue.lock().await;
-    let queued_tasks = queue.count_by_simple_type().await;
+    let queued_tasks = background
+        .queued_task_counts()
+        .await
+        .expect("external-owned startup queue counts should load");
     assert!(
         queued_tasks.is_empty(),
         "startup must not enqueue in-memory search tasks when tasks database writer is external-owned",
@@ -330,7 +331,8 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -441,7 +443,8 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -463,7 +466,8 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
             TaskQueueRecord::new("ScanLibrary_library-1_DEEP_true", 900, None)
                 .with_simple_type("ScanLibrary"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job()).await
         .expect("underscore legacy scan-library id should process successfully after canonical payload restoration");

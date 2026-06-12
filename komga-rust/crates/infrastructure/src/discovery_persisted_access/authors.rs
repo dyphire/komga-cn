@@ -1,7 +1,11 @@
-use super::*;
+use std::collections::BTreeSet;
+
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
-pub async fn load_persisted_author_names(
+use super::models::{AuthorEntry, AuthorsScope};
+
+pub(super) async fn load_persisted_author_names(
     pool: &SqlitePool,
     search: &str,
     authorized_library_ids: Option<&[String]>,
@@ -43,7 +47,7 @@ pub async fn load_persisted_author_names(
         .collect())
 }
 
-pub async fn load_persisted_author_roles(
+pub(super) async fn load_persisted_author_roles(
     pool: &SqlitePool,
     authorized_library_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
@@ -90,7 +94,7 @@ fn author_search_key(value: &str) -> String {
         .collect()
 }
 
-pub async fn load_persisted_authors_by_scope(
+pub(super) async fn load_persisted_authors_by_scope(
     pool: &SqlitePool,
     scope: &AuthorsScope,
     authorized_library_ids: Option<&[String]>,

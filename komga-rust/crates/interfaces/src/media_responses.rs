@@ -6,21 +6,20 @@ use serde_json::json;
 use crate::cache::{
     asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
 };
-use crate::identity_access::auth::{AuthUser, user_has_role};
 use crate::media_assets::http_helpers::{
     attachment_disposition, format_size_bytes, inline_disposition, internal_error_response,
 };
 use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
-    response_from_thumbnail_small_jpeg_bytes, thumbnail_max_edge_from_setting,
+    response_from_thumbnail_small_jpeg_bytes,
 };
 use crate::media_response_policy::MediaAssetResponse;
-use crate::state::{MediaAssetsState, OpdsState};
-use komga_application::discovery::BookDetailPort;
+use komga_application::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
+use komga_application::identity_access::{AuthUser, AuthUserRole, user_has_role};
 use komga_application::media_assets::{
-    BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
-    BookMediaDeliveryService, BookMediaPageRequest, BookPageRecord, BookThumbnailDelivery,
-    ContentResolverPort, MediaReaderPort,
+    BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
+    BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookPageRecord,
+    BookThumbnailDelivery,
 };
 use komga_application::operational::ServerSettingsPort;
 
@@ -42,9 +41,9 @@ impl Default for BookPageResponseOptions {
 }
 
 pub(crate) struct BookMediaResponses<'a> {
-    reader: &'a dyn MediaReaderPort,
-    content: &'a dyn ContentResolverPort,
-    book_detail: &'a dyn BookDetailPort,
+    reader: &'a dyn BookMediaReaderPort,
+    content: &'a dyn BookMediaContentPort,
+    book_ids: &'a dyn PersistedBookIdResolverPort,
 }
 
 pub(crate) struct OpdsBookMediaResponses<'a> {
@@ -53,19 +52,15 @@ pub(crate) struct OpdsBookMediaResponses<'a> {
 }
 
 impl<'a> BookMediaResponses<'a> {
-    pub(crate) fn for_media_assets(app: &'a MediaAssetsState) -> Self {
+    pub(crate) fn new(
+        reader: &'a dyn BookMediaReaderPort,
+        content: &'a dyn BookMediaContentPort,
+        book_ids: &'a dyn PersistedBookIdResolverPort,
+    ) -> Self {
         Self {
-            reader: app.reader.as_ref(),
-            content: app.content.as_ref(),
-            book_detail: app.book_detail.as_ref(),
-        }
-    }
-
-    fn for_opds(app: &'a OpdsState) -> Self {
-        Self {
-            reader: app.reader.as_ref(),
-            content: app.content.as_ref(),
-            book_detail: app.book_detail.as_ref(),
+            reader,
+            content,
+            book_ids,
         }
     }
 
@@ -170,11 +165,11 @@ impl<'a> BookMediaResponses<'a> {
         &self,
     ) -> BookMediaDeliveryService<
         '_,
-        dyn MediaReaderPort + 'a,
-        dyn ContentResolverPort + 'a,
-        dyn BookDetailPort + 'a,
+        dyn BookMediaReaderPort + 'a,
+        dyn BookMediaContentPort + 'a,
+        dyn PersistedBookIdResolverPort + 'a,
     > {
-        BookMediaDeliveryService::new(self.reader, self.content, self.book_detail)
+        BookMediaDeliveryService::new(self.reader, self.content, self.book_ids)
     }
 
     async fn raw_page_not_modified_response(
@@ -184,12 +179,11 @@ impl<'a> BookMediaResponses<'a> {
         book_id: &str,
         page_number_signed: i32,
     ) -> Option<Response> {
-        if page_number_signed <= 0 || !user_has_role(user, "PAGE_STREAMING") {
+        if page_number_signed <= 0 || !user_has_role(user, AuthUserRole::PageStreaming) {
             return None;
         }
 
-        let resolved_book_id =
-            resolve_book_id_for_conditional_raw_page(self.book_detail, book_id).await;
+        let resolved_book_id = resolve_persisted_book_id(self.book_ids, book_id).await;
         let media = self
             .reader
             .book_media(&resolved_book_id)
@@ -209,10 +203,15 @@ impl<'a> BookMediaResponses<'a> {
 }
 
 impl<'a> OpdsBookMediaResponses<'a> {
-    pub(crate) fn new(app: &'a OpdsState) -> Self {
+    pub(crate) fn new(
+        reader: &'a dyn BookMediaReaderPort,
+        content: &'a dyn BookMediaContentPort,
+        book_ids: &'a dyn PersistedBookIdResolverPort,
+        server_settings: &'a dyn ServerSettingsPort,
+    ) -> Self {
         Self {
-            media: BookMediaResponses::for_opds(app),
-            server_settings: app.server_settings.as_ref(),
+            media: BookMediaResponses::new(reader, content, book_ids),
+            server_settings,
         }
     }
 
@@ -271,40 +270,10 @@ impl<'a> OpdsBookMediaResponses<'a> {
             .selected_book_thumbnail_small(
                 headers,
                 book_id,
-                thumbnail_max_edge_from_setting(settings.thumbnail_size),
+                settings.thumbnail_size.max_edge(),
                 user,
             )
             .await
-    }
-}
-
-async fn resolve_book_id_for_conditional_raw_page(
-    book_detail: &dyn BookDetailPort,
-    requested_book_id: &str,
-) -> String {
-    let Some(index) = requested_book_id
-        .strip_prefix("book-")
-        .and_then(|value| value.parse::<usize>().ok())
-    else {
-        return requested_book_id.to_string();
-    };
-
-    if index == 0 {
-        return requested_book_id.to_string();
-    }
-
-    if matches!(
-        book_detail
-            .load_persisted_book_resource(requested_book_id)
-            .await,
-        Ok(Some(_))
-    ) {
-        return requested_book_id.to_string();
-    }
-
-    match book_detail.load_book_id_by_sorted_position(index).await {
-        Ok(Some(book_id)) => book_id,
-        _ => requested_book_id.to_string(),
     }
 }
 

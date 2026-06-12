@@ -79,6 +79,75 @@ async fn router_get_history_honors_type_sort_override_like_kotlin() {
 }
 
 #[tokio::test]
+async fn router_get_history_maps_events_to_api_page_contract() {
+    let ctx = TestFixture::new("router-get-history-api-page-contract").await;
+    insert_history_event(
+        ctx.paths(),
+        "event-book",
+        "BOOK_ADDED",
+        Some("book-1"),
+        None,
+        "2024-01-01T00:00:00Z",
+    )
+    .await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/history")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("get history api page request should build"),
+        )
+        .await
+        .expect("get history api page request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "content": [{
+                "id": "event-book",
+                "type": "BOOK_ADDED",
+                "bookId": "book-1",
+                "seriesId": null,
+                "timestamp": "2024-01-01T00:00:00Z",
+                "properties": {},
+            }],
+            "pageable": {
+                "pageNumber": 0,
+                "pageSize": 20,
+                "sort": {
+                    "empty": false,
+                    "sorted": true,
+                    "unsorted": false,
+                },
+                "offset": 0,
+                "paged": true,
+                "unpaged": false,
+            },
+            "last": true,
+            "totalElements": 1,
+            "totalPages": 1,
+            "first": true,
+            "size": 20,
+            "number": 0,
+            "sort": {
+                "empty": false,
+                "sorted": true,
+                "unsorted": false,
+            },
+            "numberOfElements": 1,
+            "empty": false,
+        })
+    );
+}
+
+#[tokio::test]
 async fn router_get_history_marks_unknown_sort_as_unsorted_like_kotlin() {
     let ctx = TestFixture::new("router-get-history-unknown-sort-unsorted").await;
     insert_history_event(

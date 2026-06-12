@@ -1,12 +1,16 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use komga_application::identity_access::{
-    AuthActivityPort, AuthOutcome, AuthUser, AuthenticationPort, CreateAuthUserInput,
-    DeviceSyncPort, KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncPage, KoboSyncPageRequest,
-    KoboSyncStatePort, PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
-    ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort, UpdateAuthUserInput,
-    UpdateAuthUserResult, UserAdminPort,
+    AuthActivityPort, AuthOutcome, AuthUser, AuthenticationActivityApiKey, AuthenticationPort,
+    CreateAuthUserInput, DeviceSyncPort, DeviceThumbnailBinary, KoboMetadataRecord, KoboProxyPort,
+    KoboProxyRequest, KoboProxyResponse, KoboSyncBookState, KoboSyncPage, KoboSyncPageRequest,
+    KoboSyncPointBook, KoboSyncStatePort, KoreaderBookLookupError, KoreaderBookTarget,
+    PersistedApiKey, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    PersistedReadProgressRecord, ResolvedAuthToken, SessionLifecyclePort, SessionResolverPort,
+    UpdateAuthUserInput, UpdateAuthUserResult, UserAdminPort, kobo_metadata_pre_paginated,
 };
-use serde_json::Value;
+use komga_application::media_assets::EpubNavigationContentPort;
 
 use crate::auth::runtime_identity_access as auth_identity;
 use crate::auth::session_store::RememberMeRuntimeSettings;
@@ -14,18 +18,39 @@ use crate::auth::{device_auth, kobo_sync};
 use crate::database_handle::DatabaseHandle;
 use crate::runtime_identity_access::user_mutation;
 
-use crate::auth::device_auth::{
-    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
-};
-
 #[derive(Clone)]
 pub struct IdentityAccess {
     db: DatabaseHandle,
+    kobo_proxy_base_url: String,
+    epub_navigation_content: Arc<dyn EpubNavigationContentPort>,
 }
 
 impl IdentityAccess {
-    pub fn new(db: DatabaseHandle) -> Self {
-        Self { db }
+    pub fn default_kobo_proxy_base_url() -> &'static str {
+        kobo_sync::DEFAULT_KOBO_PROXY_BASE_URL
+    }
+
+    pub fn new(
+        db: DatabaseHandle,
+        epub_navigation_content: Arc<dyn EpubNavigationContentPort>,
+    ) -> Self {
+        Self::with_kobo_proxy_base_url(
+            db,
+            Self::default_kobo_proxy_base_url(),
+            epub_navigation_content,
+        )
+    }
+
+    pub fn with_kobo_proxy_base_url(
+        db: DatabaseHandle,
+        kobo_proxy_base_url: impl Into<String>,
+        epub_navigation_content: Arc<dyn EpubNavigationContentPort>,
+    ) -> Self {
+        Self {
+            db,
+            kobo_proxy_base_url: kobo_proxy_base_url.into(),
+            epub_navigation_content,
+        }
     }
 }
 
@@ -34,7 +59,7 @@ impl SessionResolverPort for IdentityAccess {
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Option<AuthUser> {
+    ) -> Result<Option<AuthUser>, String> {
         auth_identity::auth_token_user_from_tokens(session_token, remember_me_token)
     }
 
@@ -42,22 +67,29 @@ impl SessionResolverPort for IdentityAccess {
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Option<ResolvedAuthToken> {
+    ) -> Result<Option<ResolvedAuthToken>, String> {
         auth_identity::auth_token_resolution_from_tokens(session_token, remember_me_token)
     }
 }
 
 #[async_trait]
 impl AuthenticationPort for IdentityAccess {
-    async fn authenticate_basic(&self, username: &str, password: &str) -> Option<AuthOutcome> {
+    async fn authenticate_basic(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<AuthOutcome, String> {
         auth_identity::authenticate_basic_credentials(self.db.read_pool(), username, password).await
     }
 
-    async fn authenticate_api_key(&self, api_key: &str) -> Option<AuthOutcome> {
+    async fn authenticate_api_key(&self, api_key: &str) -> Result<AuthOutcome, String> {
         auth_identity::persisted_api_key_user_by_token(api_key, self.db.read_pool()).await
     }
 
-    async fn api_key_metadata_by_token(&self, api_key: &str) -> Option<PersistedApiKeyMetadata> {
+    async fn api_key_metadata_by_token(
+        &self,
+        api_key: &str,
+    ) -> Result<Option<PersistedApiKeyMetadata>, String> {
         auth_identity::persisted_api_key_metadata_by_token(api_key, self.db.read_pool()).await
     }
 }
@@ -136,7 +168,7 @@ impl SessionLifecyclePort for IdentityAccess {
 
 #[async_trait]
 impl UserAdminPort for IdentityAccess {
-    async fn persisted_users(&self) -> Option<Vec<AuthUser>> {
+    async fn persisted_users(&self) -> Result<Vec<AuthUser>, String> {
         auth_identity::persisted_users(self.db.read_pool()).await
     }
 
@@ -169,7 +201,7 @@ impl UserAdminPort for IdentityAccess {
         &self,
         user_id: &str,
         password: &str,
-    ) -> Option<bool> {
+    ) -> Result<bool, String> {
         auth_identity::persisted_update_password_by_user_id(self.db.write_pool(), user_id, password)
             .await
     }
@@ -188,15 +220,19 @@ impl UserAdminPort for IdentityAccess {
         &self,
         user_id: &str,
         comment: &str,
-    ) -> Option<PersistedApiKey> {
+    ) -> Result<PersistedApiKey, String> {
         auth_identity::persisted_create_api_key(self.db.write_pool(), user_id, comment).await
     }
 
-    async fn persisted_api_key_comment_exists(&self, user_id: &str, comment: &str) -> Option<bool> {
+    async fn persisted_api_key_comment_exists(
+        &self,
+        user_id: &str,
+        comment: &str,
+    ) -> Result<bool, String> {
         auth_identity::persisted_api_key_comment_exists(self.db.read_pool(), user_id, comment).await
     }
 
-    async fn persisted_list_api_keys(&self, user_id: &str) -> Option<Vec<PersistedApiKey>> {
+    async fn persisted_list_api_keys(&self, user_id: &str) -> Result<Vec<PersistedApiKey>, String> {
         auth_identity::persisted_list_api_keys(self.db.read_pool(), user_id).await
     }
 
@@ -204,7 +240,7 @@ impl UserAdminPort for IdentityAccess {
         &self,
         user_id: &str,
         api_key_id: &str,
-    ) -> Option<bool> {
+    ) -> Result<bool, String> {
         auth_identity::persisted_delete_api_key_by_id(self.db.write_pool(), user_id, api_key_id)
             .await
     }
@@ -215,25 +251,12 @@ impl AuthActivityPort for IdentityAccess {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
-    ) -> Option<Vec<PersistedAuthenticationActivity>> {
+    ) -> Result<Vec<PersistedAuthenticationActivity>, String> {
         auth_identity::persisted_list_authentication_activity(self.db.read_pool(), user_id).await
     }
 
-    async fn persisted_cleanup_authentication_activity(&self) -> Option<u64> {
+    async fn persisted_cleanup_authentication_activity(&self) -> Result<u64, String> {
         auth_identity::persisted_cleanup_authentication_activity(self.db.write_pool()).await
-    }
-
-    async fn persisted_latest_authentication_activity_by_user_and_api_key(
-        &self,
-        user_id: &str,
-        api_key_id: &str,
-    ) -> Option<PersistedAuthenticationActivity> {
-        auth_identity::persisted_latest_authentication_activity_by_user_and_api_key(
-            self.db.read_pool(),
-            user_id,
-            api_key_id,
-        )
-        .await
     }
 
     async fn persisted_record_failed_authentication_activity(
@@ -259,8 +282,7 @@ impl AuthActivityPort for IdentityAccess {
         &self,
         user: &AuthUser,
         source: &str,
-        api_key_id: Option<&str>,
-        api_key_comment: Option<&str>,
+        api_key: AuthenticationActivityApiKey<'_>,
         ip: Option<&str>,
         user_agent: Option<&str>,
     ) -> Option<()> {
@@ -268,8 +290,7 @@ impl AuthActivityPort for IdentityAccess {
             self.db.write_pool(),
             user,
             source,
-            api_key_id,
-            api_key_comment,
+            api_key,
             ip,
             user_agent,
         )
@@ -285,22 +306,18 @@ impl DeviceSyncPort for IdentityAccess {
             .map_err(|e| e.to_string())
     }
 
-    async fn load_book_last_epub_position_locator(
-        &self,
-        book_id: &str,
-    ) -> Result<Option<Value>, String> {
-        device_auth::load_book_last_epub_position_locator(self.db.read_pool(), book_id)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
     async fn load_kobo_metadata_record(
         &self,
         book_id: &str,
     ) -> Result<Option<KoboMetadataRecord>, String> {
-        device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
+        let Some(record) = device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.kobo_metadata_record(record)?))
     }
 
     async fn load_koreader_book_target(
@@ -323,16 +340,46 @@ impl DeviceSyncPort for IdentityAccess {
     async fn load_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<(String, Vec<u8>)>, String> {
-        device_auth::load_thumbnail_by_id(self.db.read_pool(), thumbnail_id)
-            .await
-            .map_err(|e| e.to_string())
+    ) -> Result<Option<DeviceThumbnailBinary>, String> {
+        device_auth::load_thumbnail_by_id(self.db.read_pool(), thumbnail_id).await
     }
 
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, String> {
         device_auth::persisted_book_exists(self.db.read_pool(), book_id)
             .await
             .map_err(|e| e.to_string())
+    }
+}
+
+impl IdentityAccess {
+    fn kobo_metadata_record(
+        &self,
+        record: device_auth::PersistedKoboMetadataRecord,
+    ) -> Result<KoboMetadataRecord, String> {
+        Ok(KoboMetadataRecord {
+            title: record.title,
+            summary: record.summary,
+            release_date: record.release_date,
+            created_date: record.created_date,
+            language: record.language,
+            file_size: record.file_size,
+            file_name: record.file_name,
+            media_type: record.media_type,
+            contributor_names: record.contributor_names,
+            isbn: record.isbn,
+            publisher_name: record.publisher_name,
+            cover_image_id: record.cover_image_id,
+            series_id: record.series_id,
+            series_name: record.series_name,
+            series_number: record.series_number,
+            series_number_float: record.series_number_float,
+            oneshot: record.oneshot,
+            is_kepub: record.is_kepub,
+            is_pre_paginated: kobo_metadata_pre_paginated(
+                self.epub_navigation_content.as_ref(),
+                record.epub_extension_blob.as_deref(),
+            )?,
+        })
     }
 }
 
@@ -344,23 +391,14 @@ impl KoboSyncStatePort for IdentityAccess {
             .await
     }
 
-    async fn load_kobo_metadata_record(
+    async fn load_sync_book_states(
         &self,
-        book_id: &str,
-    ) -> Result<Option<KoboMetadataRecord>, String> {
-        device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
+        books: &[KoboSyncPointBook],
+        user_id: &str,
+    ) -> Result<Vec<KoboSyncBookState>, String> {
+        kobo_sync::SqliteKoboSyncState::new(self.db.read_pool())
+            .load_sync_book_states(books, user_id)
             .await
-            .map_err(|e| e.to_string())
-    }
-
-    async fn load_read_progress(
-        &self,
-        book_id: &str,
-        user_id_value: &str,
-    ) -> Result<Option<PersistedReadProgressRecord>, String> {
-        device_auth::load_read_progress(self.db.read_pool(), book_id, user_id_value)
-            .await
-            .map_err(|e| e.to_string())
     }
 
     async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String> {
@@ -371,15 +409,11 @@ impl KoboSyncStatePort for IdentityAccess {
 }
 
 #[async_trait]
-impl KoboStoreSyncPort for IdentityAccess {
-    async fn sync_store_library(
+impl KoboProxyPort for IdentityAccess {
+    async fn proxy_kobo_request(
         &self,
-        forwarded_headers: &[(String, String)],
-        query: Option<&str>,
-        raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, String> {
-        kobo_sync::HttpKoboStoreSync
-            .sync_store_library(forwarded_headers, query, raw_sync_token)
-            .await
+        request: KoboProxyRequest,
+    ) -> Result<KoboProxyResponse, String> {
+        kobo_sync::proxy_kobo_request(self.kobo_proxy_base_url.as_str(), request).await
     }
 }

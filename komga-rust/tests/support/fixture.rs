@@ -7,9 +7,10 @@ use std::pin::Pin;
 use axum::Router;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
-use komga_infrastructure::search::engine::rebuild_index_from_database;
-use komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle;
-use komga_infrastructure::sqlite::connect_task_write_pool;
+use komga_infrastructure::connect_task_write_pool;
+use komga_infrastructure::{SearchIndexLifecycle, rebuild_index_from_database};
+use komga_interfaces::state::RuntimeSseEventHub;
+use std::sync::Arc;
 
 use super::persistence_contract_fixture::{self, RuntimeDbPaths};
 use super::runtime_router_contract_support::contract_seed::seed_router_contract_data;
@@ -163,12 +164,21 @@ impl TestFixtureBuilder {
             bootstrap_empty_search_index(&config);
         }
 
+        let runtime_events = RuntimeSseEventHub::new();
         let app = match self.router_mode {
             RouterMode::WithRuntimeWorkers => {
-                komga_server::app::build_router_with_config(&config).await
+                komga_server::app::build_router_with_runtime_events_for_contract(
+                    &config,
+                    runtime_events.clone(),
+                )
+                .await
             }
             RouterMode::WithoutRuntimeWorkers => {
-                komga_server::app::build_router_without_runtime_workers_for_contract(&config).await
+                komga_server::app::build_router_without_runtime_workers_with_runtime_events_for_contract(
+                    &config,
+                    runtime_events.clone(),
+                )
+                .await
             }
         };
 
@@ -176,6 +186,7 @@ impl TestFixtureBuilder {
             db: TestDbFixture { paths: Some(paths) },
             config,
             app,
+            runtime_events,
         }
     }
 }
@@ -184,6 +195,7 @@ pub struct TestFixture {
     db: TestDbFixture,
     config: RuntimeConfig,
     app: Router,
+    runtime_events: Arc<RuntimeSseEventHub>,
 }
 
 impl TestFixture {
@@ -197,6 +209,14 @@ impl TestFixture {
 
     pub fn app(&self) -> &Router {
         &self.app
+    }
+
+    pub fn runtime_events(&self) -> &RuntimeSseEventHub {
+        self.runtime_events.as_ref()
+    }
+
+    pub fn runtime_events_arc(&self) -> Arc<RuntimeSseEventHub> {
+        self.runtime_events.clone()
     }
 
     pub fn config(&self) -> &RuntimeConfig {

@@ -1,24 +1,27 @@
 use bcrypt::{DEFAULT_COST, hash};
+use komga_infrastructure::{
+    list_persisted_user_emails, load_persisted_user_by_email, update_persisted_user_passwords,
+};
 use sqlx::SqlitePool;
 use std::fmt;
 use std::path::Path;
 
 #[derive(Debug, Default, Eq, PartialEq)]
-pub struct AdminCliCommands {
+pub(super) struct AdminCliCommands {
     list_users: bool,
     reset_emails: Vec<String>,
     new_password: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum StartupCliPreflight {
+pub(super) enum StartupCliPreflight {
     Help,
     Admin(AdminCliCommands),
     Server,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct CliUsageError {
+pub(super) struct CliUsageError {
     message: String,
 }
 
@@ -39,7 +42,7 @@ impl fmt::Display for CliUsageError {
 impl std::error::Error for CliUsageError {}
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct AdminCliActionError {
+pub(super) struct AdminCliActionError {
     message: String,
 }
 
@@ -78,7 +81,7 @@ impl PendingValueFlag {
 
 const PASSWORD_RESET_PAIRING_ERROR: &str = "Password reset requires both '--reset=<email>' (or '--reset <email>') and '--newpassword=<password>' (or '--newpassword <password>').";
 
-pub fn render_usage() -> String {
+pub(super) fn render_usage() -> String {
     [
         "Usage: komga-rust [OPTIONS]",
         "",
@@ -109,7 +112,7 @@ pub fn render_usage() -> String {
     .join("\n")
 }
 
-pub fn parse_startup_cli<I>(args: I) -> Result<StartupCliPreflight, CliUsageError>
+pub(super) fn parse_startup_cli<I>(args: I) -> Result<StartupCliPreflight, CliUsageError>
 where
     I: IntoIterator,
     I::Item: Into<String>,
@@ -185,11 +188,11 @@ fn apply_pending_value(commands: &mut AdminCliCommands, flag: PendingValueFlag, 
     }
 }
 
-pub async fn run_admin_cli_commands(
+pub(super) async fn run_admin_cli_commands(
     database_file: &Path,
     commands: &AdminCliCommands,
 ) -> Result<(), AdminCliActionError> {
-    let pool = komga_infrastructure::sqlite::connect_write_pool(database_file)
+    let pool = komga_infrastructure::connect_write_pool(database_file)
         .await
         .map_err(|error| AdminCliActionError::new(format!("failed to open database: {error}")))?;
 
@@ -210,11 +213,7 @@ pub async fn run_admin_cli_commands(
     let mut failures = Vec::new();
 
     for email in &commands.reset_emails {
-        let user = komga_infrastructure::sqlite::write_models::bootstrap_users::load_persisted_user_by_email(
-            &pool,
-            email,
-        )
-        .await;
+        let user = load_persisted_user_by_email(&pool, email).await;
 
         let Some(user) = (match user {
             Ok(row) => row,
@@ -246,17 +245,14 @@ pub async fn run_admin_cli_commands(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    komga_infrastructure::sqlite::write_models::bootstrap_users::update_persisted_user_passwords(
-        &pool,
-        &password_updates,
-    )
-    .await
-    .map_err(|error| {
-        AdminCliActionError::new(format!("failed to reset password batch: {error}"))
-    })?;
+    update_persisted_user_passwords(&pool, &password_updates)
+        .await
+        .map_err(|error| {
+            AdminCliActionError::new(format!("failed to reset password batch: {error}"))
+        })?;
 
     for user in users {
-        komga_infrastructure::runtime_identity_access::invalidate_user_sessions(user.id.as_str());
+        komga_infrastructure::invalidate_user_sessions(user.id.as_str());
         println!("Reset password for user: {}", user.email);
     }
 
@@ -264,11 +260,7 @@ pub async fn run_admin_cli_commands(
 }
 
 async fn print_user_list(pool: &SqlitePool) -> Result<(), AdminCliActionError> {
-    let rows =
-        komga_infrastructure::sqlite::write_models::bootstrap_users::list_persisted_user_emails(
-            pool,
-        )
-        .await;
+    let rows = list_persisted_user_emails(pool).await;
 
     match rows {
         Ok(rows) if rows.is_empty() => {

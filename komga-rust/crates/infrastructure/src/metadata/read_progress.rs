@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use komga_application::media_assets::BookProgressionInput;
-use komga_application::runtime_sse::register_runtime_sse_event;
+use komga_application::media_assets::{BookProgressionInput, BookProgressionRecord};
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use serde_json::Value;
-use serde_json::json;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 fn serialize_locator(locator: Option<&Value>) -> Vec<u8> {
@@ -129,48 +128,51 @@ async fn persisted_series_read_progress_exists(
     .map(|row| row.is_some())
 }
 
-fn emit_read_progress_changed(book_id: &str, user_id_value: &str) {
-    register_runtime_sse_event(
-        "ReadProgressChanged",
-        json!({
-            "bookId": book_id,
-            "userId": user_id_value,
-        }),
-        false,
-        Some(user_id_value.to_string()),
-    );
+fn emit_read_progress_changed(
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    user_id_value: &str,
+) {
+    runtime_events.register(RuntimeSseEvent::ReadProgressChanged {
+        book_id: book_id.to_string(),
+        user_id: user_id_value.to_string(),
+    });
 }
 
-fn emit_read_progress_deleted(book_id: &str, user_id_value: &str) {
-    register_runtime_sse_event(
-        "ReadProgressDeleted",
-        json!({
-            "bookId": book_id,
-            "userId": user_id_value,
-        }),
-        false,
-        Some(user_id_value.to_string()),
-    );
+fn emit_read_progress_deleted(
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    user_id_value: &str,
+) {
+    runtime_events.register(RuntimeSseEvent::ReadProgressDeleted {
+        book_id: book_id.to_string(),
+        user_id: user_id_value.to_string(),
+    });
 }
 
-fn emit_read_progress_series_event(series_id: &str, user_id_value: &str, exists: bool) {
-    register_runtime_sse_event(
-        if exists {
-            "ReadProgressSeriesChanged"
-        } else {
-            "ReadProgressSeriesDeleted"
-        },
-        json!({
-            "seriesId": series_id,
-            "userId": user_id_value,
-        }),
-        false,
-        Some(user_id_value.to_string()),
-    );
+fn emit_read_progress_series_event(
+    runtime_events: &dyn RuntimeSseEventSink,
+    series_id: &str,
+    user_id_value: &str,
+    exists: bool,
+) {
+    let event = if exists {
+        RuntimeSseEvent::ReadProgressSeriesChanged {
+            series_id: series_id.to_string(),
+            user_id: user_id_value.to_string(),
+        }
+    } else {
+        RuntimeSseEvent::ReadProgressSeriesDeleted {
+            series_id: series_id.to_string(),
+            user_id: user_id_value.to_string(),
+        }
+    };
+    runtime_events.register(event);
 }
 
-pub async fn persist_read_progress(
+pub(crate) async fn persist_read_progress(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     user_id_value: &str,
     page: u64,
@@ -201,19 +203,20 @@ pub async fn persist_read_progress(
     let series_id = load_book_series_id(pool, book_id, "read-progress").await?;
     sync_series_read_progress_for_book(pool, book_id, user_id_value, "read-progress").await?;
 
-    emit_read_progress_changed(book_id, user_id_value);
+    emit_read_progress_changed(runtime_events, book_id, user_id_value);
     if let Some(series_id) = series_id {
         let exists =
             persisted_series_read_progress_exists(pool, &series_id, user_id_value, "read-progress")
                 .await?;
-        emit_read_progress_series_event(&series_id, user_id_value, exists);
+        emit_read_progress_series_event(runtime_events, &series_id, user_id_value, exists);
     }
 
     Ok(())
 }
 
-pub async fn persist_book_progression(
+pub(crate) async fn persist_book_progression(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     input: BookProgressionInput,
 ) -> Result<(), String> {
     require_user_exists(pool, &input.user_id, "progression").await?;
@@ -243,22 +246,22 @@ pub async fn persist_book_progression(
     let series_id = load_book_series_id(pool, &input.book_id, "progression").await?;
     sync_series_read_progress_for_book(pool, &input.book_id, &input.user_id, "progression").await?;
 
-    emit_read_progress_changed(&input.book_id, &input.user_id);
+    emit_read_progress_changed(runtime_events, &input.book_id, &input.user_id);
     if let Some(series_id) = series_id {
         let exists =
             persisted_series_read_progress_exists(pool, &series_id, &input.user_id, "progression")
                 .await?;
-        emit_read_progress_series_event(&series_id, &input.user_id, exists);
+        emit_read_progress_series_event(runtime_events, &series_id, &input.user_id, exists);
     }
 
     Ok(())
 }
 
-pub async fn load_book_progression(
+pub(crate) async fn load_book_progression(
     pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
-) -> Result<Option<Value>, String> {
+) -> Result<Option<BookProgressionRecord>, String> {
     let row = sqlx::query(
         r#"
         SELECT PAGE, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR
@@ -281,13 +284,7 @@ pub async fn load_book_progression(
         .try_get::<Option<Vec<u8>>, _>("LOCATOR")
         .or_else(|_| row.try_get::<Option<Vec<u8>>, _>("locator"))
         .map_err(|error| format!("read persisted book progression locator: {error}"))?;
-    let locator = locator_blob
-        .as_deref()
-        .filter(|blob| !blob.is_empty())
-        .map(serde_json::from_slice::<Value>)
-        .transpose()
-        .map_err(|error| format!("decode persisted book progression locator: {error}"))?
-        .unwrap_or_else(|| serde_json::json!({}));
+    let locator = decode_book_progression_locator(locator_blob.as_deref())?;
     let read_date = row
         .try_get::<String, _>("READ_DATE")
         .or_else(|_| row.try_get::<String, _>("read_date"))
@@ -297,23 +294,35 @@ pub async fn load_book_progression(
     } else {
         read_date.replace(' ', "T") + "Z"
     };
-    Ok(Some(serde_json::json!({
-        "modified": modified,
-        "device": {
-            "id": row
-                .try_get::<String, _>("DEVICE_ID")
-                .or_else(|_| row.try_get::<String, _>("device_id"))
-                .map_err(|error| format!("read persisted book progression device_id: {error}"))?,
-            "name": row
-                .try_get::<String, _>("DEVICE_NAME")
-                .or_else(|_| row.try_get::<String, _>("device_name"))
-                .map_err(|error| format!("read persisted book progression device_name: {error}"))?,
-        },
-        "locator": locator,
-    })))
+    Ok(Some(BookProgressionRecord {
+        modified,
+        device_id: row
+            .try_get::<String, _>("DEVICE_ID")
+            .or_else(|_| row.try_get::<String, _>("device_id"))
+            .map_err(|error| format!("read persisted book progression device_id: {error}"))?,
+        device_name: row
+            .try_get::<String, _>("DEVICE_NAME")
+            .or_else(|_| row.try_get::<String, _>("device_name"))
+            .map_err(|error| format!("read persisted book progression device_name: {error}"))?,
+        locator,
+    }))
 }
 
-pub async fn load_book_read_progress_completed(
+fn decode_book_progression_locator(locator: Option<&[u8]>) -> Result<Value, String> {
+    let Some(locator) = locator.filter(|blob| !blob.is_empty()) else {
+        return Ok(serde_json::json!({}));
+    };
+
+    let payload = serde_json::from_slice::<Value>(locator)
+        .map_err(|error| format!("decode persisted book progression locator: {error}"))?;
+    if payload.is_object() {
+        Ok(payload)
+    } else {
+        Err("decode persisted book progression locator: expected JSON object".to_string())
+    }
+}
+
+pub(crate) async fn load_book_read_progress_completed(
     pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
@@ -335,7 +344,10 @@ pub async fn load_book_read_progress_completed(
     Ok(row.map(|row| row.get::<bool, _>("COMPLETED")))
 }
 
-pub async fn load_book_page_count(pool: &SqlitePool, book_id: &str) -> Result<Option<u64>, String> {
+pub(crate) async fn load_book_page_count(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> Result<Option<u64>, String> {
     let row = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
@@ -345,8 +357,9 @@ pub async fn load_book_page_count(pool: &SqlitePool, book_id: &str) -> Result<Op
     Ok(row.map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64))
 }
 
-pub async fn delete_persisted_read_progress(
+pub(crate) async fn delete_persisted_read_progress(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     user_id_value: &str,
 ) -> Result<(), String> {
@@ -368,21 +381,21 @@ pub async fn delete_persisted_read_progress(
             "read-progress delete",
         )
         .await?;
-        emit_read_progress_series_event(&series_id, user_id_value, exists);
+        emit_read_progress_series_event(runtime_events, &series_id, user_id_value, exists);
     }
 
-    emit_read_progress_deleted(book_id, user_id_value);
+    emit_read_progress_deleted(runtime_events, book_id, user_id_value);
 
     Ok(())
 }
 
-pub async fn readlist_tachiyomi_counters(
+pub(crate) async fn read_progress_completed_by_book_ids(
     pool: &SqlitePool,
     ordered_book_ids: &[String],
     user_id_value: &str,
-) -> Result<(u64, u64, u64, u64, u64), String> {
+) -> Result<Vec<Option<bool>>, String> {
     if ordered_book_ids.is_empty() {
-        return Ok((0, 0, 0, 0, 0));
+        return Ok(Vec::new());
     }
 
     let mut query = QueryBuilder::<Sqlite>::new(
@@ -400,7 +413,7 @@ pub async fn readlist_tachiyomi_counters(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query readlist tachiyomi counters: {error}"))?;
+        .map_err(|error| format!("query read progress completion states: {error}"))?;
 
     let completed_by_book = rows
         .into_iter()
@@ -412,78 +425,14 @@ pub async fn readlist_tachiyomi_counters(
         })
         .collect::<HashMap<_, _>>();
 
-    let completed_states = ordered_book_ids
+    Ok(ordered_book_ids
         .iter()
-        .map(|book_id| completed_by_book.get(book_id).copied().flatten())
-        .collect::<Vec<_>>();
-
-    let books_count = ordered_book_ids.len() as u64;
-    let books_read_count = completed_states
-        .iter()
-        .filter(|completed| **completed == Some(1))
-        .count() as u64;
-    let books_in_progress_count = completed_states
-        .iter()
-        .filter(|completed| **completed == Some(0))
-        .count() as u64;
-    let books_unread_count = completed_states
-        .iter()
-        .filter(|completed| completed.is_none())
-        .count() as u64;
-
-    let mut last_read_continuous_index = 0_u64;
-    for completed in completed_states {
-        if completed == Some(1) {
-            last_read_continuous_index += 1;
-        } else {
-            break;
-        }
-    }
-
-    Ok((
-        books_count,
-        books_read_count,
-        books_unread_count,
-        books_in_progress_count,
-        last_read_continuous_index,
-    ))
-}
-
-pub async fn persist_readlist_tachiyomi_progress(
-    pool: &SqlitePool,
-    ordered_book_ids: &[String],
-    user_id_value: &str,
-    last_book_read: usize,
-) -> Result<Option<()>, String> {
-    for book_id in ordered_book_ids.iter().take(last_book_read) {
-        let already_completed = sqlx::query(
-            "SELECT COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ? LIMIT 1",
-        )
-        .bind(book_id)
-        .bind(user_id_value)
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| format!("query existing completion for tachiyomi write: {error}"))?
-        .is_some_and(|row| row.get::<i64, _>("COMPLETED") != 0);
-        if already_completed {
-            continue;
-        }
-
-        let page_count = sqlx::query(
-            "SELECT COALESCE(PAGE_COUNT, 0) AS PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
-        )
-        .bind(book_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| format!("query page count for tachiyomi write: {error}"))?
-        .map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64)
-        .unwrap_or(1)
-        .max(1);
-
-        persist_read_progress(pool, book_id, user_id_value, page_count, true, None)
-            .await
-            .map_err(|error| format!("persist read progress for tachiyomi write: {error}"))?;
-    }
-
-    Ok(Some(()))
+        .map(|book_id| {
+            completed_by_book
+                .get(book_id)
+                .copied()
+                .flatten()
+                .map(|value| value != 0)
+        })
+        .collect())
 }

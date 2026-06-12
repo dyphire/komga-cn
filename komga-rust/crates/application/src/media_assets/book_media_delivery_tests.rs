@@ -3,17 +3,22 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::identity_access::AuthUser;
+use crate::discovery::PersistedBookIdResolverPort;
+use crate::identity_access::{AuthUser, AuthUserRole};
 
 use super::{
-    BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
-    BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookPageRecord,
-    PersistedBookIdResolverPort,
+    BookAccessRestrictions, BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset,
+    BookMediaDeliveryDisposition, BookMediaDeliveryService, BookMediaPageRequest,
+    BookMediaReaderPort, BookPageRecord, EpubCoverImage, MediaImageDimensions,
 };
 
 #[derive(Default)]
 struct TestBookMediaReader {
     media_by_book: HashMap<String, super::BookMediaRecord>,
+    restriction_error: Option<String>,
+    media_ready_error: Option<String>,
+    book_page_error: Option<String>,
+    selected_thumbnail_error: Option<String>,
 }
 
 #[async_trait]
@@ -23,6 +28,9 @@ impl BookMediaReaderPort for TestBookMediaReader {
     }
 
     async fn book_media_is_ready(&self, _book_id: &str) -> Result<bool, String> {
+        if let Some(error) = self.media_ready_error.clone() {
+            return Err(error);
+        }
         Ok(true)
     }
 
@@ -35,13 +43,19 @@ impl BookMediaReaderPort for TestBookMediaReader {
         _book_id: &str,
         _page_number: u64,
     ) -> Result<Option<BookPageRecord>, String> {
+        if let Some(error) = self.book_page_error.clone() {
+            return Err(error);
+        }
         Ok(None)
     }
 
     async fn book_restrictions(
         &self,
         _book_id: &str,
-    ) -> Result<Option<(Option<u16>, Vec<String>)>, String> {
+    ) -> Result<Option<BookAccessRestrictions>, String> {
+        if let Some(error) = self.restriction_error.clone() {
+            return Err(error);
+        }
         Ok(None)
     }
 
@@ -49,14 +63,43 @@ impl BookMediaReaderPort for TestBookMediaReader {
         &self,
         _book_id: &str,
     ) -> Result<Option<super::EntityThumbnailBinary>, String> {
+        if let Some(error) = self.selected_thumbnail_error.clone() {
+            return Err(error);
+        }
         Ok(None)
     }
 }
 
-#[derive(Default)]
 struct TestBookMediaContent {
-    archive_page_row: Option<BookPageRecord>,
-    page_bytes: Vec<u8>,
+    archive_page_row: Result<Option<BookPageRecord>, String>,
+    page_bytes: Result<Option<Vec<u8>>, String>,
+    thumbnail_bytes: Result<Option<Vec<u8>>, String>,
+    pdf_page_bytes: Result<Option<Vec<u8>>, String>,
+    pdf_page_count: Result<Option<u64>, String>,
+    media_file_bytes: Result<Option<Vec<u8>>, String>,
+    media_file_exists: Result<bool, String>,
+    media_file_size: Result<Option<i64>, String>,
+    media_image_dimensions: Result<Option<MediaImageDimensions>, String>,
+    converted_image_bytes: Result<Option<Vec<u8>>, String>,
+    epub_cover: Result<Option<EpubCoverImage>, String>,
+}
+
+impl Default for TestBookMediaContent {
+    fn default() -> Self {
+        Self {
+            archive_page_row: Ok(None),
+            page_bytes: Ok(None),
+            thumbnail_bytes: Ok(None),
+            pdf_page_bytes: Ok(None),
+            pdf_page_count: Ok(None),
+            media_file_bytes: Ok(None),
+            media_file_exists: Ok(true),
+            media_file_size: Ok(None),
+            media_image_dimensions: Ok(None),
+            converted_image_bytes: Ok(None),
+            epub_cover: Ok(None),
+        }
+    }
 }
 
 #[async_trait]
@@ -66,8 +109,8 @@ impl BookMediaContentPort for TestBookMediaContent {
         _media: &super::BookMediaRecord,
         _page: &BookPageRecord,
         _page_number: u64,
-    ) -> Option<Vec<u8>> {
-        Some(self.page_bytes.clone())
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.page_bytes.clone()
     }
 
     async fn render_page_thumbnail(
@@ -76,59 +119,72 @@ impl BookMediaContentPort for TestBookMediaContent {
         _page: &BookPageRecord,
         _page_number: u64,
         _max_edge: u32,
-    ) -> Option<Vec<u8>> {
-        None
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.thumbnail_bytes.clone()
     }
 
     async fn archive_page_row(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Option<BookPageRecord> {
+    ) -> Result<Option<BookPageRecord>, String> {
         self.archive_page_row.clone()
     }
 
     async fn archive_page_rows(
         &self,
         _media: &super::BookMediaRecord,
-    ) -> Option<Vec<BookPageRecord>> {
-        None
+    ) -> Result<Option<Vec<BookPageRecord>>, String> {
+        Ok(None)
     }
 
     fn pdf_page_row(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Option<BookPageRecord> {
-        None
+    ) -> Result<Option<BookPageRecord>, String> {
+        Ok(None)
     }
 
-    fn generated_pdf_page_rows(&self, _media: &super::BookMediaRecord) -> Vec<BookPageRecord> {
-        Vec::new()
+    fn generated_pdf_page_rows(
+        &self,
+        _media: &super::BookMediaRecord,
+    ) -> Result<Vec<BookPageRecord>, String> {
+        Ok(Vec::new())
     }
 
     fn read_pdf_page_as_single_page_pdf(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Option<Vec<u8>> {
-        None
+    ) -> Result<Option<Vec<u8>>, String> {
+        self.pdf_page_bytes.clone()
     }
 
-    fn detect_pdf_page_count(&self, _media: &super::BookMediaRecord) -> Option<u64> {
-        None
+    fn detect_pdf_page_count(
+        &self,
+        _media: &super::BookMediaRecord,
+    ) -> Result<Option<u64>, String> {
+        self.pdf_page_count.clone()
     }
 
-    async fn read_media_file_bytes(&self, _path: &Path) -> Option<Vec<u8>> {
-        None
+    fn media_file_exists(&self, _path: &Path) -> Result<bool, String> {
+        self.media_file_exists.clone()
     }
 
-    async fn read_media_file_size(&self, _path: &Path) -> Option<i64> {
-        None
+    async fn read_media_file_bytes(&self, _path: &Path) -> Result<Option<Vec<u8>>, String> {
+        self.media_file_bytes.clone()
     }
 
-    async fn read_media_image_dimensions(&self, _path: &Path) -> Option<(i64, i64)> {
-        None
+    async fn read_media_file_size(&self, _path: &Path) -> Result<Option<i64>, String> {
+        self.media_file_size.clone()
+    }
+
+    async fn read_media_image_dimensions(
+        &self,
+        _path: &Path,
+    ) -> Result<Option<MediaImageDimensions>, String> {
+        self.media_image_dimensions.clone()
     }
 
     fn convert_image_bytes(
@@ -136,15 +192,18 @@ impl BookMediaContentPort for TestBookMediaContent {
         bytes: &[u8],
         source_content_type: &str,
         target_content_type: &str,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, String> {
         if source_content_type.eq_ignore_ascii_case(target_content_type) {
-            return Some(bytes.to_vec());
+            return Ok(Some(bytes.to_vec()));
         }
-        None
+        self.converted_image_bytes.clone()
     }
 
-    async fn epub_cover_bytes(&self, _media: &super::BookMediaRecord) -> Option<(Vec<u8>, String)> {
-        None
+    async fn epub_cover_bytes(
+        &self,
+        _media: &super::BookMediaRecord,
+    ) -> Result<Option<EpubCoverImage>, String> {
+        self.epub_cover.clone()
     }
 }
 
@@ -165,6 +224,90 @@ impl PersistedBookIdResolverPort for IdentityBookIdResolver {
 }
 
 #[tokio::test]
+async fn book_file_propagates_restriction_load_errors() {
+    let mut reader = TestBookMediaReader {
+        restriction_error: Some("restriction lookup failed".to_string()),
+        ..Default::default()
+    };
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent::default();
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_file(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("restriction lookup failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_page_propagates_media_ready_load_errors() {
+    let mut reader = TestBookMediaReader {
+        media_ready_error: Some("media ready lookup failed".to_string()),
+        ..Default::default()
+    };
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent::default();
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(&admin_user(), "book-1", 1, BookMediaPageRequest::default())
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("media ready lookup failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn page_delivery_requires_page_streaming_role_even_for_admins() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent::default();
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+    let user = admin_without_page_streaming_user();
+
+    let page_delivery = service
+        .book_page(&user, "book-1", 1, BookMediaPageRequest::default())
+        .await;
+    let pages_delivery = service.book_pages(&user, "book-1").await;
+    let thumbnail_delivery = service.book_page_thumbnail(&user, "book-1", 1).await;
+
+    assert_eq!(page_delivery, BookMediaDelivery::Forbidden);
+    assert_eq!(pages_delivery, BookMediaDelivery::Forbidden);
+    assert_eq!(thumbnail_delivery, BookMediaDelivery::Forbidden);
+}
+
+#[tokio::test]
 async fn book_page_uses_archive_page_when_persisted_page_row_is_missing() {
     let mut reader = TestBookMediaReader::default();
     reader.media_by_book.insert(
@@ -178,15 +321,16 @@ async fn book_page_uses_archive_page_when_persisted_page_row_is_missing() {
         },
     );
     let content = TestBookMediaContent {
-        archive_page_row: Some(BookPageRecord {
+        archive_page_row: Ok(Some(BookPageRecord {
             number: 1,
             file_name: "001.png".to_string(),
             media_type: "image/png".to_string(),
             width: Some(640),
             height: Some(900),
             file_size: 12,
-        }),
-        page_bytes: b"page-bytes".to_vec(),
+        })),
+        page_bytes: Ok(Some(b"page-bytes".to_vec())),
+        ..Default::default()
     };
     let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
 
@@ -207,6 +351,357 @@ async fn book_page_uses_archive_page_when_persisted_page_row_is_missing() {
 }
 
 #[tokio::test]
+async fn book_page_propagates_page_byte_load_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 0,
+        },
+    );
+    let content = TestBookMediaContent {
+        archive_page_row: Ok(Some(BookPageRecord {
+            number: 1,
+            file_name: "001.png".to_string(),
+            media_type: "image/png".to_string(),
+            width: Some(640),
+            height: Some(900),
+            file_size: 12,
+        })),
+        page_bytes: Err("page bytes failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(&admin_user(), "book-1", 1, BookMediaPageRequest::default())
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("page bytes failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_page_propagates_page_conversion_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 0,
+        },
+    );
+    let content = TestBookMediaContent {
+        archive_page_row: Ok(Some(BookPageRecord {
+            number: 1,
+            file_name: "001.png".to_string(),
+            media_type: "image/png".to_string(),
+            width: Some(640),
+            height: Some(900),
+            file_size: 12,
+        })),
+        page_bytes: Ok(Some(b"not-an-image".to_vec())),
+        converted_image_bytes: Err("page conversion failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(
+            &admin_user(),
+            "book-1",
+            1,
+            BookMediaPageRequest {
+                convert: Some("jpeg".to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("page conversion failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_page_propagates_single_image_dimension_load_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: PathBuf::from("/library/cover.jpg"),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_image_dimensions: Err("image dimensions failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(&admin_user(), "book-1", 1, BookMediaPageRequest::default())
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("image dimensions failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_page_propagates_single_image_file_size_load_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: PathBuf::from("/library/cover.jpg"),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_file_size: Err("file size failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(&admin_user(), "book-1", 1, BookMediaPageRequest::default())
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("file size failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_pages_do_not_synthesize_single_image_row_for_missing_file() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: PathBuf::from("/library/cover.jpg"),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_file_exists: Ok(false),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_pages(&admin_user(), "book-1").await;
+
+    assert_eq!(delivery, BookMediaDelivery::NotFound);
+}
+
+#[tokio::test]
+async fn book_pages_propagate_single_image_file_probe_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: PathBuf::from("/library/cover.jpg"),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_file_exists: Err("file probe failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_pages(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("file probe failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_pages_propagate_single_image_file_size_missing_after_probe() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: PathBuf::from("/library/cover.jpg"),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_file_exists: Ok(true),
+        media_file_size: Ok(None),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_pages(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal(
+            "single image media file missing: /library/cover.jpg".to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn book_thumbnail_source_propagates_selected_thumbnail_load_errors() {
+    let mut reader = TestBookMediaReader {
+        selected_thumbnail_error: Some("selected thumbnail lookup failed".to_string()),
+        ..Default::default()
+    };
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent::default();
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_thumbnail_source(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        super::BookThumbnailDelivery::Internal("selected thumbnail lookup failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_thumbnail_source_propagates_page_lookup_errors() {
+    let mut reader = TestBookMediaReader {
+        book_page_error: Some("thumbnail page lookup failed".to_string()),
+        ..Default::default()
+    };
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        archive_page_row: Ok(Some(BookPageRecord {
+            number: 1,
+            file_name: "001.png".to_string(),
+            media_type: "image/png".to_string(),
+            width: Some(640),
+            height: Some(900),
+            file_size: 12,
+        })),
+        page_bytes: Ok(Some(b"page-bytes".to_vec())),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_thumbnail_source(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        super::BookThumbnailDelivery::Internal("thumbnail page lookup failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_thumbnail_source_propagates_epub_cover_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.epub".to_string(),
+            file_path: PathBuf::from("/library/book.epub"),
+            media_type: "application/epub+zip".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        epub_cover: Err("epub cover read failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service.book_thumbnail_source(&admin_user(), "book-1").await;
+
+    assert_eq!(
+        delivery,
+        super::BookThumbnailDelivery::Internal("epub cover read failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn book_page_thumbnail_propagates_render_errors() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-1".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: PathBuf::from("/library/book.cbz"),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 0,
+        },
+    );
+    let content = TestBookMediaContent {
+        archive_page_row: Ok(Some(BookPageRecord {
+            number: 1,
+            file_name: "001.png".to_string(),
+            media_type: "image/png".to_string(),
+            width: Some(640),
+            height: Some(900),
+            file_size: 12,
+        })),
+        thumbnail_bytes: Err("page thumbnail render failed".to_string()),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page_thumbnail(&admin_user(), "book-1", 1)
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Internal("page thumbnail render failed".to_string())
+    );
+}
+
+#[tokio::test]
 async fn book_page_preserves_page_media_type_extension_in_file_name() {
     let mut reader = TestBookMediaReader::default();
     reader.media_by_book.insert(
@@ -220,15 +715,16 @@ async fn book_page_preserves_page_media_type_extension_in_file_name() {
         },
     );
     let content = TestBookMediaContent {
-        archive_page_row: Some(BookPageRecord {
+        archive_page_row: Ok(Some(BookPageRecord {
             number: 1,
             file_name: "001.webp".to_string(),
             media_type: "image/webp".to_string(),
             width: Some(640),
             height: Some(900),
             file_size: 12,
-        }),
-        page_bytes: b"webp-bytes".to_vec(),
+        })),
+        page_bytes: Ok(Some(b"webp-bytes".to_vec())),
+        ..Default::default()
     };
     let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
 
@@ -247,7 +743,21 @@ fn admin_user() -> AuthUser {
         id: "admin".to_string(),
         email: "admin@example.org".to_string(),
         password: "password".to_string(),
-        roles: vec!["ADMIN".to_string()],
+        roles: vec![AuthUserRole::Admin, AuthUserRole::PageStreaming],
+        shared_all_libraries: true,
+        shared_library_ids: Vec::new(),
+        labels_allow: Vec::new(),
+        labels_exclude: Vec::new(),
+        age_restriction: None,
+    }
+}
+
+fn admin_without_page_streaming_user() -> AuthUser {
+    AuthUser {
+        id: "admin-without-page-streaming".to_string(),
+        email: "admin-without-page-streaming@example.org".to_string(),
+        password: "password".to_string(),
+        roles: vec![AuthUserRole::Admin],
         shared_all_libraries: true,
         shared_library_ids: Vec::new(),
         labels_allow: Vec::new(),

@@ -1,3 +1,78 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibraryScanInterval {
+    Disabled,
+    Hourly,
+    Every6h,
+    Every12h,
+    Daily,
+    Weekly,
+}
+
+impl LibraryScanInterval {
+    pub fn duration_seconds(self) -> Option<u64> {
+        match self {
+            Self::Disabled => None,
+            Self::Hourly => Some(60 * 60),
+            Self::Every6h => Some(6 * 60 * 60),
+            Self::Every12h => Some(12 * 60 * 60),
+            Self::Daily => Some(24 * 60 * 60),
+            Self::Weekly => Some(7 * 24 * 60 * 60),
+        }
+    }
+
+    pub fn persisted_name(self) -> &'static str {
+        match self {
+            Self::Disabled => "DISABLED",
+            Self::Hourly => "HOURLY",
+            Self::Every6h => "EVERY_6H",
+            Self::Every12h => "EVERY_12H",
+            Self::Daily => "DAILY",
+            Self::Weekly => "WEEKLY",
+        }
+    }
+
+    pub fn from_persisted_name(value: &str) -> Option<Self> {
+        match value {
+            "DISABLED" => Some(Self::Disabled),
+            "HOURLY" => Some(Self::Hourly),
+            "EVERY_6H" => Some(Self::Every6h),
+            "EVERY_12H" => Some(Self::Every12h),
+            "DAILY" => Some(Self::Daily),
+            "WEEKLY" => Some(Self::Weekly),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibrarySeriesCover {
+    First,
+    FirstUnreadOrFirst,
+    FirstUnreadOrLast,
+    Last,
+}
+
+impl LibrarySeriesCover {
+    pub fn persisted_name(self) -> &'static str {
+        match self {
+            Self::First => "FIRST",
+            Self::FirstUnreadOrFirst => "FIRST_UNREAD_OR_FIRST",
+            Self::FirstUnreadOrLast => "FIRST_UNREAD_OR_LAST",
+            Self::Last => "LAST",
+        }
+    }
+
+    pub fn from_persisted_name(value: &str) -> Option<Self> {
+        match value {
+            "FIRST" => Some(Self::First),
+            "FIRST_UNREAD_OR_FIRST" => Some(Self::FirstUnreadOrFirst),
+            "FIRST_UNREAD_OR_LAST" => Some(Self::FirstUnreadOrLast),
+            "LAST" => Some(Self::Last),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LibraryRecord {
     pub id: String,
@@ -14,7 +89,7 @@ pub struct LibraryRecord {
     pub import_local_artwork: bool,
     pub import_barcode_isbn: bool,
     pub scan_force_modified_time: bool,
-    pub scan_interval: String,
+    pub scan_interval: LibraryScanInterval,
     pub scan_on_startup: bool,
     pub scan_cbx: bool,
     pub scan_pdf: bool,
@@ -23,7 +98,7 @@ pub struct LibraryRecord {
     pub repair_extensions: bool,
     pub convert_to_cbz: bool,
     pub empty_trash_after_scan: bool,
-    pub series_cover: String,
+    pub series_cover: LibrarySeriesCover,
     pub hash_files: bool,
     pub hash_pages: bool,
     pub hash_koreader: bool,
@@ -49,7 +124,7 @@ impl LibraryRecord {
             import_local_artwork: true,
             import_barcode_isbn: true,
             scan_force_modified_time: false,
-            scan_interval: "EVERY_6H".to_string(),
+            scan_interval: LibraryScanInterval::Every6h,
             scan_on_startup: false,
             scan_cbx: true,
             scan_pdf: true,
@@ -58,7 +133,7 @@ impl LibraryRecord {
             repair_extensions: false,
             convert_to_cbz: false,
             empty_trash_after_scan: false,
-            series_cover: "FIRST".to_string(),
+            series_cover: LibrarySeriesCover::First,
             hash_files: true,
             hash_pages: false,
             hash_koreader: false,
@@ -171,7 +246,7 @@ pub struct LibraryChangeSet {
     pub import_local_artwork: Option<bool>,
     pub import_barcode_isbn: Option<bool>,
     pub scan_force_modified_time: Option<bool>,
-    pub scan_interval: Option<String>,
+    pub scan_interval: Option<LibraryScanInterval>,
     pub scan_on_startup: Option<bool>,
     pub scan_cbx: Option<bool>,
     pub scan_pdf: Option<bool>,
@@ -180,7 +255,7 @@ pub struct LibraryChangeSet {
     pub repair_extensions: Option<bool>,
     pub convert_to_cbz: Option<bool>,
     pub empty_trash_after_scan: Option<bool>,
-    pub series_cover: Option<String>,
+    pub series_cover: Option<LibrarySeriesCover>,
     pub hash_files: Option<bool>,
     pub hash_pages: Option<bool>,
     pub hash_koreader: Option<bool>,

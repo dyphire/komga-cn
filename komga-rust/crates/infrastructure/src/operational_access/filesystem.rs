@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use komga_application::operational::{FilesystemBrowsePort, FontPort};
-use serde_json::Value;
+use komga_application::operational::{
+    FilesystemBrowseError, FilesystemBrowsePort, FilesystemBrowseRequest,
+    FilesystemDirectoryListing, FontPort,
+};
 
 use crate::filesystem::{browser, fonts};
 
@@ -9,8 +11,11 @@ use crate::filesystem::{browser, fonts};
 pub struct FilesystemBrowseAccess;
 
 impl FilesystemBrowsePort for FilesystemBrowseAccess {
-    fn list_directory_entries(&self, path: &Path, directories_only: bool) -> Vec<Value> {
-        browser::list_directory_entries(path, directories_only)
+    fn browse(
+        &self,
+        request: FilesystemBrowseRequest,
+    ) -> Result<FilesystemDirectoryListing, FilesystemBrowseError> {
+        browser::browse_directory(request)
     }
 }
 
@@ -18,15 +23,20 @@ impl FilesystemBrowsePort for FilesystemBrowseAccess {
 pub struct FontAccess;
 
 impl FontPort for FontAccess {
-    fn list_font_families(&self, path: &Path) -> Vec<String> {
+    fn list_font_families(&self, path: &Path) -> Result<Vec<String>, String> {
         fonts::list_font_families(path)
     }
 
-    fn load_font_family_css(&self, path: &Path, family: &str) -> Option<String> {
+    fn load_font_family_css(&self, path: &Path, family: &str) -> Result<Option<String>, String> {
         fonts::load_font_family_css(path, family)
     }
 
-    fn load_font_file(&self, path: &Path, family: &str, file: &str) -> Option<Vec<u8>> {
+    fn load_font_file(
+        &self,
+        path: &Path,
+        family: &str,
+        file: &str,
+    ) -> Result<Option<Vec<u8>>, String> {
         fonts::load_font_file(path, family, file)
     }
 }

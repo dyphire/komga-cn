@@ -1,10 +1,12 @@
 use super::*;
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_application::task_processing::TaskProcessingError;
-use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::sqlite::{
+use komga_infrastructure::DatabaseHandle;
+use komga_infrastructure::TaskRuntimeOwnershipOverrides;
+use komga_infrastructure::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
-use komga_infrastructure::task_queue::TaskRuntimeOwnershipOverrides;
+use std::sync::Arc;
 
 use super::super::support::fixture::TestDbFixture;
 use super::super::support::persistence_contract_fixture::RuntimeDbPaths;
@@ -94,7 +96,8 @@ pub(super) async fn process_scan_library_task(
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task(library_id, priority, deep_scan))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler.process_available(&runtime.job()).await
 }
 
@@ -105,7 +108,7 @@ pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> 
     let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
         .await
         .expect("test private read pool should open");
-    TaskRuntimeContext::new(
+    let runtime = TaskRuntimeContext::new(
         DatabaseHandle::file_backed(config.database_file.clone())
             .await
             .expect("test db should open"),
@@ -119,8 +122,8 @@ pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> 
         config.task_pool_size,
         task_write_pool,
         task_read_pool,
-    )
-    .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
+    );
+    runtime.with_ownership_overrides(TaskRuntimeOwnershipOverrides {
         owns_main_database: Some(matches!(
             config.writer_decision(komga_config::writer_ownership::WriterKind::MainDatabase),
             komga_config::writer_ownership::WriterDecision::Allowed
@@ -143,6 +146,15 @@ pub(super) async fn runtime_task_context_from_config(config: &RuntimeConfig) -> 
                 | komga_config::writer_ownership::WriterDecision::Isolated
         )),
     })
+}
+
+pub(super) async fn runtime_task_context_from_config_with_events(
+    config: &RuntimeConfig,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
+) -> TaskRuntimeContext {
+    runtime_task_context_from_config(config)
+        .await
+        .with_runtime_events(runtime_events)
 }
 
 pub(super) async fn scheduler_for_config(config: &RuntimeConfig) -> TaskQueueScheduler {

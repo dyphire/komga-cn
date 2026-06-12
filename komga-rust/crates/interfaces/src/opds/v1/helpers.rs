@@ -1,4 +1,4 @@
-use super::*;
+use super::super::feeds::{OpdsV1NavigationEntry, query_escape};
 
 pub(super) fn series_feed_self_path(search: Option<&str>, publishers: &[String]) -> String {
     let mut query_parts = Vec::new();

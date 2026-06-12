@@ -1,40 +1,51 @@
+mod auth_session;
+#[cfg(test)]
+mod auth_session_tests;
 mod device_progress;
 #[cfg(test)]
 mod device_progress_tests;
 mod device_records;
+#[cfg(test)]
+mod device_records_tests;
 mod device_tokens;
 mod kobo_sync;
 mod mutation_models;
-pub mod ports;
+mod ports;
 mod principal_resolution;
 mod session_tokens;
 mod user_models;
 
+pub use auth_session::{
+    AuthSessionActivityContext, AuthSessionError, AuthSessionRequest, AuthSessionResponseMode,
+    AuthSessionService, AuthSessionSuccess, AuthTokenRequest, BasicAuthCredentials,
+};
 pub use device_progress::{
-    DeviceProgressError, DeviceProgressService, KoboReadingStateUpdate, KoreaderProgressSnapshot,
+    DeviceProgressError, DeviceProgressPageCountPort, DeviceProgressReaderPort,
+    DeviceProgressService, KoboReadingStateLocationSnapshot, KoboReadingStateSnapshot,
+    KoboReadingStateStatus, KoboReadingStateUpdate, KoreaderProgressSnapshot,
     KoreaderProgressUpdate,
 };
 pub use device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
+    kobo_metadata_pre_paginated,
 };
 pub use ports::{
-    AuthActivityPort, AuthenticationPort, DeviceSyncPort, SessionLifecyclePort,
-    SessionResolverPort, UserAdminPort,
+    AuthActivityPort, AuthenticationActivityApiKey, AuthenticationPort, DeviceSyncPort,
+    DeviceThumbnailBinary, SessionLifecyclePort, SessionResolverPort, UserAdminPort,
 };
 
 pub use device_tokens::{
-    generated_kobo_api_token, generated_kobo_token_triplet, random_uuid_like, sanitize_identifier,
+    GeneratedKoboDeviceTokens, generate_kobo_device_tokens, generated_kobo_api_token,
+    random_uuid_like, sanitize_identifier,
 };
 pub use kobo_sync::{
-    KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncPayload, KoboLibrarySyncRequest, KoboLibrarySyncResponse,
-    KoboLibrarySyncService, KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncAccessPolicy,
-    KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPageRequest, KoboSyncPointBook,
+    KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest, KoboLibrarySyncResponse, KoboLibrarySyncService,
+    KoboProxyHeader, KoboProxyPort, KoboProxyRequest, KoboProxyRequestBodyError, KoboProxyResponse,
+    KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncAccessPolicy, KoboSyncBookSnapshot,
+    KoboSyncBookState, KoboSyncEvent, KoboSyncPage, KoboSyncPageRequest, KoboSyncPointBook,
     KoboSyncReadListSnapshot, KoboSyncReadProgressSnapshot, KoboSyncStatePort,
-    KomgaSyncTokenPayload, build_kobo_book_metadata_payload,
-    build_kobo_changed_entitlement_removed, build_kobo_changed_product_metadata,
-    build_kobo_changed_reading_state, build_kobo_changed_tag, build_kobo_deleted_tag,
-    build_kobo_library_sync_payload, build_kobo_new_entitlement, build_kobo_new_tag,
-    build_komga_sync_token_payload, decode_or_passthrough_sync_token,
+    KomgaSyncTokenPayload, build_kobo_proxy_request, build_komga_sync_token_payload,
+    decode_or_passthrough_sync_token, encode_komga_sync_token_payload,
     is_kobo_store_sync_token_candidate, now_sync_marker, parse_komga_sync_token_payload,
 };
 pub use mutation_models::{
@@ -42,7 +53,8 @@ pub use mutation_models::{
     UpdateAuthUserResult,
 };
 pub use principal_resolution::{
-    configured_api_key_identity, koreader_authorized, resolve_kobo_user, resolve_koreader_user_id,
+    ConfiguredApiKeyIdentity, configured_api_key_identity, koreader_authorized, resolve_kobo_user,
+    resolve_koreader_user_id,
 };
 pub use session_tokens::{
     AuthTokenSource, RememberMeRuntime, ResolvedAuthToken, SessionRuntime,
@@ -51,9 +63,11 @@ pub use session_tokens::{
     resolve_authenticated_user,
 };
 pub use user_models::{
-    AuthOutcome, AuthUser, AuthUserAgeRestriction, AuthUserAgeRestrictionSnapshot,
-    AuthUserSessionSnapshot, PersistedApiKey, PersistedApiKeyMetadata,
-    PersistedAuthenticationActivity, user_from_session_snapshot, user_has_role, user_id,
-    user_is_admin, user_payload_json, user_session_snapshot, user_shared_all_libraries,
-    user_shared_library_ids,
+    AuthOutcome, AuthUser, AuthUserAgeRestriction, AuthUserAgeRestrictionKind,
+    AuthUserAgeRestrictionSnapshot, AuthUserRole, AuthUserSessionSnapshot, PersistedApiKey,
+    PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+    user_age_restriction_from_persisted_columns, user_from_session_snapshot, user_has_role,
+    user_id, user_is_admin, user_persisted_role_names, user_query_restrictions,
+    user_response_role_names, user_roles_from_persisted_names, user_session_snapshot,
+    user_shared_all_libraries, user_shared_library_ids,
 };

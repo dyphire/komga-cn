@@ -5,16 +5,16 @@ use crate::sqlite::write_models::claims::{
 };
 
 #[derive(Clone, Debug)]
-pub enum ClaimInitialAdminUserResult {
+pub(crate) enum ClaimInitialAdminUserResult {
     Created(CreatedClaimedUser),
     AlreadyClaimed,
 }
 
-pub async fn load_claim_status(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+pub(crate) async fn load_claim_status(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     Ok(load_persisted_user_count(pool).await? > 0)
 }
 
-pub async fn claim_initial_admin_user(
+pub(crate) async fn claim_initial_admin_user(
     pool: &SqlitePool,
     user_id: &str,
     email: &str,

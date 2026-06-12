@@ -124,6 +124,31 @@ async fn router_get_font_family_css_downloads_filesystem_css_without_auth_like_k
 }
 
 #[tokio::test]
+async fn router_get_font_family_css_returns_not_found_for_filesystem_family_without_fonts() {
+    let ctx = TestFixture::new("router-get-font-css-filesystem-empty-family").await;
+
+    let family_dir = ctx.paths().config_dir.join("fonts").join("Empty Family");
+    std::fs::create_dir_all(&family_dir).expect("empty custom font family dir should be created");
+    std::fs::write(family_dir.join("notes.txt"), b"not-a-font")
+        .expect("non-font file should be written");
+
+    let app = ctx.app().clone();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/fonts/resource/Empty%20Family/css")
+                .body(Body::empty())
+                .expect("get empty filesystem font css request should build"),
+        )
+        .await
+        .expect("get empty filesystem font css request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin() {
     let ctx = TestFixture::new("router-get-font-file-filesystem-anonymous").await;
 
@@ -161,6 +186,63 @@ async fn router_get_font_file_downloads_filesystem_font_without_auth_like_kotlin
         .await
         .expect("filesystem font file response body should read");
     assert_eq!(bytes.as_ref(), b"font-bytes");
+}
+
+#[tokio::test]
+async fn router_get_filesystem_font_download_headers_support_unicode_names() {
+    let ctx = TestFixture::new("router-get-font-unicode-disposition").await;
+
+    let family_dir = ctx.paths().config_dir.join("fonts").join("読書 Fonts");
+    std::fs::create_dir_all(&family_dir).expect("unicode font family dir should be created");
+    std::fs::write(family_dir.join("明朝-Regular.ttf"), b"font-bytes")
+        .expect("unicode font file should be written");
+
+    let app = ctx.app().clone();
+
+    let font_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/fonts/resource/%E8%AA%AD%E6%9B%B8%20Fonts/%E6%98%8E%E6%9C%9D-Regular.ttf")
+                .body(Body::empty())
+                .expect("get unicode filesystem font request should build"),
+        )
+        .await
+        .expect("get unicode filesystem font request should complete");
+
+    assert_eq!(font_response.status(), StatusCode::OK);
+    let font_disposition = font_response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .expect("unicode font response should include content disposition");
+    assert!(
+        font_disposition.contains("filename*=UTF-8''%E6%98%8E%E6%9C%9D-Regular.ttf"),
+        "unicode font attachment header should percent-encode filename*: {font_disposition}"
+    );
+
+    let css_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/fonts/resource/%E8%AA%AD%E6%9B%B8%20Fonts/css")
+                .body(Body::empty())
+                .expect("get unicode filesystem font css request should build"),
+        )
+        .await
+        .expect("get unicode filesystem font css request should complete");
+
+    assert_eq!(css_response.status(), StatusCode::OK);
+    let css_disposition = css_response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .expect("unicode font css response should include content disposition");
+    assert!(
+        css_disposition.contains("filename*=UTF-8''%E8%AA%AD%E6%9B%B8%20Fonts.css"),
+        "unicode font css attachment header should percent-encode filename*: {css_disposition}"
+    );
 }
 
 #[tokio::test]

@@ -2,7 +2,9 @@
 
 use crate::helpers::validation_error_response;
 use axum::response::Response;
-use komga_application::library_catalog::LibraryChangeSet;
+use komga_application::library_catalog::{
+    LibraryChangeSet, LibraryScanInterval, LibrarySeriesCover,
+};
 use serde_json::{Value, json};
 
 use super::handlers::bad_request_response;
@@ -115,12 +117,7 @@ fn parse_library_change_set(
         "scanForceModifiedTime",
         &mut changes.scan_force_modified_time,
     )?;
-    apply_enum_string_field(
-        body,
-        "scanInterval",
-        &mut changes.scan_interval,
-        VALID_SCAN_INTERVALS,
-    )?;
+    apply_scan_interval_field(body, "scanInterval", &mut changes.scan_interval)?;
     apply_bool_field(body, "scanOnStartup", &mut changes.scan_on_startup)?;
     apply_bool_field(body, "scanCbx", &mut changes.scan_cbx)?;
     apply_bool_field(body, "scanPdf", &mut changes.scan_pdf)?;
@@ -137,12 +134,7 @@ fn parse_library_change_set(
         "emptyTrashAfterScan",
         &mut changes.empty_trash_after_scan,
     )?;
-    apply_enum_string_field(
-        body,
-        "seriesCover",
-        &mut changes.series_cover,
-        VALID_SERIES_COVERS,
-    )?;
+    apply_series_cover_field(body, "seriesCover", &mut changes.series_cover)?;
     apply_bool_field(body, "hashFiles", &mut changes.hash_files)?;
     apply_bool_field(body, "hashPages", &mut changes.hash_pages)?;
     apply_bool_field(body, "hashKoreader", &mut changes.hash_koreader)?;
@@ -166,11 +158,10 @@ fn apply_string_field(
     Ok(())
 }
 
-fn apply_enum_string_field(
+fn apply_scan_interval_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-    field: &mut Option<String>,
-    allowed_values: &[&str],
+    field: &mut Option<LibraryScanInterval>,
 ) -> Result<(), Response> {
     let Some(value) = body.get(key) else {
         return Ok(());
@@ -178,10 +169,28 @@ fn apply_enum_string_field(
     let Some(value) = value.as_str() else {
         return Err(bad_request_response(&format!("{key} must be a string")));
     };
-    if !allowed_values.contains(&value) {
+    let Some(scan_interval) = LibraryScanInterval::from_persisted_name(value) else {
         return Err(bad_request_response(&format!("{key} has an invalid value")));
-    }
-    *field = Some(value.to_string());
+    };
+    *field = Some(scan_interval);
+    Ok(())
+}
+
+fn apply_series_cover_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+    field: &mut Option<LibrarySeriesCover>,
+) -> Result<(), Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(());
+    };
+    let Some(value) = value.as_str() else {
+        return Err(bad_request_response(&format!("{key} must be a string")));
+    };
+    let Some(series_cover) = LibrarySeriesCover::from_persisted_name(value) else {
+        return Err(bad_request_response(&format!("{key} has an invalid value")));
+    };
+    *field = Some(series_cover);
     Ok(())
 }
 
@@ -288,25 +297,10 @@ fn normalize_nullable_patch_string_array_field(
     Ok(())
 }
 
-const VALID_SCAN_INTERVALS: &[&str] = &[
-    "DISABLED",
-    "HOURLY",
-    "EVERY_6H",
-    "EVERY_12H",
-    "DAILY",
-    "WEEKLY",
-];
-
-const VALID_SERIES_COVERS: &[&str] = &[
-    "FIRST",
-    "FIRST_UNREAD_OR_FIRST",
-    "FIRST_UNREAD_OR_LAST",
-    "LAST",
-];
-
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
+    use komga_application::library_catalog::{LibraryScanInterval, LibrarySeriesCover};
     use serde_json::json;
 
     use super::{parse_create_library_change_set, parse_update_library_change_set};
@@ -323,10 +317,10 @@ mod tests {
         let changes = parse_create_library_change_set(&payload)
             .expect("known enum values should be accepted");
 
-        assert_eq!(changes.scan_interval.as_deref(), Some("EVERY_12H"));
+        assert_eq!(changes.scan_interval, Some(LibraryScanInterval::Every12h));
         assert_eq!(
-            changes.series_cover.as_deref(),
-            Some("FIRST_UNREAD_OR_LAST")
+            changes.series_cover,
+            Some(LibrarySeriesCover::FirstUnreadOrLast)
         );
     }
 
@@ -340,6 +334,20 @@ mod tests {
 
         let response = parse_create_library_change_set(&payload)
             .expect_err("unknown scanInterval should be rejected");
+
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn create_library_rejects_unknown_series_cover() {
+        let payload = json!({
+            "name": "Library",
+            "root": "/books",
+            "seriesCover": "MIDDLE"
+        });
+
+        let response = parse_create_library_change_set(&payload)
+            .expect_err("unknown seriesCover should be rejected");
 
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
     }

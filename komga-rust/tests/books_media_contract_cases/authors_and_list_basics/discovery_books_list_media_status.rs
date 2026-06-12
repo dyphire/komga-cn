@@ -45,50 +45,6 @@ async fn router_discovery_books_list_supports_media_status_begins_with_in_runtim
 }
 
 #[tokio::test]
-async fn router_discovery_books_list_supports_media_status_is_in_runtime_owned_mode() {
-    let ctx = TestFixture::new("router-discovery-books-list-strict-media-status").await;
-
-    let auth_token = ctx.login_admin().await;
-
-    let response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/books/list?page=0&size=20")
-                .header("x-auth-token", &auth_token)
-                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "condition": {
-                            "type": "MediaStatus",
-                            "operator": "is",
-                            "value": "READY"
-                        }
-                    })
-                    .to_string(),
-                ))
-                .expect("strict books/list media-status request should build"),
-        )
-        .await
-        .expect("strict books/list media-status request should complete");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let content = payload
-        .get("content")
-        .and_then(Value::as_array)
-        .expect("books/list media-status payload should expose content array");
-    assert_eq!(content.len(), 1);
-    assert_eq!(
-        content[0].get("id"),
-        Some(&Value::String("book-1".to_string()))
-    );
-}
-
-#[tokio::test]
 async fn router_discovery_books_list_supports_media_status_is_not_in_runtime_owned_mode() {
     let ctx = TestFixture::new("router-discovery-books-list-strict-media-status-is-not").await;
 

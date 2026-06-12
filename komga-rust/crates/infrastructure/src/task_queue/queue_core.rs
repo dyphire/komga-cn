@@ -1,64 +1,61 @@
+use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 
-use komga_application::task_processing::{
-    OpaqueTask, PersistedTaskRowShape, TaskKind, TaskQueueRecord,
-};
+use komga_application::task_processing::{PersistedTaskRowShape, TaskQueueRecord};
 use sqlx::Row;
 use sqlx::SqlitePool;
 
-use super::task_identity::{
-    PersistedTaskStoreRecord, fallback_task_payload, persisted_payload_for_known_task,
-    runtime_task_class_name,
-};
 use crate::sqlite::{connect_shared_pool, default_read_max_connections};
 
 #[derive(Clone, Debug)]
-pub struct SqliteTaskQueueStore {
+pub(super) struct PersistedTaskStoreRecord {
+    pub id: String,
+    pub simple_type: String,
+    pub priority: i32,
+    pub group: Option<String>,
+    pub payload: Option<String>,
+    pub owner: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SqliteTaskQueueStore {
     tasks_pool: SqlitePool,
 }
 
-fn runtime_record_from_persisted_row(persisted_row: PersistedTaskRowShape) -> TaskQueueRecord {
-    if let Ok(kind) = TaskKind::parse(&persisted_row.simple_type) {
-        return known_runtime_record(kind, persisted_row);
-    }
-
-    OpaqueTask {
-        runtime_simple_type: persisted_row.simple_type.clone(),
-        persisted_row,
-    }
-    .into_queue_record()
-}
-
-fn persisted_row_from_runtime_record(task: &PersistedTaskStoreRecord) -> PersistedTaskRowShape {
-    if let Ok(kind) = TaskKind::parse(&task.simple_type) {
-        return known_persisted_row(kind, task);
-    }
-
-    PersistedTaskRowShape {
-        id: task.id.clone(),
-        priority: task.priority,
-        group: task.group.clone(),
-        class_name: runtime_task_class_name(task.simple_type.as_str()),
-        simple_type: task.simple_type.clone(),
-        payload: fallback_task_payload(task),
-        owner: task.owner.clone(),
-    }
+fn persisted_row_from_runtime_record(
+    task: &PersistedTaskStoreRecord,
+) -> Result<PersistedTaskRowShape, String> {
+    PersistedTaskRowShape::from_queue_record(runtime_record_from_store_record(task.clone()))
+        .map_err(|error| format!("build persisted task row for '{}': {error}", task.id))
 }
 
 impl SqliteTaskQueueStore {
-    pub async fn new(tasks_db_file: PathBuf) -> Option<Self> {
-        if !tasks_db_file.exists() {
-            return None;
+    pub(super) async fn new(tasks_db_file: PathBuf) -> Result<Option<Self>, String> {
+        match fs::metadata(&tasks_db_file) {
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "inspect tasks sqlite file '{}': {error}",
+                    tasks_db_file.display()
+                ));
+            }
         }
 
         let tasks_pool = connect_shared_pool(&tasks_db_file, default_read_max_connections())
             .await
-            .expect("tasks sqlite pool should open for task persistence");
+            .map_err(|error| {
+                format!(
+                    "open tasks sqlite pool '{}': {error}",
+                    tasks_db_file.display()
+                )
+            })?;
 
-        Some(Self { tasks_pool })
+        Ok(Some(Self { tasks_pool }))
     }
 
-    pub async fn load_records(&self) -> Vec<PersistedTaskStoreRecord> {
+    pub(super) async fn load_records(&self) -> Result<Vec<PersistedTaskStoreRecord>, String> {
         let rows = sqlx::query(
             r#"SELECT
                 ID,
@@ -73,17 +70,19 @@ impl SqliteTaskQueueStore {
         )
         .fetch_all(&self.tasks_pool)
         .await
-        .expect("persisted task queue rows should be readable");
+        .map_err(|error| format!("persisted task queue rows should be readable: {error}"))?;
 
-        rows.into_iter()
-            .map(persisted_row_shape)
-            .map(runtime_record_from_persisted_row)
-            .map(store_record_from_runtime_record)
-            .collect::<Vec<_>>()
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            records.push(store_record_from_runtime_record(
+                persisted_row_shape(row).into_queue_record(),
+            ));
+        }
+        Ok(records)
     }
 
-    pub async fn persist_task(&self, task: &PersistedTaskStoreRecord) {
-        let row = persisted_row_from_runtime_record(task);
+    pub(super) async fn persist_task(&self, task: &PersistedTaskStoreRecord) -> Result<(), String> {
+        let row = persisted_row_from_runtime_record(task)?;
         sqlx::query(
             r#"INSERT INTO TASK (
                 ID,
@@ -112,10 +111,11 @@ impl SqliteTaskQueueStore {
         .bind(row.owner)
         .execute(&self.tasks_pool)
         .await
-        .expect("queued task rows should persist to TASK table");
+        .map_err(|error| format!("persist queued task '{}' to TASK table: {error}", task.id))?;
+        Ok(())
     }
 
-    pub async fn claim_task(&self, task_id: &str, owner: &str) {
+    pub(super) async fn claim_task(&self, task_id: &str, owner: &str) -> Result<(), String> {
         let task_id = task_id.to_string();
         let owner = owner.to_string();
         sqlx::query(
@@ -127,21 +127,22 @@ impl SqliteTaskQueueStore {
         .bind(task_id)
         .execute(&self.tasks_pool)
         .await
-        .expect("claimed task owner should persist to TASK table");
+        .map_err(|error| format!("persist claimed task owner to TASK table: {error}"))?;
+        Ok(())
     }
 
-    pub async fn delete_task(&self, task_id: &str) -> bool {
+    pub(super) async fn delete_task(&self, task_id: &str) -> Result<bool, String> {
         let task_id = task_id.to_string();
-        sqlx::query("DELETE FROM TASK WHERE ID = ?")
+        let deleted = sqlx::query("DELETE FROM TASK WHERE ID = ?")
             .bind(task_id)
             .execute(&self.tasks_pool)
             .await
-            .expect("completed task rows should be deleted from TASK table")
-            .rows_affected()
-            > 0
+            .map_err(|error| format!("delete completed task row from TASK table: {error}"))?
+            .rows_affected();
+        Ok(deleted > 0)
     }
 
-    pub async fn disown_all(&self) {
+    pub(super) async fn disown_all(&self) -> Result<(), String> {
         sqlx::query(
             r#"UPDATE TASK
             SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
@@ -149,15 +150,17 @@ impl SqliteTaskQueueStore {
         )
         .execute(&self.tasks_pool)
         .await
-        .expect("owned task rows should be disowned in TASK table");
+        .map_err(|error| format!("disown owned task rows in TASK table: {error}"))?;
+        Ok(())
     }
 
-    pub async fn clear_unowned(&self) -> usize {
-        sqlx::query("DELETE FROM TASK WHERE OWNER IS NULL")
+    pub(super) async fn clear_unowned(&self) -> Result<usize, String> {
+        let deleted = sqlx::query("DELETE FROM TASK WHERE OWNER IS NULL")
             .execute(&self.tasks_pool)
             .await
-            .expect("unowned task rows should be deleted from TASK table")
-            .rows_affected() as usize
+            .map_err(|error| format!("delete unowned task rows from TASK table: {error}"))?
+            .rows_affected() as usize;
+        Ok(deleted)
     }
 }
 
@@ -172,6 +175,16 @@ fn store_record_from_runtime_record(task: TaskQueueRecord) -> PersistedTaskStore
     }
 }
 
+fn runtime_record_from_store_record(record: PersistedTaskStoreRecord) -> TaskQueueRecord {
+    let mut task = TaskQueueRecord::new(record.id, record.priority, record.group)
+        .with_simple_type(record.simple_type);
+    if let Some(payload) = record.payload {
+        task = task.with_payload(payload);
+    }
+    task.owner = record.owner;
+    task
+}
+
 fn persisted_row_shape(row: sqlx::sqlite::SqliteRow) -> PersistedTaskRowShape {
     PersistedTaskRowShape {
         id: row.get::<String, _>("ID"),
@@ -181,32 +194,6 @@ fn persisted_row_shape(row: sqlx::sqlite::SqliteRow) -> PersistedTaskRowShape {
         simple_type: row.get::<String, _>("SIMPLE_TYPE"),
         payload: row.get::<String, _>("PAYLOAD"),
         owner: row.get::<Option<String>, _>("OWNER"),
-    }
-}
-
-fn known_runtime_record(kind: TaskKind, persisted_row: PersistedTaskRowShape) -> TaskQueueRecord {
-    let def = kind.definition();
-    let mut runtime_record = TaskQueueRecord::new(
-        persisted_row.id,
-        persisted_row.priority,
-        persisted_row.group,
-    )
-    .with_simple_type(def.simple_type)
-    .with_payload(persisted_row.payload);
-    runtime_record.owner = persisted_row.owner;
-    runtime_record
-}
-
-fn known_persisted_row(kind: TaskKind, task: &PersistedTaskStoreRecord) -> PersistedTaskRowShape {
-    let def = kind.definition();
-    PersistedTaskRowShape {
-        id: task.id.clone(),
-        priority: task.priority,
-        group: task.group.clone(),
-        class_name: def.persisted_class_name.to_string(),
-        simple_type: def.simple_type.to_string(),
-        payload: persisted_payload_for_known_task(kind, task),
-        owner: task.owner.clone(),
     }
 }
 
@@ -224,12 +211,38 @@ mod tests {
             payload: None,
             owner: None,
         };
-        let kind = TaskKind::parse(&task.simple_type).unwrap();
-        let row = known_persisted_row(kind, &task);
+        let row = persisted_row_from_runtime_record(&task).expect("known task row should build");
         assert_eq!(
             row.class_name,
             "org.gotson.komga.application.tasks.Task$AnalyzeBook"
         );
         assert_eq!(row.simple_type, "AnalyzeBook");
+    }
+
+    #[tokio::test]
+    async fn task_store_initialization_reports_tasks_db_metadata_errors() {
+        let root = unique_temp_dir("tasks-db-metadata-error");
+        std::fs::create_dir_all(&root).expect("task store fixture root should exist");
+        std::fs::write(root.join("blocked"), b"not a directory")
+            .expect("blocking tasks db component should be written");
+
+        let tasks_db_file = root.join("blocked/tasks.sqlite");
+        let error = SqliteTaskQueueStore::new(tasks_db_file)
+            .await
+            .expect_err("tasks db metadata error should be reported");
+        assert!(
+            error.contains("inspect tasks sqlite file"),
+            "unexpected error: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn unique_temp_dir(case_id: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-rust-task-store-{case_id}-{nanos}"))
     }
 }

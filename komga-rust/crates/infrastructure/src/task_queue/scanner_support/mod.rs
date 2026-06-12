@@ -6,11 +6,17 @@ mod scan_restore;
 mod scan_sse;
 mod sidecars;
 
-pub(crate) use scan_models::LibraryScanResult;
-pub(super) use sidecars::enqueue_sidecar_refresh_tasks;
+pub(in crate::task_queue) use scan_models::LibraryScanResult;
+#[cfg(test)]
+pub(in crate::task_queue) use scan_models::{
+    BookMetadataRefreshRequest, ScannedBookRow, ScannedSeriesRow, ScannedSidecarRow,
+    ScannedSidecarSource, ScannedSidecarType,
+};
+pub(in crate::task_queue) use sidecars::enqueue_sidecar_refresh_tasks;
 
 use sqlx::SqlitePool;
 
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_application::task_processing::TaskProcessingError;
 
 use scan_diff::scan_library;
@@ -19,17 +25,24 @@ use scan_persist::ScannedLibraryPersistence;
 /// Owns the "scan a library" capability.
 /// Single entry point hides FS walking, DB diffing, persistence, SSE emission,
 /// and post-scan trash checks behind one `execute()` call.
-pub(crate) struct LibraryScanner {
+pub(in crate::task_queue) struct LibraryScanner {
     pool: SqlitePool,
+    runtime_events: std::sync::Arc<dyn RuntimeSseEventSink>,
 }
 
 impl LibraryScanner {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub(in crate::task_queue) fn new(
+        pool: SqlitePool,
+        runtime_events: std::sync::Arc<dyn RuntimeSseEventSink>,
+    ) -> Self {
+        Self {
+            pool,
+            runtime_events,
+        }
     }
 
     /// Scan filesystem → diff against DB → persist changes → emit SSE → check trash.
-    pub async fn execute(
+    pub(in crate::task_queue) async fn execute(
         &self,
         library_id: &str,
         deep_scan: bool,
@@ -38,12 +51,17 @@ impl LibraryScanner {
             .await
             .map_err(|error| TaskProcessingError::runtime(format!("scan library: {error}")))?;
 
-        let persistence = ScannedLibraryPersistence::new(&self.pool, library_id, &scan)
-            .execute()
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("persist scanned library: {error}"))
-            })?;
+        let persistence = ScannedLibraryPersistence::new(
+            &self.pool,
+            self.runtime_events.as_ref(),
+            library_id,
+            &scan,
+        )
+        .execute()
+        .await
+        .map_err(|error| {
+            TaskProcessingError::runtime(format!("persist scanned library: {error}"))
+        })?;
 
         Ok(LibraryScanResult {
             book_ids: scan.book_ids,

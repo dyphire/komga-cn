@@ -1,30 +1,21 @@
 use sqlx::Row;
 
-pub use komga_application::opds::{
-    OpdsPersistedBookAuthorRecord as PersistedBookAuthorRecord, PersistedBookFeedRecord,
-    PersistedBookSearchRecord, PersistedLibraryRecord, PersistedNamedRecord,
-    PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
-    PersistedSeriesRecord, PersistedSeriesSearchRecord,
-};
+use crate::parsing::{clamp_kotlin_int_u32, parse_sqlite_group_concat_values};
 
-pub(crate) fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
-    row.try_get::<i64, _>("AGE_RATING")
-        .ok()
-        .and_then(|value| u16::try_from(value).ok())
+use komga_application::opds::OpdsPersistedBookAuthorRecord;
+
+pub(crate) fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u32> {
+    row.get::<Option<i64>, _>("AGE_RATING")
+        .map(clamp_kotlin_int_u32)
 }
 
 pub(crate) fn parsed_sharing_labels(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
-    row.get::<String, _>("SHARING_LABELS")
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
+    parse_sqlite_group_concat_values(&row.get::<String, _>("SHARING_LABELS"))
 }
 
 pub(crate) fn parsed_book_author_records(
     row: &sqlx::sqlite::SqliteRow,
-) -> Vec<PersistedBookAuthorRecord> {
+) -> Vec<OpdsPersistedBookAuthorRecord> {
     row.get::<String, _>("AUTHORS")
         .split('\u{001e}')
         .filter(|value| !value.is_empty())
@@ -32,7 +23,7 @@ pub(crate) fn parsed_book_author_records(
             let mut parts = value.splitn(2, '\u{001f}');
             let name = parts.next().unwrap_or_default().trim().to_string();
             let role = parts.next().unwrap_or_default().trim().to_string();
-            PersistedBookAuthorRecord { name, role }
+            OpdsPersistedBookAuthorRecord { name, role }
         })
         .filter(|author| !author.name.is_empty())
         .collect()

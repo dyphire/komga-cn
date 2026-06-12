@@ -2,7 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use komga_application::opds::OpdsPersistedPort;
+use komga_application::opds::{
+    OpdsCollectionDetailPersistedPort, OpdsCollectionVisibilityPersistedPort,
+    OpdsLibraryPersistedPort, OpdsPersistedUnifiedSearchRecords, OpdsPublisherPersistedPort,
+    OpdsReadlistDetailPersistedPort, OpdsReadlistVisibilityPersistedPort, OpdsSearchPersistedPort,
+    OpdsSeriesPersistedPort, PersistedBookFeedRecord, PersistedBookSearchRecord,
+    PersistedLibraryRecord, PersistedNamedRecord, PersistedReadlistBookRecord,
+    PersistedReadlistRecord, PersistedSeriesBookRecord, PersistedSeriesRecord,
+    PersistedSeriesSearchRecord,
+};
+use komga_domain::discovery::MediaStatus;
+use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
@@ -12,24 +22,22 @@ use crate::search::index_lifecycle::SearchEntityType;
 mod collections;
 mod records;
 
-pub use collections::{
+use collections::unicode_collation_sort_key;
+use collections::{
     load_collection, load_collection_books, load_collection_series, load_collections,
     load_publishers,
 };
-pub use records::{
-    PersistedBookAuthorRecord, PersistedBookFeedRecord, PersistedBookSearchRecord,
-    PersistedLibraryRecord, PersistedNamedRecord, PersistedReadlistBookRecord,
-    PersistedReadlistRecord, PersistedSeriesBookRecord, PersistedSeriesRecord,
-    PersistedSeriesSearchRecord,
-};
-
-use collections::unicode_collation_sort_key;
 use records::{
     parsed_age_rating, parsed_book_author_records, parsed_book_tags, parsed_sharing_labels,
     placeholder_list,
 };
 
 const OPDS_SEARCH_GROUP_LIMIT: i64 = 20;
+
+fn optional_non_empty_string(row: &SqliteRow, column: &str) -> Option<String> {
+    let value = row.get::<String, _>(column);
+    (!value.is_empty()).then_some(value)
+}
 
 #[derive(Clone)]
 pub struct OpdsPersistedAccess {
@@ -45,7 +53,7 @@ impl OpdsPersistedAccess {
 }
 
 #[async_trait]
-impl OpdsPersistedPort for OpdsPersistedAccess {
+impl OpdsLibraryPersistedPort for OpdsPersistedAccess {
     async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
         load_libraries(self.db.read_pool())
             .await
@@ -60,7 +68,10 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .await
             .map_err(|error| error.to_string())
     }
+}
 
+#[async_trait]
+impl OpdsReadlistVisibilityPersistedPort for OpdsPersistedAccess {
     async fn load_readlists_for_library(
         &self,
         library_id: &str,
@@ -76,6 +87,40 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .map_err(|error| error.to_string())
     }
 
+    async fn load_readlist_books(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        load_readlist_books(self.db.read_pool(), readlist_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[async_trait]
+impl OpdsCollectionVisibilityPersistedPort for OpdsPersistedAccess {
+    async fn load_collections(
+        &self,
+        library_id: Option<&str>,
+    ) -> Result<Vec<PersistedNamedRecord>, String> {
+        load_collections(self.db.read_pool(), library_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn load_collection_series(
+        &self,
+        collection_id: &str,
+        ordered: bool,
+    ) -> Result<Vec<PersistedSeriesRecord>, String> {
+        load_collection_series(self.db.read_pool(), collection_id, ordered)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[async_trait]
+impl OpdsSeriesPersistedPort for OpdsPersistedAccess {
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
         load_series(self.db.read_pool(), series_id)
             .await
@@ -99,7 +144,10 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .await
             .map_err(|error| error.to_string())
     }
+}
 
+#[async_trait]
+impl OpdsReadlistDetailPersistedPort for OpdsPersistedAccess {
     async fn load_readlist(
         &self,
         readlist_id: &str,
@@ -117,36 +165,68 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .await
             .map_err(|error| error.to_string())
     }
+}
 
+#[async_trait]
+impl OpdsSearchPersistedPort for OpdsPersistedAccess {
     async fn load_unified_search_results(
         &self,
         query: &str,
-    ) -> Result<
-        (
-            Vec<PersistedSeriesSearchRecord>,
-            Vec<PersistedBookSearchRecord>,
-            Vec<PersistedNamedRecord>,
-            Vec<PersistedNamedRecord>,
-        ),
-        String,
-    > {
+    ) -> Result<OpdsPersistedUnifiedSearchRecords, String> {
         let trimmed_query = query.trim();
         if trimmed_query.is_empty() {
             return load_blank_opds_search_results(self.db.read_pool()).await;
         }
 
-        Ok((
-            load_ranked_series_search_results(self.db.read_pool(), &self.search, trimmed_query)
-                .await?,
-            load_ranked_book_search_results(self.db.read_pool(), &self.search, trimmed_query)
-                .await?,
-            load_ranked_collection_search_results(self.db.read_pool(), &self.search, trimmed_query)
-                .await?,
-            load_ranked_readlist_search_results(self.db.read_pool(), &self.search, trimmed_query)
-                .await?,
-        ))
+        Ok(OpdsPersistedUnifiedSearchRecords {
+            series: load_ranked_series_search_results(
+                self.db.read_pool(),
+                &self.search,
+                trimmed_query,
+            )
+            .await?,
+            books: load_ranked_book_search_results(
+                self.db.read_pool(),
+                &self.search,
+                trimmed_query,
+            )
+            .await?,
+            collections: load_ranked_collection_search_results(
+                self.db.read_pool(),
+                &self.search,
+                trimmed_query,
+            )
+            .await?,
+            readlists: load_ranked_readlist_search_results(
+                self.db.read_pool(),
+                &self.search,
+                trimmed_query,
+            )
+            .await?,
+        })
     }
 
+    async fn load_collection_books(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+        load_collection_books(self.db.read_pool(), collection_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn load_readlist_books(
+        &self,
+        readlist_id: &str,
+    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        load_readlist_books(self.db.read_pool(), readlist_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[async_trait]
+impl OpdsPublisherPersistedPort for OpdsPersistedAccess {
     async fn load_publishers(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
@@ -155,16 +235,10 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
             .await
             .map_err(|error| error.to_string())
     }
+}
 
-    async fn load_collections(
-        &self,
-        library_id: Option<&str>,
-    ) -> Result<Vec<PersistedNamedRecord>, String> {
-        load_collections(self.db.read_pool(), library_id)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
+#[async_trait]
+impl OpdsCollectionDetailPersistedPort for OpdsPersistedAccess {
     async fn load_collection(
         &self,
         collection_id: &str,
@@ -196,29 +270,21 @@ impl OpdsPersistedPort for OpdsPersistedAccess {
 
 async fn load_blank_opds_search_results(
     pool: &SqlitePool,
-) -> Result<
-    (
-        Vec<PersistedSeriesSearchRecord>,
-        Vec<PersistedBookSearchRecord>,
-        Vec<PersistedNamedRecord>,
-        Vec<PersistedNamedRecord>,
-    ),
-    String,
-> {
-    Ok((
-        load_series_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+) -> Result<OpdsPersistedUnifiedSearchRecords, String> {
+    Ok(OpdsPersistedUnifiedSearchRecords {
+        series: load_series_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
             .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
-        load_book_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+        books: load_book_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
             .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
-        load_collection_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+        collections: load_collection_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
             .map_err(|error| format!("load blank OPDS collection search rows: {error}"))?,
-        load_readlist_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
+        readlists: load_readlist_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
             .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
-    ))
+    })
 }
 
 async fn load_ranked_series_search_results(
@@ -230,7 +296,7 @@ async fn load_ranked_series_search_results(
         .await
         .map_err(|error| format!("load OPDS series search count: {error}"))?
         .max(1);
-    let ids = search.search_ids_or_empty(query, SearchEntityType::Series, limit);
+    let ids = search.search_ids(query, SearchEntityType::Series, limit)?;
     ordered_series_search_rows(pool, &ids).await
 }
 
@@ -243,7 +309,7 @@ async fn load_ranked_book_search_results(
         .await
         .map_err(|error| format!("load OPDS book search count: {error}"))?
         .max(1);
-    let ids = search.search_ids_or_empty(query, SearchEntityType::Book, limit);
+    let ids = search.search_ids(query, SearchEntityType::Book, limit)?;
     ordered_book_search_rows(pool, &ids).await
 }
 
@@ -256,7 +322,7 @@ async fn load_ranked_collection_search_results(
         .await
         .map_err(|error| format!("load OPDS collection search count: {error}"))?
         .max(1);
-    let ids = search.search_ids_or_empty(query, SearchEntityType::Collection, limit);
+    let ids = search.search_ids(query, SearchEntityType::Collection, limit)?;
     ordered_collection_search_rows(pool, &ids).await
 }
 
@@ -269,7 +335,7 @@ async fn load_ranked_readlist_search_results(
         .await
         .map_err(|error| format!("load OPDS readlist search count: {error}"))?
         .max(1);
-    let ids = search.search_ids_or_empty(query, SearchEntityType::ReadList, limit);
+    let ids = search.search_ids(query, SearchEntityType::ReadList, limit)?;
     ordered_readlist_search_rows(pool, &ids).await
 }
 
@@ -329,7 +395,7 @@ async fn ordered_readlist_search_rows(
     Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
 }
 
-pub async fn load_libraries(pool: &SqlitePool) -> Result<Vec<PersistedLibraryRecord>, sqlx::Error> {
+async fn load_libraries(pool: &SqlitePool) -> Result<Vec<PersistedLibraryRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM LIBRARY"#,
@@ -347,7 +413,7 @@ FROM LIBRARY"#,
         .collect())
 }
 
-pub async fn load_library(
+async fn load_library(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryRecord>, sqlx::Error> {
@@ -368,7 +434,7 @@ LIMIT 1"#,
     }))
 }
 
-pub async fn load_readlists_for_library(
+async fn load_readlists_for_library(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Vec<PersistedReadlistRecord>, sqlx::Error> {
@@ -396,7 +462,7 @@ ORDER BY rl.NAME COLLATE NOCASE ASC, rl.ID ASC"#,
         .collect())
 }
 
-pub async fn load_all_readlists(
+async fn load_all_readlists(
     pool: &SqlitePool,
 ) -> Result<Vec<PersistedReadlistRecord>, sqlx::Error> {
     let rows = sqlx::query(
@@ -422,7 +488,7 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         .collect())
 }
 
-pub async fn load_series(
+async fn load_series(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesRecord>, sqlx::Error> {
@@ -430,14 +496,20 @@ pub async fn load_series(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(NULLIF(sm.SUMMARY, ''), bma.SUMMARY, '') AS SERIES_SUMMARY,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE s.ID = ?
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, SERIES_SUMMARY, AGE_RATING, LAST_MODIFIED
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(NULLIF(sm.SUMMARY, ''), bma.SUMMARY, ''),
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
 LIMIT 1"#,
     )
     .bind(series_id)
@@ -455,7 +527,7 @@ LIMIT 1"#,
     }))
 }
 
-pub async fn load_series_books_paged(
+async fn load_series_books_paged(
     pool: &SqlitePool,
     series_id: &str,
     user_id: &str,
@@ -480,7 +552,10 @@ pub async fn load_series_books_paged(
        COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
        COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        rp.PAGE AS LAST_READ,
        rp.READ_DATE AS LAST_READ_DATE,
        COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED,
@@ -526,36 +601,30 @@ OFFSET ?"#,
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: {
+                let value = row.get::<String, _>("ISBN");
+                (!value.is_empty()).then_some(value)
+            },
             authors: parsed_book_author_records(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
             file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
-            media_status: row.try_get::<String, _>("MEDIA_STATUS").ok(),
+            media_status: parsed_media_status(&row),
             page_count: row.get::<i64, _>("PAGE_COUNT"),
             epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
-            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
-            last_read_date: row
-                .try_get::<Option<String>, _>("LAST_READ_DATE")
-                .ok()
-                .flatten(),
+            last_read: row.get::<Option<i64>, _>("LAST_READ"),
+            last_read_date: row.get::<Option<String>, _>("LAST_READ_DATE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row.try_get::<String, _>("RELEASE_DATE").ok(),
+            release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
         })
         .collect())
 }
 
-pub async fn load_series_tags(
-    pool: &SqlitePool,
-    series_id: &str,
-) -> Result<Vec<String>, sqlx::Error> {
+async fn load_series_tags(pool: &SqlitePool, series_id: &str) -> Result<Vec<String>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT DISTINCT bt.TAG AS TAG
 FROM BOOK_METADATA_TAG bt
@@ -575,7 +644,7 @@ ORDER BY bt.TAG COLLATE NOCASE ASC, bt.TAG ASC"#,
         .collect())
 }
 
-pub async fn load_readlist(
+async fn load_readlist(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Option<PersistedReadlistRecord>, sqlx::Error> {
@@ -597,7 +666,7 @@ LIMIT 1"#,
     }))
 }
 
-pub async fn load_readlist_books(
+async fn load_readlist_books(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<PersistedReadlistBookRecord>, sqlx::Error> {
@@ -619,7 +688,10 @@ pub async fn load_readlist_books(
        COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
        COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED,
        bm.RELEASE_DATE AS RELEASE_DATE
 FROM READLIST_BOOK rb
@@ -656,28 +728,33 @@ ORDER BY rb.NUMBER ASC"#,
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: {
+                let value = row.get::<String, _>("ISBN");
+                (!value.is_empty()).then_some(value)
+            },
             authors: parsed_book_author_records(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
             file_size: row.get::<i64, _>("FILE_SIZE"),
             media_type: row.get::<String, _>("MEDIA_TYPE"),
-            media_status: row.try_get::<String, _>("MEDIA_STATUS").ok(),
+            media_status: parsed_media_status(&row),
             page_count: row.get::<i64, _>("PAGE_COUNT"),
             epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row.try_get::<String, _>("RELEASE_DATE").ok(),
+            release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
         })
         .collect())
 }
 
-pub async fn load_series_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+fn parsed_media_status(row: &sqlx::sqlite::SqliteRow) -> Option<MediaStatus> {
+    row.get::<Option<String>, _>("MEDIA_STATUS")
+        .and_then(|status| MediaStatus::parse(&status))
+}
+
+async fn load_series_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
 FROM SERIES s
@@ -688,7 +765,7 @@ WHERE s.DELETED_DATE IS NULL"#,
     Ok(row.get::<i64, _>("TOTAL") as usize)
 }
 
-pub async fn load_book_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+async fn load_book_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) AS TOTAL
 FROM BOOK b
@@ -699,21 +776,21 @@ WHERE b.DELETED_DATE IS NULL"#,
     Ok(row.get::<i64, _>("TOTAL") as usize)
 }
 
-pub async fn load_collection_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+async fn load_collection_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM COLLECTION")
         .fetch_one(pool)
         .await?;
     Ok(row.get::<i64, _>("TOTAL") as usize)
 }
 
-pub async fn load_readlist_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
+async fn load_readlist_search_count(pool: &SqlitePool) -> Result<usize, sqlx::Error> {
     let row = sqlx::query("SELECT COUNT(*) AS TOTAL FROM READLIST")
         .fetch_one(pool)
         .await?;
     Ok(row.get::<i64, _>("TOTAL") as usize)
 }
 
-pub async fn load_series_search_records_by_ids(
+async fn load_series_search_records_by_ids(
     pool: &SqlitePool,
     ids: &[String],
 ) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
@@ -724,7 +801,10 @@ pub async fn load_series_search_records_by_ids(
     let sql = format!(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
@@ -756,7 +836,7 @@ GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
         .collect())
 }
 
-pub async fn load_book_search_records_by_ids(
+async fn load_book_search_records_by_ids(
     pool: &SqlitePool,
     ids: &[String],
 ) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
@@ -781,7 +861,10 @@ pub async fn load_book_search_records_by_ids(
        COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
        COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED,
        bm.RELEASE_DATE AS RELEASE_DATE
 FROM BOOK b
@@ -820,10 +903,7 @@ GROUP BY b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME),
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: optional_non_empty_string(&row, "ISBN"),
             authors: parsed_book_author_records(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
@@ -835,12 +915,12 @@ GROUP BY b.ID, b.SERIES_ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row.try_get::<String, _>("RELEASE_DATE").ok(),
+            release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
         })
         .collect())
 }
 
-pub async fn load_collection_search_records_by_ids(
+async fn load_collection_search_records_by_ids(
     pool: &SqlitePool,
     ids: &[String],
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
@@ -849,7 +929,7 @@ pub async fn load_collection_search_records_by_ids(
     }
 
     let sql = format!(
-        r#"SELECT ID, NAME
+        r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION
 WHERE ID IN ({})"#,
         placeholder_list(ids.len())
@@ -866,15 +946,13 @@ WHERE ID IN ({})"#,
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
-            last_modified: row
-                .try_get::<String, _>("LAST_MODIFIED")
-                .unwrap_or_default(),
-            ordered: false,
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect())
 }
 
-pub async fn load_readlist_search_records_by_ids(
+async fn load_readlist_search_records_by_ids(
     pool: &SqlitePool,
     ids: &[String],
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
@@ -883,7 +961,7 @@ pub async fn load_readlist_search_records_by_ids(
     }
 
     let sql = format!(
-        r#"SELECT ID, NAME
+        r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM READLIST
 WHERE ID IN ({})"#,
         placeholder_list(ids.len())
@@ -899,10 +977,8 @@ WHERE ID IN ({})"#,
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
-            last_modified: row
-                .try_get::<String, _>("LAST_MODIFIED")
-                .unwrap_or_default(),
-            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect::<Vec<_>>();
 
@@ -911,14 +987,17 @@ WHERE ID IN ({})"#,
     Ok(records)
 }
 
-pub async fn load_series_search_records_limited(
+async fn load_series_search_records_limited(
     pool: &SqlitePool,
     limit: i64,
 ) -> Result<Vec<PersistedSeriesSearchRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
@@ -947,7 +1026,7 @@ LIMIT ?"#,
         .collect())
 }
 
-pub async fn load_book_search_records_limited(
+async fn load_book_search_records_limited(
     pool: &SqlitePool,
     limit: i64,
 ) -> Result<Vec<PersistedBookSearchRecord>, sqlx::Error> {
@@ -968,7 +1047,10 @@ pub async fn load_book_search_records_limited(
        COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
        COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED,
        bm.RELEASE_DATE AS RELEASE_DATE
 FROM BOOK b
@@ -1004,10 +1086,7 @@ LIMIT ?"#,
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: optional_non_empty_string(&row, "ISBN"),
             authors: parsed_book_author_records(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
@@ -1019,17 +1098,17 @@ LIMIT ?"#,
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row.try_get::<String, _>("RELEASE_DATE").ok(),
+            release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
         })
         .collect())
 }
 
-pub async fn load_collection_search_records_limited(
+async fn load_collection_search_records_limited(
     pool: &SqlitePool,
     limit: i64,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT ID, NAME
+        r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION
 ORDER BY NAME COLLATE NOCASE ASC, ID ASC
 LIMIT ?"#,
@@ -1042,10 +1121,8 @@ LIMIT ?"#,
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
-            last_modified: row
-                .try_get::<String, _>("LAST_MODIFIED")
-                .unwrap_or_default(),
-            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect::<Vec<_>>();
 
@@ -1054,12 +1131,12 @@ LIMIT ?"#,
     Ok(records)
 }
 
-pub async fn load_readlist_search_records_limited(
+async fn load_readlist_search_records_limited(
     pool: &SqlitePool,
     limit: i64,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT ID, NAME
+        r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
 FROM READLIST
 ORDER BY NAME COLLATE NOCASE ASC, ID ASC
 LIMIT ?"#,
@@ -1072,10 +1149,76 @@ LIMIT ?"#,
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
-            last_modified: row
-                .try_get::<String, _>("LAST_MODIFIED")
-                .unwrap_or_default(),
-            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect())
+}
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::sqlite::{connect_test_pool, setup};
+
+    fn temp_db_path(case_id: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-rust-{case_id}-{nanos}.sqlite"))
+    }
+
+    async fn open_bootstrapped_pool(case_id: &str) -> SqlitePool {
+        let db_path = temp_db_path(case_id);
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        pool
+    }
+
+    #[tokio::test]
+    async fn search_named_records_preserve_ordered_flags() {
+        let pool = open_bootstrapped_pool("opds-search-named-ordered").await;
+        sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+            .bind("collection-1")
+            .bind("Collection 1")
+            .bind(true)
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("ordered collection should be inserted");
+        sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
+            .bind("readlist-1")
+            .bind("Readlist 1")
+            .bind(0_i64)
+            .bind(true)
+            .execute(&pool)
+            .await
+            .expect("ordered readlist should be inserted");
+
+        let collection_ids = vec!["collection-1".to_string()];
+        let readlist_ids = vec!["readlist-1".to_string()];
+        let collection_rows_by_id = load_collection_search_records_by_ids(&pool, &collection_ids)
+            .await
+            .expect("collection search rows by id should load");
+        let readlist_rows_by_id = load_readlist_search_records_by_ids(&pool, &readlist_ids)
+            .await
+            .expect("readlist search rows by id should load");
+        let collection_rows_limited = load_collection_search_records_limited(&pool, 20)
+            .await
+            .expect("limited collection search rows should load");
+        let readlist_rows_limited = load_readlist_search_records_limited(&pool, 20)
+            .await
+            .expect("limited readlist search rows should load");
+
+        assert!(collection_rows_by_id[0].ordered);
+        assert!(readlist_rows_by_id[0].ordered);
+        assert!(collection_rows_limited[0].ordered);
+        assert!(readlist_rows_limited[0].ordered);
+        pool.close().await;
+    }
 }

@@ -1,21 +1,26 @@
 use sqlx::{Row, SqlitePool};
 
-pub use komga_application::discovery::{
+use komga_application::discovery::{
     ExistingSeriesMetadataRecord, PersistedSeriesCollectionRecord, PersistedSeriesDetailRecord,
     PersistedSeriesResourceRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
-    SeriesMetadataUpdateRecord,
+    SeriesMetadataUpdateRecord, SeriesReadingDirection,
 };
+use komga_domain::discovery::SeriesStatus;
 
-pub async fn load_persisted_series_resource(
+use crate::parsing::clamp_kotlin_int_u32;
+
+pub(super) async fn load_persisted_series_resource(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
     let row = sqlx::query(
         r#"SELECT s.LIBRARY_ID, sm.AGE_RATING,
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+                COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                                FROM SERIES_METADATA_SHARING sms
+                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
          FROM SERIES s
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
          WHERE s.ID = ?
          GROUP BY s.LIBRARY_ID, sm.AGE_RATING"#,
     )
@@ -33,7 +38,7 @@ pub async fn load_persisted_series_resource(
     }))
 }
 
-pub async fn load_series_id_by_sorted_position(
+pub(super) async fn load_series_id_by_sorted_position(
     pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
@@ -54,7 +59,7 @@ pub async fn load_series_id_by_sorted_position(
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
-pub async fn load_persisted_series_detail(
+pub(super) async fn load_persisted_series_detail(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
@@ -71,10 +76,12 @@ pub async fn load_persisted_series_detail(
                 COALESCE(sm.LANGUAGE, '') AS LANGUAGE,
                 COALESCE(sm.CREATED_DATE, s.CREATED_DATE) AS METADATA_CREATED,
                 COALESCE(sm.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+                COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                                FROM SERIES_METADATA_SHARING sms
+                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
          FROM SERIES s
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
          WHERE s.ID = ?
          GROUP BY s.ID, s.LIBRARY_ID, s.NAME, s.URL, s.CREATED_DATE, s.LAST_MODIFIED_DATE,
                   s.FILE_LAST_MODIFIED, s.ONESHOT, s.DELETED_DATE, sm.STATUS, sm.TITLE,
@@ -111,11 +118,12 @@ pub async fn load_persisted_series_detail(
         last_modified: row.get::<String, _>("LAST_MODIFIED_DATE"),
         file_last_modified: row.get::<String, _>("FILE_LAST_MODIFIED"),
         books_count: books_count as u32,
-        status: row.get::<String, _>("STATUS"),
+        status: SeriesStatus::parse(&row.get::<String, _>("STATUS"))
+            .unwrap_or(SeriesStatus::Ongoing),
         summary: row.get::<String, _>("SUMMARY"),
-        reading_direction: row
-            .get::<Option<String>, _>("READING_DIRECTION")
-            .unwrap_or_default(),
+        reading_direction: SeriesReadingDirection::parse(
+            &row.get::<String, _>("READING_DIRECTION"),
+        ),
         publisher: row.get::<String, _>("PUBLISHER"),
         age_rating: row
             .get::<Option<i64>, _>("AGE_RATING")
@@ -129,7 +137,7 @@ pub async fn load_persisted_series_detail(
     }))
 }
 
-pub async fn load_persisted_series_collections(
+pub(super) async fn load_persisted_series_collections(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
@@ -175,7 +183,7 @@ pub async fn load_persisted_series_collections(
     Ok(collections)
 }
 
-pub async fn load_existing_series_metadata(
+pub(super) async fn load_existing_series_metadata(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
@@ -265,7 +273,8 @@ pub async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     Ok(Some(ExistingSeriesMetadataRecord {
-        status: row.get::<String, _>("STATUS"),
+        status: SeriesStatus::parse(&row.get::<String, _>("STATUS"))
+            .unwrap_or(SeriesStatus::Ongoing),
         status_lock: row.get::<bool, _>("STATUS_LOCK"),
         title: row.get::<String, _>("TITLE"),
         title_lock: row.get::<bool, _>("TITLE_LOCK"),
@@ -273,7 +282,10 @@ pub async fn load_existing_series_metadata(
         title_sort_lock: row.get::<bool, _>("TITLE_SORT_LOCK"),
         summary: row.get::<String, _>("SUMMARY"),
         summary_lock: row.get::<bool, _>("SUMMARY_LOCK"),
-        reading_direction: row.get::<Option<String>, _>("READING_DIRECTION"),
+        reading_direction: row
+            .get::<Option<String>, _>("READING_DIRECTION")
+            .as_deref()
+            .and_then(SeriesReadingDirection::parse),
         reading_direction_lock: row.get::<bool, _>("READING_DIRECTION_LOCK"),
         publisher: row.get::<String, _>("PUBLISHER"),
         publisher_lock: row.get::<bool, _>("PUBLISHER_LOCK"),
@@ -300,7 +312,7 @@ pub async fn load_existing_series_metadata(
     }))
 }
 
-pub async fn persist_series_metadata_update(
+pub(super) async fn persist_series_metadata_update(
     pool: &SqlitePool,
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
@@ -321,7 +333,7 @@ pub async fn persist_series_metadata_update(
              LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
          WHERE SERIES_ID = ?"#,
     )
-    .bind(&update.status)
+    .bind(update.status.persisted_name())
     .bind(update.status_lock)
     .bind(&update.title)
     .bind(update.title_lock)
@@ -329,7 +341,7 @@ pub async fn persist_series_metadata_update(
     .bind(update.title_sort_lock)
     .bind(&update.summary)
     .bind(update.summary_lock)
-    .bind(update.reading_direction.as_deref())
+    .bind(update.reading_direction.map(|value| value.persisted_name()))
     .bind(update.reading_direction_lock)
     .bind(&update.publisher)
     .bind(update.publisher_lock)
@@ -419,10 +431,6 @@ async fn replace_series_metadata_strings(
     Ok(())
 }
 
-fn clamp_kotlin_int_u32(value: i64) -> u32 {
-    value.clamp(0, i64::from(i32::MAX)) as u32
-}
-
 async fn replace_series_metadata_alternate_titles(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     series_id: &str,
@@ -481,7 +489,7 @@ async fn replace_series_metadata_links(
     Ok(())
 }
 
-pub async fn refresh_series_after_metadata_update(
+pub(super) async fn refresh_series_after_metadata_update(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<(), String> {

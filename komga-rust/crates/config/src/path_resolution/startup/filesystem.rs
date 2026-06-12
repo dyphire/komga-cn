@@ -1,4 +1,6 @@
-use super::*;
+use std::path::Path;
+
+use crate::error::ConfigError;
 
 pub(crate) fn ensure_runtime_directories(
     config_dir: &Path,

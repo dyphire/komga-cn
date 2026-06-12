@@ -1,10 +1,7 @@
-use std::{
-    collections::HashMap,
-    io::Read,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
-use crate::runtime_sse::register_runtime_sse_event;
+use crate::random_tokens::random_hex_token;
+use crate::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -13,11 +10,10 @@ use icu::locale::locale;
 use komga_domain::discovery::{
     DiscoveryQueryContext, PageEnvelope, content_allowed_by_restrictions,
 };
-use serde_json::json;
 
 use super::{
-    CollectionDetailPort, CollectionListPort, CollectionMutationPort, CollectionReadModel,
-    CollectionSearchPort, CollectionSeriesPort, PersistedCollectionAccessRecord,
+    CollectionMutationPort, CollectionProjectionPort, CollectionReadModel, CollectionSearchPort,
+    CollectionSeriesPort, PersistedCollectionAccessRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,9 +53,9 @@ impl std::fmt::Display for CollectionMutationError {
 
 impl std::error::Error for CollectionMutationError {}
 
-pub struct CollectionListService<'a, C, S, R>
+pub struct CollectionProjectionService<'a, C, S, R>
 where
-    C: CollectionListPort + ?Sized,
+    C: CollectionProjectionPort + ?Sized,
     S: CollectionSeriesPort + ?Sized,
     R: CollectionSearchPort + ?Sized,
 {
@@ -68,25 +64,17 @@ where
     search: &'a R,
 }
 
-pub struct CollectionVisibilityService<'a, C, S>
-where
-    C: CollectionDetailPort + ?Sized,
-    S: CollectionSeriesPort + ?Sized,
-{
-    collections: &'a C,
-    series: &'a S,
-}
-
 pub struct CollectionMutationService<'a, C>
 where
     C: CollectionMutationPort + ?Sized,
 {
     collections: &'a C,
+    runtime_events: &'a dyn RuntimeSseEventSink,
 }
 
-impl<'a, C, S, R> CollectionListService<'a, C, S, R>
+impl<'a, C, S, R> CollectionProjectionService<'a, C, S, R>
 where
-    C: CollectionListPort + ?Sized,
+    C: CollectionProjectionPort + ?Sized,
     S: CollectionSeriesPort + ?Sized,
     R: CollectionSearchPort + ?Sized,
 {
@@ -131,6 +119,58 @@ where
         ))
     }
 
+    pub async fn collection_detail(
+        &self,
+        context: &DiscoveryQueryContext,
+        collection_id: &str,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let Some(collection) = self.load_collection_detail(collection_id).await? else {
+            return Ok(None);
+        };
+
+        self.visible_collection(context, collection).await
+    }
+
+    pub async fn visible_collection_series_ids(
+        &self,
+        context: &DiscoveryQueryContext,
+        collection_id: &str,
+    ) -> Result<Vec<String>, String> {
+        Ok(self
+            .collection_detail(context, collection_id)
+            .await?
+            .map(|collection| collection.series_ids)
+            .unwrap_or_default())
+    }
+
+    pub async fn visible_collections(
+        &self,
+        context: &DiscoveryQueryContext,
+        collections: Vec<CollectionReadModel>,
+    ) -> Result<Vec<CollectionReadModel>, String> {
+        let mut visible = Vec::with_capacity(collections.len());
+        for collection in collections {
+            if let Some(collection) = self.visible_collection(context, collection).await? {
+                visible.push(collection);
+            }
+        }
+        Ok(visible)
+    }
+
+    async fn visible_collection(
+        &self,
+        context: &DiscoveryQueryContext,
+        mut collection: CollectionReadModel,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        self.apply_visibility(&mut collection, context, None)
+            .await?;
+        if collection.series_ids.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(collection))
+    }
+
     async fn load_collections(&self) -> Result<Vec<CollectionReadModel>, String> {
         let rows = self.collections.load_persisted_collections().await?;
 
@@ -152,6 +192,25 @@ where
             .load_persisted_collection_series_ids(&id)
             .await?;
         Ok(collection_from_record(row, series_ids))
+    }
+
+    async fn load_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<CollectionReadModel>, String> {
+        let Some(row) = self
+            .collections
+            .load_persisted_collection_detail(collection_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let series_ids = self
+            .collections
+            .load_persisted_collection_series_ids(collection_id)
+            .await?;
+
+        Ok(Some(collection_from_record(row, series_ids)))
     }
 
     async fn apply_visibility(
@@ -258,87 +317,15 @@ async fn series_visible_to_context(
     ))
 }
 
-impl<'a, C, S> CollectionVisibilityService<'a, C, S>
-where
-    C: CollectionDetailPort + ?Sized,
-    S: CollectionSeriesPort + ?Sized,
-{
-    pub fn new(collections: &'a C, series: &'a S) -> Self {
-        Self {
-            collections,
-            series,
-        }
-    }
-
-    pub async fn collection_detail(
-        &self,
-        context: &DiscoveryQueryContext,
-        collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
-        let Some(collection) = self.load_collection_detail(collection_id).await? else {
-            return Ok(None);
-        };
-
-        self.visible_collection(context, collection).await
-    }
-
-    pub async fn visible_collection(
-        &self,
-        context: &DiscoveryQueryContext,
-        mut collection: CollectionReadModel,
-    ) -> Result<Option<CollectionReadModel>, String> {
-        let visible_series_ids = self
-            .visible_collection_series_ids(context, &collection)
-            .await?;
-        if visible_series_ids.is_empty() {
-            return Ok(None);
-        }
-
-        collection.filtered = collection.series_ids.len() != visible_series_ids.len();
-        collection.series_ids = visible_series_ids;
-        Ok(Some(collection))
-    }
-
-    pub async fn visible_collection_series_ids(
-        &self,
-        context: &DiscoveryQueryContext,
-        collection: &CollectionReadModel,
-    ) -> Result<Vec<String>, String> {
-        let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
-        for series_id in &collection.series_ids {
-            if series_visible_to_context(self.series, context, series_id, None).await? {
-                visible_series_ids.push(series_id.clone());
-            }
-        }
-        Ok(visible_series_ids)
-    }
-
-    async fn load_collection_detail(
-        &self,
-        collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
-        let Some(row) = self
-            .collections
-            .load_persisted_collection_detail(collection_id)
-            .await?
-        else {
-            return Ok(None);
-        };
-        let series_ids = self
-            .collections
-            .load_persisted_collection_series_ids(collection_id)
-            .await?;
-
-        Ok(Some(collection_from_record(row, series_ids)))
-    }
-}
-
 impl<'a, C> CollectionMutationService<'a, C>
 where
     C: CollectionMutationPort + ?Sized,
 {
-    pub fn new(collections: &'a C) -> Self {
-        Self { collections }
+    pub fn new(collections: &'a C, runtime_events: &'a dyn RuntimeSseEventSink) -> Self {
+        Self {
+            collections,
+            runtime_events,
+        }
     }
 
     pub async fn create_collection(
@@ -359,15 +346,11 @@ where
             .await
             .map_err(CollectionMutationError::Persistence)?;
 
-        register_runtime_sse_event(
-            "CollectionAdded",
-            json!({
-                "collectionId": collection_id,
-                "seriesIds": input.series_ids,
-            }),
-            false,
-            None,
-        );
+        self.runtime_events
+            .register(RuntimeSseEvent::CollectionAdded {
+                collection_id: collection_id.clone(),
+                series_ids: input.series_ids.clone(),
+            });
         self.collections
             .upsert_collection_search_document(&collection_id)
             .await
@@ -402,15 +385,11 @@ where
             return Ok(false);
         }
 
-        register_runtime_sse_event(
-            "CollectionChanged",
-            json!({
-                "collectionId": collection_id,
-                "seriesIds": input.series_ids,
-            }),
-            false,
-            None,
-        );
+        self.runtime_events
+            .register(RuntimeSseEvent::CollectionChanged {
+                collection_id: collection_id.to_string(),
+                series_ids: input.series_ids.clone(),
+            });
         self.collections
             .upsert_collection_search_document(collection_id)
             .await
@@ -437,15 +416,11 @@ where
         }
 
         if let Some(collection) = existing {
-            register_runtime_sse_event(
-                "CollectionDeleted",
-                json!({
-                    "collectionId": collection_id,
-                    "seriesIds": collection.series_ids,
-                }),
-                false,
-                None,
-            );
+            self.runtime_events
+                .register(RuntimeSseEvent::CollectionDeleted {
+                    collection_id: collection_id.to_string(),
+                    series_ids: collection.series_ids,
+                });
         }
         self.collections
             .delete_collection_search_document(collection_id)
@@ -559,23 +534,6 @@ fn generated_collection_id() -> String {
     format!("collection-{}", random_hex_token(12))
 }
 
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Mutex};
@@ -585,19 +543,20 @@ mod tests {
     use komga_domain::discovery::DiscoveryQueryContext;
 
     use crate::discovery::{
-        CollectionDetailPort, CollectionListPort, CollectionMutationPort, CollectionSearchPort,
+        CollectionMutationPort, CollectionProjectionPort, CollectionSearchPort,
         CollectionSeriesPort, PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
     };
+    use crate::runtime_sse::RuntimeSseEventStore;
 
     use super::{
-        CollectionListQuery, CollectionListService, CollectionMutationError,
-        CollectionMutationInput, CollectionMutationService, CollectionVisibilityService,
+        CollectionListQuery, CollectionMutationError, CollectionMutationInput,
+        CollectionMutationService, CollectionProjectionService, collection_from_record,
     };
 
     #[tokio::test]
-    async fn list_collections_applies_visibility_scope_before_search_ranking() {
+    async fn collection_projection_service_applies_visibility_scope_before_search_ranking() {
         let ports = TestCollectionPorts::new();
-        let service = CollectionListService::new(&ports, &ports, &ports);
+        let service = CollectionProjectionService::new(&ports, &ports, &ports);
 
         let page = service
             .list_collections(
@@ -624,9 +583,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_collections_sorts_by_name_before_pagination() {
+    async fn collection_projection_service_sorts_by_name_before_pagination() {
         let ports = TestCollectionPorts::new();
-        let service = CollectionListService::new(&ports, &ports, &ports);
+        let service = CollectionProjectionService::new(&ports, &ports, &ports);
 
         let page = service
             .list_collections(
@@ -653,27 +612,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collection_visibility_service_filters_hidden_series_for_detail() {
+    async fn collection_projection_service_applies_visibility_consistently_across_collection_surfaces()
+     {
         let ports = TestCollectionPorts::new();
-        let service = CollectionVisibilityService::new(&ports, &ports);
+        let service = CollectionProjectionService::new(&ports, &ports, &ports);
+        let context = context_with_libraries(["library-a", "library-b"]);
+        let seed_collection = collection_from_record(
+            collection_record("collection-visible", "Alpha"),
+            vec!["series-a".to_string(), "series-denied".to_string()],
+        );
 
-        let collection = service
-            .collection_detail(
-                &context_with_libraries(["library-a", "library-b"]),
-                "collection-visible",
-            )
+        let detail = service
+            .collection_detail(&context, "collection-visible")
             .await
             .expect("collection detail should resolve")
-            .expect("visible collection should remain");
+            .expect("collection should remain visible");
+        let visible_series_ids = service
+            .visible_collection_series_ids(&context, "collection-visible")
+            .await
+            .expect("visible collection series ids should resolve");
+        let visible_collections = service
+            .visible_collections(&context, vec![seed_collection])
+            .await
+            .expect("visible collections should resolve");
 
-        assert_eq!(collection.series_ids, vec!["series-a"]);
-        assert!(collection.filtered);
+        assert_eq!(detail.series_ids, vec!["series-a".to_string()]);
+        assert_eq!(visible_series_ids, detail.series_ids);
+        assert_eq!(
+            visible_collections
+                .iter()
+                .flat_map(|collection| collection.series_ids.iter())
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["series-a"],
+        );
+        assert!(detail.filtered);
+        assert!(visible_collections[0].filtered);
     }
 
     #[tokio::test]
     async fn collection_mutation_service_rejects_duplicate_names_before_persistence() {
         let ports = TestCollectionPorts::new();
-        let service = CollectionMutationService::new(&ports);
+        let runtime_events = RuntimeSseEventStore::default();
+        let service = CollectionMutationService::new(&ports, &runtime_events);
 
         let error = service
             .create_collection(collection_mutation_input("alpha", ["series-a"]))
@@ -691,7 +672,8 @@ mod tests {
         ports
             .collections
             .push(collection_record("collection-legacy-duplicate", "Alpha"));
-        let service = CollectionMutationService::new(&ports);
+        let runtime_events = RuntimeSseEventStore::default();
+        let service = CollectionMutationService::new(&ports, &runtime_events);
 
         let updated = service
             .update_collection(
@@ -709,7 +691,8 @@ mod tests {
     #[tokio::test]
     async fn collection_mutation_service_syncs_search_after_create_update_and_delete() {
         let ports = TestCollectionPorts::new();
-        let service = CollectionMutationService::new(&ports);
+        let runtime_events = RuntimeSseEventStore::default();
+        let service = CollectionMutationService::new(&ports, &runtime_events);
 
         let created = service
             .create_collection(collection_mutation_input("Delta", ["series-a"]))
@@ -844,7 +827,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl CollectionListPort for TestCollectionPorts {
+    impl CollectionProjectionPort for TestCollectionPorts {
         async fn persisted_collections_exist(&self) -> Result<bool, String> {
             Ok(!self.collections.is_empty())
         }
@@ -855,20 +838,6 @@ mod tests {
             Ok(self.collections.clone())
         }
 
-        async fn load_persisted_collection_series_ids(
-            &self,
-            collection_id: &str,
-        ) -> Result<Vec<String>, String> {
-            Ok(self
-                .collection_series
-                .get(collection_id)
-                .cloned()
-                .unwrap_or_default())
-        }
-    }
-
-    #[async_trait]
-    impl CollectionDetailPort for TestCollectionPorts {
         async fn load_persisted_collection_detail(
             &self,
             collection_id: &str,
@@ -904,14 +873,22 @@ mod tests {
             &self,
             collection_id: &str,
         ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
-            CollectionDetailPort::load_persisted_collection_detail(self, collection_id).await
+            Ok(self
+                .collections
+                .iter()
+                .find(|collection| collection.id == collection_id)
+                .cloned())
         }
 
         async fn load_persisted_collection_series_ids(
             &self,
             collection_id: &str,
         ) -> Result<Vec<String>, String> {
-            CollectionDetailPort::load_persisted_collection_series_ids(self, collection_id).await
+            Ok(self
+                .collection_series
+                .get(collection_id)
+                .cloned()
+                .unwrap_or_default())
         }
 
         async fn persist_collection_create(

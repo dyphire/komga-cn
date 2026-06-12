@@ -414,3 +414,39 @@ async fn router_discovery_books_list_supports_tag_author_media_profile_in_runtim
         .expect("strict books media profile isNot kept payload should expose content array");
     assert_eq!(media_profile_is_not_kept_content.len(), 1);
 }
+
+#[tokio::test]
+async fn router_discovery_books_list_rejects_invalid_poster_thumbnail_type() {
+    let ctx = TestFixture::new("router-discovery-books-list-invalid-poster-thumbnail-type").await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "Poster",
+                            "operator": "is",
+                            "value": {
+                                "type": "BROKEN_TYPE",
+                                "selected": true
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid poster thumbnail type request should build"),
+        )
+        .await
+        .expect("invalid poster thumbnail type request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

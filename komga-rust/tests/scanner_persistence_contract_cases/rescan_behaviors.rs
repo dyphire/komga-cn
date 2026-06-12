@@ -1,15 +1,12 @@
 use super::support::*;
 use super::*;
+use crate::support::sqlite::connect_test_pool;
+use komga_application::runtime_sse::{
+    RuntimeSseEvent, RuntimeSseEventLog, RuntimeSseEventSink, RuntimeSseEventStore,
+};
 use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
-use komga_infrastructure::sqlite::connect_test_pool;
-use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-
-fn scanner_runtime_sse_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
+use komga_infrastructure::SqliteFilesystemLibraryScanPipeline;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
@@ -26,7 +23,8 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -45,7 +43,8 @@ async fn scanner_deep_scan_reanalyzes_changed_existing_books() {
 
     scheduler
         .enqueue(scan_library_task("library-1", 900, true))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -81,7 +80,8 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -105,7 +105,8 @@ async fn scanner_oneshot_rescan_reuses_existing_series_id_when_book_url_changes(
 
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -165,7 +166,8 @@ async fn scanner_scan_splits_configured_oneshots_directories_into_per_book_onesh
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -354,7 +356,8 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
         scheduler
             .enqueue(scan_library_task("library-1", 900, false))
-            .await;
+            .await
+            .expect("task enqueue should succeed");
         scheduler
             .process_available(&runtime.job())
             .await
@@ -404,7 +407,8 @@ async fn scanner_regular_scan_reanalyzes_changed_books_when_series_changed() {
 
         scheduler
             .enqueue(scan_library_task("library-1", 900, false))
-            .await;
+            .await
+            .expect("task enqueue should succeed");
         scheduler
             .process_available(&runtime.job())
             .await
@@ -437,7 +441,8 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -463,7 +468,8 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
 
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -518,7 +524,8 @@ async fn scanner_regular_rescan_skips_existing_book_when_series_timestamp_is_unc
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -650,7 +657,8 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -685,7 +693,8 @@ async fn scanner_rescan_recreates_missing_metadata_seed_rows() {
 
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -711,7 +720,8 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -728,7 +738,8 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
 
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -806,7 +817,6 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
 
 #[tokio::test]
 async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
-    let _guard = scanner_runtime_sse_lock().lock().await;
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-sse-order")
         .await
         .expect("scanner SSE order fixture should be created");
@@ -817,12 +827,16 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
         .to_string_lossy()
         .to_string();
 
-    let initial_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context_from_config(&fixture.config).await;
+    let runtime_events = Arc::new(RuntimeSseEventStore::default());
+    let runtime_event_sink: Arc<dyn RuntimeSseEventSink> = runtime_events.clone();
+    let initial_cursor = runtime_events.current_cursor();
+    let runtime =
+        runtime_task_context_from_config_with_events(&fixture.config, runtime_event_sink).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -832,33 +846,19 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
         load_active_series_id_for_book_url(&fixture.paths.main_db, &book_url).await;
     let expected_book_id = load_active_book_id_by_url(&fixture.paths.main_db, &book_url).await;
 
-    let (_, initial_events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        initial_cursor,
-        "scanner-contract-admin",
-        true,
-    );
+    let initial_events = runtime_events
+        .pending_events(initial_cursor, "scanner-contract-admin", true)
+        .events;
     let initial_scan_names = initial_events
         .iter()
-        .filter_map(|event| match event.name.as_str() {
-            "SeriesAdded"
-                if event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some(expected_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+        .filter_map(|event| match &event.event {
+            RuntimeSseEvent::SeriesAdded { series_id, .. } if series_id == &expected_series_id => {
+                Some("SeriesAdded")
             }
-            "BookAdded"
-                if event.payload.get("bookId").and_then(|value| value.as_str())
-                    == Some(expected_book_id.as_str())
-                    && event
-                        .payload
-                        .get("seriesId")
-                        .and_then(|value| value.as_str())
-                        == Some(expected_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+            RuntimeSseEvent::BookAdded {
+                book_id, series_id, ..
+            } if book_id == &expected_book_id && series_id == &expected_series_id => {
+                Some("BookAdded")
             }
             _ => None,
         })
@@ -869,44 +869,33 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
         "scanner runtime SSE should mirror Kotlin createSeries->addBooks ordering during initial discovery",
     );
 
-    let rescan_cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let rescan_cursor = runtime_events.current_cursor();
     fs::remove_dir_all(fixture.library_root.join("Series-A"))
         .expect("series directory should be removable for scanner SSE order contract");
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
         .expect("missing-series rescan should publish runtime SSE events successfully");
 
-    let (_, rescan_events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        rescan_cursor,
-        "scanner-contract-admin",
-        true,
-    );
+    let rescan_events = runtime_events
+        .pending_events(rescan_cursor, "scanner-contract-admin", true)
+        .events;
     let rescan_names = rescan_events
         .iter()
-        .filter_map(|event| match event.name.as_str() {
-            "BookChanged"
-                if event.payload.get("bookId").and_then(|value| value.as_str())
-                    == Some(expected_book_id.as_str())
-                    && event
-                        .payload
-                        .get("seriesId")
-                        .and_then(|value| value.as_str())
-                        == Some(expected_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+        .filter_map(|event| match &event.event {
+            RuntimeSseEvent::BookChanged {
+                book_id, series_id, ..
+            } if book_id == &expected_book_id && series_id == &expected_series_id => {
+                Some("BookChanged")
             }
-            "SeriesChanged"
-                if event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some(expected_series_id.as_str()) =>
+            RuntimeSseEvent::SeriesChanged { series_id, .. }
+                if series_id == &expected_series_id =>
             {
-                Some(event.name.as_str())
+                Some("SeriesChanged")
             }
             _ => None,
         })
@@ -921,7 +910,6 @@ async fn scanner_runtime_sse_scan_events_follow_kotlin_lifecycle_order() {
 
 #[tokio::test]
 async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_new_ones() {
-    let _guard = scanner_runtime_sse_lock().lock().await;
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-sse-mixed-order")
         .await
         .expect("scanner SSE mixed-order fixture should be created");
@@ -932,11 +920,15 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .to_string_lossy()
         .to_string();
 
-    let runtime = runtime_task_context_from_config(&fixture.config).await;
+    let runtime_events = Arc::new(RuntimeSseEventStore::default());
+    let runtime_event_sink: Arc<dyn RuntimeSseEventSink> = runtime_events.clone();
+    let runtime =
+        runtime_task_context_from_config_with_events(&fixture.config, runtime_event_sink).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -956,10 +948,11 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
         .to_string_lossy()
         .to_string();
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let cursor = runtime_events.current_cursor();
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -970,53 +963,29 @@ async fn scanner_runtime_sse_mixed_rescan_deletes_missing_items_before_adding_ne
     let renamed_book_id =
         load_active_book_id_by_url(&fixture.paths.main_db, &renamed_book_url).await;
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "scanner-contract-admin",
-        true,
-    );
+    let events = runtime_events
+        .pending_events(cursor, "scanner-contract-admin", true)
+        .events;
     let mixed_rescan_names = events
         .iter()
-        .filter_map(|event| match event.name.as_str() {
-            "BookChanged"
-                if event.payload.get("bookId").and_then(|value| value.as_str())
-                    == Some(original_book_id.as_str())
-                    && event
-                        .payload
-                        .get("seriesId")
-                        .and_then(|value| value.as_str())
-                        == Some(original_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+        .filter_map(|event| match &event.event {
+            RuntimeSseEvent::BookChanged {
+                book_id, series_id, ..
+            } if book_id == &original_book_id && series_id == &original_series_id => {
+                Some("BookChanged")
             }
-            "SeriesChanged"
-                if event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some(original_series_id.as_str()) =>
+            RuntimeSseEvent::SeriesChanged { series_id, .. }
+                if series_id == &original_series_id =>
             {
-                Some(event.name.as_str())
+                Some("SeriesChanged")
             }
-            "SeriesAdded"
-                if event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some(renamed_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+            RuntimeSseEvent::SeriesAdded { series_id, .. } if series_id == &renamed_series_id => {
+                Some("SeriesAdded")
             }
-            "BookAdded"
-                if event.payload.get("bookId").and_then(|value| value.as_str())
-                    == Some(renamed_book_id.as_str())
-                    && event
-                        .payload
-                        .get("seriesId")
-                        .and_then(|value| value.as_str())
-                        == Some(renamed_series_id.as_str()) =>
-            {
-                Some(event.name.as_str())
+            RuntimeSseEvent::BookAdded {
+                book_id, series_id, ..
+            } if book_id == &renamed_book_id && series_id == &renamed_series_id => {
+                Some("BookAdded")
             }
             _ => None,
         })

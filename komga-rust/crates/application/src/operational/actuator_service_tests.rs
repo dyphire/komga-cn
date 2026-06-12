@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
 
 use super::*;
 
@@ -34,7 +33,7 @@ struct FakeOperationalMetrics {
 
 #[async_trait]
 impl OperationalMetricsPort for FakeOperationalMetrics {
-    async fn load_task_execution_values(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String> {
         Ok(Vec::new())
     }
 
@@ -42,19 +41,21 @@ impl OperationalMetricsPort for FakeOperationalMetrics {
         Ok(0.0)
     }
 
-    async fn load_series_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_series_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         Ok(Vec::new())
     }
 
-    async fn load_books_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         Ok(Vec::new())
     }
 
-    async fn load_books_filesize_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_books_filesize_grouped_by_library(
+        &self,
+    ) -> Result<Vec<LibraryMetricValue>, String> {
         Ok(Vec::new())
     }
 
-    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<(String, f64)>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
         Ok(Vec::new())
     }
 
@@ -70,16 +71,16 @@ impl OperationalMetricsPort for FakeOperationalMetrics {
         Ok(0.0)
     }
 
-    async fn load_sqlite_pool_snapshots(
+    async fn load_database_pool_snapshots(
         &self,
         paths: &[PathBuf],
-    ) -> Result<Vec<SqlitePoolSnapshot>, String> {
+    ) -> Result<Vec<DatabasePoolSnapshot>, String> {
         *self
             .requested_pool_paths
             .lock()
             .expect("requested pool paths lock should not be poisoned") = paths.to_vec();
 
-        Ok(vec![SqlitePoolSnapshot {
+        Ok(vec![DatabasePoolSnapshot {
             path: paths[0].clone(),
             max_connections: 7,
             min_connections: 1,
@@ -135,25 +136,13 @@ fn fake_snapshots() -> FakeActuatorSnapshots {
     }
 }
 
-fn measurement_value(payload: &Value, statistic: &str) -> f64 {
-    payload["measurements"]
-        .as_array()
-        .expect("metric should expose measurements")
+fn measurement_value(metric: &ActuatorMetricDetail, statistic: &str) -> f64 {
+    metric
+        .measurements
         .iter()
-        .find(|measurement| measurement["statistic"].as_str() == Some(statistic))
-        .and_then(|measurement| measurement["value"].as_f64())
+        .find(|measurement| measurement.statistic == statistic)
+        .map(|measurement| measurement.value)
         .expect("metric should expose requested measurement")
-}
-
-#[test]
-fn health_payload_is_built_from_snapshot_port() {
-    let snapshots = fake_snapshots();
-    let metrics = FakeOperationalMetrics::default();
-    let service = ActuatorService::new(&snapshots, &metrics);
-
-    let payload = service.health_payload(false);
-
-    assert_eq!(payload, json!({ "status": "DOWN" }));
 }
 
 #[tokio::test]
@@ -162,13 +151,13 @@ async fn metric_detail_uses_probe_snapshot_paths_for_runtime_pool_metrics() {
     let metrics = FakeOperationalMetrics::default();
     let service = ActuatorService::new(&snapshots, &metrics);
 
-    let payload = service
-        .metric_detail_payload("jdbc.connections.max", &HashMap::new())
+    let metric = service
+        .metric_detail("jdbc.connections.max", &HashMap::new())
         .await
         .expect("metric detail should load")
         .expect("jdbc metric should exist");
 
-    assert_eq!(measurement_value(&payload, "VALUE"), 7.0);
+    assert_eq!(measurement_value(&metric, "VALUE"), 7.0);
     assert_eq!(
         metrics
             .requested_pool_paths
@@ -181,7 +170,10 @@ async fn metric_detail_uses_probe_snapshot_paths_for_runtime_pool_metrics() {
         ]
     );
     assert_eq!(
-        payload["availableTags"][0],
-        json!({ "tag": "name", "values": ["main-pool-max-7"] })
+        metric.available_tags[0],
+        ActuatorMetricAvailableTag {
+            tag: "name".to_string(),
+            values: vec!["main-pool-max-7".to_string()],
+        }
     );
 }

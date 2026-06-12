@@ -12,7 +12,7 @@ pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
         "fileLastModified": format_local_datetime(record.file_last_modified_unix_nanos),
         "sizeBytes": record.size_bytes,
         "size": format_size_bytes(record.size_bytes),
-        "status": record.status,
+        "status": record.status.persisted_name(),
         "mediaType": record.media_type,
         "pages": record.pages.iter().map(transient_page_payload).collect::<Vec<_>>(),
         "files": record.files,

@@ -940,16 +940,15 @@ async fn router_actuator_metric_detail_uses_runtime_process_cpu_usage_for_admin(
 async fn router_actuator_metric_detail_exposes_datasource_tags_for_admin() {
     let ctx = TestFixture::new("router-actuator-metric-detail-datasource-tags").await;
 
-    let _main_pool_one = komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().main_db, 1)
+    let _main_pool_one = komga_infrastructure::connect_shared_pool(&ctx.paths().main_db, 1)
         .await
         .expect("main shared sqlx pool with max=1 should open");
-    let _main_pool_two = komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().main_db, 2)
+    let _main_pool_two = komga_infrastructure::connect_shared_pool(&ctx.paths().main_db, 2)
         .await
         .expect("main shared sqlx pool with max=2 should open");
-    let _tasks_pool_one =
-        komga_infrastructure::sqlite::connect_shared_pool(&ctx.paths().tasks_db, 1)
-            .await
-            .expect("tasks shared sqlx pool with max=1 should open");
+    let _tasks_pool_one = komga_infrastructure::connect_shared_pool(&ctx.paths().tasks_db, 1)
+        .await
+        .expect("tasks shared sqlx pool with max=1 should open");
 
     let app = ctx.app().clone();
     let auth_token = ctx.login_admin().await;
@@ -1387,7 +1386,7 @@ async fn router_actuator_health_aggregates_down_when_database_file_is_missing() 
     let app = ctx.app().clone();
     let auth_token = ctx.login_admin().await;
     ctx.close_shared_pools().await;
-    komga_infrastructure::filesystem::remove_file_after_release(&ctx.paths().tasks_db)
+    komga_infrastructure::remove_file_after_release(&ctx.paths().tasks_db)
         .expect("tasks db should be removable for health down test");
 
     let response = app

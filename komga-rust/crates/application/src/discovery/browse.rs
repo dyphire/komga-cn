@@ -75,6 +75,12 @@ pub struct SeriesAlphabeticalGroupsRequest {
     pub search: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeriesAlphabeticalGroup {
+    pub group: String,
+    pub count: i64,
+}
+
 #[derive(Clone, Debug)]
 pub enum BookTagScope {
     All,
@@ -107,7 +113,7 @@ pub trait DiscoveryBrowseService: Send + Sync {
         &self,
         context: &DiscoveryQueryContext,
         request: SeriesAlphabeticalGroupsRequest,
-    ) -> Result<Vec<serde_json::Value>, DiscoveryError>;
+    ) -> Result<Vec<SeriesAlphabeticalGroup>, DiscoveryError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

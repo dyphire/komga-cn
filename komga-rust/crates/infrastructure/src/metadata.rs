@@ -4,18 +4,19 @@ mod refresh;
 mod thumbnails;
 
 pub use book_metadata::SqliteBookMetadataPort;
-pub use read_progress::{
+pub(crate) use read_progress::{
     delete_persisted_read_progress, load_book_page_count, load_book_progression,
     load_book_read_progress_completed, persist_book_progression, persist_read_progress,
-    persist_readlist_tachiyomi_progress, readlist_tachiyomi_counters,
+    read_progress_completed_by_book_ids,
 };
-pub use refresh::{
-    RefreshBookMetadataOutcome, TransientMetadataProviderInference, aggregate_series_metadata,
-    generate_book_thumbnail, infer_transient_comicinfo_provider_metadata,
-    infer_transient_epub_provider_metadata, refresh_book_local_artwork, refresh_book_metadata,
-    refresh_series_local_artwork, refresh_series_metadata,
+pub use refresh::generate_book_thumbnail;
+pub(crate) use refresh::{
+    TransientMetadataProviderInference, aggregate_series_metadata,
+    infer_transient_comicinfo_provider_metadata, infer_transient_epub_provider_metadata,
+    refresh_book_local_artwork, refresh_book_metadata, refresh_series_local_artwork,
+    refresh_series_metadata,
 };
-pub use thumbnails::{
+pub(crate) use thumbnails::{
     delete_book_thumbnail, delete_collection_thumbnail, delete_readlist_thumbnail,
     delete_series_thumbnail, insert_book_thumbnail, insert_collection_thumbnail,
     insert_readlist_thumbnail, insert_series_thumbnail, load_book_thumbnail_by_id,

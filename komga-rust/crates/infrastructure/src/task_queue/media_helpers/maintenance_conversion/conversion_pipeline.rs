@@ -1,39 +1,40 @@
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+
+use komga_application::task_processing::TaskProcessingError;
+use komga_domain::discovery::MediaStatus;
+use zip::ZipArchive;
+
+use super::super::super::index_tasks;
+use super::super::super::runtime_context::JobRuntime;
+use super::super::archive_utils::{
+    build_stored_zip_archive, load_rar_entries_for_conversion, metadata_updated_unix_seconds,
+    normalize_library_relative_url,
+};
+use super::super::media_analysis::is_rar_media_type;
 use super::super::media_queries::{
     PersistedBookToConvert, PersistedHashedPageToDelete, load_book_conversion_target,
     load_book_hashed_pages, load_books_to_convert, load_library_maintenance_flags,
 };
 use super::super::media_updates::{
-    persist_book_conversion, persist_book_conversion_events, persist_book_page_hashes,
+    BookPageHashWrite, persist_book_conversion, persist_book_conversion_events,
+    persist_book_page_hashes,
 };
-use super::*;
 use crate::{resolve_library_item_path, resolve_stored_path};
-use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
 
-static FAILED_BOOK_CONVERSIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-
-fn failed_book_conversions() -> &'static Mutex<HashSet<String>> {
-    FAILED_BOOK_CONVERSIONS.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn book_conversion_failed_before(book_id: &str) -> bool {
-    failed_book_conversions()
-        .lock()
-        .expect("failed book conversion lock should not be poisoned")
-        .contains(book_id)
-}
-
-fn mark_book_conversion_failed(book_id: &str) {
-    failed_book_conversions()
-        .lock()
-        .expect("failed book conversion lock should not be poisoned")
-        .insert(book_id.to_string());
+struct PreparedBookConversion {
+    destination_path: PathBuf,
+    destination_url: String,
+    file_last_modified: i64,
+    file_size: i64,
+    source_path: PathBuf,
 }
 
 fn restored_page_hashes(
     current_pages: &[PersistedHashedPageToDelete],
     previous_pages: &[PersistedHashedPageToDelete],
-) -> Vec<(i64, String)> {
+) -> Vec<BookPageHashWrite> {
     current_pages
         .iter()
         .filter_map(|current_page| {
@@ -45,7 +46,10 @@ fn restored_page_hashes(
                         && previous_page.file_name == current_page.file_name
                         && !previous_page.file_hash.trim().is_empty()
                 })
-                .map(|previous_page| (current_page.page_number, previous_page.file_hash.clone()))
+                .map(|previous_page| BookPageHashWrite {
+                    page_number: current_page.page_number,
+                    file_hash: previous_page.file_hash.clone(),
+                })
         })
         .collect()
 }
@@ -83,11 +87,11 @@ pub(in crate::task_queue) async fn convert_book(
     if !source.convert_to_cbz {
         return Ok(());
     }
-    if book_conversion_failed_before(&book_id) {
+    if runtime.book_conversion_failed_before(&book_id) {
         return Ok(());
     }
 
-    if !source.media_status.eq_ignore_ascii_case("READY") {
+    if source.media_status != Some(MediaStatus::Ready) {
         return Ok(());
     }
     if !is_rar_media_type(&source.media_type) {
@@ -99,22 +103,38 @@ pub(in crate::task_queue) async fn convert_book(
     let source_file_last_modified = source.file_last_modified;
     let convert_book_id = book_id.clone();
     let prepared_conversion = (|| {
-        if !source_path.exists() {
-            return Ok(None);
-        }
-        let Ok(source_metadata) = fs::metadata(&source_path) else {
-            return Ok(None);
+        let source_metadata = match fs::metadata(&source_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(TaskProcessingError::runtime(format!(
+                    "failed to read source file metadata for conversion '{convert_book_id}' ('{}'): {error}",
+                    source_path.display(),
+                )));
+            }
         };
-        if metadata_updated_unix_seconds(&source_metadata) != source_file_last_modified {
+        let current_source_file_last_modified =
+            metadata_updated_unix_seconds(&source_metadata, &source_path)
+                .map_err(TaskProcessingError::runtime)?;
+        if current_source_file_last_modified != source_file_last_modified {
             return Ok(None);
         }
 
         let destination_path = source_path.with_extension("cbz");
-        if destination_path.exists() {
-            return Err(TaskProcessingError::runtime(format!(
-                "failed to convert book '{convert_book_id}' to CBZ: destination already exists '{}'",
-                destination_path.display(),
-            )));
+        match fs::metadata(&destination_path) {
+            Ok(_) => {
+                return Err(TaskProcessingError::runtime(format!(
+                    "failed to convert book '{convert_book_id}' to CBZ: destination already exists '{}'",
+                    destination_path.display(),
+                )));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(TaskProcessingError::runtime(format!(
+                    "failed to inspect conversion destination for '{convert_book_id}' ('{}'): {error}",
+                    destination_path.display(),
+                )));
+            }
         }
 
         let payload = {
@@ -155,45 +175,47 @@ pub(in crate::task_queue) async fn convert_book(
                 destination_path.display(),
             ))
         })?;
+        let destination_file_last_modified =
+            metadata_updated_unix_seconds(&destination_metadata, &destination_path)
+                .map_err(TaskProcessingError::runtime)?;
 
-        Ok(Some((
+        Ok(Some(PreparedBookConversion {
             destination_path,
             destination_url,
-            metadata_updated_unix_seconds(&destination_metadata),
-            destination_metadata.len() as i64,
+            file_last_modified: destination_file_last_modified,
+            file_size: destination_metadata.len() as i64,
             source_path,
-        )))
+        }))
     })();
 
-    let Some((destination_path, destination_url, file_last_modified, file_size, source_path)) =
-        (match prepared_conversion {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                mark_book_conversion_failed(&book_id);
-                return Err(error);
-            }
-        })
-    else {
+    let Some(conversion) = (match prepared_conversion {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            runtime.mark_book_conversion_failed(&book_id);
+            return Err(error);
+        }
+    }) else {
         return Ok(());
     };
 
     if let Err(error) = persist_book_conversion(
         runtime.database().write_pool(),
+        runtime.runtime_events(),
         &book_id,
         &source.library_id,
         &source.book_url,
-        &destination_url,
-        file_last_modified,
-        file_size,
+        &conversion.destination_url,
+        conversion.file_last_modified,
+        conversion.file_size,
     )
     .await
     {
-        let revert_destination_path = destination_path.clone();
+        let revert_destination_path = conversion.destination_path.clone();
         let _ = tokio::fs::remove_file(&revert_destination_path).await;
         return Err(TaskProcessingError::runtime(error));
     }
 
-    let source_path_for_delete = source_path.clone();
+    let source_path_for_delete = conversion.source_path.clone();
     let source_deleted = tokio::fs::remove_file(&source_path_for_delete)
         .await
         .is_ok();
@@ -201,8 +223,8 @@ pub(in crate::task_queue) async fn convert_book(
         runtime.database().write_pool(),
         &book_id,
         &source.series_id,
-        &source_path,
-        &destination_path,
+        &conversion.source_path,
+        &conversion.destination_path,
         source_deleted,
     )
     .await
@@ -212,7 +234,7 @@ pub(in crate::task_queue) async fn convert_book(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    super::index_tasks::analyze_book(runtime, &book_id).await?;
+    index_tasks::analyze_book(runtime, &book_id).await?;
 
     let analyzed_pages = load_book_hashed_pages(runtime.database().read_pool(), &book_id)
         .await

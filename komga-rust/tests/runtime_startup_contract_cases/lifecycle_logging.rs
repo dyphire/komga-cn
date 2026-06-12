@@ -1,4 +1,5 @@
 use super::support::*;
+use komga_application::operational::StartupTimingState;
 use std::fs;
 use std::time::Duration;
 
@@ -12,10 +13,8 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
     let mut config = runtime_config_for_logging_contract("komga-runtime-startup-lifecycle");
     fs::create_dir_all(&config.lucene_data_directory)
         .expect("lucene directory should be created for startup lifecycle test");
-    komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle::bootstrap(
-        config.lucene_data_directory.as_path(),
-    )
-    .expect("startup lifecycle test should bootstrap a valid search index");
+    komga_infrastructure::SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
+        .expect("startup lifecycle test should bootstrap a valid search index");
     let listener = runtime.block_on(async {
         tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -31,15 +30,23 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
         .expect("startup lifecycle test listener should expose local addr");
     let expected_database_file = config.database_file.to_string_lossy().to_string();
     let expected_bind_address = config.bind_address.to_string();
+    let startup_timing = StartupTimingState::default();
 
     let logs = capture_contract_log_async(&config, {
         let config = config.clone();
+        let startup_timing = startup_timing.clone();
         async move {
+            let startup_wait = startup_timing.clone();
             let join = tokio::spawn(async move {
-                komga_server::app::serve_with_config(listener, config).await
+                komga_server::app::serve_with_startup_timing_for_contract(
+                    listener,
+                    config,
+                    startup_timing,
+                )
+                .await
             });
 
-            tokio::time::sleep(Duration::from_millis(75)).await;
+            wait_for_application_started(&startup_wait).await;
             join.abort();
             let _ = join.await;
         }
@@ -107,6 +114,20 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
         field_str(bind, "bind_address"),
         Some(expected_bind_address.as_str())
     );
+}
+
+async fn wait_for_application_started(startup_timing: &StartupTimingState) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if startup_timing.snapshot().application_started_time_seconds > 0.0 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "startup lifecycle server did not record application started"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 #[test]

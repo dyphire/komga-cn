@@ -3,8 +3,40 @@ use super::*;
 mod provider_formats;
 
 pub(super) use provider_formats::{
-    write_router_epub_with_package_document, write_router_epub_with_package_document_and_entries,
+    write_router_cbz_with_single_page, write_router_epub_with_package_document,
+    write_router_epub_with_package_document_and_entries,
 };
+
+async fn isolate_book_metadata_imports(
+    pool: &sqlx::SqlitePool,
+    import_comicinfo_book: i64,
+    import_comicinfo_readlist: i64,
+    import_epub_book: i64,
+    import_barcode_isbn: i64,
+) {
+    sqlx::query(
+        r#"
+        UPDATE LIBRARY
+        SET IMPORT_COMICINFO_BOOK = ?,
+            IMPORT_COMICINFO_READLIST = ?,
+            IMPORT_EPUB_BOOK = ?,
+            IMPORT_BARCODE_ISBN = ?,
+            IMPORT_COMICINFO_SERIES = 0,
+            IMPORT_COMICINFO_COLLECTION = 0,
+            IMPORT_EPUB_SERIES = 0,
+            IMPORT_MYLAR_SERIES = 0
+        WHERE ID = ?
+        "#,
+    )
+    .bind(import_comicinfo_book)
+    .bind(import_comicinfo_readlist)
+    .bind(import_epub_book)
+    .bind(import_barcode_isbn)
+    .bind("library-1")
+    .execute(pool)
+    .await
+    .expect("library metadata import flags should isolate book metadata provider behavior");
+}
 
 #[tokio::test]
 async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_book_fields() {
@@ -33,13 +65,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
         let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("main db should open for readlist-only metadata fixture setup");
-        sqlx::query(
-            "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_COMICINFO_READLIST = 1 WHERE ID = ?",
-        )
-        .bind("library-1")
-        .execute(&pool)
-        .await
-        .expect("library ComicInfo import flags should be updated for readlist-only metadata test");
+        isolate_book_metadata_imports(&pool, 0, 1, 0, 0).await;
         sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
             .bind("books/book-1.epub")
             .execute(&pool)
@@ -165,6 +191,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
     .execute(&pool)
     .await
     .expect("book metadata sidecar row should be inserted for number capability test");
+    isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     pool.close().await;
 
     let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
@@ -248,6 +275,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     .execute(&pool)
     .await
     .expect("book metadata sidecar row should be inserted for remaining ComicInfo test");
+    isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     sqlx::query(
         "UPDATE BOOK_METADATA SET RELEASE_DATE = ?, RELEASE_DATE_LOCK = 1, ISBN = ?, ISBN_LOCK = 1, AUTHORS_LOCK = 0, TAGS_LOCK = 0, LINKS_LOCK = 0 WHERE BOOK_ID = ?",
     )
@@ -417,13 +445,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     .execute(&pool)
     .await
     .expect("ComicInfo gate sidecar row should be inserted");
-    sqlx::query(
-        "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 1, IMPORT_EPUB_BOOK = 0, IMPORT_BARCODE_ISBN = 0 WHERE ID = ?",
-    )
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("library metadata import flags should isolate ComicInfo gate behavior for refresh test");
+    isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     sqlx::query("UPDATE BOOK_METADATA SET ISBN = ?, ISBN_LOCK = 0 WHERE BOOK_ID = ?")
         .bind("")
         .bind("book-comicinfo-gate-1")

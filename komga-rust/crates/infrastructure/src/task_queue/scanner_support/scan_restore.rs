@@ -5,10 +5,15 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 
+use komga_domain::media_assets::ThumbnailType;
+
 use crate::persisted_paths::resolve_rooted_path;
 use crate::sql::task_queue::DELETE_BOOK_DEPENDENCY_SQL;
 
-use super::scan_models::*;
+use super::scan_models::{
+    BookMetadataRefreshRequest, InsertedBookCandidate, InsertedSeriesCandidate,
+    RestoredBookMatches, RestoredSeriesMatch,
+};
 
 fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|error| {
@@ -29,9 +34,9 @@ pub(super) async fn try_restore_deleted_books(
     pool: &SqlitePool,
     library_root: &Path,
     inserted_books: &[InsertedBookCandidate],
-) -> Result<(Vec<String>, Vec<BookMetadataRefreshRequest>), String> {
+) -> Result<RestoredBookMatches, String> {
     let mut restored_series_ids = HashSet::<String>::new();
-    let mut metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
+    let mut book_metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
 
     for inserted in inserted_books {
         let deleted_candidates = sqlx::query(
@@ -119,10 +124,12 @@ WHERE BOOK_ID = ?"#,
             r#"UPDATE THUMBNAIL_BOOK
 SET BOOK_ID = ?
 WHERE BOOK_ID = ?
-  AND TYPE IN ('GENERATED', 'USER_UPLOADED')"#,
+  AND TYPE IN (?, ?)"#,
         )
         .bind(&inserted.book_id)
         .bind(&matched_deleted_book_id)
+        .bind(ThumbnailType::Generated.persisted_name())
+        .bind(ThumbnailType::UserUploaded.persisted_name())
         .execute(pool)
         .await
         .map_err(|error| {
@@ -223,7 +230,7 @@ WHERE BOOK_ID = ?"#,
                 )
             })?;
             if !deleted_title_locked {
-                metadata_refreshes.push(BookMetadataRefreshRequest {
+                book_metadata_refreshes.push(BookMetadataRefreshRequest {
                     book_id: inserted.book_id.clone(),
                     series_id: inserted.series_id.clone(),
                     capabilities: vec!["TITLE".to_string()],
@@ -355,10 +362,10 @@ SET READ_COUNT = excluded.READ_COUNT,
         restored_series_ids.insert(inserted.series_id.clone());
     }
 
-    Ok((
-        restored_series_ids.into_iter().collect(),
-        metadata_refreshes,
-    ))
+    Ok(RestoredBookMatches {
+        series_ids: restored_series_ids.into_iter().collect(),
+        book_metadata_refreshes,
+    })
 }
 
 pub(super) async fn try_restore_deleted_series(
@@ -614,10 +621,11 @@ SELECT ?, LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"
             r#"UPDATE THUMBNAIL_SERIES
 SET SERIES_ID = ?
 WHERE SERIES_ID = ?
-  AND TYPE = 'USER_UPLOADED'"#,
+  AND TYPE = ?"#,
         )
         .bind(&inserted.series_id)
         .bind(&deleted_series_id)
+        .bind(ThumbnailType::UserUploaded.persisted_name())
         .execute(pool)
         .await
         .map_err(|error| format!("failed to restore THUMBNAIL_SERIES rows: {error}"))?;

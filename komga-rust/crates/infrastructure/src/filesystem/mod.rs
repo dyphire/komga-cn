@@ -5,12 +5,14 @@ use std::time::{Duration, Instant};
 const FILE_RELEASE_RETRY_DEADLINE: Duration = Duration::from_secs(30);
 const FILE_RELEASE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
-pub mod browser;
-pub mod fonts;
-pub mod import;
-pub mod media_access;
-pub mod media_analysis;
-pub mod transient_books;
+pub(crate) mod browser;
+pub(crate) mod fonts;
+mod import;
+pub(crate) mod media_access;
+pub(crate) mod media_analysis;
+pub(crate) mod transient_books;
+
+pub use import::FilesystemBookImport;
 
 pub fn remove_file_after_release(path: &Path) -> io::Result<bool> {
     let deadline = Instant::now() + FILE_RELEASE_RETRY_DEADLINE;

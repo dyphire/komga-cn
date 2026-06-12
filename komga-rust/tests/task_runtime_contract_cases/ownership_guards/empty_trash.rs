@@ -2,13 +2,26 @@ use super::*;
 
 async fn run_empty_trash(paths: &RuntimeDbPaths) {
     let runtime = runtime_task_context(paths).await;
+    run_empty_trash_with_runtime(runtime).await;
+}
+
+async fn run_empty_trash_with_cleanup_policy(
+    paths: &RuntimeDbPaths,
+    cleanup_policy: CleanupEmptySetsPolicy,
+) {
+    let runtime = runtime_task_context_with_cleanup_policy(paths, cleanup_policy).await;
+    run_empty_trash_with_runtime(runtime).await;
+}
+
+async fn run_empty_trash_with_runtime(runtime: TaskRuntimeContext) {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("EmptyTrash_library-1", 1_000, Some("library-1".to_string()))
                 .with_simple_type("EmptyTrash"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -263,18 +276,6 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
         .execute(&pool)
         .await
         .expect("readlist members should be removed before cleanup-empty-sets verification");
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind("DELETE_EMPTY_COLLECTIONS")
-        .bind("true")
-        .execute(&pool)
-        .await
-        .expect("delete empty collections setting should be enabled for thumbnail cleanup");
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind("DELETE_EMPTY_READLISTS")
-        .bind("true")
-        .execute(&pool)
-        .await
-        .expect("delete empty readlists setting should be enabled for thumbnail cleanup");
     sqlx::query(
         "INSERT INTO THUMBNAIL_COLLECTION (ID, COLLECTION_ID, THUMBNAIL, TYPE, SELECTED) VALUES (?, ?, ?, ?, ?)",
     )
@@ -299,7 +300,14 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
     .expect("readlist thumbnail should be inserted for empty-set cleanup verification");
     pool.close().await;
 
-    run_empty_trash(ctx.paths()).await;
+    run_empty_trash_with_cleanup_policy(
+        ctx.paths(),
+        CleanupEmptySetsPolicy {
+            delete_empty_collections: true,
+            delete_empty_read_lists: true,
+        },
+    )
+    .await;
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await

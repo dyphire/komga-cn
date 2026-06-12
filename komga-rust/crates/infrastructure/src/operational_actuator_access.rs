@@ -84,15 +84,15 @@ impl ActuatorSnapshotPort for ActuatorSnapshotAccess {
             .http_server_requests
             .snapshot()
             .into_iter()
-            .map(|(key, summary)| ActuatorHttpServerRequestMetric {
-                exception: key.exception,
-                method: key.method,
-                outcome: key.outcome,
-                status: key.status,
-                uri: key.uri,
-                count: summary.count,
-                total_time_seconds: summary.total_time_seconds,
-                max_time_seconds: summary.max_time_seconds,
+            .map(|snapshot| ActuatorHttpServerRequestMetric {
+                exception: snapshot.key.exception,
+                method: snapshot.key.method,
+                outcome: snapshot.key.outcome,
+                status: snapshot.key.status,
+                uri: snapshot.key.uri,
+                count: snapshot.summary.count,
+                total_time_seconds: snapshot.summary.total_time_seconds,
+                max_time_seconds: snapshot.summary.max_time_seconds,
             })
             .collect();
 

@@ -6,6 +6,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+use crate::support::sqlite::connect_test_pool;
+
 use super::RuntimeDbPaths;
 
 pub(crate) struct SingleResponseServer {
@@ -190,7 +192,7 @@ pub(crate) async fn spawn_request_body_echo_server() -> SingleResponseServer {
 }
 
 pub(crate) async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, value: &str) {
-    let pool = komga_infrastructure::sqlite::connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("server settings db should open");
 
@@ -205,7 +207,7 @@ pub(crate) async fn upsert_server_setting(paths: &RuntimeDbPaths, key: &str, val
 }
 
 pub(crate) async fn load_server_setting(paths: &RuntimeDbPaths, key: &str) -> Option<String> {
-    let pool = komga_infrastructure::sqlite::connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("server settings read db should open");
 
@@ -220,7 +222,7 @@ pub(crate) async fn load_server_setting(paths: &RuntimeDbPaths, key: &str) -> Op
 }
 
 pub(crate) async fn seed_kobo_sync_api_key(paths: &RuntimeDbPaths, api_key: &str, user_id: &str) {
-    let pool = komga_infrastructure::sqlite::connect_test_pool(paths.main_db.as_path(), 1)
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
         .await
         .expect("user api key seed db should open");
 

@@ -1,9 +1,11 @@
-use komga_application::media_assets::ReadlistThumbnailRecord;
+use komga_application::media_assets::{ReadlistThumbnailRecord, ThumbnailType};
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
 use super::{emit_thumbnail_readlist_event, generated_thumbnail_id};
+use crate::parsing::parse_thumbnail_type;
 
-pub async fn load_persisted_readlist_thumbnails(
+pub(crate) async fn load_persisted_readlist_thumbnails(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<ReadlistThumbnailRecord>, String> {
@@ -20,24 +22,30 @@ pub async fn load_persisted_readlist_thumbnails(
     .await
     .map_err(|error| format!("query persisted readlist thumbnails: {error}"))?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| ReadlistThumbnailRecord {
-            id: row.get::<String, _>("ID"),
-            readlist_id: row.get::<String, _>("READLIST_ID"),
-            thumbnail_type: row.get::<String, _>("TYPE"),
-            selected: row.get::<i64, _>("SELECTED") != 0,
-            media_type: row.get::<String, _>("MEDIA_TYPE"),
-            file_size: row.get::<i64, _>("FILE_SIZE"),
-            width: row.get::<i64, _>("WIDTH"),
-            height: row.get::<i64, _>("HEIGHT"),
-            thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
+    rows.into_iter()
+        .map(|row| {
+            Ok(ReadlistThumbnailRecord {
+                id: row.get::<String, _>("ID"),
+                readlist_id: row.get::<String, _>("READLIST_ID"),
+                thumbnail_type: parse_thumbnail_type(&row.get::<String, _>("TYPE")),
+                selected: row.get::<i64, _>("SELECTED") != 0,
+                media_type: row.get::<String, _>("MEDIA_TYPE"),
+                file_size: row.get::<i64, _>("FILE_SIZE"),
+                width: row.get::<i64, _>("WIDTH"),
+                height: row.get::<i64, _>("HEIGHT"),
+                thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
+            })
         })
-        .collect())
+        .collect()
 }
 
-pub async fn insert_readlist_thumbnail(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "This persistence boundary writes the thumbnail record fields directly."
+)]
+pub(crate) async fn insert_readlist_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     readlist_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -95,7 +103,7 @@ pub async fn insert_readlist_thumbnail(
     .bind(&id)
     .bind(selected)
     .bind(thumbnail)
-    .bind("USER_UPLOADED")
+    .bind(ThumbnailType::UserUploaded.persisted_name())
     .bind(readlist_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
@@ -112,7 +120,7 @@ pub async fn insert_readlist_thumbnail(
     let record = ReadlistThumbnailRecord {
         id,
         readlist_id: readlist_id.to_string(),
-        thumbnail_type: "USER_UPLOADED".to_string(),
+        thumbnail_type: ThumbnailType::UserUploaded,
         selected,
         media_type: media_type.to_string(),
         file_size: thumbnail.len() as i64,
@@ -120,12 +128,13 @@ pub async fn insert_readlist_thumbnail(
         height,
         thumbnail: thumbnail.to_vec(),
     };
-    emit_thumbnail_readlist_event(&record.readlist_id, record.selected, true);
+    emit_thumbnail_readlist_event(runtime_events, &record.readlist_id, record.selected, true);
     Ok(record)
 }
 
-pub async fn select_readlist_thumbnail(
+pub(crate) async fn select_readlist_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
@@ -200,12 +209,13 @@ pub async fn select_readlist_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist thumbnail select tx: {error}"))?;
-    emit_thumbnail_readlist_event(&target_readlist_id, true, true);
+    emit_thumbnail_readlist_event(runtime_events, &target_readlist_id, true, true);
     Ok(true)
 }
 
-pub async fn delete_readlist_thumbnail(
+pub(crate) async fn delete_readlist_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     readlist_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
@@ -271,7 +281,7 @@ pub async fn delete_readlist_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit readlist thumbnail delete tx: {error}"))?;
-    emit_thumbnail_readlist_event(&target_readlist_id, deleted_selected, false);
+    emit_thumbnail_readlist_event(runtime_events, &target_readlist_id, deleted_selected, false);
     Ok(true)
 }
 
@@ -331,7 +341,7 @@ async fn normalize_readlist_thumbnail_selection(
     Ok(())
 }
 
-pub async fn load_persisted_readlist_name(
+pub(crate) async fn load_persisted_readlist_name(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Option<String>, String> {
@@ -349,7 +359,7 @@ pub async fn load_persisted_readlist_name(
     Ok(row.map(|row| row.get::<String, _>("NAME")))
 }
 
-pub async fn persisted_readlist_exists(
+pub(crate) async fn persisted_readlist_exists(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<bool, String> {

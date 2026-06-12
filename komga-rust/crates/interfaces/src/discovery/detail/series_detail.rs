@@ -1,14 +1,29 @@
 #![allow(clippy::result_large_err)]
 
-use super::series_persistence::ExistingSeriesMetadata;
-use super::*;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use komga_application::discovery::{
+    SeriesAlternateTitleRecord, SeriesEventEmitter, SeriesMetadataLinkRecord, SeriesMetadataPatch,
+    SeriesMetadataUpdateError, SeriesMetadataUpdateResult, SeriesMetadataWriter,
+    SeriesReadingDirection, resolve_persisted_series_id,
+};
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSource};
+use komga_domain::discovery::SeriesStatus;
+use serde_json::{Value, json};
+
+use super::detail_utils::internal_error_response;
+use super::series_persistence::{
+    load_persisted_series_collections, load_persisted_series_detail, load_persisted_series_resource,
+};
+use super::{series_collections_payload, series_detail_payload};
+use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
+use crate::helpers::{detail_access_denial_response, to_domain_query_context};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
-use axum::extract::State;
-use language_tags::LanguageTag;
-use reqwest::Url;
 
-pub async fn series_detail(
+pub(crate) async fn series_detail(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -16,7 +31,8 @@ pub async fn series_detail(
 ) -> Response {
     let app = &app;
 
-    let resolved_series_id = resolve_series_id_for_persisted(app, &series_id).await;
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
 
     let Some(resource) = (match load_persisted_series_resource(app, &resolved_series_id).await {
         Ok(resource) => resource,
@@ -58,7 +74,7 @@ pub async fn series_detail(
     Json(series_detail_payload(&series, is_admin)).into_response()
 }
 
-pub async fn series_collections(
+pub(crate) async fn series_collections(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -66,12 +82,14 @@ pub async fn series_collections(
 ) -> Response {
     let app = &app;
 
-    let Some(context) = app
+    let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let Some(resource) = (match load_persisted_series_resource(app, &series_id).await {
         Ok(resource) => resource,
@@ -95,22 +113,15 @@ pub async fn series_collections(
     {
         Ok(_) => match load_persisted_series_collections(app, &series_id).await {
             Ok(collections) => {
-                let service = CollectionVisibilityService::new(
-                    app.collection.as_ref(),
-                    app.series_detail.as_ref(),
-                );
                 let domain_context = to_domain_query_context(context);
-                let mut visible_collections = Vec::with_capacity(collections.len());
-                for collection in collections {
-                    match service
-                        .visible_collection(&domain_context, collection)
-                        .await
-                    {
-                        Ok(Some(collection)) => visible_collections.push(collection),
-                        Ok(None) => {}
-                        Err(error) => return internal_error_response(error),
-                    }
-                }
+                let visible_collections = match app
+                    .persisted_sets
+                    .visible_collections(&domain_context, collections)
+                    .await
+                {
+                    Ok(collections) => collections,
+                    Err(error) => return internal_error_response(error),
+                };
 
                 Json(series_collections_payload(&visible_collections)).into_response()
             }
@@ -120,7 +131,7 @@ pub async fn series_collections(
     }
 }
 
-pub async fn series_metadata_update(
+pub(crate) async fn series_metadata_update(
     State(app): State<DiscoveryState>,
     _: Admin,
     Path(series_id): Path<String>,
@@ -139,420 +150,297 @@ pub async fn series_metadata_update(
         }
     };
 
-    if let Err(response) = validate_series_metadata_patch(body) {
-        return response;
-    }
-
-    let existing = match load_existing_series_metadata(app, &series_id).await {
-        Ok(Some(existing)) => existing,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error_response(error),
+    let patch = match parse_series_metadata_patch(body) {
+        Ok(patch) => patch,
+        Err(response) => return response,
     };
 
-    let update = merge_series_metadata_patch(body, &existing);
+    let event_emitter = RuntimeSeriesEventEmitter {
+        runtime_events: app.runtime_events.as_ref(),
+    };
+    let writer = SeriesMetadataWriter::new(app.series_metadata.as_ref(), &event_emitter);
+    match writer.update_series(&series_id, patch).await {
+        Ok(SeriesMetadataUpdateResult::Updated) => StatusCode::NO_CONTENT.into_response(),
+        Ok(SeriesMetadataUpdateResult::NotFound) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => series_metadata_update_error_response(error),
+    }
+}
 
-    match persist_series_metadata_update(app, &series_id, update).await {
-        Ok(true) => {
-            if let Err(error) =
-                sync_series_search_documents_after_metadata_update(app, &series_id).await
-            {
-                return internal_error_response(error);
-            }
-            StatusCode::NO_CONTENT.into_response()
+fn series_metadata_update_error_response(error: SeriesMetadataUpdateError) -> Response {
+    match error {
+        SeriesMetadataUpdateError::Validation(error) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
-        Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        SeriesMetadataUpdateError::Persistence(error) => internal_error_response(error),
     }
 }
 
-/// Merges a validated JSON patch onto existing series metadata, producing the
-/// full update record to persist.
-pub(super) fn merge_series_metadata_patch(
+struct RuntimeSeriesEventEmitter<'a> {
+    runtime_events: &'a dyn RuntimeSseEventSource,
+}
+
+impl SeriesEventEmitter for RuntimeSeriesEventEmitter<'_> {
+    fn emit_series_changed(&self, series_id: &str, library_id: &str) {
+        self.runtime_events
+            .register(RuntimeSseEvent::SeriesChanged {
+                series_id: series_id.to_string(),
+                library_id: library_id.to_string(),
+            });
+    }
+}
+
+fn parse_series_metadata_patch(
     body: &serde_json::Map<String, Value>,
-    existing: &ExistingSeriesMetadata,
-) -> SeriesMetadataUpdateRecord {
-    let merge_str = |key: &str, fallback: &str| -> String {
-        body.get(key)
-            .and_then(Value::as_str)
-            .unwrap_or(fallback)
-            .to_string()
+) -> Result<SeriesMetadataPatch, Response> {
+    Ok(SeriesMetadataPatch {
+        status: optional_series_status_field(body, "status")?,
+        status_lock: optional_bool_field(body, "statusLock")?,
+        title: optional_string_field(body, "title")?,
+        title_lock: optional_bool_field(body, "titleLock")?,
+        title_sort: optional_string_field(body, "titleSort")?,
+        title_sort_lock: optional_bool_field(body, "titleSortLock")?,
+        summary: optional_string_field(body, "summary")?,
+        summary_lock: optional_bool_field(body, "summaryLock")?,
+        reading_direction: optional_reading_direction_field(body, "readingDirection")?,
+        reading_direction_lock: optional_bool_field(body, "readingDirectionLock")?,
+        publisher: optional_string_field(body, "publisher")?,
+        publisher_lock: optional_bool_field(body, "publisherLock")?,
+        age_rating: optional_nullable_u32_field(body, "ageRating")?,
+        age_rating_lock: optional_bool_field(body, "ageRatingLock")?,
+        language: optional_string_field(body, "language")?,
+        language_lock: optional_bool_field(body, "languageLock")?,
+        genres: optional_string_list_field(body, "genres")?,
+        genres_lock: optional_bool_field(body, "genresLock")?,
+        tags: optional_string_list_field(body, "tags")?,
+        tags_lock: optional_bool_field(body, "tagsLock")?,
+        total_book_count: optional_nullable_u32_field(body, "totalBookCount")?,
+        total_book_count_lock: optional_bool_field(body, "totalBookCountLock")?,
+        sharing_labels: optional_string_list_field(body, "sharingLabels")?,
+        sharing_labels_lock: optional_bool_field(body, "sharingLabelsLock")?,
+        links: optional_links_field(body, "links")?,
+        links_lock: optional_bool_field(body, "linksLock")?,
+        alternate_titles: optional_alternate_titles_field(body, "alternateTitles")?,
+        alternate_titles_lock: optional_bool_field(body, "alternateTitlesLock")?,
+    })
+}
+
+fn optional_reading_direction_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<Option<SeriesReadingDirection>>, Response> {
+    match optional_nullable_string_field(body, key)? {
+        Some(Some(value)) => SeriesReadingDirection::parse(&value)
+            .map(Some)
+            .map(Some)
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("{key} has an invalid value") })),
+                )
+                    .into_response()
+            }),
+        Some(None) => Ok(Some(None)),
+        None => Ok(None),
+    }
+}
+
+fn optional_series_status_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<SeriesStatus>, Response> {
+    match optional_string_field(body, key)? {
+        Some(value) => SeriesStatus::parse(&value).map(Some).ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("{key} has an invalid value") })),
+            )
+                .into_response()
+        }),
+        None => Ok(None),
+    }
+}
+
+fn optional_bool_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<bool>, Response> {
+    match body.get(key) {
+        Some(value) if value.is_null() => Ok(None),
+        Some(value) => value
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| bad_request_response(&format!("{key} must be a boolean or null"))),
+        None => Ok(None),
+    }
+}
+
+fn optional_string_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<String>, Response> {
+    match body.get(key) {
+        Some(value) if value.is_null() => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| bad_request_response(&format!("{key} must be a string or null"))),
+        None => Ok(None),
+    }
+}
+
+fn optional_nullable_string_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<Option<String>>, Response> {
+    match body.get(key) {
+        Some(value) if value.is_null() => Ok(Some(None)),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(Some(value.to_string())))
+            .ok_or_else(|| bad_request_response(&format!("{key} must be a string or null"))),
+        None => Ok(None),
+    }
+}
+
+fn optional_nullable_u32_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<Option<u32>>, Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(None);
     };
-    let merge_bool = |key: &str, fallback: bool| -> bool {
-        body.get(key).and_then(Value::as_bool).unwrap_or(fallback)
-    };
-    let merge_nullable_str = |key: &str, fallback: &Option<String>| -> Option<String> {
-        if body.contains_key(key) {
-            body.get(key).and_then(Value::as_str).map(str::to_string)
-        } else {
-            fallback.clone()
-        }
-    };
-    let merge_nullable_u32 = |key: &str, fallback: Option<u32>| -> Option<u32> {
-        if body.contains_key(key) {
-            body.get(key)
-                .and_then(Value::as_u64)
-                .and_then(|v| u32::try_from(v).ok())
-        } else {
-            fallback
-        }
-    };
-
-    SeriesMetadataUpdateRecord {
-        status: merge_str("status", &existing.status),
-        status_lock: merge_bool("statusLock", existing.status_lock),
-        title: merge_str("title", &existing.title),
-        title_lock: merge_bool("titleLock", existing.title_lock),
-        title_sort: merge_str("titleSort", &existing.title_sort),
-        title_sort_lock: merge_bool("titleSortLock", existing.title_sort_lock),
-        summary: merge_str("summary", &existing.summary),
-        summary_lock: merge_bool("summaryLock", existing.summary_lock),
-        reading_direction: merge_nullable_str("readingDirection", &existing.reading_direction),
-        reading_direction_lock: merge_bool("readingDirectionLock", existing.reading_direction_lock),
-        publisher: merge_str("publisher", &existing.publisher),
-        publisher_lock: merge_bool("publisherLock", existing.publisher_lock),
-        age_rating: merge_nullable_u32("ageRating", existing.age_rating),
-        age_rating_lock: merge_bool("ageRatingLock", existing.age_rating_lock),
-        language: merge_str("language", &existing.language),
-        language_lock: merge_bool("languageLock", existing.language_lock),
-        genres: merge_string_list_field(body, "genres", &existing.genres),
-        genres_lock: merge_bool("genresLock", existing.genres_lock),
-        tags: merge_string_list_field(body, "tags", &existing.tags),
-        tags_lock: merge_bool("tagsLock", existing.tags_lock),
-        total_book_count: merge_nullable_u32("totalBookCount", existing.total_book_count),
-        total_book_count_lock: merge_bool("totalBookCountLock", existing.total_book_count_lock),
-        sharing_labels: merge_string_list_field(body, "sharingLabels", &existing.sharing_labels),
-        sharing_labels_lock: merge_bool("sharingLabelsLock", existing.sharing_labels_lock),
-        links: merge_links_field(body, "links", &existing.links),
-        links_lock: merge_bool("linksLock", existing.links_lock),
-        alternate_titles: merge_alternate_titles_field(
-            body,
-            "alternateTitles",
-            &existing.alternate_titles,
-        ),
-        alternate_titles_lock: merge_bool("alternateTitlesLock", existing.alternate_titles_lock),
-    }
-}
-
-fn validate_series_metadata_patch(body: &serde_json::Map<String, Value>) -> Result<(), Response> {
-    validate_optional_enum(body, "status", &["ENDED", "ONGOING", "ABANDONED", "HIATUS"])?;
-    validate_optional_bool(body, "statusLock")?;
-    validate_optional_non_blank_string(body, "title")?;
-    validate_optional_bool(body, "titleLock")?;
-    validate_optional_non_blank_string(body, "titleSort")?;
-    validate_optional_bool(body, "titleSortLock")?;
-    validate_optional_string(body, "summary")?;
-    validate_optional_bool(body, "summaryLock")?;
-    validate_optional_enum(
-        body,
-        "readingDirection",
-        &["LEFT_TO_RIGHT", "RIGHT_TO_LEFT", "VERTICAL", "WEBTOON"],
-    )?;
-    validate_optional_bool(body, "readingDirectionLock")?;
-    validate_optional_string(body, "publisher")?;
-    validate_optional_bool(body, "publisherLock")?;
-    validate_optional_non_negative_u32(body, "ageRating")?;
-    validate_optional_bool(body, "ageRatingLock")?;
-    validate_optional_language(body, "language")?;
-    validate_optional_bool(body, "languageLock")?;
-    validate_optional_string_array(body, "genres")?;
-    validate_optional_bool(body, "genresLock")?;
-    validate_optional_string_array(body, "tags")?;
-    validate_optional_bool(body, "tagsLock")?;
-    validate_optional_positive_i32_range(body, "totalBookCount")?;
-    validate_optional_bool(body, "totalBookCountLock")?;
-    validate_optional_string_array(body, "sharingLabels")?;
-    validate_optional_bool(body, "sharingLabelsLock")?;
-    validate_links_array(body, "links")?;
-    validate_optional_bool(body, "linksLock")?;
-    validate_alternate_titles_array(body, "alternateTitles")?;
-    validate_optional_bool(body, "alternateTitlesLock")?;
-    Ok(())
-}
-
-fn merge_string_list_field(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-    existing: &[String],
-) -> Vec<String> {
-    if !body.contains_key(key) {
-        return existing.to_vec();
+    if value.is_null() {
+        return Ok(Some(None));
     }
 
-    body.get(key)
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
-fn validate_optional_bool(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    if body.contains_key(key)
-        && !body
-            .get(key)
-            .is_some_and(|value| value.is_null() || value.is_boolean())
-    {
-        return Err(bad_request_response(&format!(
-            "{key} must be a boolean or null"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_optional_string(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    if body.contains_key(key)
-        && !body
-            .get(key)
-            .is_some_and(|value| value.is_null() || value.is_string())
-    {
-        return Err(bad_request_response(&format!(
-            "{key} must be a string or null"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_optional_non_blank_string(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    validate_optional_string(body, key)?;
-    if let Some(value) = body.get(key).and_then(Value::as_str)
-        && value.trim().is_empty()
-    {
-        return Err(bad_request_response(&format!("{key} must not be blank")));
-    }
-    Ok(())
-}
-
-fn validate_optional_language(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    validate_optional_string(body, key)?;
-    if let Some(value) = body.get(key).and_then(Value::as_str)
-        && !value.trim().is_empty()
-        && LanguageTag::parse(value).is_err()
-    {
-        return Err(bad_request_response(&format!(
-            "{key} must be blank or a valid BCP47 language tag"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_optional_enum(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-    allowed: &[&str],
-) -> Result<(), Response> {
-    validate_optional_string(body, key)?;
-    if let Some(value) = body.get(key).and_then(Value::as_str)
-        && !allowed.iter().any(|candidate| candidate == &value)
-    {
-        return Err(bad_request_response(&format!("{key} has an invalid value")));
-    }
-    Ok(())
-}
-
-fn validate_optional_non_negative_u32(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    if !body.contains_key(key) || body.get(key).is_some_and(Value::is_null) {
-        return Ok(());
-    }
-    let Some(value) = body.get(key).and_then(Value::as_i64) else {
+    let Some(value) = value.as_i64() else {
         return Err(bad_request_response(&format!(
             "{key} must be an integer or null"
         )));
     };
-    if !(0..=i64::from(i32::MAX)).contains(&value) {
+    if !(0..=i64::from(u32::MAX)).contains(&value) {
         return Err(bad_request_response(&format!(
             "{key} must be between 0 and {}",
-            i32::MAX
+            u32::MAX,
         )));
     }
-    Ok(())
+
+    Ok(Some(Some(value as u32)))
 }
 
-fn validate_optional_positive_i32_range(
+fn optional_string_list_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<(), Response> {
-    if !body.contains_key(key) || body.get(key).is_some_and(Value::is_null) {
-        return Ok(());
-    }
-    let Some(value) = body.get(key).and_then(Value::as_i64) else {
-        return Err(bad_request_response(&format!(
-            "{key} must be a positive integer or null"
-        )));
+) -> Result<Option<Vec<String>>, Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(None);
     };
-    if !(1..=i64::from(i32::MAX)).contains(&value) {
-        return Err(bad_request_response(&format!(
-            "{key} must be a positive integer"
-        )));
+    if value.is_null() {
+        return Ok(Some(Vec::new()));
     }
-    Ok(())
-}
 
-fn validate_optional_string_array(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<(), Response> {
-    if !body.contains_key(key) || body.get(key).is_some_and(Value::is_null) {
-        return Ok(());
-    }
-    let Some(values) = body.get(key).and_then(Value::as_array) else {
+    let Some(values) = value.as_array() else {
         return Err(bad_request_response(&format!(
             "{key} must be an array or null"
         )));
     };
-    if values.iter().any(|value| value.as_str().is_none()) {
-        return Err(bad_request_response(&format!(
-            "{key} entries must be strings"
-        )));
-    }
-    Ok(())
+    let values = values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| bad_request_response(&format!("{key} entries must be strings")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Some(values))
 }
 
-fn validate_links_array(body: &serde_json::Map<String, Value>, key: &str) -> Result<(), Response> {
-    if !body.contains_key(key) || body.get(key).is_some_and(Value::is_null) {
-        return Ok(());
-    }
-    let Some(values) = body.get(key).and_then(Value::as_array) else {
-        return Err(bad_request_response(&format!(
-            "{key} must be an array or null"
-        )));
-    };
-
-    for value in values {
-        let Some(object) = value.as_object() else {
-            return Err(bad_request_response("links entries must be objects"));
-        };
-        let Some(label) = object.get("label").and_then(Value::as_str) else {
-            return Err(bad_request_response("links.label must be a string"));
-        };
-        if label.trim().is_empty() {
-            return Err(bad_request_response("links.label must not be blank"));
-        }
-        let Some(url) = object.get("url").and_then(Value::as_str) else {
-            return Err(bad_request_response("links.url must be a string"));
-        };
-        if Url::parse(url).is_err() {
-            return Err(bad_request_response("links.url must be a valid URL"));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_alternate_titles_array(
+fn optional_links_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<(), Response> {
-    if !body.contains_key(key) || body.get(key).is_some_and(Value::is_null) {
-        return Ok(());
+) -> Result<Option<Vec<SeriesMetadataLinkRecord>>, Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(Vec::new()));
     }
-    let Some(values) = body.get(key).and_then(Value::as_array) else {
+
+    let Some(values) = value.as_array() else {
         return Err(bad_request_response(&format!(
             "{key} must be an array or null"
         )));
     };
 
-    for value in values {
-        let Some(object) = value.as_object() else {
-            return Err(bad_request_response(
-                "alternateTitles entries must be objects",
-            ));
-        };
-        let Some(label) = object.get("label").and_then(Value::as_str) else {
-            return Err(bad_request_response(
-                "alternateTitles.label must be a string",
-            ));
-        };
-        if label.trim().is_empty() {
-            return Err(bad_request_response(
-                "alternateTitles.label must not be blank",
-            ));
-        }
-        let Some(title) = object.get("title").and_then(Value::as_str) else {
-            return Err(bad_request_response(
-                "alternateTitles.title must be a string",
-            ));
-        };
-        if title.trim().is_empty() {
-            return Err(bad_request_response(
-                "alternateTitles.title must not be blank",
-            ));
-        }
+    let values = values
+        .iter()
+        .map(|value| {
+            let Some(object) = value.as_object() else {
+                return Err(bad_request_response("links entries must be objects"));
+            };
+            let Some(label) = object.get("label").and_then(Value::as_str) else {
+                return Err(bad_request_response("links.label must be a string"));
+            };
+            let Some(url) = object.get("url").and_then(Value::as_str) else {
+                return Err(bad_request_response("links.url must be a string"));
+            };
+            Ok(SeriesMetadataLinkRecord {
+                label: label.to_string(),
+                url: url.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Some(values))
+}
+
+fn optional_alternate_titles_field(
+    body: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<Vec<SeriesAlternateTitleRecord>>, Response> {
+    let Some(value) = body.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(Some(Vec::new()));
     }
 
-    Ok(())
+    let Some(values) = body.get(key).and_then(Value::as_array) else {
+        return Err(bad_request_response(&format!(
+            "{key} must be an array or null"
+        )));
+    };
+
+    let values = values
+        .iter()
+        .map(|value| {
+            let Some(object) = value.as_object() else {
+                return Err(bad_request_response(
+                    "alternateTitles entries must be objects",
+                ));
+            };
+            let Some(label) = object.get("label").and_then(Value::as_str) else {
+                return Err(bad_request_response(
+                    "alternateTitles.label must be a string",
+                ));
+            };
+            let Some(title) = object.get("title").and_then(Value::as_str) else {
+                return Err(bad_request_response(
+                    "alternateTitles.title must be a string",
+                ));
+            };
+            Ok(SeriesAlternateTitleRecord {
+                label: label.to_string(),
+                title: title.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Some(values))
 }
 
 fn bad_request_response(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
-}
-
-fn merge_links_field(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-    existing: &[SeriesMetadataLinkRecord],
-) -> Vec<SeriesMetadataLinkRecord> {
-    if !body.contains_key(key) {
-        return existing.to_vec();
-    }
-
-    body.get(key)
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_object)
-                .filter_map(|value| {
-                    Some(SeriesMetadataLinkRecord {
-                        label: value.get("label")?.as_str()?.to_string(),
-                        url: value.get("url")?.as_str()?.to_string(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
-fn merge_alternate_titles_field(
-    body: &serde_json::Map<String, Value>,
-    key: &str,
-    existing: &[SeriesAlternateTitleRecord],
-) -> Vec<SeriesAlternateTitleRecord> {
-    if !body.contains_key(key) {
-        return existing.to_vec();
-    }
-
-    body.get(key)
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_object)
-                .filter_map(|value| {
-                    Some(SeriesAlternateTitleRecord {
-                        label: value.get("label")?.as_str()?.to_string(),
-                        title: value.get("title")?.as_str()?.to_string(),
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
 }

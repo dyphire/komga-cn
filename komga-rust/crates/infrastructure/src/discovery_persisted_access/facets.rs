@@ -1,6 +1,8 @@
-use super::*;
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
-pub async fn load_persisted_genres(
+use super::common;
+
+pub(super) async fn load_persisted_genres(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -23,7 +25,7 @@ pub async fn load_persisted_genres(
     .await
 }
 
-pub async fn load_persisted_tags(
+pub(super) async fn load_persisted_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -122,7 +124,7 @@ pub async fn load_persisted_tags(
         .collect())
 }
 
-pub async fn load_persisted_languages(
+pub(super) async fn load_persisted_languages(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -145,7 +147,7 @@ pub async fn load_persisted_languages(
     .await
 }
 
-pub async fn load_persisted_publishers(
+pub(super) async fn load_persisted_publishers(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -168,7 +170,7 @@ pub async fn load_persisted_publishers(
     .await
 }
 
-pub async fn load_persisted_age_ratings(
+pub(super) async fn load_persisted_age_ratings(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -217,7 +219,7 @@ pub async fn load_persisted_age_ratings(
         .collect())
 }
 
-pub async fn load_persisted_sharing_labels(
+pub(super) async fn load_persisted_sharing_labels(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -240,7 +242,7 @@ pub async fn load_persisted_sharing_labels(
     .await
 }
 
-pub async fn load_persisted_series_release_dates(
+pub(super) async fn load_persisted_series_release_dates(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,
@@ -277,7 +279,7 @@ pub async fn load_persisted_series_release_dates(
     Ok(years)
 }
 
-pub async fn load_persisted_series_tags(
+pub(super) async fn load_persisted_series_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_id: Option<&str>,

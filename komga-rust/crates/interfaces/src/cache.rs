@@ -64,7 +64,7 @@ pub(crate) async fn cache_workflow_middleware(request: Request, next: Next) -> R
     let (parts, body) = response.into_parts();
     let bytes = match to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
-        Err(_) => return Response::from_parts(parts, Body::empty()),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     let etag = asset_etag(bytes.as_ref());
@@ -239,6 +239,10 @@ fn insert_header_if_valid(headers: &mut HeaderMap, name: header::HeaderName, val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Router;
+    use axum::routing::get;
+    use futures_util::stream;
+    use tower::util::ServiceExt;
 
     #[test]
     fn excluded_paths_match_expected_templates() {
@@ -255,5 +259,34 @@ mod tests {
             "/kobo/{auth_token}/v1/books/{book_id}/file/epub"
         ));
         assert!(!is_etag_excluded_path("/api/v1/libraries"));
+    }
+
+    #[tokio::test]
+    async fn cache_middleware_returns_internal_error_when_body_collection_fails() {
+        async fn failing_body_response() -> Response {
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from_stream(stream::once(async {
+                    Err::<Vec<u8>, std::io::Error>(std::io::Error::other("body stream failed"))
+                })))
+                .expect("failing response should build")
+        }
+
+        let app = Router::new()
+            .route("/api/body-error", get(failing_body_response))
+            .route_layer(axum::middleware::from_fn(cache_workflow_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/body-error")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("middleware request should complete");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

@@ -125,3 +125,125 @@ async fn router_book_resource_routes_accept_basic_auth_like_kotlin_clients() {
         assert_eq!(response.status(), StatusCode::OK, "route: {route}");
     }
 }
+
+#[tokio::test]
+async fn router_book_font_resource_requires_authentication() {
+    let ctx = TestFixture::new("router-book-font-resource-auth").await;
+    write_router_epub_resource(
+        ctx.paths(),
+        "books/book-1.epub",
+        "OEBPS/fonts/fixture.woff",
+        b"font-bytes",
+    );
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/resource/OEBPS/fonts/fixture.woff")
+                .body(Body::empty())
+                .expect("font resource request should build"),
+        )
+        .await
+        .expect("font resource request should complete");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn router_book_resource_requires_page_streaming_role_even_for_admins() {
+    let ctx = TestFixture::new("router-book-resource-page-streaming-role").await;
+    write_router_epub_resource(
+        ctx.paths(),
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>Chapter</body></html>"#,
+    );
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for resource role seed");
+    let password = "router-contract-resource-admin-only-123";
+    sqlx::query(
+        "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("resource-admin-only")
+    .bind("resource-admin-only@example.org")
+    .bind(hash_router_contract_password(password))
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("resource admin-only user should be inserted");
+    for role in ["USER", "ADMIN"] {
+        sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+            .bind("resource-admin-only")
+            .bind(role)
+            .execute(&pool)
+            .await
+            .expect("resource admin-only role should be inserted");
+    }
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/resource/OEBPS/chapter.xhtml")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value("resource-admin-only@example.org", password),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("admin-only resource request should build"),
+        )
+        .await
+        .expect("admin-only resource request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn router_book_resource_routes_report_invalid_epub_archive_errors() {
+    let ctx = TestFixture::new("router-book-resource-invalid-epub").await;
+    let epub_path = ctx.paths().config_dir.join("books/book-1.epub");
+    std::fs::create_dir_all(
+        epub_path
+            .parent()
+            .expect("invalid epub fixture should have a parent directory"),
+    )
+    .expect("invalid epub parent directory should be created");
+    std::fs::write(&epub_path, b"not a zip").expect("invalid epub fixture should be written");
+
+    let auth_token = ctx.login_admin().await;
+
+    for route in [
+        "/api/v1/books/book-1/resource/OEBPS/chapter.xhtml",
+        "/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml",
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("invalid epub resource request should build"),
+            )
+            .await
+            .expect("invalid epub resource request should complete");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "route: {route}"
+        );
+    }
+}

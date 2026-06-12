@@ -21,7 +21,10 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
         async move {
             let runtime = runtime_task_context_from_config(&config).await;
             let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-            scheduler.enqueue(task).await;
+            scheduler
+                .enqueue(task)
+                .await
+                .expect("task enqueue should succeed");
             scheduler
                 .process_available(&runtime.job())
                 .await
@@ -110,16 +113,20 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
             ));
             {
                 let queue = task_queue.lock().await;
-                queue.enqueue(failed_task).await;
-                queue.enqueue(disowned_task).await;
+                queue
+                    .enqueue(failed_task)
+                    .await
+                    .expect("task enqueue should succeed");
+                queue
+                    .enqueue(disowned_task)
+                    .await
+                    .expect("task enqueue should succeed");
             }
 
-            komga_infrastructure::task_queue::worker_runtime::run_background_task_iteration(
-                task_queue, runtime,
-            )
-            .await
-            .expect_err("unsupported task should fail the background task iteration")
-            .to_string()
+            komga_infrastructure::run_background_task_iteration(task_queue, runtime)
+                .await
+                .expect_err("unsupported task should fail the background task iteration")
+                .to_string()
         }
     });
 
@@ -200,11 +207,15 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
         async move {
             let runtime = runtime_task_context_from_config(&config).await;
             let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-            scheduler.enqueue(task).await;
+            scheduler
+                .enqueue(task)
+                .await
+                .expect("task enqueue should succeed");
 
             let claimed = scheduler
                 .take_next()
                 .await
+                .expect("recover fixture queue should load")
                 .expect("recover fixture should claim the queued task before recovery");
             assert_eq!(claimed.id, "UpgradeIndex:logging-recover");
 
@@ -308,14 +319,17 @@ async fn scheduler_take_next_respects_priority_order_group_locks_and_owner_persi
         scheduler
             .take_next()
             .await
+            .expect("first queue load should succeed")
             .expect("first claim should exist"),
         scheduler
             .take_next()
             .await
+            .expect("second queue load should succeed")
             .expect("second claim should exist"),
         scheduler
             .take_next()
             .await
+            .expect("third queue load should succeed")
             .expect("third claim should exist"),
     ];
 

@@ -1,7 +1,14 @@
-use super::*;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{AuthUser, user_id};
+use serde_json::{Value, json};
+
 use crate::identity_access::auth::Authenticated;
+use crate::media_assets::access_control::visible_readlist_book_ids_for_user;
+use crate::media_assets::http_helpers::internal_error_response;
 use crate::state::MediaAssetsState;
-use axum::extract::State;
 
 async fn load_tachiyomi_readlist_book_ids(
     app: &MediaAssetsState,
@@ -11,7 +18,7 @@ async fn load_tachiyomi_readlist_book_ids(
     visible_readlist_book_ids_for_user(app, readlist_id, user).await
 }
 
-pub async fn readlist_tachiyomi_read_progress_get(
+pub(crate) async fn readlist_tachiyomi_read_progress_get(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(readlist_id): Path<String>,
@@ -26,7 +33,7 @@ pub async fn readlist_tachiyomi_read_progress_get(
     };
 
     let counters = match app
-        .reader
+        .read_progress_service
         .readlist_tachiyomi_counters(&ordered_book_ids, user_id(&user))
         .await
     {
@@ -34,24 +41,17 @@ pub async fn readlist_tachiyomi_read_progress_get(
         Err(error) => return internal_error_response(error),
     };
 
-    let (
-        books_count,
-        books_read_count,
-        books_unread_count,
-        books_in_progress_count,
-        last_read_continuous_index,
-    ) = counters;
     Json(json!({
-        "booksCount": books_count,
-        "booksReadCount": books_read_count,
-        "booksUnreadCount": books_unread_count,
-        "booksInProgressCount": books_in_progress_count,
-        "lastReadContinuousIndex": last_read_continuous_index,
+        "booksCount": counters.books_count,
+        "booksReadCount": counters.books_read_count,
+        "booksUnreadCount": counters.books_unread_count,
+        "booksInProgressCount": counters.books_in_progress_count,
+        "lastReadContinuousIndex": counters.last_read_continuous_index,
     }))
     .into_response()
 }
 
-pub async fn readlist_tachiyomi_read_progress_put(
+pub(crate) async fn readlist_tachiyomi_read_progress_put(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(readlist_id): Path<String>,
@@ -83,16 +83,15 @@ pub async fn readlist_tachiyomi_read_progress_put(
     }
 
     match app
-        .progress
-        .persist_readlist_tachiyomi_progress(
+        .read_progress_service
+        .mark_readlist_tachiyomi_progress(
             &ordered_book_ids,
             user_id(&user),
             last_book_read as usize,
         )
         .await
     {
-        Ok(Some(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => internal_error_response(error),
     }
 }

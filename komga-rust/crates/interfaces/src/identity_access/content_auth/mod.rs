@@ -6,31 +6,25 @@ use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use serde_json::Value;
-use serde_json::json;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::access_log::RequestConnectionInfo;
-use crate::discovery_auth::principal::principal_from_user_payload;
+use crate::access_log::{self, RequestConnectionInfo};
 
 use crate::identity_access::auth::{
-    Admin, AuthOutcome, AuthTokenSource, AuthUser, PersistedAuthenticationActivity,
+    Admin, api_key_header_value, authentication_activity_request_metadata, basic_credentials,
     bootstrap_api_key_user, bootstrap_user, bootstrap_user_with_remember_me_cookies,
     bootstrap_user_with_remember_me_token, empty_auth_token_supplied, expired_remember_me_cookie,
-    expired_session_cookie, invalidate_session_token, invalidate_user_sessions_for_runtime_key,
-    persisted_api_key_comment_exists, persisted_api_key_metadata, persisted_api_key_user,
-    persisted_basic_user, persisted_create_api_key, persisted_delete_api_key_by_id,
-    persisted_list_api_keys, persisted_list_authentication_activity,
-    persisted_record_successful_authentication_activity, persisted_update_password_by_user_id,
-    persisted_users, remember_me_max_age_seconds, remember_me_requested,
-    remember_me_token_for_user_with_runtime_key, resolved_auth_token, resolved_auth_user,
-    resolved_token, session_token_for_user_with_runtime_key, session_token_from_headers,
-    unauthorized_json_response, user_id, user_is_admin, user_payload_json,
+    expired_session_cookie, invalidate_user_sessions_for_runtime_key,
+    persisted_update_password_by_user_id, persisted_users, remember_me_requested,
+    remember_me_token_from_headers, session_token_from_headers, unauthorized_json_response,
 };
+use crate::identity_access::user_payload_json;
 use crate::operational::register_session_expired_event;
 use crate::state::{IdentityAccessState, IdentityState};
 use komga_application::identity_access::{
-    AuthUserAgeRestrictionInput, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
+    AuthSessionActivityContext, AuthSessionError, AuthSessionRequest, AuthSessionResponseMode,
+    AuthSessionSuccess, AuthTokenRequest, AuthUserAgeRestrictionInput, CreateAuthUserInput,
+    SharedLibrariesInput, UpdateAuthUserInput, user_id, user_is_admin,
 };
 
 mod activity_routes;
@@ -41,15 +35,21 @@ use activity_routes::{
     users_me_api_keys_create, users_me_api_keys_delete, users_me_api_keys_list,
     users_me_authentication_activity,
 };
-use helpers::*;
+use helpers::{
+    generated_user_id, looks_like_kotlin_user_email, parse_age_restriction_optional,
+    parse_roles_array, parse_shared_libraries_create, parse_shared_libraries_patch,
+    parse_string_set_optional, password_from_request, register_discovery_principal,
+    required_authenticated_user, spring_error, validation_error,
+};
 
 fn expire_user_sessions_for_runtime_key(
-    identity: &IdentityState,
+    app: &IdentityAccessState,
     user_id: &str,
     runtime_key: &str,
 ) {
+    let identity = &app.identity;
     invalidate_user_sessions_for_runtime_key(identity, user_id, runtime_key);
-    register_session_expired_event(user_id);
+    register_session_expired_event(app.runtime_events.as_ref(), user_id);
 }
 
 pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Response {
@@ -60,163 +60,82 @@ pub(super) async fn users_me(app: &IdentityAccessState, request: Request) -> Res
     let headers = request.headers().clone();
     let request_metadata = authentication_activity_request_metadata(&request);
 
-    match persisted_api_key_user(identity, &headers)
-        .await
-        .unwrap_or(AuthOutcome::Missing)
-    {
-        AuthOutcome::Valid(user) => {
-            let api_key_metadata = persisted_api_key_metadata(identity, &headers).await;
-            let (api_key_id, api_key_comment) = api_key_metadata
-                .as_ref()
-                .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
-                .unwrap_or((None, None));
-            let _ = persisted_record_successful_authentication_activity(
-                identity,
-                &user,
-                authentication_activity_write_input(
-                    &request_metadata,
-                    "ApiKey",
-                    api_key_id,
-                    api_key_comment,
-                ),
-            )
-            .await;
-            let token = session_token_for_user_with_runtime_key(
-                identity,
-                &user,
-                auth_db.session_runtime_key.as_str(),
-            );
-            register_discovery_principal(
-                auth_state,
-                &crate::identity_access::auth::user_payload_json(&user),
-                &token,
-            );
-            return bootstrap_api_key_user(*user, token);
-        }
-        AuthOutcome::Invalid => return unauthorized_json_response(uri.path()),
-        AuthOutcome::Missing => {}
-    }
-
-    if let Some(resolved) = resolved_auth_token(identity, &headers) {
-        let user = resolved.user;
-        if resolved.source == AuthTokenSource::RememberMe {
-            let _ = persisted_record_successful_authentication_activity(
-                identity,
-                &user,
-                authentication_activity_write_input(&request_metadata, "RememberMe", None, None),
-            )
-            .await;
-        }
-        let token = match resolved.source {
-            AuthTokenSource::Session => session_token_from_headers(&headers)
-                .expect("session authentication should have a session token"),
-            AuthTokenSource::RememberMe => session_token_for_user_with_runtime_key(
-                identity,
-                &user,
-                auth_db.session_runtime_key.as_str(),
-            ),
-        };
-        let payload = crate::identity_access::auth::user_payload_json(&user);
-        register_discovery_principal(auth_state, &payload, &token);
-        if resolved.source == AuthTokenSource::Session {
-            return Json(payload).into_response();
-        }
-        return bootstrap_user(user, token);
-    }
-
     // Kotlin persists both success and failure authentication events. This HTTP path only aligns
     // successful-source vocabulary for now; the remaining failure-persistence gap is documented by
     // the auth-session contract suite instead of being left implicit.
-    match persisted_basic_user(identity, &headers)
+    match identity
+        .auth_session()
+        .authenticate(AuthSessionRequest {
+            api_key: api_key_header_value(&headers),
+            basic: basic_credentials(&headers),
+            session_token: session_token_from_headers(&headers),
+            remember_me_token: remember_me_token_from_headers(&headers),
+            empty_auth_token_supplied: empty_auth_token_supplied(&headers),
+            remember_me_requested: remember_me_requested(&uri),
+            session_runtime_key: auth_db.session_runtime_key.clone(),
+            remember_me_runtime_key: auth_db.remember_me_runtime_key.clone(),
+            activity: AuthSessionActivityContext {
+                ip: request_metadata.ip,
+                user_agent: request_metadata.user_agent,
+            },
+        })
         .await
-        .unwrap_or(AuthOutcome::Missing)
     {
-        AuthOutcome::Valid(user) if remember_me_requested(&uri) => {
-            let _ = persisted_record_successful_authentication_activity(
-                identity,
-                &user,
-                authentication_activity_write_input(&request_metadata, "Password", None, None),
-            )
-            .await;
-            let Some(remember_me_token) = remember_me_token_for_user_with_runtime_key(
-                identity,
-                &user,
-                auth_db.remember_me_runtime_key.as_str(),
-            ) else {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            };
-            let remember_me_cookie_max_age_seconds =
-                remember_me_max_age_seconds(identity, auth_db.remember_me_runtime_key.as_str());
-            if empty_auth_token_supplied(&headers) {
-                let token = session_token_for_user_with_runtime_key(
-                    identity,
-                    &user,
-                    auth_db.session_runtime_key.as_str(),
-                );
-                register_discovery_principal(
-                    auth_state,
-                    &crate::identity_access::auth::user_payload_json(&user),
-                    &token,
-                );
-                bootstrap_user_with_remember_me_token(
-                    *user,
-                    token,
-                    remember_me_token,
-                    remember_me_cookie_max_age_seconds,
-                )
-            } else {
-                let token = session_token_for_user_with_runtime_key(
-                    identity,
-                    &user,
-                    auth_db.session_runtime_key.as_str(),
-                );
-                register_discovery_principal(
-                    auth_state,
-                    &crate::identity_access::auth::user_payload_json(&user),
-                    &token,
-                );
-                bootstrap_user_with_remember_me_cookies(
-                    *user,
-                    token,
-                    remember_me_token,
-                    remember_me_cookie_max_age_seconds,
-                )
-            }
+        Ok(success) => auth_session_response(auth_state, success),
+        Err(AuthSessionError::InvalidApiKey) => unauthorized_json_response(uri.path()),
+        Err(AuthSessionError::Unauthorized) => StatusCode::UNAUTHORIZED.into_response(),
+        Err(AuthSessionError::RememberMeUnavailable) => {
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
-        AuthOutcome::Valid(user) => {
-            let _ = persisted_record_successful_authentication_activity(
-                identity,
-                &user,
-                authentication_activity_write_input(&request_metadata, "Password", None, None),
-            )
-            .await;
-            let token = session_token_for_user_with_runtime_key(
-                identity,
-                &user,
-                auth_db.session_runtime_key.as_str(),
-            );
-            register_discovery_principal(
-                auth_state,
-                &crate::identity_access::auth::user_payload_json(&user),
-                &token,
-            );
-            if empty_auth_token_supplied(&headers) {
-                bootstrap_user(*user, token)
-            } else {
-                bootstrap_api_key_user(*user, token)
-            }
+        Err(AuthSessionError::StorageFailure) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+fn auth_session_response(
+    auth_state: &crate::discovery_auth::state::DiscoveryAuthState,
+    success: AuthSessionSuccess,
+) -> Response {
+    access_log::record_resolved_auth_user_id(Some(user_id(&success.user)));
+    register_discovery_principal(auth_state, &success.user, &success.session_token);
+
+    match success.response_mode {
+        AuthSessionResponseMode::BodyOnly => Json(user_payload_json(&success.user)).into_response(),
+        AuthSessionResponseMode::SessionCookie => {
+            bootstrap_api_key_user(success.user, success.session_token)
         }
-        AuthOutcome::Invalid => StatusCode::UNAUTHORIZED.into_response(),
-        AuthOutcome::Missing => StatusCode::UNAUTHORIZED.into_response(),
+        AuthSessionResponseMode::SessionHeaderAndCookie => {
+            bootstrap_user(success.user, success.session_token)
+        }
+        AuthSessionResponseMode::RememberMeCookies {
+            remember_me_token,
+            remember_me_max_age_seconds,
+        } => bootstrap_user_with_remember_me_cookies(
+            success.user,
+            success.session_token,
+            remember_me_token,
+            remember_me_max_age_seconds,
+        ),
+        AuthSessionResponseMode::RememberMeHeader {
+            remember_me_token,
+            remember_me_max_age_seconds,
+        } => bootstrap_user_with_remember_me_token(
+            success.user,
+            success.session_token,
+            remember_me_token,
+            remember_me_max_age_seconds,
+        ),
     }
 }
 
 pub(super) async fn login_set_cookie(identity: &IdentityState, headers: HeaderMap) -> Response {
-    if resolved_auth_user(identity, &headers).is_none() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
-    let token = resolved_token(&headers);
+    let token = match identity
+        .auth_session()
+        .login_cookie_session_token(auth_token_request(&headers))
+    {
+        Ok(Some(token)) => token,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
     let cookie = Cookie::build(("KOMGA-SESSION", token))
         .path("/")
         .http_only(true)
@@ -236,7 +155,10 @@ pub(super) async fn login_set_cookie(identity: &IdentityState, headers: HeaderMa
 }
 
 pub(super) async fn users_list(app: &IdentityAccessState) -> Response {
-    let users = persisted_users(&app.identity).await.unwrap_or_default();
+    let users = match persisted_users(&app.identity).await {
+        Ok(users) => users,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
     Json(users.iter().map(user_payload_json).collect::<Vec<_>>()).into_response()
 }
@@ -247,8 +169,9 @@ pub(super) async fn users_create(
     connection_info: RequestConnectionInfo,
     body: Value,
 ) -> Response {
-    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
     if !user_is_admin(&current_user) {
         return StatusCode::FORBIDDEN.into_response();
@@ -341,8 +264,9 @@ pub(super) async fn users_delete(
     Path(target_user_id): Path<String>,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
@@ -359,7 +283,7 @@ pub(super) async fn users_delete(
     {
         Ok(true) => {
             expire_user_sessions_for_runtime_key(
-                &app.identity,
+                &app,
                 &target_user_id,
                 auth_db.session_runtime_key.as_str(),
             );
@@ -378,8 +302,9 @@ pub(super) async fn users_update(
     body: Value,
 ) -> Response {
     let auth_db = &app.auth_db;
-    let Some(current_user) = authenticated_user(&headers, connection_info, &app).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
@@ -466,7 +391,7 @@ pub(super) async fn users_update(
         Ok(result) => {
             if result.expire_sessions {
                 expire_user_sessions_for_runtime_key(
-                    &app.identity,
+                    &app,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
@@ -478,12 +403,10 @@ pub(super) async fn users_update(
 }
 
 pub(super) async fn logout(identity: &IdentityState, headers: HeaderMap) -> Response {
-    if resolved_auth_user(identity, &headers).is_none() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
-    if let Some(token) = session_token_from_headers(&headers) {
-        invalidate_session_token(identity, &token);
+    match identity.auth_session().logout(auth_token_request(&headers)) {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 
     let mut response = StatusCode::NO_CONTENT.into_response();
@@ -491,6 +414,13 @@ pub(super) async fn logout(identity: &IdentityState, headers: HeaderMap) -> Resp
     headers.append(header::SET_COOKIE, expired_session_cookie());
     headers.append(header::SET_COOKIE, expired_remember_me_cookie());
     response
+}
+
+fn auth_token_request(headers: &HeaderMap) -> AuthTokenRequest {
+    AuthTokenRequest {
+        session_token: session_token_from_headers(headers),
+        remember_me_token: remember_me_token_from_headers(headers),
+    }
 }
 
 pub(super) async fn users_me_password(
@@ -501,8 +431,9 @@ pub(super) async fn users_me_password(
 ) -> Response {
     let auth_db = &app.auth_db;
     let identity = &app.identity;
-    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let current_user = match required_authenticated_user(&headers, connection_info, app).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
 
     let Some(password) = password_from_request(&body) else {
@@ -513,9 +444,9 @@ pub(super) async fn users_me_password(
     }
 
     match persisted_update_password_by_user_id(identity, user_id(&current_user), password).await {
-        Some(true) => StatusCode::NO_CONTENT.into_response(),
-        Some(false) => StatusCode::NOT_FOUND.into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -528,8 +459,9 @@ pub(super) async fn users_by_id_password(
 ) -> Response {
     let auth_db = &app.auth_db;
     let identity = &app.identity;
-    let Some(current_user) = authenticated_user(&headers, connection_info, app).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let current_user = match required_authenticated_user(&headers, connection_info, app).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
@@ -543,18 +475,18 @@ pub(super) async fn users_by_id_password(
     }
 
     match persisted_update_password_by_user_id(identity, &target_user_id, password).await {
-        Some(true) => {
+        Ok(true) => {
             if user_id(&current_user) != target_user_id {
                 expire_user_sessions_for_runtime_key(
-                    identity,
+                    app,
                     &target_user_id,
                     auth_db.session_runtime_key.as_str(),
                 );
             }
             StatusCode::NO_CONTENT.into_response()
         }
-        Some(false) => StatusCode::NOT_FOUND.into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

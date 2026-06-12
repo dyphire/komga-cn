@@ -1,16 +1,38 @@
-use komga_application::media_assets::EntityThumbnailBinary;
+use axum::Json;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::Multipart;
+use image::ImageFormat;
+use komga_application::media_assets::{EntityThumbnailBinary, ThumbnailType};
+use serde_json::json;
 
-use crate::media_assets::page_resolution;
 use crate::media_response_policy::MediaAssetResponse;
+use crate::state::MediaAssetsState;
 
-use super::*;
+use super::super::media_helpers::book_media_is_epub;
+use super::super::page_resolution;
+use super::super::types::PersistedBookMedia;
 
 const MOSAIC_HEIGHT: u32 = 300;
 const MOSAIC_RATIO: f32 = 0.70666664;
 
-pub(super) fn thumbnail_dimensions(bytes: &[u8]) -> Option<(i64, i64)> {
+pub(super) struct ThumbnailUpload {
+    pub(super) bytes: Vec<u8>,
+    pub(super) media_type: String,
+    pub(super) selected: bool,
+}
+
+pub(super) struct ThumbnailDimensions {
+    pub(super) width: i64,
+    pub(super) height: i64,
+}
+
+pub(super) fn thumbnail_dimensions(bytes: &[u8]) -> Option<ThumbnailDimensions> {
     let image = image::load_from_memory(bytes).ok()?;
-    Some((i64::from(image.width()), i64::from(image.height())))
+    Some(ThumbnailDimensions {
+        width: i64::from(image.width()),
+        height: i64::from(image.height()),
+    })
 }
 
 fn repeated_thumbnail_source_ids(ids: Vec<String>) -> Vec<String> {
@@ -115,37 +137,33 @@ pub(super) fn set_one_hour_private_cache_control(response: &mut Response) {
     );
 }
 
-pub(crate) fn thumbnail_max_edge_from_setting(value: &str) -> u32 {
-    match value {
-        "MEDIUM" => 600,
-        "LARGE" => 900,
-        "XLARGE" => 1200,
-        _ => 300,
-    }
-}
-
 pub(super) async fn load_book_thumbnail_source_bytes(
     app: &MediaAssetsState,
     book_id: &str,
     media: &PersistedBookMedia,
-) -> Option<Vec<u8>> {
-    if let Ok(Some(thumbnail)) = app.reader.selected_book_thumbnail(book_id).await
-        && thumbnail.thumbnail_type != "GENERATED"
+) -> Result<Option<Vec<u8>>, String> {
+    match app
+        .thumbnail_reader
+        .selected_book_thumbnail(book_id)
+        .await?
     {
-        return Some(thumbnail.thumbnail);
+        Some(thumbnail) if thumbnail.thumbnail_type != ThumbnailType::Generated => {
+            return Ok(Some(thumbnail.thumbnail));
+        }
+        Some(_) | None => {}
     }
 
     if book_media_is_epub(media) {
         return app
-            .content
+            .book_media_content
             .epub_cover_bytes(media)
             .await
-            .map(|(bytes, _)| bytes);
+            .map(|cover| cover.map(|cover| cover.bytes));
     }
 
     page_resolution::load_book_thumbnail_page_source_bytes(
-        app.reader.as_ref(),
-        app.content.as_ref(),
+        app.book_media_reader.as_ref(),
+        app.book_media_content.as_ref(),
         book_id,
         media,
     )
@@ -156,12 +174,16 @@ pub(super) async fn load_series_thumbnail(
     app: &MediaAssetsState,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
-    if let Some(thumbnail) = app.reader.selected_series_thumbnail(series_id).await? {
+    if let Some(thumbnail) = app
+        .thumbnail_reader
+        .selected_series_thumbnail(series_id)
+        .await?
+    {
         return Ok(Some(thumbnail));
     }
 
     let Some(book_id) = app
-        .reader
+        .thumbnail_reader
         .series_book_ids(series_id)
         .await?
         .into_iter()
@@ -170,16 +192,17 @@ pub(super) async fn load_series_thumbnail(
         return Ok(None);
     };
 
-    app.reader.selected_book_thumbnail(&book_id).await
+    app.thumbnail_reader.selected_book_thumbnail(&book_id).await
 }
 
 pub(super) async fn load_series_thumbnail_source_bytes(
     app: &MediaAssetsState,
     series_id: &str,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>, String> {
     match load_series_thumbnail(app, series_id).await {
-        Ok(Some(thumbnail)) => Some(thumbnail.thumbnail),
-        Ok(None) | Err(_) => None,
+        Ok(Some(thumbnail)) => Ok(Some(thumbnail.thumbnail)),
+        Ok(None) => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -194,8 +217,8 @@ pub(super) async fn load_readlist_mosaic_bytes(
 
     let mut images = Vec::new();
     for book_id in book_ids {
-        if let Ok(Some(media)) = app.reader.book_media(&book_id).await
-            && let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id, &media).await
+        if let Some(media) = app.thumbnail_reader.book_media(&book_id).await?
+            && let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id, &media).await?
         {
             images.push(bytes);
         }
@@ -215,7 +238,7 @@ pub(super) async fn load_collection_mosaic_bytes(
 
     let mut images = Vec::new();
     for series_id in series_ids {
-        if let Some(bytes) = load_series_thumbnail_source_bytes(app, &series_id).await {
+        if let Some(bytes) = load_series_thumbnail_source_bytes(app, &series_id).await? {
             images.push(bytes);
         }
     }
@@ -226,7 +249,7 @@ pub(super) async fn load_collection_mosaic_bytes(
 pub(super) async fn parse_thumbnail_upload(
     mut multipart: Multipart,
     entity_name: &str,
-) -> Result<(Vec<u8>, String, bool), Response> {
+) -> Result<ThumbnailUpload, Response> {
     let mut image_bytes = None::<Vec<u8>>;
     let mut media_type = None::<String>;
     let mut selected = true;
@@ -291,7 +314,11 @@ pub(super) async fn parse_thumbnail_upload(
         return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response());
     };
 
-    Ok((bytes, media_type, selected))
+    Ok(ThumbnailUpload {
+        bytes,
+        media_type,
+        selected,
+    })
 }
 
 fn resolve_thumbnail_media_type(content_type: Option<&str>, bytes: &[u8]) -> Option<String> {

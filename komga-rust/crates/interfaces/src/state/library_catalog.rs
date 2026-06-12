@@ -1,6 +1,12 @@
-use super::*;
+use std::sync::Arc;
+
 use axum::extract::FromRef;
 use komga_application::library_catalog::LibraryCatalogPort;
+
+use super::app_state::HttpAppState;
+use super::identity::IdentityState;
+use super::task_queue::TaskQueueState;
+use crate::discovery_auth::state::DiscoveryAuthState;
 
 #[derive(Clone)]
 pub struct LibraryCatalogState {

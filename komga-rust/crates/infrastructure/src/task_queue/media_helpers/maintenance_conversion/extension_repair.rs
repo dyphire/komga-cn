@@ -1,48 +1,19 @@
-use super::super::media_queries::load_book_for_extension_repair;
-use super::super::media_updates::persist_book_extension_repair;
-use super::*;
-use crate::{resolve_library_item_path, resolve_stored_path};
-use std::collections::HashSet;
-use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use komga_application::task_processing::TaskProcessingError;
+use std::io::ErrorKind;
 use tokio::fs;
 
-static SKIPPED_EXTENSION_REPAIRS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-
-fn skipped_extension_repairs() -> &'static Mutex<HashSet<String>> {
-    SKIPPED_EXTENSION_REPAIRS.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn skipped_extension_repair_key(database_file: &Path, book_id: &str) -> String {
-    format!("{}::{book_id}", database_file.display())
-}
-
-#[cfg(test)]
-fn skipped_extension_repair_key_prefix(database_file: &Path) -> String {
-    format!("{}::", database_file.display())
-}
-
-fn extension_repair_was_skipped(cache_key: &str) -> bool {
-    skipped_extension_repairs()
-        .lock()
-        .expect("skipped extension repairs lock should not be poisoned")
-        .contains(cache_key)
-}
-
-fn mark_extension_repair_skipped(cache_key: &str) {
-    skipped_extension_repairs()
-        .lock()
-        .expect("skipped extension repairs lock should not be poisoned")
-        .insert(cache_key.to_string());
-}
+use super::super::super::runtime_context::JobRuntime;
+use super::super::archive_utils::{metadata_updated_unix_seconds, normalize_library_relative_url};
+use super::super::library_flags::load_library_maintenance_flags;
+use super::super::media_analysis::expected_extension_for_media_type;
+use super::super::media_queries::load_book_for_extension_repair;
+use super::super::media_updates::persist_book_extension_repair;
+use crate::{resolve_library_item_path, resolve_stored_path};
 
 pub(in crate::task_queue) async fn repair_extension(
     runtime: &JobRuntime<'_>,
     book_id: &str,
 ) -> Result<(), TaskProcessingError> {
-    let database_file = runtime.database().main_db().database_file().to_path_buf();
-    let skip_cache_key = skipped_extension_repair_key(database_file.as_path(), book_id);
-
     let Some(row) = load_book_for_extension_repair(runtime.database().read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
@@ -61,7 +32,7 @@ pub(in crate::task_queue) async fn repair_extension(
     let library_id = row.library_id;
     let media_type = row.media_type;
 
-    if extension_repair_was_skipped(&skip_cache_key) {
+    if runtime.extension_repair_was_skipped(&book_id) {
         return Ok(());
     }
 
@@ -71,8 +42,15 @@ pub(in crate::task_queue) async fn repair_extension(
 
     let resolved_library_root = resolve_stored_path(&library_root);
     let source_path = resolve_library_item_path(&library_root, &book_url);
-    if fs::metadata(&source_path).await.is_err() {
-        return Ok(());
+    match fs::metadata(&source_path).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to read source file metadata for extension repair '{book_id}' ('{}'): {error}",
+                source_path.display(),
+            )));
+        }
     }
 
     let current_extension = source_path
@@ -85,16 +63,25 @@ pub(in crate::task_queue) async fn repair_extension(
     }
 
     if media_type == "application/zip" && current_extension == "epub" {
-        mark_extension_repair_skipped(&skip_cache_key);
+        runtime.mark_extension_repair_skipped(&book_id);
         return Ok(());
     }
 
     let destination_path = source_path.with_extension(correct_extension);
-    if fs::metadata(&destination_path).await.is_ok() {
-        return Err(TaskProcessingError::runtime(format!(
-            "failed to repair extension for '{book_id}': destination already exists '{}'",
-            destination_path.display(),
-        )));
+    match fs::metadata(&destination_path).await {
+        Ok(_) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to repair extension for '{book_id}': destination already exists '{}'",
+                destination_path.display(),
+            )));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to inspect extension repair destination for '{book_id}' ('{}'): {error}",
+                destination_path.display(),
+            )));
+        }
     }
 
     fs::rename(&source_path, &destination_path)
@@ -117,7 +104,9 @@ pub(in crate::task_queue) async fn repair_extension(
     let destination_url =
         normalize_library_relative_url(&resolved_library_root, &destination_path)?;
     let file_size = destination_metadata.len() as i64;
-    let file_last_modified = metadata_updated_unix_seconds(&destination_metadata);
+    let file_last_modified =
+        metadata_updated_unix_seconds(&destination_metadata, &destination_path)
+            .map_err(TaskProcessingError::runtime)?;
 
     let repair_result = persist_book_extension_repair(
         runtime.database().write_pool(),
@@ -141,19 +130,11 @@ pub(in crate::task_queue) async fn repair_extension(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::sqlite::connect_test_pool;
     use crate::task_queue::test_support::RuntimeTestFixture;
     use sqlx::Row;
 
-    fn clear_skipped_extension_repairs_for_test_database(database_file: &Path) {
-        skipped_extension_repairs()
-            .lock()
-            .expect("skipped extension repairs lock should not be poisoned")
-            .retain(|entry| {
-                !entry.starts_with(&skipped_extension_repair_key_prefix(database_file))
-            });
-    }
+    use super::repair_extension;
 
     async fn seed_extension_repair_fixture(
         fixture: &RuntimeTestFixture,
@@ -204,9 +185,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repair_extensions_remembers_previously_skipped_books_within_process() {
+    async fn repair_extensions_remembers_previously_skipped_books_within_runtime() {
         let fixture = RuntimeTestFixture::new("repair-extensions-main");
-        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
         std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("repair-extensions config dir should be created");
         let source_path = fixture.library_root.join("books/repair-book.epub");
@@ -256,14 +236,12 @@ mod tests {
             "skipped repair cache should suppress later extension repair work for the same book id",
         );
 
-        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
         fixture.cleanup().await;
     }
 
     #[tokio::test]
     async fn repair_extensions_does_not_cache_books_that_were_already_correct() {
         let fixture = RuntimeTestFixture::new("repair-extensions-candidate");
-        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
         std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("repair-extensions candidate config dir should be created");
         let source_path = fixture.library_root.join("books/repair-book.pdf");
@@ -318,84 +296,81 @@ mod tests {
             "later mismatched files should still be repaired when the first run only observed a correct extension",
         );
 
-        clear_skipped_extension_repairs_for_test_database(fixture.database_file.as_path());
         fixture.cleanup().await;
     }
 
     #[tokio::test]
-    async fn repair_extensions_skip_cache_isolated_by_runtime_database() {
-        let skipped_fixture = RuntimeTestFixture::new("repair-extensions-isolated-skipped");
-        clear_skipped_extension_repairs_for_test_database(skipped_fixture.database_file.as_path());
-        std::fs::create_dir_all(skipped_fixture.library_root.join("books"))
+    async fn repair_extensions_propagates_invalid_source_path_metadata_error() {
+        let fixture = RuntimeTestFixture::new("repair-extensions-invalid-source-path");
+        seed_extension_repair_fixture(&fixture, "books/repair-book\0.bin", "application/pdf").await;
+        let runtime = fixture.runtime_context(true, true).await;
+
+        let error = repair_extension(&runtime.job(), "book-1")
+            .await
+            .expect_err("invalid source path metadata error should fail extension repair");
+
+        assert!(
+            error.to_string().contains("source file metadata"),
+            "{error}"
+        );
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn repair_extensions_skip_cache_isolated_by_task_runtime() {
+        let fixture = RuntimeTestFixture::new("repair-extensions-isolated-runtime");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("isolated skipped config dir should be created");
-        let skipped_source_path = skipped_fixture.library_root.join("books/repair-book.epub");
-        std::fs::write(&skipped_source_path, b"isolated-skipped-fixture")
+        let source_path = fixture.library_root.join("books/repair-book.epub");
+        let destination_path = fixture.library_root.join("books/repair-book.pdf");
+        std::fs::write(&source_path, b"isolated-skipped-fixture")
             .expect("isolated skipped source file should be written");
 
-        seed_extension_repair_fixture(
-            &skipped_fixture,
-            "books/repair-book.epub",
-            "application/zip",
-        )
-        .await;
+        seed_extension_repair_fixture(&fixture, "books/repair-book.epub", "application/zip").await;
 
-        let skipped_runtime = skipped_fixture.runtime_context(true, true).await;
+        let skipped_runtime = fixture.runtime_context(true, true).await;
 
         repair_extension(&skipped_runtime.job(), "book-1")
             .await
             .expect("first runtime should mark its epub-detected-as-zip book as skipped");
 
-        let candidate_fixture = RuntimeTestFixture::new("repair-extensions-isolated-candidate");
-        clear_skipped_extension_repairs_for_test_database(
-            candidate_fixture.database_file.as_path(),
-        );
-        std::fs::create_dir_all(candidate_fixture.library_root.join("books"))
-            .expect("isolated candidate config dir should be created");
-        let candidate_bin_path = candidate_fixture.library_root.join("books/repair-book.bin");
-        std::fs::write(&candidate_bin_path, b"isolated-candidate-fixture")
-            .expect("isolated candidate source file should be written");
+        let pool = connect_test_pool(fixture.database_file.as_path(), 1)
+            .await
+            .expect("isolated runtime db should reopen for media mutation");
+        sqlx::query("UPDATE MEDIA SET MEDIA_TYPE = ? WHERE BOOK_ID = ?")
+            .bind("application/pdf")
+            .bind("book-1")
+            .execute(&pool)
+            .await
+            .expect("isolated runtime media type should be changed after first skipped run");
+        pool.close().await;
 
-        seed_extension_repair_fixture(
-            &candidate_fixture,
-            "books/repair-book.bin",
-            "application/pdf",
-        )
-        .await;
-
-        let candidate_runtime = candidate_fixture.runtime_context(true, true).await;
+        let candidate_runtime = fixture.runtime_context(true, true).await;
 
         repair_extension(&candidate_runtime.job(), "book-1")
             .await
-            .expect("separate runtime database should still repair its own mismatched book");
+            .expect("separate task runtime should not inherit the previous runtime skip cache");
 
-        let verify_pool = connect_test_pool(candidate_fixture.database_file.as_path(), 1)
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
-            .expect("isolated candidate db should reopen for verification");
+            .expect("isolated runtime db should reopen for verification");
         let row = sqlx::query("SELECT URL FROM BOOK WHERE ID = ? LIMIT 1")
             .bind("book-1")
             .fetch_one(&verify_pool)
             .await
-            .expect("isolated candidate book row should be queryable");
+            .expect("isolated runtime book row should be queryable");
         verify_pool.close().await;
 
         assert_eq!(row.get::<String, _>("URL"), "books/repair-book.pdf");
         assert!(
-            candidate_fixture
-                .library_root
-                .join("books/repair-book.pdf")
-                .exists(),
-            "skip cache must not leak across distinct runtime databases that reuse the same book id",
+            destination_path.exists(),
+            "new task runtime should repair the same database/book after the media type changes",
         );
         assert!(
-            !candidate_bin_path.exists(),
-            "candidate runtime should finish the rename instead of short-circuiting on another database's cached skip",
+            !source_path.exists(),
+            "new task runtime should finish the rename instead of short-circuiting on the previous runtime's cached skip",
         );
 
-        clear_skipped_extension_repairs_for_test_database(skipped_fixture.database_file.as_path());
-        clear_skipped_extension_repairs_for_test_database(
-            candidate_fixture.database_file.as_path(),
-        );
-        skipped_fixture.cleanup().await;
-        candidate_fixture.cleanup().await;
+        fixture.cleanup().await;
     }
 }

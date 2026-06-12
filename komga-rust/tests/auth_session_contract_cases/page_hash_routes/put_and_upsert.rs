@@ -225,3 +225,87 @@ async fn router_put_page_hash_persists_known_thumbnail_so_it_survives_source_rem
         .expect("known page hash thumbnail response body should be readable");
     assert!(body.starts_with(&[0xFF, 0xD8]));
 }
+
+#[tokio::test]
+async fn router_put_page_hash_propagates_thumbnail_decode_failures() {
+    let ctx = TestFixture::new("router-put-page-hash-invalid-thumbnail-source").await;
+    seed_unknown_page_hash_source(
+        ctx.paths(),
+        "book-page-hash-invalid-thumb",
+        "invalid-thumb-hash",
+        "images/invalid-thumb-source.png",
+        "invalid-thumb-source.png",
+        "image/png",
+        b"not-an-image",
+    )
+    .await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/page-hashes")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"hash":"invalid-thumb-hash","size":12,"action":"IGNORE"}"#,
+                ))
+                .expect("page hash put request for invalid thumbnail should build"),
+        )
+        .await
+        .expect("page hash put request for invalid thumbnail should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        load_page_hash_record(ctx.paths(), "invalid-thumb-hash")
+            .await
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn router_get_page_hash_thumbnail_fallback_preserves_source_media_type() {
+    let ctx = TestFixture::new("router-get-page-hash-thumbnail-fallback-media-type").await;
+    let expected = fixture_png_bytes();
+    let source_path = seed_page_hash_image_source(
+        ctx.paths(),
+        "book-page-hash-fallback-thumb",
+        "known-fallback-thumb-hash",
+        "images/known-fallback-thumb-source.png",
+        "known-fallback-thumb-source.png",
+    )
+    .await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/page-hashes/known-fallback-thumb-hash/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("fallback page hash thumbnail request should build"),
+        )
+        .await
+        .expect("fallback page hash thumbnail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/png")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("fallback page hash thumbnail response body should be readable");
+    assert_eq!(body.as_ref(), expected.as_slice());
+
+    std::fs::remove_file(source_path).expect("fallback source image should be removable");
+}

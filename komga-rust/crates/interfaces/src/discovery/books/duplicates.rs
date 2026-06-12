@@ -10,8 +10,9 @@ use icu::locale::locale;
 use serde_json::{Value, json};
 
 use crate::helpers::{query_bool, query_value, query_values};
-use crate::identity_access::auth::{Admin, user_id};
+use crate::identity_access::auth::Admin;
 use crate::state::DiscoveryState;
+use komga_application::identity_access::user_id;
 
 use super::super::persisted::common_helpers::{decode_query_component, internal_error_response};
 
@@ -39,6 +40,26 @@ enum DuplicateBooksSortField {
 struct DuplicateBooksSortMode {
     field: DuplicateBooksSortField,
     descending: bool,
+}
+
+struct DuplicateBooksSortRequest<'a> {
+    field: &'a str,
+    descending: bool,
+}
+
+impl<'a> DuplicateBooksSortRequest<'a> {
+    fn parse(sort: &'a str) -> Self {
+        match sort.split_once(',') {
+            Some((field, direction)) => Self {
+                field,
+                descending: direction.eq_ignore_ascii_case("desc"),
+            },
+            None => Self {
+                field: sort,
+                descending: false,
+            },
+        }
+    }
 }
 
 struct DuplicateBookPayload {
@@ -83,8 +104,8 @@ fn parse_duplicate_books_sort_modes(sorts: &[String]) -> Vec<DuplicateBooksSortM
     sorts
         .iter()
         .filter_map(|sort| {
-            let (field, direction) = sort.split_once(',').unwrap_or((sort.as_str(), "asc"));
-            let field = match field {
+            let requested_sort = DuplicateBooksSortRequest::parse(sort);
+            let field = match requested_sort.field {
                 "name" => DuplicateBooksSortField::Name,
                 "series" => DuplicateBooksSortField::Series,
                 "created" | "createdDate" => DuplicateBooksSortField::Created,
@@ -105,7 +126,7 @@ fn parse_duplicate_books_sort_modes(sorts: &[String]) -> Vec<DuplicateBooksSortM
             };
             Some(DuplicateBooksSortMode {
                 field,
-                descending: direction.eq_ignore_ascii_case("desc"),
+                descending: requested_sort.descending,
             })
         })
         .collect()
@@ -323,7 +344,7 @@ fn slice_duplicate_books_page(
     }
 }
 
-pub async fn books_duplicates(
+pub(crate) async fn books_duplicates(
     State(app): State<DiscoveryState>,
     admin: Admin,
     uri: Uri,

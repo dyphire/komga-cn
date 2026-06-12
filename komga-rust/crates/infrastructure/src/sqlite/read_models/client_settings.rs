@@ -1,10 +1,22 @@
-use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 
-pub async fn load_client_settings_global(
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedClientGlobalSetting {
+    pub(crate) key: String,
+    pub(crate) value: String,
+    pub(crate) allow_unauthorized: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedClientUserSetting {
+    pub(crate) key: String,
+    pub(crate) value: String,
+}
+
+pub(crate) async fn load_client_settings_global(
     pool: &SqlitePool,
     allow_unauthorized_only: bool,
-) -> Result<Value, sqlx::Error> {
+) -> Result<Vec<PersistedClientGlobalSetting>, sqlx::Error> {
     let rows = if allow_unauthorized_only {
         sqlx::query(
             r#"SELECT KEY, VALUE, ALLOW_UNAUTHORIZED
@@ -24,26 +36,20 @@ pub async fn load_client_settings_global(
         .await?
     };
 
-    let mut map = serde_json::Map::new();
-    for row in rows {
-        let key = row.get::<String, _>("KEY");
-        let value = row.get::<String, _>("VALUE");
-        let allow_unauthorized = row.get::<bool, _>("ALLOW_UNAUTHORIZED");
-        map.insert(
-            key,
-            json!({
-                "value": value,
-                "allowUnauthorized": allow_unauthorized,
-            }),
-        );
-    }
-    Ok(Value::Object(map))
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedClientGlobalSetting {
+            key: row.get::<String, _>("KEY"),
+            value: row.get::<String, _>("VALUE"),
+            allow_unauthorized: row.get::<bool, _>("ALLOW_UNAUTHORIZED"),
+        })
+        .collect())
 }
 
-pub async fn load_client_settings_user(
+pub(crate) async fn load_client_settings_user(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<Value, sqlx::Error> {
+) -> Result<Vec<PersistedClientUserSetting>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT KEY, VALUE
          FROM CLIENT_SETTINGS_USER
@@ -54,11 +60,11 @@ pub async fn load_client_settings_user(
     .fetch_all(pool)
     .await?;
 
-    let mut map = serde_json::Map::new();
-    for row in rows {
-        let key = row.get::<String, _>("KEY");
-        let value = row.get::<String, _>("VALUE");
-        map.insert(key, json!({ "value": value }));
-    }
-    Ok(Value::Object(map))
+    Ok(rows
+        .into_iter()
+        .map(|row| PersistedClientUserSetting {
+            key: row.get::<String, _>("KEY"),
+            value: row.get::<String, _>("VALUE"),
+        })
+        .collect())
 }

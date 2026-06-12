@@ -1,10 +1,23 @@
 use super::helpers::{nav_entry_with_content, publisher_entry_id, series_feed_self_path};
 use super::streaming::{build_book_feed_acquisition_entries, localized_opds_updated};
-use super::*;
-use crate::identity_access::auth::AuthUser;
-use crate::state::{
-    OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService, OpdsState,
+use crate::state::OpdsState;
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::AuthUser;
+use komga_application::opds::{
+    OpdsBookFeedEntry, OpdsFeedService, OpdsFeedUserContext, OpdsPersistedService,
 };
+
+use crate::request_urls::app_absolute_url;
+
+use super::super::feeds::{
+    OpdsPageNavigation, OpdsPageRequest, OpdsV1FeedHeader, OpdsV1NavigationEntry, OpdsV1XmlLink,
+    opds_v1_acquisition_feed_response_with_entries, opds_v1_navigation_feed_response,
+    opds_v1_navigation_feed_response_with_extra_links, paginate_vec, parse_page_size,
+    percent_decode, query_escape, query_value, query_values, xml_escape,
+};
+use super::super::persisted::{allowed_library_ids_for_user, load_opds_v1_series_search_results};
+use super::super::types::PersistedBookFeedItem;
 
 fn persisted_book_feed_item(entry: OpdsBookFeedEntry) -> PersistedBookFeedItem {
     PersistedBookFeedItem {
@@ -132,25 +145,27 @@ pub(crate) async fn opds_v1_on_deck(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = feed_service
-        .on_deck_page(&feed_user, None, page, size)
+    let feed_service = OpdsFeedService::new(app.opds_feed_catalog.as_ref());
+    let page_result = match feed_service
+        .on_deck_page(&feed_user, None, page_request.page, page_request.size)
         .await
-        .ok();
-    let has_next = page_result
-        .as_ref()
-        .map(|page| page.has_next)
-        .unwrap_or(false);
+    {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let has_next = page_result.has_next;
     let books = page_result
-        .map(|page| page.books)
-        .unwrap_or_default()
+        .books
         .into_iter()
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
 
-    let entries = build_book_feed_acquisition_entries(app, &headers, books).await;
+    let entries = match build_book_feed_acquisition_entries(app, &headers, books).await {
+        Ok(entries) => entries,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
     opds_v1_acquisition_feed_response_with_entries(
         &headers,
@@ -159,7 +174,10 @@ pub(crate) async fn opds_v1_on_deck(
         "/opds/v1.2/ondeck",
         entries,
         None,
-        Some((page, has_next)),
+        Some(OpdsPageNavigation {
+            page: page_request.page,
+            has_next,
+        }),
     )
 }
 
@@ -169,25 +187,27 @@ pub(crate) async fn opds_v1_keep_reading(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = feed_service
-        .keep_reading_page(&feed_user, None, page, size)
+    let feed_service = OpdsFeedService::new(app.opds_feed_catalog.as_ref());
+    let page_result = match feed_service
+        .keep_reading_page(&feed_user, None, page_request.page, page_request.size)
         .await
-        .ok();
-    let has_next = page_result
-        .as_ref()
-        .map(|page| page.has_next)
-        .unwrap_or(false);
+    {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let has_next = page_result.has_next;
     let books = page_result
-        .map(|page| page.books)
-        .unwrap_or_default()
+        .books
         .into_iter()
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
 
-    let entries = build_book_feed_acquisition_entries(app, &headers, books).await;
+    let entries = match build_book_feed_acquisition_entries(app, &headers, books).await {
+        Ok(entries) => entries,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
     opds_v1_acquisition_feed_response_with_entries(
         &headers,
@@ -196,7 +216,10 @@ pub(crate) async fn opds_v1_keep_reading(
         "/opds/v1.2/keep-reading",
         entries,
         None,
-        Some((page, has_next)),
+        Some(OpdsPageNavigation {
+            page: page_request.page,
+            has_next,
+        }),
     )
 }
 
@@ -206,34 +229,36 @@ pub(crate) async fn opds_v1_series_latest(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = feed_service
-        .latest_series_page_including_one_shots(&feed_user, None, page, size)
+    let feed_service = OpdsFeedService::new(app.opds_feed_catalog.as_ref());
+    let page_result = match feed_service
+        .latest_series_page_including_one_shots(
+            &feed_user,
+            None,
+            page_request.page,
+            page_request.size,
+        )
         .await
-        .ok();
-    let has_next = page_result
-        .as_ref()
-        .map(|page| page.has_next)
-        .unwrap_or(false);
+    {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let has_next = page_result.has_next;
     let rows = page_result
-        .map(|page| {
-            page.series
-                .into_iter()
-                .map(|series| {
-                    let series_id = series.id;
-                    OpdsV1NavigationEntry {
-                        id: series_id.clone(),
-                        title: series.title,
-                        content: String::new(),
-                        href_path: format!("/opds/v1.2/series/{series_id}"),
-                        updated: Some(series.last_modified),
-                    }
-                })
-                .collect::<Vec<_>>()
+        .series
+        .into_iter()
+        .map(|series| {
+            let series_id = series.id;
+            OpdsV1NavigationEntry {
+                id: series_id.clone(),
+                title: series.title,
+                content: String::new(),
+                href_path: format!("/opds/v1.2/series/{series_id}"),
+                updated: Some(series.last_modified),
+            }
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
 
     opds_v1_navigation_feed_response(
         OpdsV1FeedHeader {
@@ -242,7 +267,10 @@ pub(crate) async fn opds_v1_series_latest(
             title: "Latest series",
             self_path: "/opds/v1.2/series/latest",
             feed_updated: None,
-            pagination: Some((page, has_next)),
+            pagination: Some(OpdsPageNavigation {
+                page: page_request.page,
+                has_next,
+            }),
         },
         rows,
     )
@@ -254,24 +282,31 @@ pub(crate) async fn opds_v1_books_latest(
     app: &OpdsState,
     user: &AuthUser,
 ) -> Response {
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let feed_service = OpdsFeedService::new(app.opds_catalog.as_ref());
-    let page_result = feed_service
-        .latest_books_page_with_read_progress(&feed_user, None, page, size)
+    let feed_service = OpdsFeedService::new(app.opds_feed_catalog.as_ref());
+    let page_result = match feed_service
+        .latest_books_page_with_read_progress(
+            &feed_user,
+            None,
+            page_request.page,
+            page_request.size,
+        )
         .await
-        .ok();
-    let has_next = page_result
-        .as_ref()
-        .map(|page| page.has_next)
-        .unwrap_or(false);
+    {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let has_next = page_result.has_next;
     let books = page_result
-        .map(|page| page.books)
-        .unwrap_or_default()
+        .books
         .into_iter()
         .map(persisted_book_feed_item)
         .collect::<Vec<_>>();
-    let entries = build_book_feed_acquisition_entries(app, &headers, books).await;
+    let entries = match build_book_feed_acquisition_entries(app, &headers, books).await {
+        Ok(entries) => entries,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
     opds_v1_acquisition_feed_response_with_entries(
         &headers,
         "latestBooks",
@@ -279,7 +314,10 @@ pub(crate) async fn opds_v1_books_latest(
         "/opds/v1.2/books/latest",
         entries,
         None,
-        Some((page, has_next)),
+        Some(OpdsPageNavigation {
+            page: page_request.page,
+            has_next,
+        }),
     )
 }
 
@@ -289,21 +327,21 @@ pub(crate) async fn opds_v1_libraries(
     user: &AuthUser,
 ) -> Response {
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let persisted_service = OpdsPersistedService::new(app.opds_library_persisted.as_ref());
 
-    let rows = persisted_service
-        .visible_libraries(&feed_user)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|library| OpdsV1NavigationEntry {
-            id: library.id.clone(),
-            title: library.name,
-            content: String::new(),
-            href_path: format!("/opds/v1.2/libraries/{}", library.id),
-            updated: Some(library.last_modified),
-        })
-        .collect::<Vec<_>>();
+    let rows = match persisted_service.visible_libraries(&feed_user).await {
+        Ok(libraries) => libraries,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+    .into_iter()
+    .map(|library| OpdsV1NavigationEntry {
+        id: library.id.clone(),
+        title: library.name,
+        content: String::new(),
+        href_path: format!("/opds/v1.2/libraries/{}", library.id),
+        updated: Some(library.last_modified),
+    })
+    .collect::<Vec<_>>();
 
     opds_v1_navigation_feed_response(
         OpdsV1FeedHeader {
@@ -325,26 +363,29 @@ pub(crate) async fn opds_v1_collections(
     user: &AuthUser,
 ) -> Response {
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
-    let rows = persisted_service
+    let persisted_service = OpdsPersistedService::new(app.opds_feed_persisted.as_ref());
+    let rows = match persisted_service
         .all_collections(&feed_user, None, true)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|collection| {
-            let updated = localized_opds_updated(&collection.last_modified);
-            OpdsV1NavigationEntry {
-                id: collection.id.clone(),
-                title: collection.name,
-                content: String::new(),
-                href_path: format!("/opds/v1.2/collections/{}", collection.id),
-                updated,
-            }
-        })
-        .collect::<Vec<_>>();
+    {
+        Ok(collections) => collections,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+    .into_iter()
+    .map(|collection| {
+        let updated = localized_opds_updated(&collection.last_modified);
+        OpdsV1NavigationEntry {
+            id: collection.id.clone(),
+            title: collection.name,
+            content: String::new(),
+            href_path: format!("/opds/v1.2/collections/{}", collection.id),
+            updated,
+        }
+    })
+    .collect::<Vec<_>>();
 
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let (rows, has_next) = paginate_vec(rows, page, size);
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
+    let rows_page = paginate_vec(rows, page_request);
 
     opds_v1_navigation_feed_response(
         OpdsV1FeedHeader {
@@ -353,9 +394,12 @@ pub(crate) async fn opds_v1_collections(
             title: "All collections",
             self_path: "/opds/v1.2/collections",
             feed_updated: None,
-            pagination: Some((page, has_next)),
+            pagination: Some(OpdsPageNavigation {
+                page: page_request.page,
+                has_next: rows_page.has_next,
+            }),
         },
-        rows,
+        rows_page.items,
     )
 }
 
@@ -366,23 +410,23 @@ pub(crate) async fn opds_v1_readlists(
     user: &AuthUser,
 ) -> Response {
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
-    let rows = persisted_service
-        .all_readlists(&feed_user, None)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|readlist| OpdsV1NavigationEntry {
-            id: readlist.id.clone(),
-            title: readlist.name,
-            content: String::new(),
-            href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
-            updated: Some(readlist.last_modified),
-        })
-        .collect::<Vec<_>>();
+    let persisted_service = OpdsPersistedService::new(app.opds_feed_persisted.as_ref());
+    let rows = match persisted_service.all_readlists(&feed_user, None).await {
+        Ok(readlists) => readlists,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+    .into_iter()
+    .map(|readlist| OpdsV1NavigationEntry {
+        id: readlist.id.clone(),
+        title: readlist.name,
+        content: String::new(),
+        href_path: format!("/opds/v1.2/readlists/{}", readlist.id),
+        updated: Some(readlist.last_modified),
+    })
+    .collect::<Vec<_>>();
 
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
-    let (rows, has_next) = paginate_vec(rows, page, size);
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
+    let rows_page = paginate_vec(rows, page_request);
 
     opds_v1_navigation_feed_response(
         OpdsV1FeedHeader {
@@ -391,9 +435,12 @@ pub(crate) async fn opds_v1_readlists(
             title: "All read lists",
             self_path: "/opds/v1.2/readlists",
             feed_updated: None,
-            pagination: Some((page, has_next)),
+            pagination: Some(OpdsPageNavigation {
+                page: page_request.page,
+                has_next: rows_page.has_next,
+            }),
         },
-        rows,
+        rows_page.items,
     )
 }
 
@@ -404,12 +451,12 @@ pub(crate) async fn opds_v1_publishers(
     user: &AuthUser,
 ) -> Response {
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
-    let publishers = persisted_service
-        .publishers(&feed_user)
-        .await
-        .unwrap_or_default();
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let persisted_service = OpdsPersistedService::new(app.opds_publisher_persisted.as_ref());
+    let publishers = match persisted_service.publishers(&feed_user).await {
+        Ok(publishers) => publishers,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let rows = publishers
         .into_iter()
         .map(|publisher| OpdsV1NavigationEntry {
@@ -420,7 +467,7 @@ pub(crate) async fn opds_v1_publishers(
             updated: None,
         })
         .collect::<Vec<_>>();
-    let (rows, has_next) = paginate_vec(rows, page, size);
+    let rows_page = paginate_vec(rows, page_request);
     opds_v1_navigation_feed_response(
         OpdsV1FeedHeader {
             headers: &headers,
@@ -428,9 +475,12 @@ pub(crate) async fn opds_v1_publishers(
             title: "All publishers",
             self_path: "/opds/v1.2/publishers",
             feed_updated: None,
-            pagination: Some((page, has_next)),
+            pagination: Some(OpdsPageNavigation {
+                page: page_request.page,
+                has_next: rows_page.has_next,
+            }),
         },
-        rows,
+        rows_page.items,
     )
 }
 
@@ -443,7 +493,7 @@ pub(crate) async fn opds_v1_series(
     let allowed_library_ids = allowed_library_ids_for_user(user);
 
     let query = uri.query().unwrap_or_default();
-    let (page, size) = parse_page_size(query);
+    let page_request = parse_page_size(query);
     let search = query_value(query, "search")
         .map(percent_decode)
         .and_then(|value| {
@@ -454,15 +504,18 @@ pub(crate) async fn opds_v1_series(
     let self_path = series_feed_self_path(search.as_deref(), publishers.as_slice());
 
     let search_rows = if let Some(search_term) = search.as_deref() {
-        load_opds_v1_series_search_results(
-            app.opds_persisted.as_ref(),
-            app.opds_catalog.as_ref(),
+        match load_opds_v1_series_search_results(
+            app.opds_search_persisted.as_ref(),
+            app.opds_browse_catalog.as_ref(),
             &allowed_library_ids,
             search_term,
             publishers.as_slice(),
         )
         .await
-        .unwrap_or_default()
+        {
+            Ok(series) => series,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
         .into_iter()
         .map(|series| {
             let series_id = series.id;
@@ -476,33 +529,43 @@ pub(crate) async fn opds_v1_series(
         })
         .collect::<Vec<_>>()
     } else {
-        app.opds_catalog
+        match app
+            .opds_browse_catalog
             .load_series_page(
                 allowed_library_ids.as_ref(),
                 None,
                 &publishers,
-                page.saturating_mul(size) as i64,
-                (size + 1) as i64,
+                page_request.page.saturating_mul(page_request.size) as i64,
+                (page_request.size + 1) as i64,
             )
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|series| {
-                let series_id = series.id;
-                OpdsV1NavigationEntry {
-                    id: series_id.clone(),
-                    title: series.title,
-                    content: String::new(),
-                    href_path: format!("/opds/v1.2/series/{series_id}"),
-                    updated: Some(series.last_modified),
-                }
-            })
-            .collect::<Vec<_>>()
+        {
+            Ok(series) => series,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+        .into_iter()
+        .map(|series| {
+            let series_id = series.id;
+            OpdsV1NavigationEntry {
+                id: series_id.clone(),
+                title: series.title,
+                content: String::new(),
+                href_path: format!("/opds/v1.2/series/{series_id}"),
+                updated: Some(series.last_modified),
+            }
+        })
+        .collect::<Vec<_>>()
     };
-    let (entries, has_next) = if search.is_some() {
-        paginate_vec(search_rows, page, size)
+    let entries_page = if search.is_some() {
+        paginate_vec(search_rows, page_request)
     } else {
-        paginate_vec(search_rows, 0, size)
+        paginate_vec(
+            search_rows,
+            OpdsPageRequest {
+                page: 0,
+                size: page_request.size,
+            },
+        )
     };
 
     opds_v1_navigation_feed_response(
@@ -516,8 +579,11 @@ pub(crate) async fn opds_v1_series(
                 .as_str(),
             self_path: self_path.as_str(),
             feed_updated: None,
-            pagination: Some((page, has_next)),
+            pagination: Some(OpdsPageNavigation {
+                page: page_request.page,
+                has_next: entries_page.has_next,
+            }),
         },
-        entries,
+        entries_page.items,
     )
 }

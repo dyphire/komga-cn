@@ -967,8 +967,36 @@ async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_no
 }
 
 #[tokio::test]
-async fn router_discovery_series_books_route_remains_available_for_deprecated_compatibility() {
-    let ctx = TestFixture::new("router-discovery-deprecated-series-books-compat").await;
+async fn router_discovery_series_books_route_bridges_deprecated_numeric_series_id() {
+    let ctx = TestFixture::builder("router-discovery-deprecated-series-books-id-bridge")
+        .with_seed(|paths| async move {
+            seed_router_custom_series(&paths, "custom-series-2", "Series 2", "library-1").await;
+
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("deprecated series books bridge db should open");
+            sqlx::query("UPDATE BOOK SET SERIES_ID = ? WHERE ID = ?")
+                .bind("custom-series-2")
+                .bind("book-1")
+                .execute(&pool)
+                .await
+                .expect("deprecated series books bridge book should move");
+            sqlx::query("UPDATE SERIES SET BOOK_COUNT = ? WHERE ID = ?")
+                .bind(0_i64)
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("deprecated series books bridge source count should update");
+            sqlx::query("UPDATE SERIES SET BOOK_COUNT = ? WHERE ID = ?")
+                .bind(1_i64)
+                .bind("custom-series-2")
+                .execute(&pool)
+                .await
+                .expect("deprecated series books bridge target count should update");
+            pool.close().await;
+        })
+        .build()
+        .await;
     let auth_token = ctx.login_admin().await;
 
     let response = ctx
@@ -977,7 +1005,7 @@ async fn router_discovery_series_books_route_remains_available_for_deprecated_co
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/series/series-1/books?page=0&size=20")
+                .uri("/api/v1/series/series-2/books?page=0&size=20")
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
                 .expect("deprecated series books request should build"),

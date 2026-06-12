@@ -1,4 +1,4 @@
-use crate::state::LibraryIdMappingPort;
+use komga_application::discovery::LibraryIdMappingPort;
 
 fn push_unique(values: &mut Vec<String>, value: &str) {
     if !values.iter().any(|candidate| candidate == value) {
@@ -6,23 +6,22 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
     }
 }
 
-pub async fn remap_requested_library_ids_for_persisted(
+pub(in crate::discovery) async fn remap_requested_library_ids_for_persisted(
     backend: &dyn LibraryIdMappingPort,
     requested: Option<&Vec<String>>,
-) -> Option<Vec<String>> {
-    let requested = requested?;
-
-    if requested.is_empty() {
-        return None;
-    }
-
-    let persisted_ids = match backend.load_persisted_library_ids().await {
-        Ok(ids) => ids,
-        Err(_) => return None,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(requested) = requested else {
+        return Ok(None);
     };
 
+    if requested.is_empty() {
+        return Ok(None);
+    }
+
+    let persisted_ids = backend.load_persisted_library_ids().await?;
+
     if persisted_ids.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut normalized = Vec::new();
@@ -50,5 +49,32 @@ pub async fn remap_requested_library_ids_for_persisted(
         push_unique(&mut normalized, mapped);
     }
 
-    (!normalized.is_empty()).then_some(normalized)
+    Ok((!normalized.is_empty()).then_some(normalized))
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+
+    use super::*;
+
+    struct FailingLibraryIdMapping;
+
+    #[async_trait]
+    impl LibraryIdMappingPort for FailingLibraryIdMapping {
+        async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
+            Err("library lookup failed".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn remap_requested_library_ids_propagates_backend_errors() {
+        let requested = vec!["1".to_string()];
+        let error =
+            remap_requested_library_ids_for_persisted(&FailingLibraryIdMapping, Some(&requested))
+                .await
+                .expect_err("library id lookup errors must not become unmapped filters");
+
+        assert_eq!(error, "library lookup failed");
+    }
 }

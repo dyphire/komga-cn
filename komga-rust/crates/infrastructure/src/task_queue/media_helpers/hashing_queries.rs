@@ -1,4 +1,12 @@
+use std::collections::HashMap;
+
+use komga_application::task_processing::TaskProcessingError;
+use sha2::{Digest, Sha256};
+use tokio::fs;
+
+use super::super::runtime_context::JobRuntime;
 use super::hashed_pages::HashedPageToDelete;
+use super::library_flags::load_library_hashing_flags;
 use super::media_queries::{
     load_book_file_path, load_book_hash_runtime_state, load_book_library_id,
     load_books_with_missing_page_hash as load_persisted_books_with_missing_page_hash,
@@ -7,9 +15,7 @@ use super::media_queries::{
     load_non_deleted_book_ids as load_persisted_non_deleted_book_ids,
 };
 use super::media_updates::persist_book_hash;
-use super::*;
 use crate::filesystem::media_access::hashes::persist_book_page_hashes_from_media_content;
-use tokio::fs;
 
 pub(in crate::task_queue) async fn hash_book_pages(
     runtime: &JobRuntime<'_>,

@@ -46,11 +46,9 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
         },
     )
     .await;
-    komga_infrastructure::task_queue::worker_runtime::cleanup_authentication_activity_once(
-        &runtime,
-    )
-    .await
-    .expect("auth cleanup should skip cleanly when main database is external-owned");
+    komga_infrastructure::cleanup_authentication_activity_once(&runtime)
+        .await
+        .expect("auth cleanup should skip cleanly when main database is external-owned");
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -134,7 +132,8 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
             TaskQueueRecord::new("AnalyzeBook_book-1", 1_000, Some("series-1".to_string()))
                 .with_simple_type("AnalyzeBook"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -231,7 +230,8 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
             1_000,
             Some("book-1".to_string()),
         ))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -298,7 +298,8 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
             )
             .with_simple_type("AggregateSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -344,18 +345,6 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .execute(&pool)
         .await
         .expect("readlist members should be removed for cleanup fixture");
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind("DELETE_EMPTY_COLLECTIONS")
-        .bind("true")
-        .execute(&pool)
-        .await
-        .expect("delete empty collections setting should be enabled");
-    sqlx::query("INSERT OR REPLACE INTO SERVER_SETTINGS (KEY, VALUE) VALUES (?, ?)")
-        .bind("DELETE_EMPTY_READLISTS")
-        .bind("true")
-        .execute(&pool)
-        .await
-        .expect("delete empty readlists setting should be enabled");
     pool.close().await;
 
     let runtime = runtime_task_context_with_overrides(
@@ -365,14 +354,19 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
             ..TaskRuntimeOwnershipOverrides::default()
         },
     )
-    .await;
+    .await
+    .with_cleanup_empty_sets_policy(CleanupEmptySetsPolicy {
+        delete_empty_collections: true,
+        delete_empty_read_lists: true,
+    });
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
             TaskQueueRecord::new("EmptyTrash_library-1", 1_000, Some("library-1".to_string()))
                 .with_simple_type("EmptyTrash"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await

@@ -556,8 +556,8 @@ async fn router_users_me_api_keys_create_and_list_expose_expected_fields() {
     );
     assert_eq!(
         entry.get("lastModifiedDate").and_then(Value::as_str),
-        Some(created_created_date.as_str()),
-        "api key list entry should mirror Kotlin's createdDate-backed lastModifiedDate: {entry:?}"
+        Some("2030-02-03T04:05:06Z"),
+        "api key list entry should expose persisted lastModifiedDate: {entry:?}"
     );
 }
 

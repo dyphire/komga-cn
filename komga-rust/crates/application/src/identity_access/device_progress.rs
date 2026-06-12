@@ -1,19 +1,55 @@
+use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::media_assets::{
     BookProgressionConflictPolicy, BookProgressionWrite, BookProgressionWriteError,
-    BookProgressionWriteService, BookProgressionWriteSource, ContentResolverPort, EpubNavigation,
-    EpubNavigationError, EpubNavigationLoadError, MediaReaderPort, ProgressWriterPort,
+    BookProgressionWriteReaderPort, BookProgressionWriteService, BookProgressionWriteSource,
+    BookProgressionWriterPort, EpubNavigation, EpubNavigationContentPort, EpubNavigationError,
+    EpubNavigationLoadError, EpubNavigationReaderPort, ReadProgressReadPort,
     load_book_epub_navigation,
 };
 
 use super::DeviceSyncPort;
 
-pub struct DeviceProgressService<'a> {
+#[async_trait]
+pub trait DeviceProgressPageCountPort: Send + Sync {
+    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+}
+
+#[async_trait]
+impl<T> DeviceProgressPageCountPort for T
+where
+    T: ReadProgressReadPort + ?Sized,
+{
+    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+        ReadProgressReadPort::book_page_count(self, book_id).await
+    }
+}
+
+pub trait DeviceProgressReaderPort:
+    BookProgressionWriteReaderPort
+    + EpubNavigationReaderPort
+    + DeviceProgressPageCountPort
+    + Send
+    + Sync
+{
+}
+
+impl<T> DeviceProgressReaderPort for T where
+    T: BookProgressionWriteReaderPort
+        + EpubNavigationReaderPort
+        + DeviceProgressPageCountPort
+        + Send
+        + Sync
+        + ?Sized
+{
+}
+
+pub struct DeviceProgressService<'a, C: ?Sized, W: ?Sized> {
     device_sync: &'a dyn DeviceSyncPort,
-    reader: &'a dyn MediaReaderPort,
-    content: &'a dyn ContentResolverPort,
-    progress: &'a dyn ProgressWriterPort,
+    reader: &'a dyn DeviceProgressReaderPort,
+    content: &'a C,
+    progress: &'a W,
 }
 
 pub struct KoreaderProgressUpdate {
@@ -32,14 +68,48 @@ pub struct KoreaderProgressSnapshot {
     pub device_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct KoboReadingStateSnapshot {
+    pub book_id: String,
+    pub created: String,
+    pub last_modified: String,
+    pub status: KoboReadingStateStatus,
+    pub times_started_reading: u64,
+    pub total_progress_percent: Option<f64>,
+    pub content_source_progress_percent: Option<f64>,
+    pub location: Option<KoboReadingStateLocationSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KoboReadingStateStatus {
+    ReadyToRead,
+    Reading,
+    Finished,
+}
+
+impl KoboReadingStateStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadyToRead => "ReadyToRead",
+            Self::Reading => "Reading",
+            Self::Finished => "Finished",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KoboReadingStateLocationSnapshot {
+    pub source: String,
+    pub kobo_span: Option<String>,
+}
+
 pub struct KoboReadingStateUpdate {
     pub last_modified: String,
-    pub status: String,
+    pub status: KoboReadingStateStatus,
     pub progress_percent: Option<f64>,
     pub content_source_progress_percent: Option<f64>,
     pub location_source: String,
-    pub location_type: String,
-    pub location_value: Option<String>,
+    pub kobo_span: Option<String>,
     pub device_id: String,
     pub device_name: String,
 }
@@ -59,12 +129,16 @@ enum KoreaderMediaProfile {
     Epub,
 }
 
-impl<'a> DeviceProgressService<'a> {
+impl<'a, C, W> DeviceProgressService<'a, C, W>
+where
+    C: EpubNavigationContentPort + ?Sized,
+    W: BookProgressionWriterPort + ?Sized,
+{
     pub fn new(
         device_sync: &'a dyn DeviceSyncPort,
-        reader: &'a dyn MediaReaderPort,
-        content: &'a dyn ContentResolverPort,
-        progress: &'a dyn ProgressWriterPort,
+        reader: &'a dyn DeviceProgressReaderPort,
+        content: &'a C,
+        progress: &'a W,
     ) -> Self {
         Self {
             device_sync,
@@ -79,21 +153,23 @@ impl<'a> DeviceProgressService<'a> {
         book_id: &str,
         user_id: &str,
         fallback_created_timestamp: &str,
-    ) -> Result<Value, DeviceProgressError> {
+    ) -> Result<KoboReadingStateSnapshot, DeviceProgressError> {
         let progress = self
             .device_sync
             .load_read_progress(book_id, user_id)
             .await
             .map_err(|_| DeviceProgressError::Persistence)?;
 
-        Ok(match progress {
-            Some(record) => kobo_reading_state_payload(
+        match progress {
+            Some(record) => {
+                let locator = parse_locator_payload(record.locator.as_deref())?;
+                Ok(kobo_reading_state_snapshot(book_id, &record, locator))
+            }
+            None => Ok(kobo_empty_reading_state_snapshot(
                 book_id,
-                &record,
-                parse_locator_payload(record.locator.as_deref()),
-            ),
-            None => kobo_empty_reading_state_payload(book_id, fallback_created_timestamp),
-        })
+                fallback_created_timestamp,
+            )),
+        }
     }
 
     pub async fn update_kobo_reading_state(
@@ -102,48 +178,48 @@ impl<'a> DeviceProgressService<'a> {
         user_id: &str,
         update: KoboReadingStateUpdate,
     ) -> Result<(), DeviceProgressError> {
-        let completed = update.status.eq_ignore_ascii_case("Finished");
         let content_source_progress = update.content_source_progress_percent.ok_or_else(|| {
             DeviceProgressError::BadRequest("ContentSourceProgressPercent is required".to_string())
         })? / 100.0;
         let total_progress = update.progress_percent.map(|value| value / 100.0);
 
-        let locator = if completed {
-            self.device_sync
-                .load_book_last_epub_position_locator(book_id)
-                .await
-                .map_err(|_| DeviceProgressError::Persistence)?
-                .ok_or(DeviceProgressError::Persistence)?
-        } else {
-            let request_locator = json!({
-                "href": update.location_source,
-                "type": "application/xhtml+xml",
-                "koboSpan": if update.location_type.eq_ignore_ascii_case("kobospan") {
-                    update.location_value.clone()
-                } else {
-                    None
-                },
-                "locations": {
-                    "progression": content_source_progress,
-                    "totalProgression": total_progress,
-                },
-            });
-
-            self.book_epub_navigation(book_id)
-                .await?
-                .normalize_locator(&request_locator)
-                .map_err(device_progress_error_from_epub_error)?
-        };
-
-        let locator_progression = locator
-            .get("locations")
-            .and_then(|value| value.get("progression"))
-            .and_then(Value::as_f64)
-            .unwrap_or(if completed {
-                1.0
+        let (locator, locator_progression, locator_total_progression) =
+            if update.status == KoboReadingStateStatus::Finished {
+                let locator = self
+                    .book_epub_navigation(book_id)
+                    .await?
+                    .positions()
+                    .last()
+                    .map(|position| position.raw().clone())
+                    .ok_or(DeviceProgressError::Persistence)?;
+                let locator_progression = locator_progression(&locator).unwrap_or(1.0);
+                let locator_total_progression = locator_total_progression(&locator);
+                (locator, locator_progression, locator_total_progression)
             } else {
-                content_source_progress
-            });
+                let request_locator = json!({
+                    "href": update.location_source,
+                    "type": "application/xhtml+xml",
+                    "koboSpan": update.kobo_span.clone(),
+                    "locations": {
+                        "progression": content_source_progress,
+                        "totalProgression": total_progress,
+                    },
+                });
+
+                let normalized_locator = self
+                    .book_epub_navigation(book_id)
+                    .await?
+                    .normalize_locator(&request_locator)
+                    .map_err(device_progress_error_from_epub_error)?;
+                let locator_progression = normalized_locator.progression();
+                let locator_total_progression = normalized_locator.total_progression();
+                (
+                    normalized_locator.into_raw(),
+                    locator_progression,
+                    locator_total_progression,
+                )
+            };
+
         let page_count = self
             .reader
             .book_page_count(book_id)
@@ -160,6 +236,7 @@ impl<'a> DeviceProgressService<'a> {
                 page_count,
                 source: BookProgressionWriteSource::TotalProgression {
                     progression: locator_progression,
+                    total_progression: locator_total_progression,
                     locator: Some(locator),
                 },
                 modified: Some(update.last_modified),
@@ -234,7 +311,7 @@ impl<'a> DeviceProgressService<'a> {
             .map_err(|_| DeviceProgressError::Persistence)?
             .ok_or(DeviceProgressError::NoProgress)?;
 
-        let locator = parse_locator_payload(progress.locator.as_deref());
+        let locator = parse_locator_payload(progress.locator.as_deref())?;
         let percentage = locator
             .get("locations")
             .and_then(|value| value.get("totalProgression"))
@@ -242,16 +319,20 @@ impl<'a> DeviceProgressService<'a> {
             .unwrap_or_else(|| {
                 (progress.page.max(0) as f64 / target.page_count.max(1) as f64).clamp(0.0, 1.0)
             });
-        let progress_value = match self
-            .koreader_epub_progress_value(&target.id, &locator)
-            .await
-        {
-            Some(progress_value) => progress_value,
-            None => locator
+        let fallback_progress_value = || {
+            locator
                 .get("koreaderProgress")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .unwrap_or_else(|| progress.page.max(0).to_string()),
+                .unwrap_or_else(|| progress.page.max(0).to_string())
+        };
+        let progress_value = match koreader_media_profile(&target.media_type) {
+            Some(KoreaderMediaProfile::Epub) => self
+                .koreader_epub_progress_value(&target.id, &locator)
+                .await?
+                .unwrap_or_else(fallback_progress_value),
+            Some(KoreaderMediaProfile::Visual) => fallback_progress_value(),
+            None => return Err(DeviceProgressError::UnsupportedMediaProfile),
         };
 
         Ok(KoreaderProgressSnapshot {
@@ -277,6 +358,8 @@ impl<'a> DeviceProgressService<'a> {
         let progression = page as f64 / target.page_count.max(1) as f64;
         Ok(BookProgressionWriteSource::Position {
             progression,
+            position: page as u64,
+            total_progression: Some(progression),
             locator: Some(json!({
                 "koreaderProgress": progress,
                 "locations": {
@@ -300,6 +383,7 @@ impl<'a> DeviceProgressService<'a> {
 
         Ok(BookProgressionWriteSource::TotalProgression {
             progression: 0.0,
+            total_progression: locator_total_progression(&locator),
             locator: Some(locator),
         })
     }
@@ -313,11 +397,16 @@ impl<'a> DeviceProgressService<'a> {
             .map_err(device_progress_error_from_epub_load_error)
     }
 
-    async fn koreader_epub_progress_value(&self, book_id: &str, locator: &Value) -> Option<String> {
-        self.book_epub_navigation(book_id)
-            .await
-            .ok()?
-            .koreader_progress_for_locator(locator)
+    async fn koreader_epub_progress_value(
+        &self,
+        book_id: &str,
+        locator: &Value,
+    ) -> Result<Option<String>, DeviceProgressError> {
+        match load_book_epub_navigation(self.reader, self.content, book_id).await {
+            Ok(navigation) => Ok(navigation.koreader_progress_for_locator(locator)),
+            Err(EpubNavigationLoadError::MissingExtension) => Ok(None),
+            Err(EpubNavigationLoadError::Internal(_)) => Err(DeviceProgressError::Persistence),
+        }
     }
 }
 
@@ -348,96 +437,90 @@ fn parse_koreader_progress_page(progress: &str) -> Option<u64> {
     progress.parse::<u64>().ok().filter(|value| *value > 0)
 }
 
-fn parse_locator_payload(locator: Option<&[u8]>) -> Value {
-    locator
-        .and_then(|blob| serde_json::from_slice::<Value>(blob).ok())
-        .unwrap_or_else(|| json!({}))
-}
+fn parse_locator_payload(locator: Option<&[u8]>) -> Result<Value, DeviceProgressError> {
+    let Some(locator) = locator else {
+        return Ok(json!({}));
+    };
 
-fn kobo_empty_reading_state_payload(book_id: &str, created_timestamp: &str) -> Value {
-    json!({
-        "Created": created_timestamp,
-        "CurrentBookmark": {
-            "LastModified": created_timestamp,
-        },
-        "EntitlementId": book_id,
-        "LastModified": created_timestamp,
-        "PriorityTimestamp": created_timestamp,
-        "Statistics": {
-            "LastModified": created_timestamp,
-        },
-        "StatusInfo": {
-            "LastModified": created_timestamp,
-            "Status": "ReadyToRead",
-            "TimesStartedReading": 0,
-        },
-    })
-}
-
-fn kobo_reading_state_payload(
-    book_id: &str,
-    progress: &super::PersistedReadProgressRecord,
-    locator: Value,
-) -> Value {
-    let source = locator.get("href").and_then(Value::as_str);
-    let kobo_span = locator.get("koboSpan").and_then(Value::as_str);
-    let mut current_bookmark = json!({
-        "LastModified": progress.last_modified,
-    });
-    let current_bookmark_object = current_bookmark
-        .as_object_mut()
-        .expect("reading state bookmark should be an object");
-
-    if let Some(total_progression) = locator
-        .get("locations")
-        .and_then(|value| value.get("totalProgression"))
-        .and_then(Value::as_f64)
-    {
-        current_bookmark_object.insert(
-            "ProgressPercent".to_string(),
-            json!(total_progression * 100.0),
-        );
+    let payload =
+        serde_json::from_slice::<Value>(locator).map_err(|_| DeviceProgressError::Persistence)?;
+    if payload.is_object() {
+        Ok(payload)
+    } else {
+        Err(DeviceProgressError::Persistence)
     }
-    if let Some(source_progression) = locator
+}
+
+fn locator_progression(locator: &Value) -> Option<f64> {
+    locator
         .get("locations")
         .and_then(|value| value.get("progression"))
         .and_then(Value::as_f64)
-    {
-        current_bookmark_object.insert(
-            "ContentSourceProgressPercent".to_string(),
-            json!(source_progression * 100.0),
-        );
-    }
+}
 
-    if source.is_some() || kobo_span.is_some() {
-        let mut location = json!({
-            "Source": source.unwrap_or_default(),
-            "Type": "KoboSpan",
-        });
-        if let Some(kobo_span) = kobo_span {
-            location
-                .as_object_mut()
-                .expect("reading state location should be an object")
-                .insert("Value".to_string(), Value::String(kobo_span.to_string()));
-        }
-        current_bookmark_object.insert("Location".to_string(), location);
-    }
+fn locator_total_progression(locator: &Value) -> Option<f64> {
+    locator
+        .get("locations")
+        .and_then(|value| value.get("totalProgression"))
+        .and_then(Value::as_f64)
+}
 
-    json!({
-        "Created": progress.created,
-        "CurrentBookmark": current_bookmark,
-        "EntitlementId": book_id,
-        "LastModified": progress.last_modified,
-        "PriorityTimestamp": progress.last_modified,
-        "Statistics": {
-            "LastModified": progress.last_modified,
+fn kobo_empty_reading_state_snapshot(
+    book_id: &str,
+    created_timestamp: &str,
+) -> KoboReadingStateSnapshot {
+    KoboReadingStateSnapshot {
+        book_id: book_id.to_string(),
+        created: created_timestamp.to_string(),
+        last_modified: created_timestamp.to_string(),
+        status: KoboReadingStateStatus::ReadyToRead,
+        times_started_reading: 0,
+        total_progress_percent: None,
+        content_source_progress_percent: None,
+        location: None,
+    }
+}
+
+fn kobo_reading_state_snapshot(
+    book_id: &str,
+    progress: &super::PersistedReadProgressRecord,
+    locator: Value,
+) -> KoboReadingStateSnapshot {
+    let source = locator.get("href").and_then(Value::as_str);
+    let kobo_span = locator.get("koboSpan").and_then(Value::as_str);
+    let total_progress_percent = locator
+        .get("locations")
+        .and_then(|value| value.get("totalProgression"))
+        .and_then(Value::as_f64)
+        .map(|value| value * 100.0);
+    let content_source_progress_percent = locator
+        .get("locations")
+        .and_then(|value| value.get("progression"))
+        .and_then(Value::as_f64)
+        .map(|value| value * 100.0);
+    let location = if source.is_some() || kobo_span.is_some() {
+        Some(KoboReadingStateLocationSnapshot {
+            source: source.unwrap_or_default().to_string(),
+            kobo_span: kobo_span.map(str::to_string),
+        })
+    } else {
+        None
+    };
+
+    KoboReadingStateSnapshot {
+        book_id: book_id.to_string(),
+        created: progress.created.clone(),
+        last_modified: progress.last_modified.clone(),
+        status: if progress.completed {
+            KoboReadingStateStatus::Finished
+        } else {
+            KoboReadingStateStatus::Reading
         },
-        "StatusInfo": {
-            "LastModified": progress.last_modified,
-            "Status": if progress.completed { "Finished" } else { "Reading" },
-            "TimesStartedReading": 1,
-        },
-    })
+        times_started_reading: 1,
+        total_progress_percent,
+        content_source_progress_percent,
+        location,
+    }
 }
 
 fn device_progress_error_from_epub_error(error: EpubNavigationError) -> DeviceProgressError {

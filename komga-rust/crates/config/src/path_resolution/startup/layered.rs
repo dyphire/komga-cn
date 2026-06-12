@@ -1,4 +1,9 @@
-use super::*;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
+
+use config::{Config as LayeredConfig, Environment, File as ConfigFile, FileFormat};
+
+use crate::error::ConfigError;
 
 pub(crate) fn build_layered_config(
     config_dir: &Path,

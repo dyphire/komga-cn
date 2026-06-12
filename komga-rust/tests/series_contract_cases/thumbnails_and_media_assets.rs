@@ -20,6 +20,37 @@ async fn seed_book_thumbnail_bytes(
 }
 
 #[tokio::test]
+async fn router_series_thumbnail_returns_internal_error_when_existence_check_fails() {
+    let ctx = TestFixture::new("router-series-thumbnail-existence-check-error").await;
+    let auth_token = ctx.login_admin().await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("series thumbnail existence failure db should open");
+    sqlx::query("ALTER TABLE SERIES RENAME TO SERIES_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("series table should be renamed for thumbnail existence failure");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/series/series-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series thumbnail existence failure request should build"),
+        )
+        .await
+        .expect("series thumbnail existence failure request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
 async fn router_series_thumbnail_upload_parses_multipart_image_and_selected_flag() {
     let ctx = TestFixture::new("router-series-thumbnail-upload-multipart").await;
     let auth_token = ctx.login_admin().await;

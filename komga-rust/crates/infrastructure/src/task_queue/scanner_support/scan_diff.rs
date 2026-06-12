@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::ErrorKind;
 
 use sqlx::{Row, SqlitePool};
 
@@ -7,18 +8,21 @@ use crate::persisted_paths::resolve_stored_path;
 
 use super::scan_discovery::{
     build_sidecars, collect_series_directories, is_hidden_path, is_supported_book_file,
-    metadata_updated_unix_seconds, resolve_oneshot_series_id, route_safe_scanner_id,
-    scanner_url_key,
+    metadata_updated_unix_seconds, path_file_name_utf8, path_file_stem_utf8,
+    resolve_oneshot_series_id, route_safe_scanner_id, scanner_url_key,
 };
-use super::scan_models::*;
+use super::scan_models::{
+    ExistingScannedBookRow, ExistingScannedSeriesRow, LibraryScanConfig, ScannedBookRow,
+    ScannedLibrary, ScannedSeriesRow,
+};
 
-pub(crate) async fn scan_library(
+pub(super) async fn scan_library(
     pool: &SqlitePool,
     library_id: &str,
     deep_scan: bool,
 ) -> Result<ScannedLibrary, String> {
     let Some(scan_config) = load_library_scan_config(pool, library_id).await? else {
-        return Ok(unavailable_scanned_library());
+        return Err(format!("library '{library_id}' does not exist"));
     };
 
     let existing_books_by_url = load_existing_scanned_books_by_url(pool, library_id).await?;
@@ -32,7 +36,7 @@ pub(crate) async fn scan_library(
     )
 }
 
-pub(crate) fn build_scanned_library(
+pub(super) fn build_scanned_library(
     scan_config: LibraryScanConfig,
     existing_books_by_url: HashMap<String, ExistingScannedBookRow>,
     existing_series_by_url: HashMap<String, ExistingScannedSeriesRow>,
@@ -44,8 +48,17 @@ pub(crate) fn build_scanned_library(
         .map(|value| value.to_ascii_lowercase());
 
     let root = resolve_stored_path(&scan_config.root);
-    if !root.exists() {
-        return Ok(unavailable_scanned_library());
+    match fs::metadata(&root) {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(unavailable_scanned_library());
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect library scan root '{}': {error}",
+                root.display()
+            ));
+        }
     }
     let existing_books_by_url = existing_books_by_url
         .into_iter()
@@ -74,29 +87,43 @@ pub(crate) fn build_scanned_library(
         let series_is_oneshot = oneshots_directory
             .as_ref()
             .is_some_and(|value| series_url.to_ascii_lowercase().contains(value));
-        let series_dir_last_modified_unix_seconds = fs::metadata(&series_dir)
-            .ok()
-            .map(|value| metadata_updated_unix_seconds(&value))
-            .unwrap_or(0);
+        let series_dir_metadata = fs::metadata(&series_dir).map_err(|error| {
+            format!(
+                "failed to read series directory metadata for '{}': {error}",
+                series_dir.display()
+            )
+        })?;
+        let series_dir_last_modified_unix_seconds =
+            metadata_updated_unix_seconds(&series_dir_metadata, series_dir.as_path())?;
 
-        let Ok(entries) = fs::read_dir(&series_dir) else {
-            continue;
-        };
+        let entries = fs::read_dir(&series_dir).map_err(|error| {
+            format!(
+                "failed to scan series directory '{}': {error}",
+                series_dir.display()
+            )
+        })?;
 
         let mut books = Vec::new();
         let mut changed_book_candidates = Vec::new();
         let mut sidecar_candidates = Vec::new();
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to read directory entry in '{}': {error}",
+                    series_dir.display()
+                )
+            })?;
             let path = entry.path();
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
 
-            if !metadata.is_file() {
+            if is_hidden_path(path.as_path()) {
                 continue;
             }
 
-            if is_hidden_path(path.as_path()) {
+            let metadata = entry.metadata().map_err(|error| {
+                format!("failed to read metadata for '{}': {error}", path.display())
+            })?;
+
+            if !metadata.is_file() {
                 continue;
             }
 
@@ -107,17 +134,10 @@ pub(crate) fn build_scanned_library(
                     .get(&book_url_key)
                     .map(|existing| existing.book_id.clone())
                     .unwrap_or_else(|| route_safe_scanner_id("book", path.as_path()));
-                let file_last_modified_unix_seconds = metadata_updated_unix_seconds(&metadata);
-                let book_name = path
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let file_name = path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or_default()
-                    .to_string();
+                let file_last_modified_unix_seconds =
+                    metadata_updated_unix_seconds(&metadata, path.as_path())?;
+                let book_name = path_file_stem_utf8(path.as_path())?.to_string();
+                let file_name = path_file_name_utf8(path.as_path())?.to_string();
 
                 if let Some(existing) = existing_books_by_url.get(&book_url_key)
                     && existing.file_last_modified_unix_seconds != file_last_modified_unix_seconds
@@ -174,7 +194,7 @@ pub(crate) fn build_scanned_library(
                 &books,
                 &sidecar_candidates,
                 false,
-            ));
+            )?);
             for book in &books {
                 let book_url_key = scanner_url_key(root.as_path(), &book.book_url);
                 let series_id = resolve_oneshot_series_id(
@@ -221,18 +241,14 @@ pub(crate) fn build_scanned_library(
             changed_existing_book_ids.extend(changed_book_candidates);
         }
         discovered_series_ids.insert(series_id.clone());
-        let series_name = series_dir
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_string();
+        let series_name = path_file_name_utf8(series_dir.as_path())?.to_string();
 
         sidecars.extend(build_sidecars(
             &series_url,
             &books,
             &sidecar_candidates,
             true,
-        ));
+        )?);
 
         series_rows.push(ScannedSeriesRow {
             series_id,
@@ -281,7 +297,7 @@ fn unavailable_scanned_library() -> ScannedLibrary {
     }
 }
 
-pub(crate) async fn load_library_scan_config(
+pub(super) async fn load_library_scan_config(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<LibraryScanConfig>, String> {
@@ -329,7 +345,7 @@ async fn load_existing_scanned_books_by_url(
     library_id: &str,
 ) -> Result<HashMap<String, ExistingScannedBookRow>, String> {
     let rows = sqlx::query(
-        r#"SELECT ID, URL, SERIES_ID, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
+        r#"SELECT ID, URL, SERIES_ID, oneshot AS ONESHOT, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM BOOK
 WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
@@ -361,7 +377,7 @@ async fn load_existing_scanned_series_by_url(
     library_id: &str,
 ) -> Result<HashMap<String, ExistingScannedSeriesRow>, String> {
     let rows = sqlx::query(
-        r#"SELECT URL, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
+        r#"SELECT URL, oneshot AS ONESHOT, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM SERIES
 WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
@@ -384,4 +400,77 @@ WHERE LIBRARY_ID = ?
             )
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn temp_library_path(case_id: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-rust-scan-diff-{case_id}-{nanos}"))
+    }
+
+    fn scan_config_for_root(root: &std::path::Path) -> LibraryScanConfig {
+        LibraryScanConfig {
+            root: root.to_string_lossy().to_string(),
+            scan_cbx: true,
+            scan_pdf: true,
+            scan_epub: true,
+            scan_force_modified_time: false,
+            oneshots_directory: None,
+            scan_directory_exclusions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn scan_propagates_root_metadata_errors() {
+        let root = temp_library_path("root-metadata-error");
+        std::fs::create_dir_all(&root).expect("scan fixture root should exist");
+        std::fs::write(root.join("blocked"), b"not a directory")
+            .expect("blocking root component should be written");
+        let scan_root = root.join("blocked/library");
+
+        let error = build_scanned_library(
+            scan_config_for_root(scan_root.as_path()),
+            HashMap::new(),
+            HashMap::new(),
+            false,
+        )
+        .expect_err("scanner root metadata errors should be propagated");
+
+        assert!(error.contains("failed to inspect library scan root"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_rejects_book_paths_without_utf8_file_names() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = temp_library_path("invalid-book-name");
+        let series_dir = root.join("Series 1");
+        std::fs::create_dir_all(&series_dir).expect("series fixture directory should exist");
+        let invalid_book = series_dir.join(OsString::from_vec(b"\xff.cbz".to_vec()));
+        std::fs::write(&invalid_book, b"book").expect("book fixture should be written");
+
+        let error = build_scanned_library(
+            scan_config_for_root(root.as_path()),
+            HashMap::new(),
+            HashMap::new(),
+            false,
+        )
+        .expect_err("scanner should not persist empty names for non-UTF-8 book paths");
+
+        assert!(error.contains("valid UTF-8 file stem"), "{error}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

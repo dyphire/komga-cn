@@ -1,21 +1,10 @@
 use axum::http::{HeaderMap, header};
-use serde_json::Value;
 
 pub(super) fn intersection(requested: &[String], authorized: &[String]) -> Vec<String> {
     requested
         .iter()
         .filter(|candidate| authorized.contains(*candidate))
         .cloned()
-        .collect::<Vec<_>>()
-}
-
-pub(super) fn normalized_labels(labels: &[Value]) -> Vec<String> {
-    labels
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .map(|label| label.to_ascii_lowercase())
         .collect::<Vec<_>>()
 }
 

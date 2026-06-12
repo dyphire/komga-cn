@@ -35,9 +35,19 @@ pub struct OpdsLibrarySeriesQuery<'a> {
     pub size: usize,
 }
 
-/// Port for OPDS catalog browsing operations.
+pub struct OpdsSeriesFeedPage {
+    pub series: Vec<OpdsSeriesEntry>,
+    pub has_next: bool,
+}
+
+pub struct BrowseSeriesNavigationPage {
+    pub entries: Vec<BrowseSeriesNavigationEntry>,
+    pub total_count: usize,
+}
+
+/// Port for OPDS feed queries.
 #[async_trait]
-pub trait OpdsCatalogPort: Send + Sync {
+pub trait OpdsFeedCatalogPort: Send + Sync {
     async fn load_book_feed_page(
         &self,
         query: OpdsBookFeedQuery<'_>,
@@ -51,8 +61,12 @@ pub trait OpdsCatalogPort: Send + Sync {
     async fn load_library_series_feed_page(
         &self,
         query: OpdsLibrarySeriesQuery<'_>,
-    ) -> Result<(Vec<OpdsSeriesEntry>, bool), String>;
+    ) -> Result<OpdsSeriesFeedPage, String>;
+}
 
+/// Port for OPDS catalog browsing operations.
+#[async_trait]
+pub trait OpdsBrowseCatalogPort: Send + Sync {
     async fn load_browse_series_navigation_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
@@ -60,7 +74,7 @@ pub trait OpdsCatalogPort: Send + Sync {
         publishers: &[String],
         page: usize,
         size: usize,
-    ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String>;
+    ) -> Result<BrowseSeriesNavigationPage, String>;
 
     async fn load_browse_publisher_entries(
         &self,

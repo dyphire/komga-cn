@@ -1,38 +1,44 @@
-use std::io::Read;
-
-use flate2::read::GzDecoder;
-use serde_json::Value;
 use sqlx::{Row, SqlitePool};
 
 use crate::resolve_optional_library_item_path;
 
-pub use komga_application::identity_access::{
-    KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
+use komga_application::identity_access::{
+    DeviceThumbnailBinary, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 
-fn decode_epub_extension_is_fixed_layout(blob: &[u8]) -> bool {
-    let mut decoder = GzDecoder::new(blob);
-    let mut json = String::new();
-    if decoder.read_to_string(&mut json).is_err() {
-        return false;
-    }
-    serde_json::from_str::<Value>(&json)
-        .ok()
-        .and_then(|value| value.get("isFixedLayout").and_then(Value::as_bool))
-        .unwrap_or(false)
+pub(crate) struct PersistedKoboMetadataRecord {
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) release_date: Option<String>,
+    pub(crate) created_date: Option<String>,
+    pub(crate) language: String,
+    pub(crate) file_size: u64,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) contributor_names: Vec<String>,
+    pub(crate) isbn: Option<String>,
+    pub(crate) publisher_name: Option<String>,
+    pub(crate) cover_image_id: Option<String>,
+    pub(crate) series_id: Option<String>,
+    pub(crate) series_name: Option<String>,
+    pub(crate) series_number: Option<String>,
+    pub(crate) series_number_float: Option<f64>,
+    pub(crate) oneshot: bool,
+    pub(crate) is_kepub: bool,
+    pub(crate) epub_extension_blob: Option<Vec<u8>>,
 }
 
-pub async fn load_kobo_metadata_record(
+pub(crate) async fn load_kobo_metadata_record(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<KoboMetadataRecord>, sqlx::Error> {
+) -> Result<Option<PersistedKoboMetadataRecord>, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT COALESCE(bm.TITLE, b.NAME) AS TITLE,
        COALESCE(bm.SUMMARY, '') AS SUMMARY,
        bm.RELEASE_DATE AS RELEASE_DATE,
        COALESCE(bm.CREATED_DATE, b.CREATED_DATE, '') AS CREATED_DATE,
        COALESCE(sm.LANGUAGE, 'en') AS LANGUAGE,
-       COALESCE(b.FILE_SIZE, 0) AS FILE_SIZE,
+       b.FILE_SIZE AS FILE_SIZE,
        b.NAME AS FILE_NAME,
        COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
        NULLIF(TRIM(bm.ISBN), '') AS ISBN,
@@ -42,7 +48,7 @@ pub async fn load_kobo_metadata_record(
        sm.TITLE AS SERIES_NAME,
        NULLIF(TRIM(bm.NUMBER), '') AS SERIES_NUMBER,
        bm.NUMBER_SORT AS SERIES_NUMBER_FLOAT,
-       COALESCE(b.ONESHOT, FALSE) AS ONESHOT,
+       b.ONESHOT AS ONESHOT,
        COALESCE(m.EPUB_IS_KEPUB, FALSE) AS EPUB_IS_KEPUB,
        m.EXTENSION_VALUE_BLOB AS EXTENSION_VALUE_BLOB
  FROM BOOK b
@@ -76,7 +82,7 @@ pub async fn load_kobo_metadata_record(
         .map(|row| row.get::<String, _>("NAME"))
         .collect::<Vec<_>>();
 
-    Ok(row.map(|row| KoboMetadataRecord {
+    Ok(row.map(|row| PersistedKoboMetadataRecord {
         title: row.get::<String, _>("TITLE"),
         summary: row.get::<String, _>("SUMMARY"),
         release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
@@ -103,17 +109,14 @@ pub async fn load_kobo_metadata_record(
         series_number_float: row.get::<Option<f64>, _>("SERIES_NUMBER_FLOAT"),
         oneshot: row.get::<bool, _>("ONESHOT"),
         is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
-        is_pre_paginated: row
-            .get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB")
-            .as_deref()
-            .is_some_and(decode_epub_extension_is_fixed_layout),
+        epub_extension_blob: row.get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB"),
     }))
 }
 
-pub async fn load_thumbnail_by_id(
+pub(crate) async fn load_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<(String, Vec<u8>)>, sqlx::Error> {
+) -> Result<Option<DeviceThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
  FROM THUMBNAIL_BOOK tb
@@ -124,7 +127,8 @@ pub async fn load_thumbnail_by_id(
     )
     .bind(thumbnail_id)
     .fetch_optional(pool)
-    .await?;
+    .await
+    .map_err(|error| format!("load Kobo thumbnail '{thumbnail_id}': {error}"))?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -132,25 +136,34 @@ pub async fn load_thumbnail_by_id(
 
     let media_type = row.get::<String, _>("MEDIA_TYPE");
     if let Some(thumbnail) = row.get::<Option<Vec<u8>>, _>("THUMBNAIL") {
-        return Ok(Some((media_type, thumbnail)));
+        return Ok(Some(DeviceThumbnailBinary {
+            media_type,
+            bytes: thumbnail,
+        }));
     }
 
     let Some(url) = row.get::<Option<String>, _>("URL") else {
         return Ok(None);
     };
     let library_root = row.get::<Option<String>, _>("LIBRARY_ROOT");
-    let sidecar_path = resolve_optional_library_item_path(library_root.as_deref(), &url);
-    let Some(sidecar_path) = sidecar_path else {
-        return Ok(None);
-    };
+    let sidecar_path = resolve_optional_library_item_path(library_root.as_deref(), &url)
+        .ok_or_else(|| {
+            format!("persisted Kobo thumbnail sidecar URL requires a library root: {url}")
+        })?;
 
-    match std::fs::read(&sidecar_path) {
-        Ok(bytes) => Ok(Some((media_type, bytes))),
-        Err(_) => Ok(None),
-    }
+    let bytes = std::fs::read(&sidecar_path).map_err(|error| {
+        format!(
+            "read Kobo thumbnail sidecar {}: {error}",
+            sidecar_path.display()
+        )
+    })?;
+    Ok(Some(DeviceThumbnailBinary { media_type, bytes }))
 }
 
-pub async fn persisted_book_exists(pool: &SqlitePool, book_id: &str) -> Result<bool, sqlx::Error> {
+pub(crate) async fn persisted_book_exists(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT 1 AS FOUND
  FROM BOOK
@@ -164,57 +177,7 @@ pub async fn persisted_book_exists(pool: &SqlitePool, book_id: &str) -> Result<b
     Ok(row.is_some())
 }
 
-pub async fn load_book_last_epub_position_locator(
-    pool: &SqlitePool,
-    book_id: &str,
-) -> Result<Option<Value>, sqlx::Error> {
-    let row = sqlx::query(
-        r#"SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB
- FROM MEDIA
- WHERE BOOK_ID = ?
- LIMIT 1"#,
-    )
-    .bind(book_id)
-    .fetch_optional(pool)
-    .await?;
-
-    let Some(row) = row else {
-        return Ok(None);
-    };
-
-    let extension_class = row
-        .get::<Option<String>, _>("EXTENSION_CLASS")
-        .unwrap_or_default();
-    if !extension_class.is_empty()
-        && !extension_class
-            .to_ascii_lowercase()
-            .contains("mediaextensionepub")
-    {
-        return Ok(None);
-    }
-
-    let Some(blob) = row.get::<Option<Vec<u8>>, _>("EXTENSION_VALUE_BLOB") else {
-        return Ok(None);
-    };
-
-    let mut decoder = GzDecoder::new(blob.as_slice());
-    let mut decoded = Vec::new();
-    if decoder.read_to_end(&mut decoded).is_err() {
-        return Ok(None);
-    }
-
-    let extension_json = match serde_json::from_slice::<Value>(&decoded) {
-        Ok(value) => value,
-        Err(_) => return Ok(None),
-    };
-
-    Ok(extension_json
-        .get("positions")
-        .and_then(Value::as_array)
-        .and_then(|positions| positions.last().cloned()))
-}
-
-pub async fn load_book_created_timestamp(
+pub(crate) async fn load_book_created_timestamp(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<String>, sqlx::Error> {
@@ -235,7 +198,7 @@ pub async fn load_book_created_timestamp(
         .filter(|value| !value.trim().is_empty()))
 }
 
-pub async fn load_read_progress(
+pub(crate) async fn load_read_progress(
     pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
@@ -270,7 +233,7 @@ pub async fn load_read_progress(
     }))
 }
 
-pub async fn load_koreader_book_target(
+pub(crate) async fn load_koreader_book_target(
     pool: &SqlitePool,
     book_hash: &str,
 ) -> Result<Option<KoreaderBookTarget>, KoreaderBookLookupError> {

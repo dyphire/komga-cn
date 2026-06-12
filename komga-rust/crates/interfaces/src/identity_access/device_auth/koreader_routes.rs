@@ -1,7 +1,21 @@
-use super::*;
-use axum::extract::State;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Extension, Path, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{
+    DeviceProgressError, KoreaderProgressUpdate, now_sync_marker,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::access_log::RequestConnectionInfo;
+use crate::identity_access::device_auth::auth_resolvers::{
+    raw_koreader_header_user, required_koreader_user, required_koreader_user_id,
+};
+use crate::identity_access::device_auth::device_progress_service;
+use crate::state::IdentityAccessState;
 
 const KOREADER_VENDOR_MEDIA_TYPE: &str = "application/vnd.koreader.v1+json";
 const KOREADER_PROGRESS_PATH: &str = "/koreader/syncs/progress";
@@ -72,7 +86,7 @@ fn koreader_progress_error_response(
         .into_response()
 }
 
-pub async fn koreader_user_create(
+pub(crate) async fn koreader_user_create(
     State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -100,7 +114,7 @@ pub async fn koreader_user_create(
         .into_response()
 }
 
-pub async fn koreader_user_auth(
+pub(crate) async fn koreader_user_auth(
     State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -123,7 +137,7 @@ pub async fn koreader_user_auth(
         .into_response()
 }
 
-pub async fn koreader_get_progress(
+pub(crate) async fn koreader_get_progress(
     State(app): State<IdentityAccessState>,
     Path(book_hash): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
@@ -137,7 +151,13 @@ pub async fn koreader_get_progress(
             Err(status) => return status.into_response(),
         };
 
-    let progress = match device_progress_service(&app)
+    let progress_service = device_progress_service(
+        app.identity.device_sync(),
+        app.device_progress_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
+        app.progress.as_ref(),
+    );
+    let progress = match progress_service
         .koreader_progress(&book_hash, &user_id_value)
         .await
     {
@@ -191,7 +211,7 @@ pub async fn koreader_get_progress(
         .into_response()
 }
 
-pub async fn koreader_put_progress(
+pub(crate) async fn koreader_put_progress(
     State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
@@ -211,7 +231,13 @@ pub async fn koreader_put_progress(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    if let Err(error) = device_progress_service(&app)
+    let progress_service = device_progress_service(
+        app.identity.device_sync(),
+        app.device_progress_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
+        app.progress.as_ref(),
+    );
+    if let Err(error) = progress_service
         .update_koreader_progress(
             &user_id_value,
             KoreaderProgressUpdate {

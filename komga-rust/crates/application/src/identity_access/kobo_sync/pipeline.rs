@@ -1,15 +1,14 @@
-use async_trait::async_trait;
-use serde_json::Value;
+use std::collections::HashMap;
 
-use crate::identity_access::{KoboMetadataRecord, PersistedReadProgressRecord, user_id};
+use async_trait::async_trait;
+
+use crate::identity_access::user_id;
 
 use super::lifecycle::KoboSyncLifecycle;
 use super::{
-    KoboLibrarySyncRequest, KoboLibrarySyncResponse, KoboStoreSyncMergeResult,
-    KoboSyncBookSnapshot, KoboSyncPage, KoboSyncPageRequest, KoboSyncReadProgressSnapshot,
-    build_kobo_changed_entitlement_removed, build_kobo_changed_product_metadata,
-    build_kobo_changed_reading_state, build_kobo_changed_tag, build_kobo_deleted_tag,
-    build_kobo_new_entitlement, build_kobo_new_tag,
+    KoboLibrarySyncRequest, KoboLibrarySyncResponse, KoboProxyHeader, KoboStoreSyncMergeResult,
+    KoboSyncBookSnapshot, KoboSyncBookState, KoboSyncEvent, KoboSyncPage, KoboSyncPageRequest,
+    KoboSyncPointBook,
 };
 
 pub struct KoboLibrarySyncService<'a> {
@@ -21,16 +20,11 @@ pub struct KoboLibrarySyncService<'a> {
 pub trait KoboSyncStatePort: Send + Sync {
     async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String>;
 
-    async fn load_kobo_metadata_record(
+    async fn load_sync_book_states(
         &self,
-        book_id: &str,
-    ) -> Result<Option<KoboMetadataRecord>, String>;
-
-    async fn load_read_progress(
-        &self,
-        book_id: &str,
+        books: &[KoboSyncPointBook],
         user_id: &str,
-    ) -> Result<Option<PersistedReadProgressRecord>, String>;
+    ) -> Result<Vec<KoboSyncBookState>, String>;
 
     async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String>;
 }
@@ -39,7 +33,7 @@ pub trait KoboSyncStatePort: Send + Sync {
 pub trait KoboStoreSyncPort: Send + Sync {
     async fn sync_store_library(
         &self,
-        forwarded_headers: &[(String, String)],
+        forwarded_headers: &[KoboProxyHeader],
         query: Option<&str>,
         raw_sync_token: &str,
     ) -> Result<KoboStoreSyncMergeResult, String>;
@@ -78,7 +72,7 @@ impl<'a> KoboLibrarySyncService<'a> {
                 )
                 .await
         {
-            merged_events.extend(store_response.events);
+            merged_events.extend(store_response.events.into_iter().map(KoboSyncEvent::Raw));
             merged_should_continue = store_response.should_continue;
             if let Some(raw_store_sync_token) = store_response.raw_sync_token
                 && !raw_store_sync_token.trim().is_empty()
@@ -110,145 +104,108 @@ impl<'a> KoboLibrarySyncService<'a> {
         &self,
         request: &KoboLibrarySyncRequest,
         page: &KoboSyncPage,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<Vec<KoboSyncEvent>, String> {
         let user_id_value = user_id(&request.user);
+        let book_states = self.load_sync_book_state_map(page, user_id_value).await?;
         let mut events = Vec::new();
 
         for book in &page.books_added {
-            let metadata = self
-                .state
-                .load_kobo_metadata_record(&book.book_id)
-                .await?
-                .ok_or_else(|| "kobo metadata record not found".to_string())?;
-            let progress = self
-                .state
-                .load_read_progress(&book.book_id, user_id_value)
-                .await?
-                .as_ref()
-                .map(progress_snapshot);
-            let snapshot = sync_book_snapshot_from_metadata(
-                &book.book_id,
-                &book.created,
-                &book.file_last_modified,
-                &metadata,
-            );
-            events.push(build_kobo_new_entitlement(
-                &snapshot,
-                progress.as_ref(),
-                request.base_url.as_str(),
-                request.auth_token.as_str(),
-            ));
+            let state = required_book_state(&book_states, &book.book_id)?;
+            let snapshot = required_book_snapshot(state)?.clone();
+            events.push(KoboSyncEvent::NewEntitlement {
+                book: snapshot,
+                progress: state.progress.clone(),
+            });
         }
 
         for book in &page.books_changed {
-            let metadata = self
-                .state
-                .load_kobo_metadata_record(&book.book_id)
-                .await?
-                .ok_or_else(|| "kobo metadata record not found".to_string())?;
-            let progress = self
-                .state
-                .load_read_progress(&book.book_id, user_id_value)
-                .await?
-                .as_ref()
-                .map(progress_snapshot);
-            let snapshot = sync_book_snapshot_from_metadata(
-                &book.book_id,
-                &book.created,
-                &book.file_last_modified,
-                &metadata,
-            );
-            events.push(build_kobo_new_entitlement(
-                &snapshot,
-                progress.as_ref(),
-                request.base_url.as_str(),
-                request.auth_token.as_str(),
-            ));
-            events.push(build_kobo_changed_product_metadata(
-                &snapshot,
-                request.base_url.as_str(),
-                request.auth_token.as_str(),
-            ));
-            if let Some(progress) = progress.as_ref() {
-                events.push(build_kobo_changed_reading_state(&snapshot, progress));
+            let state = required_book_state(&book_states, &book.book_id)?;
+            let snapshot = required_book_snapshot(state)?.clone();
+            events.push(KoboSyncEvent::NewEntitlement {
+                book: snapshot.clone(),
+                progress: state.progress.clone(),
+            });
+            events.push(KoboSyncEvent::ChangedProductMetadata {
+                book: snapshot.clone(),
+            });
+            if let Some(progress) = state.progress.clone() {
+                events.push(KoboSyncEvent::ChangedReadingState {
+                    book: snapshot,
+                    progress,
+                });
             }
         }
 
         for book in &page.books_removed {
             let snapshot =
                 removed_book_snapshot(&book.book_id, &book.created, &book.file_last_modified);
-            events.push(build_kobo_changed_entitlement_removed(
-                &snapshot,
-                request.base_url.as_str(),
-                request.auth_token.as_str(),
-            ));
+            events.push(KoboSyncEvent::ChangedEntitlementRemoved { book: snapshot });
         }
 
         for book in &page.books_read_progress_changed {
-            if let Some(progress) = self
-                .state
-                .load_read_progress(&book.book_id, user_id_value)
-                .await?
-            {
-                let metadata = self
-                    .state
-                    .load_kobo_metadata_record(&book.book_id)
-                    .await?
-                    .ok_or_else(|| "kobo metadata record not found".to_string())?;
-                let snapshot = sync_book_snapshot_from_metadata(
-                    &book.book_id,
-                    &book.created,
-                    &book.file_last_modified,
-                    &metadata,
-                );
-                let progress = progress_snapshot(&progress);
-                events.push(build_kobo_changed_reading_state(&snapshot, &progress));
+            let state = required_book_state(&book_states, &book.book_id)?;
+            if let Some(progress) = state.progress.clone() {
+                let snapshot = required_book_snapshot(state)?.clone();
+                events.push(KoboSyncEvent::ChangedReadingState {
+                    book: snapshot,
+                    progress,
+                });
             }
         }
 
         for readlist in &page.readlists_added {
-            events.push(build_kobo_new_tag(readlist));
+            events.push(KoboSyncEvent::NewTag {
+                readlist: readlist.clone(),
+            });
         }
         for readlist in &page.readlists_changed {
-            events.push(build_kobo_changed_tag(readlist));
+            events.push(KoboSyncEvent::ChangedTag {
+                readlist: readlist.clone(),
+            });
         }
         for readlist in &page.readlists_removed {
-            events.push(build_kobo_deleted_tag(readlist));
+            events.push(KoboSyncEvent::DeletedTag {
+                readlist: readlist.clone(),
+            });
         }
 
         Ok(events)
     }
+
+    async fn load_sync_book_state_map(
+        &self,
+        page: &KoboSyncPage,
+        user_id: &str,
+    ) -> Result<HashMap<String, KoboSyncBookState>, String> {
+        let books = page
+            .books_added
+            .iter()
+            .chain(&page.books_changed)
+            .chain(&page.books_read_progress_changed)
+            .cloned()
+            .collect::<Vec<_>>();
+        let states = self.state.load_sync_book_states(&books, user_id).await?;
+        Ok(states
+            .into_iter()
+            .map(|state| (state.book_id.clone(), state))
+            .collect())
+    }
 }
 
-fn sync_book_snapshot_from_metadata(
+fn required_book_state<'a>(
+    states: &'a HashMap<String, KoboSyncBookState>,
     book_id: &str,
-    created: &str,
-    file_last_modified: &str,
-    metadata: &KoboMetadataRecord,
-) -> KoboSyncBookSnapshot {
-    KoboSyncBookSnapshot {
-        id: book_id.to_string(),
-        title: metadata.title.clone(),
-        summary: metadata.summary.clone(),
-        release_date: metadata.release_date.clone(),
-        language: metadata.language.clone(),
-        file_size: metadata.file_size,
-        page_count: 1,
-        created: metadata
-            .created_date
-            .clone()
-            .unwrap_or_else(|| created.to_string()),
-        last_modified: file_last_modified.to_string(),
-        contributor_names: metadata.contributor_names.clone(),
-        isbn: metadata.isbn.clone(),
-        publisher_name: metadata.publisher_name.clone(),
-        cover_image_id: metadata.cover_image_id.clone(),
-        series_id: metadata.series_id.clone(),
-        series_name: metadata.series_name.clone(),
-        series_number: metadata.series_number.clone(),
-        series_number_float: metadata.series_number_float,
-        oneshot: metadata.oneshot,
-    }
+) -> Result<&'a KoboSyncBookState, String> {
+    states
+        .get(book_id)
+        .ok_or_else(|| format!("kobo sync book state not found for {book_id}"))
+}
+
+fn required_book_snapshot(state: &KoboSyncBookState) -> Result<&KoboSyncBookSnapshot, String> {
+    state
+        .book
+        .as_ref()
+        .ok_or_else(|| format!("kobo sync book snapshot not found for {}", state.book_id))
 }
 
 fn removed_book_snapshot(
@@ -275,15 +232,5 @@ fn removed_book_snapshot(
         series_number: None,
         series_number_float: None,
         oneshot: true,
-    }
-}
-
-fn progress_snapshot(record: &PersistedReadProgressRecord) -> KoboSyncReadProgressSnapshot {
-    KoboSyncReadProgressSnapshot {
-        page: record.page,
-        completed: record.completed,
-        created: record.created.clone(),
-        last_modified: record.last_modified.clone(),
-        locator: record.locator.clone(),
     }
 }

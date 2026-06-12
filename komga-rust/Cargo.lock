@@ -2583,9 +2583,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "flate2",
+ "getrandom 0.3.4",
  "icu",
  "komga-domain",
+ "language-tags",
+ "quick-xml",
  "regex",
  "serde",
  "serde_json",
@@ -2593,6 +2595,7 @@ dependencies = [
  "time",
  "tokio",
  "tsid",
+ "url",
 ]
 
 [[package]]
@@ -2628,12 +2631,11 @@ name = "komga-infrastructure"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "axum",
- "axum-extra",
  "base64 0.22.1",
  "bcrypt",
  "flate2",
  "futures-util",
+ "getrandom 0.3.4",
  "icu",
  "image",
  "komga-application",
@@ -2654,10 +2656,12 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tantivy",
+ "time",
  "tokio",
  "tracing",
  "unicode-normalization",
  "unrar",
+ "url",
  "windows-sys 0.61.2",
  "zip",
 ]
@@ -2682,7 +2686,6 @@ dependencies = [
  "komga-infrastructure",
  "komga-kepubify",
  "komga-oauth",
- "language-tags",
  "lopdf",
  "mime_guess",
  "oauth2",
@@ -2697,6 +2700,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-stream",
+ "tower",
  "tower-http",
  "tracing",
  "unicode-normalization",
@@ -2774,6 +2778,7 @@ dependencies = [
  "bcrypt",
  "flate2",
  "futures-util",
+ "getrandom 0.3.4",
  "image",
  "komga-application",
  "komga-build-support",

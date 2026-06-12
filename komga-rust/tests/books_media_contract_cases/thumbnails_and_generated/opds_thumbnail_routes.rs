@@ -216,7 +216,7 @@ async fn router_opds_v1_book_thumbnail_small_returns_selected_generated_thumbnai
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
-    generate_book_thumbnail(&pool, "book-1")
+    generate_book_thumbnail_with_isolated_events(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before small generated test");
 
@@ -376,7 +376,7 @@ async fn router_opds_v2_book_thumbnail_ignores_mutated_generated_thumbnail_bytes
         let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
             .expect("pool for generate_book_thumbnail");
-        generate_book_thumbnail(&pool, book_id)
+        generate_book_thumbnail_with_isolated_events(&pool, book_id)
             .await
             .expect("generate_book_thumbnail should succeed before generated-source test");
 

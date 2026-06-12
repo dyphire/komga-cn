@@ -6,12 +6,23 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 
-use crate::identity_access::auth::{AuthUser, user_shared_all_libraries, user_shared_library_ids};
-use crate::state::{OpdsCatalogPort, OpdsPersistedPort, PersistedLibraryRecord};
+use komga_application::identity_access::{
+    AuthUser, user_shared_all_libraries, user_shared_library_ids,
+};
+use komga_application::opds::{
+    OpdsBrowseCatalogPort, OpdsLibraryPersistedPort, OpdsSearchPersistedPort,
+    OpdsSeriesPersistedPort, PersistedLibraryRecord,
+};
 
 use super::types::{PersistedLibrary, PersistedSeries, PersistedSeriesSearchResult};
 
 mod catalog_queries;
+
+#[derive(Default)]
+pub(super) struct OpdsJsonNavigationPage {
+    pub(super) entries: Vec<Value>,
+    pub(super) total_count: usize,
+}
 
 pub(super) fn allowed_library_ids_for_user(user: &AuthUser) -> Option<HashSet<String>> {
     if user_shared_all_libraries(user) {
@@ -32,39 +43,47 @@ pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &st
     }
 }
 
-pub(super) async fn load_libraries(
-    backend: &dyn OpdsPersistedPort,
-) -> Result<Vec<PersistedLibrary>, String> {
+pub(super) async fn load_libraries<P>(backend: &P) -> Result<Vec<PersistedLibrary>, String>
+where
+    P: OpdsLibraryPersistedPort + ?Sized,
+{
     let records = backend.load_libraries().await?;
     Ok(records.into_iter().map(map_library_record).collect())
 }
 
-pub(super) async fn load_library(
-    backend: &dyn OpdsPersistedPort,
+pub(super) async fn load_library<P>(
+    backend: &P,
     library_id: &str,
-) -> Result<Option<PersistedLibrary>, String> {
+) -> Result<Option<PersistedLibrary>, String>
+where
+    P: OpdsLibraryPersistedPort + ?Sized,
+{
     let record = backend.load_library(library_id).await?;
     Ok(record.map(map_library_record))
 }
 
-pub(super) async fn load_series_tags(
-    backend: &dyn OpdsPersistedPort,
-    series_id: &str,
-) -> Result<Vec<String>, String> {
+pub(super) async fn load_series_tags<P>(backend: &P, series_id: &str) -> Result<Vec<String>, String>
+where
+    P: OpdsSeriesPersistedPort + ?Sized,
+{
     backend.load_series_tags(series_id).await
 }
 
-pub(super) async fn load_opds_v1_series_search_results(
-    persisted_backend: &dyn OpdsPersistedPort,
-    catalog_backend: &dyn OpdsCatalogPort,
+pub(super) async fn load_opds_v1_series_search_results<P>(
+    persisted_backend: &P,
+    catalog_backend: &dyn OpdsBrowseCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
     search: &str,
     publishers: &[String],
-) -> Result<Vec<PersistedSeriesSearchResult>, String> {
-    let (series_rows, _, _, _) = persisted_backend
+) -> Result<Vec<PersistedSeriesSearchResult>, String>
+where
+    P: OpdsSearchPersistedPort + ?Sized,
+{
+    let records = persisted_backend
         .load_unified_search_results(search)
         .await?;
-    let series = series_rows
+    let series = records
+        .series
         .into_iter()
         .map(|row| PersistedSeriesSearchResult {
             id: row.id,
@@ -116,14 +135,14 @@ pub(super) async fn load_opds_v1_series_search_results(
 }
 
 pub(super) async fn load_browse_series_navigation(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
     publishers: &[String],
     page: usize,
     size: usize,
-) -> Result<(Vec<Value>, usize), String> {
+) -> Result<OpdsJsonNavigationPage, String> {
     catalog_queries::load_browse_series_navigation(
         backend,
         headers,
@@ -137,7 +156,7 @@ pub(super) async fn load_browse_series_navigation(
 }
 
 pub(super) async fn load_browse_publisher_navigation(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -160,7 +179,7 @@ fn map_library_record(row: PersistedLibraryRecord) -> PersistedLibrary {
 }
 
 pub(super) async fn load_series_page(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],
@@ -178,11 +197,14 @@ pub(super) async fn load_series_page(
     .await
 }
 
-pub(super) async fn validate_library_scope(
-    backend: &dyn OpdsPersistedPort,
+pub(super) async fn validate_library_scope<P>(
+    backend: &P,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
-) -> Option<Response> {
+) -> Option<Response>
+where
+    P: OpdsLibraryPersistedPort + ?Sized,
+{
     let library_id = library_id?;
 
     let library = match load_library(backend, library_id).await {

@@ -1,19 +1,22 @@
 use komga_domain::common_ids::ReadListId;
 use komga_domain::discovery::{
     BookCondition, BookPosterCondition, BookValueCondition, DateCondition, FilterOperator,
-    InclusionCondition, NumberCondition, ReadStatusCondition, StringCondition,
+    InclusionCondition, MediaProfile, MediaStatus, NumberCondition, ReadStatusCondition,
+    StringCondition,
 };
 
-use super::helpers::{
-    author_contains_filter, author_matches_filter, media_profile_for_media_type, poster_matches,
-};
+use super::helpers::{author_contains_filter, author_matches_filter, poster_matches};
 use super::models::{BookEvaluationContext, BookRow};
 use super::text_matching::{
     TextMatchMode, any_ignore_ascii_case, any_normalized_text_matches, matches_optional_value,
     normalized_text_matches,
 };
 
-pub fn evaluate(row: &BookRow, condition: &BookCondition, ctx: &BookEvaluationContext) -> bool {
+pub(super) fn evaluate(
+    row: &BookRow,
+    condition: &BookCondition,
+    ctx: &BookEvaluationContext,
+) -> bool {
     match condition {
         BookCondition::Value(value) => evaluate_value(row, value, ctx),
         BookCondition::Composite(composite) => match composite.operator {
@@ -54,19 +57,18 @@ fn evaluate_value(
         BookValueCondition::Publisher(inc) => {
             matches_optional_string_inclusion(row.publisher.as_deref(), inc)
         }
-        BookValueCondition::AgeRating(inc) => matches_optional_copy_inclusion(row.age_rating, inc),
+        BookValueCondition::AgeRating(inc) => matches_age_rating_inclusion(row.age_rating, inc),
         BookValueCondition::ReadStatus(ReadStatusCondition::Include(values)) => {
-            ctx.user_id_present && any_ignore_ascii_case([row.read_status.as_str()], values)
+            ctx.user_id_present && values.contains(&row.read_status)
         }
         BookValueCondition::ReadStatus(ReadStatusCondition::Exclude(values)) => {
-            ctx.user_id_present && !any_ignore_ascii_case([row.read_status.as_str()], values)
+            ctx.user_id_present && !values.contains(&row.read_status)
         }
         BookValueCondition::MediaProfile(inc) => {
-            let profile = media_profile_for_media_type(&row.media_type);
-            matches_string_inclusion(profile, inc, String::as_str)
+            matches_media_profile_inclusion(MediaProfile::from_media_type(&row.media_type), inc)
         }
         BookValueCondition::MediaStatus(inc) => {
-            matches_string_inclusion(row.media_status.as_str(), inc, String::as_str)
+            matches_media_status_inclusion(row.media_status, inc)
         }
         BookValueCondition::Author(condition) => matches_author_condition(row, condition),
         BookValueCondition::Poster(inc) => matches_poster_condition(row, inc, ctx),
@@ -78,6 +80,30 @@ fn evaluate_value(
             condition,
             &ctx.release_date_cutoffs,
         ),
+    }
+}
+
+fn matches_media_status_inclusion(
+    actual: MediaStatus,
+    condition: &InclusionCondition<MediaStatus>,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => values.contains(&actual),
+        InclusionCondition::Exclude(values) => !values.contains(&actual),
+    }
+}
+
+fn matches_media_profile_inclusion(
+    actual: Option<MediaProfile>,
+    condition: &InclusionCondition<MediaProfile>,
+) -> bool {
+    match condition {
+        InclusionCondition::Include(values) => {
+            actual.is_some_and(|actual| values.contains(&actual))
+        }
+        InclusionCondition::Exclude(values) => actual
+            .map(|actual| !values.contains(&actual))
+            .unwrap_or(true),
     }
 }
 
@@ -110,18 +136,19 @@ fn matches_optional_string_inclusion(
     }
 }
 
-fn matches_optional_copy_inclusion<T: Copy + PartialEq>(
-    actual: Option<T>,
-    condition: &InclusionCondition<T>,
-) -> bool {
+fn matches_age_rating_inclusion(actual: Option<u32>, condition: &InclusionCondition<u16>) -> bool {
     match condition {
         InclusionCondition::Include(values) => {
-            actual.is_some_and(|actual| values.contains(&actual))
+            actual.is_some_and(|actual| contains_age_rating(values, actual))
         }
         InclusionCondition::Exclude(values) => actual
-            .map(|actual| !values.contains(&actual))
+            .map(|actual| !contains_age_rating(values, actual))
             .unwrap_or(true),
     }
+}
+
+fn contains_age_rating(values: &[u16], actual: u32) -> bool {
+    values.iter().any(|value| actual == u32::from(*value))
 }
 
 fn matches_readlist_condition(
@@ -297,15 +324,7 @@ fn matches_poster_condition(
         InclusionCondition::Include(conditions) => posters.is_some_and(|posters| {
             posters.iter().any(|poster| {
                 conditions.iter().any(|condition| {
-                    poster_matches(
-                        poster,
-                        condition
-                            .thumbnail_type
-                            .as_ref()
-                            .map(|v| vec![v.clone()])
-                            .as_ref(),
-                        condition.selected,
-                    )
+                    poster_matches(poster, condition.thumbnail_type, condition.selected)
                 })
             })
         }),
@@ -313,15 +332,7 @@ fn matches_poster_condition(
             .map(|posters| {
                 !posters.iter().any(|poster| {
                     conditions.iter().any(|condition| {
-                        poster_matches(
-                            poster,
-                            condition
-                                .thumbnail_type
-                                .as_ref()
-                                .map(|v| vec![v.clone()])
-                                .as_ref(),
-                            condition.selected,
-                        )
+                        poster_matches(poster, condition.thumbnail_type, condition.selected)
                     })
                 })
             })

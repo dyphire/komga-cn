@@ -1,15 +1,15 @@
 use crate::opds::{
-    OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCatalogPort, OpdsFeedUserContext,
+    OpdsBookFeedKind, OpdsBookFeedQuery, OpdsFeedCatalogPort, OpdsFeedUserContext,
     OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
-    OpdsSeriesEntry,
+    OpdsSeriesFeedPage,
 };
 
 pub struct OpdsFeedService<'a> {
-    catalog: &'a dyn OpdsCatalogPort,
+    catalog: &'a dyn OpdsFeedCatalogPort,
 }
 
 impl<'a> OpdsFeedService<'a> {
-    pub fn new(catalog: &'a dyn OpdsCatalogPort) -> Self {
+    pub fn new(catalog: &'a dyn OpdsFeedCatalogPort) -> Self {
         Self { catalog }
     }
 
@@ -120,7 +120,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: &str,
         page: usize,
         size: usize,
-    ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+    ) -> Result<OpdsSeriesFeedPage, String> {
         self.catalog
             .load_library_series_feed_page(OpdsLibrarySeriesQuery {
                 user,
@@ -157,11 +157,11 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
+    use komga_domain::discovery::{AgeRestrictionKind, QueryRestrictions};
 
     use super::*;
     use crate::opds::{
-        BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsAgeRestrictionKind,
-        OpdsBookFeedEntry, OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCatalogPort,
+        OpdsBookFeedEntry, OpdsBookFeedKind, OpdsBookFeedQuery, OpdsFeedCatalogPort,
         OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsSeriesEntry,
     };
 
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl OpdsCatalogPort for TestCatalog {
+    impl OpdsFeedCatalogPort for TestCatalog {
         async fn load_book_feed_page(
             &self,
             query: OpdsBookFeedQuery<'_>,
@@ -253,7 +253,7 @@ mod tests {
         async fn load_library_series_feed_page(
             &self,
             query: OpdsLibrarySeriesQuery<'_>,
-        ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+        ) -> Result<OpdsSeriesFeedPage, String> {
             self.library_series_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")
@@ -263,37 +263,10 @@ mod tests {
                     size: query.size,
                 });
 
-            Ok((vec![series("series-1", query.library_id, false)], false))
-        }
-
-        async fn load_browse_series_navigation_entries(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _library_id: Option<&str>,
-            _publishers: &[String],
-            _page: usize,
-            _size: usize,
-        ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String> {
-            unimplemented!()
-        }
-
-        async fn load_browse_publisher_entries(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _library_id: Option<&str>,
-        ) -> Result<Vec<BrowsePublisherEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_series_page(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _search: Option<&str>,
-            _publishers: &[String],
-            _offset: i64,
-            _limit: i64,
-        ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            unimplemented!()
+            Ok(OpdsSeriesFeedPage {
+                series: vec![series("series-1", query.library_id, false)],
+                has_next: false,
+            })
         }
     }
 
@@ -386,13 +359,13 @@ mod tests {
         let service = OpdsFeedService::new(&catalog);
         let user = test_user();
 
-        let (series, has_next) = service
+        let page = service
             .library_series_page(&user, "lib-a", 3, 50)
             .await
             .expect("library series page should load");
 
-        assert_eq!(series.len(), 1);
-        assert!(!has_next);
+        assert_eq!(page.series.len(), 1);
+        assert!(!page.has_next);
         assert_eq!(
             catalog
                 .library_series_calls
@@ -412,10 +385,12 @@ mod tests {
         let user = OpdsFeedUserContext {
             user_id: "user-1".to_string(),
             allowed_library_ids: Some(HashSet::from(["lib-a".to_string()])),
-            age: Some(15),
-            age_restriction: Some(OpdsAgeRestrictionKind::AllowOnly),
-            labels_allow: vec!["kids".to_string()],
-            labels_exclude: vec!["adult".to_string()],
+            restrictions: QueryRestrictions {
+                age: Some(15),
+                age_restriction: Some(AgeRestrictionKind::AllowOnly),
+                labels_allow: vec!["kids".to_string()],
+                labels_exclude: vec!["adult".to_string()],
+            },
         };
 
         assert!(user.can_access_book_feed_entry(&book(
@@ -444,17 +419,19 @@ mod tests {
         OpdsFeedUserContext {
             user_id: "user-1".to_string(),
             allowed_library_ids: Some(HashSet::from(["lib-a".to_string()])),
-            age: None,
-            age_restriction: None,
-            labels_allow: Vec::new(),
-            labels_exclude: Vec::new(),
+            restrictions: QueryRestrictions {
+                age: None,
+                age_restriction: None,
+                labels_allow: Vec::new(),
+                labels_exclude: Vec::new(),
+            },
         }
     }
 
     fn book(
         id: &str,
         library_id: &str,
-        age_rating: Option<u16>,
+        age_rating: Option<u32>,
         sharing_labels: &[&str],
     ) -> OpdsBookFeedEntry {
         OpdsBookFeedEntry {
@@ -494,7 +471,7 @@ mod tests {
         id: &str,
         library_id: &str,
         one_shot: bool,
-        age_rating: Option<u16>,
+        age_rating: Option<u32>,
         sharing_labels: &[&str],
     ) -> OpdsSeriesEntry {
         OpdsSeriesEntry {

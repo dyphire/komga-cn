@@ -2,41 +2,55 @@ use super::*;
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
-use komga_application::identity_access::AuthUser;
+use komga_application::identity_access::{AuthUser, AuthUserRole};
 use komga_application::operational::{
-    HttpServerRequestsState, ServerSettingsPort, ServerSettingsService, StartupTimingState,
+    HttpServerRequestsState, ServerSettingChange, ServerSettingsPort, ServerSettingsService,
+    StartupTimingState,
 };
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,
 };
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_infrastructure::ServerSettingsStore;
 
 use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
 use crate::state::{
-    BookImportSseEvent, OAuth2ClientConfig, OperationalBuildMetadata, RuntimeState,
-    ServerSettingsState, SseOperationalState,
+    OAuth2ClientConfig, OperationalBuildMetadata, RuntimeState, ServerSettingsState,
+    SseConnectionState,
 };
+
+#[test]
+fn settings_update_command_parses_thumbnail_size_at_transport_boundary() {
+    let command = settings_update_command(&json!({ "thumbnailSize": "XLARGE" }))
+        .expect("valid thumbnail size should parse");
+
+    assert_eq!(command.thumbnail_size, Some(ThumbnailSize::XLarge));
+    assert_eq!(
+        settings_update_command(&json!({ "thumbnailSize": "small" })),
+        Err("thumbnailSize is invalid".to_string()),
+    );
+}
 
 #[tokio::test]
 async fn update_server_settings_applies_runtime_task_pool_after_persistence_succeeds() {
-    let (fixture_root, store) = sqlite_fixture("task-pool-apply-success").await;
-    store
-        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("1".to_string()))])
+    let fixture = sqlite_fixture("task-pool-apply-success").await;
+    fixture
+        .store
+        .apply_changes(&[ServerSettingChange::set("TASK_POOL_SIZE", "1")])
         .await
         .expect("seed task pool size should succeed");
 
     let apply_count = Arc::new(AtomicUsize::new(0));
     let applied_value = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(fixture_root.clone());
+    let state = test_operational_state(fixture.root.clone());
     let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueue {
@@ -50,7 +64,7 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
                 }
             },
         }),
-        store.clone(),
+        fixture.store.clone(),
     ));
     let response = update_server_settings(
         State(test_server_settings_state(&app)),
@@ -62,7 +76,8 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(apply_count.load(Ordering::SeqCst), 1);
     assert_eq!(applied_value.load(Ordering::SeqCst), 3);
-    let persisted = store
+    let persisted = fixture
+        .store
         .load_map()
         .await
         .expect("settings should be readable after update");
@@ -71,19 +86,20 @@ async fn update_server_settings_applies_runtime_task_pool_after_persistence_succ
         Some(&Some("3".to_string()))
     );
 
-    cleanup_fixture(fixture_root).await;
+    cleanup_fixture(fixture.root).await;
 }
 
 #[tokio::test]
 async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change() {
-    let (fixture_root, store) = sqlite_fixture("task-pool-not-changed").await;
-    store
-        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("2".to_string()))])
+    let fixture = sqlite_fixture("task-pool-not-changed").await;
+    fixture
+        .store
+        .apply_changes(&[ServerSettingChange::set("TASK_POOL_SIZE", "2")])
         .await
         .expect("seed task pool size should succeed");
 
     let apply_count = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(fixture_root.clone());
+    let state = test_operational_state(fixture.root.clone());
     let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueue {
@@ -95,7 +111,7 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
                 }
             },
         }),
-        store.clone(),
+        fixture.store.clone(),
     ));
     let response = update_server_settings(
         State(test_server_settings_state(&app)),
@@ -106,7 +122,8 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(apply_count.load(Ordering::SeqCst), 0);
-    let persisted = store
+    let persisted = fixture
+        .store
         .load_map()
         .await
         .expect("settings should be readable after update");
@@ -119,19 +136,20 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
         Some(&Some("true".to_string()))
     );
 
-    cleanup_fixture(fixture_root).await;
+    cleanup_fixture(fixture.root).await;
 }
 
 #[tokio::test]
 async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
-    let (fixture_root, store) = sqlite_fixture("read-side-effect-free").await;
-    store
-        .apply_changes(&[("TASK_POOL_SIZE".to_string(), Some("4".to_string()))])
+    let fixture = sqlite_fixture("read-side-effect-free").await;
+    fixture
+        .store
+        .apply_changes(&[ServerSettingChange::set("TASK_POOL_SIZE", "4")])
         .await
         .expect("seed task pool size should succeed");
 
     let apply_count = Arc::new(AtomicUsize::new(0));
-    let state = test_operational_state(fixture_root.clone());
+    let state = test_operational_state(fixture.root.clone());
     let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueue {
@@ -143,7 +161,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
                 }
             },
         }),
-        store,
+        fixture.store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -151,18 +169,18 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(apply_count.load(Ordering::SeqCst), 0);
 
-    cleanup_fixture(fixture_root).await;
+    cleanup_fixture(fixture.root).await;
 }
 
 #[tokio::test]
 async fn get_server_settings_returns_empty_string_placeholders_for_missing_string_sources() {
-    let (fixture_root, store) = sqlite_fixture("string-placeholders").await;
+    let fixture = sqlite_fixture("string-placeholders").await;
 
-    let state = test_operational_state(fixture_root.clone());
+    let state = test_operational_state(fixture.root.clone());
     let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueue { apply: |_| Ok(()) }),
-        store,
+        fixture.store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -182,25 +200,26 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     assert_eq!(response_body.get("serverContextPath"), Some(&placeholder));
     assert_eq!(response_body.get("kepubifyPath"), Some(&placeholder));
 
-    cleanup_fixture(fixture_root).await;
+    cleanup_fixture(fixture.root).await;
 }
 
 #[tokio::test]
 async fn get_server_settings_returns_runtime_server_port_configuration_source() {
-    let (fixture_root, store) = sqlite_fixture("runtime-port-source").await;
-    store
-        .apply_changes(&[("SERVER_PORT".to_string(), Some("9090".to_string()))])
+    let fixture = sqlite_fixture("runtime-port-source").await;
+    fixture
+        .store
+        .apply_changes(&[ServerSettingChange::set("SERVER_PORT", "9090")])
         .await
         .expect("seed server port should succeed");
 
-    let mut state = test_operational_state(fixture_root.clone());
+    let mut state = test_operational_state(fixture.root.clone());
     state.runtime.bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     state.runtime.configuration_bind_address =
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8081));
     let app = Arc::new(test_app_state(
         state,
         Arc::new(FakeTaskQueue { apply: |_| Ok(()) }),
-        store,
+        fixture.store,
     ));
     let response =
         get_server_settings(State(test_server_settings_state(&app)), Admin(admin_user())).await;
@@ -221,7 +240,7 @@ async fn get_server_settings_returns_runtime_server_port_configuration_source() 
         }))
     );
 
-    cleanup_fixture(fixture_root).await;
+    cleanup_fixture(fixture.root).await;
 }
 
 struct FakeTaskQueue<F> {
@@ -247,8 +266,8 @@ where
         Ok(())
     }
 
-    async fn status(&self) -> QueueStatus {
-        QueueStatus::default()
+    async fn status(&self) -> Result<QueueStatus, String> {
+        Ok(QueueStatus::default())
     }
 }
 
@@ -257,8 +276,8 @@ impl<F> TaskQueueAdmin for FakeTaskQueue<F>
 where
     F: Fn(usize) -> Result<(), String> + Send + Sync,
 {
-    async fn clear_unowned_tasks(&self) -> usize {
-        0
+    async fn clear_unowned_tasks(&self) -> Result<usize, String> {
+        Ok(0)
     }
 
     async fn apply_pool_size(&self, value: usize) -> Result<(), String> {
@@ -268,7 +287,12 @@ where
     fn wakeup(&self) {}
 }
 
-async fn sqlite_fixture(case: &str) -> (PathBuf, Arc<ServerSettingsStore>) {
+struct ServerSettingsSqliteFixture {
+    root: PathBuf,
+    store: Arc<ServerSettingsStore>,
+}
+
+async fn sqlite_fixture(case: &str) -> ServerSettingsSqliteFixture {
     let root = unique_fixture_root(case);
     std::fs::create_dir_all(&root).expect("fixture root should be created");
     let store = Arc::new(ServerSettingsStore::new(root.join("main.db")));
@@ -277,12 +301,12 @@ async fn sqlite_fixture(case: &str) -> (PathBuf, Arc<ServerSettingsStore>) {
         .load_map()
         .await
         .expect("schema bootstrap should succeed");
-    (root, store)
+    ServerSettingsSqliteFixture { root, store }
 }
 
 async fn cleanup_fixture(root: PathBuf) {
     let db_path = root.join("main.db");
-    let evicted = komga_infrastructure::sqlite::evict_shared_pools_for_paths(&[db_path]);
+    let evicted = komga_infrastructure::evict_shared_pools_for_paths(&[db_path]);
     for pool in evicted {
         pool.close().await;
     }
@@ -312,6 +336,8 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
             configuration_bind_address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
             server_context_path: None,
             configuration_server_context_path: None,
+            actuator_enabled: true,
+            dev_cors_enabled: false,
         },
         startup_timing: StartupTimingState::default(),
         http_server_requests: HttpServerRequestsState::default(),
@@ -326,12 +352,7 @@ fn test_operational_state(fixture_root: PathBuf) -> OperationalState {
         oauth2_clients: Vec::<OAuth2ClientConfig>::new(),
         oauth2_account_creation: false,
         oidc_email_verification: true,
-        sse: Arc::new(Mutex::new(SseOperationalState {
-            accepting_connections: true,
-            book_import_events: Vec::<BookImportSseEvent>::new(),
-            session_expired_events: Vec::new(),
-            next_session_expired_event_id: 1,
-        })),
+        sse: SseConnectionState::accepting(),
         shutdown_trigger: None,
     }
 }
@@ -341,7 +362,7 @@ fn admin_user() -> AuthUser {
         id: "admin-user".to_string(),
         email: "admin@example.org".to_string(),
         password: String::new(),
-        roles: vec!["ADMIN".to_string()],
+        roles: vec![AuthUserRole::Admin],
         shared_all_libraries: true,
         shared_library_ids: Vec::new(),
         labels_allow: Vec::new(),

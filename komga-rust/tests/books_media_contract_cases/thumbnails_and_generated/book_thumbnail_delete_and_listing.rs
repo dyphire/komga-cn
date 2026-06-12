@@ -130,7 +130,7 @@ async fn router_book_thumbnail_delete_rejects_generated_thumbnail() {
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("pool for generate_book_thumbnail");
-    generate_book_thumbnail(&pool, "book-1")
+    generate_book_thumbnail_with_isolated_events(&pool, "book-1")
         .await
         .expect("generate_book_thumbnail should succeed before delete test");
 
@@ -255,7 +255,6 @@ async fn router_book_thumbnail_delete_reselects_remaining_thumbnail_when_selecte
 
 #[tokio::test]
 async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
-    let _guard = thumbnail_runtime_sse_guard().await;
     let ctx = TestFixture::new("router-book-thumbnail-select-sse").await;
 
     let auth_token = ctx.login_admin().await;
@@ -283,7 +282,7 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
         .expect("uploaded book thumbnail should expose id")
         .to_string();
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let cursor = ctx.runtime_events().current_cursor();
     let select = ctx
         .app()
         .clone()
@@ -301,32 +300,26 @@ async fn router_book_thumbnail_select_emits_thumbnail_book_added_event() {
         .expect("book thumbnail select sse request should complete");
     assert_eq!(select.status(), StatusCode::ACCEPTED);
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
-    let thumbnail_event = events
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
+    let selected = events
         .iter()
-        .find(|event| event.name == "ThumbnailBookAdded")
+        .find_map(|event| match &event.event {
+            RuntimeSseEvent::ThumbnailBookAdded {
+                book_id,
+                series_id,
+                selected,
+            } if book_id == "book-1" && series_id == "series-1" => Some(*selected),
+            _ => None,
+        })
         .expect("book thumbnail select should emit ThumbnailBookAdded SSE");
-    assert_eq!(
-        thumbnail_event.payload.get("selected"),
-        Some(&Value::Bool(true))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("bookId"),
-        Some(&Value::String("book-1".to_string()))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("seriesId"),
-        Some(&Value::String("series-1".to_string()))
-    );
+    assert!(selected);
 }
 
 #[tokio::test]
 async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
-    let _guard = thumbnail_runtime_sse_guard().await;
     let book_id = "book-thumbnail-delete-sse";
     let ctx = TestFixture::new("router-book-thumbnail-delete-sse").await;
     seed_router_primary_series_cbz_book(
@@ -362,7 +355,7 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         .expect("uploaded book thumbnail should expose id")
         .to_string();
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
+    let cursor = ctx.runtime_events().current_cursor();
     let delete = ctx
         .app()
         .clone()
@@ -378,35 +371,26 @@ async fn router_book_thumbnail_delete_emits_thumbnail_book_deleted_event() {
         .expect("book thumbnail delete sse request should complete");
     assert_eq!(delete.status(), StatusCode::ACCEPTED);
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
-    let thumbnail_event = events
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
+    let selected = events
         .iter()
-        .find(|event| {
-            event.name == "ThumbnailBookDeleted"
-                && event.payload.get("bookId").and_then(Value::as_str) == Some(book_id)
-                && event.payload.get("seriesId").and_then(Value::as_str) == Some("series-1")
+        .find_map(|event| match &event.event {
+            RuntimeSseEvent::ThumbnailBookDeleted {
+                book_id: event_book_id,
+                series_id,
+                selected,
+            } if event_book_id == book_id && series_id == "series-1" => Some(*selected),
+            _ => None,
         })
         .expect("book thumbnail delete should emit ThumbnailBookDeleted SSE");
-    assert_eq!(
-        thumbnail_event.payload.get("selected"),
-        Some(&Value::Bool(true))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("bookId"),
-        Some(&Value::String(book_id.to_string()))
-    );
-    assert_eq!(
-        thumbnail_event.payload.get("seriesId"),
-        Some(&Value::String("series-1".to_string()))
-    );
+    assert!(selected);
 }
 
 #[tokio::test]
-async fn router_book_thumbnails_returns_empty_array_for_existing_book_without_posters() {
+async fn router_book_thumbnails_return_empty_array_without_generated_thumbnails() {
     let ctx = TestFixture::builder("router-book-thumbnails-empty-array")
         .with_seed(|paths| async move {
             seed_router_authors_scope_variants(&paths).await;

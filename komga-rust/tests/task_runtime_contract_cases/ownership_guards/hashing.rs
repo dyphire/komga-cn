@@ -25,7 +25,8 @@ async fn runtime_blocks_book_hash_when_main_database_is_external_owned() {
             TaskQueueRecord::new("HashBook_book-1", 1_000, Some("book-1".to_string()))
                 .with_simple_type("HashBook"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -92,7 +93,8 @@ async fn runtime_skips_book_hash_when_library_hash_files_was_disabled_after_enqu
             TaskQueueRecord::new("HashBook_book-hash-flag-1", 1_000, None)
                 .with_simple_type("HashBook"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler.process_available(&runtime.job()).await.expect(
         "hash-book task should skip cleanly when library hash-files was disabled after enqueue",
     );
@@ -141,7 +143,8 @@ async fn runtime_skips_book_hash_when_book_already_has_hash() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("HashBook_book-1", 1_000, None).with_simple_type("HashBook"))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -237,7 +240,8 @@ async fn runtime_blocks_book_page_hash_when_main_database_is_external_owned() {
             )
             .with_simple_type("HashBookPages"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -306,7 +310,8 @@ async fn runtime_skips_book_koreader_hash_when_library_hash_koreader_was_disable
             TaskQueueRecord::new("HashBookKoreader_book-koreader-flag-1", 1_000, None)
                 .with_simple_type("HashBookKoreader"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job()).await
         .expect("koreader-hash task should skip cleanly when library hash-koreader was disabled after enqueue");
@@ -347,7 +352,8 @@ async fn runtime_skips_book_koreader_hash_when_book_already_has_hash() {
             TaskQueueRecord::new("HashBookKoreader_book-1", 1_000, None)
                 .with_simple_type("HashBookKoreader"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -434,7 +440,8 @@ async fn runtime_skips_book_page_hash_when_library_hash_pages_was_disabled_after
             TaskQueueRecord::new("HashBookPages_book-hash-flag-1", 1_000, None)
                 .with_simple_type("HashBookPages"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler.process_available(&runtime.job()).await.expect(
         "page-hash task should skip cleanly when library hash-pages was disabled after enqueue",
     );

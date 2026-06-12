@@ -1,6 +1,6 @@
 use sqlx::{Row, SqlitePool};
 
-pub async fn load_announcement_read_ids(
+pub(crate) async fn load_announcement_read_ids(
     pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {

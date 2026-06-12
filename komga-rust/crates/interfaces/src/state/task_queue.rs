@@ -1,5 +1,9 @@
-use super::*;
+use std::sync::Arc;
+
 use axum::extract::FromRef;
+use komga_application::task_processing::TaskQueueAdmin;
+
+use super::app_state::HttpAppState;
 
 #[derive(Clone)]
 pub struct TaskQueueState {

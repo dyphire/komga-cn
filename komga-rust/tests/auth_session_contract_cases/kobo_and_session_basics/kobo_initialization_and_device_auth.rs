@@ -306,6 +306,46 @@ async fn router_kobo_initialization_falls_back_to_native_resources_for_non_401_p
 }
 
 #[tokio::test]
+async fn router_kobo_initialization_reports_malformed_successful_proxy_response() {
+    let _guard = kobo_proxy_env_lock().lock().await;
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+
+    let server = spawn_single_response_server(200, "application/json", r#"{"Resources":"#).await;
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
+    }
+
+    let ctx = TestFixture::new("router-kobo-initialization-proxy-malformed-success").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/initialization")
+                .header(header::HOST, "komga.example")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("kobo initialization malformed proxy request should build"),
+        )
+        .await
+        .expect("kobo initialization malformed proxy request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+    server
+        .join
+        .await
+        .expect("kobo initialization malformed proxy server should finish");
+}
+
+#[tokio::test]
 async fn router_kobo_initialization_preserves_unauthorized_from_proxy() {
     let _guard = kobo_proxy_env_lock().lock().await;
     let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
@@ -474,6 +514,46 @@ async fn router_kobo_auth_device_falls_back_to_dummy_payload_when_proxy_returns_
         .join
         .await
         .expect("kobo auth device proxy unauthorized server should finish");
+}
+
+#[tokio::test]
+async fn router_kobo_auth_device_reports_malformed_successful_proxy_response() {
+    let _guard = kobo_proxy_env_lock().lock().await;
+    let previous = std::env::var("KOMGA_RUST_KOBO_PROXY_URL").ok();
+
+    let server = spawn_single_response_server(200, "application/json", r#"{"AccessToken":"#).await;
+    unsafe {
+        std::env::set_var("KOMGA_RUST_KOBO_PROXY_URL", server.url.clone());
+    }
+
+    let ctx = TestFixture::new("router-kobo-auth-device-proxy-malformed-success").await;
+    seed_admin_kobo_path_token(ctx.paths()).await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/kobo/any-token/v1/auth/device")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-auth-token", &auth_token)
+                .body(Body::from(r#"{"UserKey":"Reader-1"}"#))
+                .expect("kobo auth device malformed proxy request should build"),
+        )
+        .await
+        .expect("kobo auth device malformed proxy request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    restore_env_var("KOMGA_RUST_KOBO_PROXY_URL", previous);
+    server
+        .join
+        .await
+        .expect("kobo auth device malformed proxy server should finish");
 }
 
 #[tokio::test]

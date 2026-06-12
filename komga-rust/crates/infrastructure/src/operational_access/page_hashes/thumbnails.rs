@@ -1,11 +1,12 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::io::Read;
 
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, PageHashThumbnail, book_media_is_pdf,
-    book_media_is_single_image, content_type_from_filename,
+    BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_single_image,
+    content_type_from_filename,
 };
-use komga_application::operational::PageHashUpsertCommand;
+use komga_application::operational::{PageHashThumbnail, PageHashUpsertCommand};
 use sqlx::SqlitePool;
 use std::io::Cursor;
 use zip::ZipArchive;
@@ -27,6 +28,11 @@ use std::path::Path;
 
 const KOTLIN_PDF_MIN_EDGE: u32 = 3200;
 
+struct UnknownPageHashSourceBytes {
+    bytes: Vec<u8>,
+    media_type: String,
+}
+
 pub(super) async fn load_page_hash_thumbnail(
     pool: &SqlitePool,
     page_hash: &str,
@@ -38,12 +44,14 @@ pub(super) async fn load_page_hash_thumbnail(
         }));
     }
 
-    let Some((bytes, media_type)) = load_unknown_page_hash_source_bytes(pool, page_hash).await?
-    else {
+    let Some(source) = load_unknown_page_hash_source_bytes(pool, page_hash).await? else {
         return Ok(None);
     };
 
-    Ok(Some(PageHashThumbnail { bytes, media_type }))
+    Ok(Some(PageHashThumbnail {
+        bytes: source.bytes,
+        media_type: source.media_type,
+    }))
 }
 
 pub(super) async fn load_unknown_page_hash_thumbnail(
@@ -71,8 +79,9 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
     };
 
     if let Some(max_edge) = resize_to {
-        let Some(bytes) =
-            render_book_page_thumbnail(&media, &page, target.page_number, max_edge).await
+        let Some(bytes) = render_book_page_thumbnail(&media, &page, target.page_number, max_edge)
+            .await
+            .map_err(as_sqlx_protocol_error)?
         else {
             return Ok(None);
         };
@@ -91,6 +100,7 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
             pdf_render_max_edge(&page),
         )
         .await
+        .map_err(as_sqlx_protocol_error)?
         else {
             return Ok(None);
         };
@@ -101,7 +111,10 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
         }));
     }
 
-    let Some(bytes) = resolve_book_page_bytes(&media, &page, target.page_number).await else {
+    let Some(bytes) = resolve_book_page_bytes(&media, &page, target.page_number)
+        .await
+        .map_err(as_sqlx_protocol_error)?
+    else {
         return Ok(None);
     };
 
@@ -117,19 +130,25 @@ pub(super) async fn upsert_page_hash(
     command: PageHashUpsertCommand,
 ) -> Result<(), sqlx::Error> {
     let page_hash = command.hash.as_str();
-    let existed = page_hash_exists(read_pool, page_hash).await?;
+    let thumbnail = if page_hash_exists(read_pool, page_hash).await? {
+        None
+    } else {
+        build_known_page_hash_thumbnail(read_pool, page_hash).await?
+    };
+
     upsert_page_hash_model(write_pool, &command).await?;
 
-    if !existed
-        && let Some(thumbnail) = build_known_page_hash_thumbnail(read_pool, page_hash).await?
-    {
+    if let Some(thumbnail) = thumbnail {
         insert_page_hash_thumbnail(write_pool, page_hash, &thumbnail).await?;
     }
 
     Ok(())
 }
 
-async fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Option<Vec<u8>> {
+async fn read_unknown_thumbnail_bytes(
+    source_path: &Path,
+    file_name: &str,
+) -> Result<Option<Vec<u8>>, String> {
     let extension = source_path
         .extension()
         .and_then(|value| value.to_str())
@@ -140,30 +159,69 @@ async fn read_unknown_thumbnail_bytes(source_path: &Path, file_name: &str) -> Op
         extension.as_str(),
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "bmp"
     ) {
-        return tokio::fs::read(source_path).await.ok();
+        return tokio::fs::read(source_path)
+            .await
+            .map(Some)
+            .map_err(|error| {
+                format!(
+                    "read page-hash thumbnail source '{}': {error}",
+                    source_path.display()
+                )
+            });
     }
 
     if matches!(extension.as_str(), "cbz" | "zip" | "epub") {
         let path = source_path.to_path_buf();
         let file_name = file_name.to_string();
-        return tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
-            let file = fs::File::open(&path).ok()?;
-            let mut archive = ZipArchive::new(file).ok()?;
-            let mut entry = archive.by_name(&file_name).ok()?;
+        return tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+            let file = fs::File::open(&path).map_err(|error| {
+                format!(
+                    "open page-hash thumbnail archive '{}': {error}",
+                    path.display()
+                )
+            })?;
+            let mut archive = ZipArchive::new(file).map_err(|error| {
+                format!(
+                    "read page-hash thumbnail archive '{}': {error}",
+                    path.display()
+                )
+            })?;
+            let mut entry = match archive.by_name(&file_name) {
+                Ok(entry) => entry,
+                Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+                Err(error) => {
+                    return Err(format!(
+                        "open page-hash thumbnail archive entry '{}' from '{}': {error}",
+                        file_name,
+                        path.display()
+                    ));
+                }
+            };
             let mut bytes = Vec::new();
-            Read::read_to_end(&mut entry, &mut bytes).ok()?;
-            Some(bytes)
+            Read::read_to_end(&mut entry, &mut bytes).map_err(|error| {
+                format!(
+                    "read page-hash thumbnail archive entry '{}' from '{}': {error}",
+                    file_name,
+                    path.display()
+                )
+            })?;
+            Ok(Some(bytes))
         })
         .await
-        .ok()
-        .flatten();
+        .map_err(|error| format!("join page-hash thumbnail archive read task: {error}"))?;
     }
 
     if matches!(extension.as_str(), "cbr" | "rar") {
-        return read_rar_entry_bytes(source_path, file_name).ok().flatten();
+        return read_rar_entry_bytes(source_path, file_name).map_err(|error| {
+            format!(
+                "read page-hash thumbnail rar entry '{}' from '{}': {error}",
+                file_name,
+                source_path.display()
+            )
+        });
     }
 
-    None
+    Ok(None)
 }
 
 async fn load_page_hash_page_row(
@@ -177,26 +235,50 @@ async fn load_page_hash_page_row(
     }
 
     if book_media_is_single_image(media) && page_number == 1 {
-        return Ok(Some(single_image_page_row(media, page_number)));
+        return single_image_page_row(media, page_number).map(Some);
     }
 
-    Ok(load_archive_page_row(media, page_number)
-        .await
-        .or_else(|| load_pdf_page_row(media, page_number)))
+    let archive_row = load_archive_page_row(media, page_number).await?;
+    Ok(match archive_row {
+        Some(row) => Some(row),
+        None => load_pdf_page_row(media, page_number)?,
+    })
 }
 
-fn single_image_page_row(media: &BookMediaRecord, page_number: u64) -> BookPageRecord {
-    BookPageRecord {
+fn single_image_page_row(
+    media: &BookMediaRecord,
+    page_number: u64,
+) -> Result<BookPageRecord, String> {
+    let file_size = match fs::metadata(&media.file_path) {
+        Ok(metadata) if metadata.is_file() => i64::try_from(metadata.len()).map_err(|error| {
+            format!(
+                "convert page-hash media file size '{}': {error}",
+                media.file_path.display()
+            )
+        })?,
+        Ok(_) => {
+            return Err(format!(
+                "page-hash media path '{}' is not a file",
+                media.file_path.display()
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => 0,
+        Err(error) => {
+            return Err(format!(
+                "read page-hash media file metadata '{}': {error}",
+                media.file_path.display()
+            ));
+        }
+    };
+
+    Ok(BookPageRecord {
         number: page_number,
         file_name: media.file_name.clone(),
         media_type: content_type_from_filename(&media.file_name, &media.media_type),
         width: None,
         height: None,
-        file_size: fs::metadata(&media.file_path)
-            .ok()
-            .and_then(|metadata| i64::try_from(metadata.len()).ok())
-            .unwrap_or(0),
-    }
+        file_size,
+    })
 }
 
 fn page_media_type(page: &BookPageRecord, media: &BookMediaRecord) -> String {
@@ -230,17 +312,19 @@ async fn build_known_page_hash_thumbnail(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
-    let Some((bytes, _)) = load_unknown_page_hash_source_bytes(pool, page_hash).await? else {
+    let Some(source) = load_unknown_page_hash_source_bytes(pool, page_hash).await? else {
         return Ok(None);
     };
 
-    Ok(encode_image_bytes_as_thumbnail_jpeg(&bytes, 500))
+    Ok(Some(
+        encode_image_bytes_as_thumbnail_jpeg(&source.bytes, 500).map_err(as_sqlx_protocol_error)?,
+    ))
 }
 
 async fn load_unknown_page_hash_source_bytes(
     pool: &SqlitePool,
     page_hash: &str,
-) -> Result<Option<(Vec<u8>, String)>, sqlx::Error> {
+) -> Result<Option<UnknownPageHashSourceBytes>, sqlx::Error> {
     let Some(source) = load_unknown_page_hash_source(pool, page_hash).await? else {
         return Ok(None);
     };
@@ -253,7 +337,11 @@ async fn load_unknown_page_hash_source_bytes(
     Ok(
         read_unknown_thumbnail_bytes(&source_path, &source.file_name)
             .await
-            .map(|bytes| (bytes, source.media_type)),
+            .map_err(as_sqlx_protocol_error)?
+            .map(|bytes| UnknownPageHashSourceBytes {
+                bytes,
+                media_type: source.media_type,
+            }),
     )
 }
 
@@ -270,14 +358,15 @@ async fn insert_page_hash_thumbnail(
     Ok(())
 }
 
-fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
-    let image = image::load_from_memory(bytes).ok()?;
+fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(bytes)
+        .map_err(|error| format!("decode page-hash thumbnail source image: {error}"))?;
     let resized = image.thumbnail(max_edge.max(1), max_edge.max(1));
     let mut output = Cursor::new(Vec::new());
     resized
         .write_to(&mut output, image::ImageFormat::Jpeg)
-        .ok()?;
-    Some(output.into_inner())
+        .map_err(|error| format!("encode page-hash thumbnail JPEG: {error}"))?;
+    Ok(output.into_inner())
 }
 
 #[cfg(test)]
@@ -398,6 +487,44 @@ mod tests {
 
     fn legacy_file_url(path: &Path) -> String {
         format!("file:{}", path.to_string_lossy().replace(' ', "%20"))
+    }
+
+    #[test]
+    fn single_image_page_row_reports_non_file_media_paths() {
+        let path = unique_temp_dir("single-image-directory");
+        fs::create_dir_all(&path).expect("single-image directory fixture should be created");
+        let media = BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "cover.jpg".to_string(),
+            file_path: path.clone(),
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+        };
+
+        let error = single_image_page_row(&media, 1)
+            .expect_err("directory media path should not produce a page row");
+
+        assert!(error.contains("not a file"), "unexpected error: {error}");
+        let _ = fs::remove_dir(path);
+    }
+
+    #[tokio::test]
+    async fn read_unknown_thumbnail_bytes_propagates_invalid_zip_errors() {
+        let root = unique_temp_dir("invalid-zip-source");
+        fs::create_dir_all(&root).expect("invalid zip fixture root should be created");
+        let archive_path = root.join("book.cbz");
+        fs::write(&archive_path, b"not-a-zip").expect("invalid zip source should be written");
+
+        let error = read_unknown_thumbnail_bytes(&archive_path, "cover.png")
+            .await
+            .expect_err("invalid page-hash source archive must not become no thumbnail");
+
+        assert!(
+            error.contains("read page-hash thumbnail archive"),
+            "unexpected page-hash source error: {error}"
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]

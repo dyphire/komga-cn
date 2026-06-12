@@ -1,6 +1,6 @@
 use crate::opds::{
-    OpdsBookFeedEntry, OpdsCatalogPort, OpdsFeedService, OpdsFeedUserContext,
-    OpdsLibraryScopeError, OpdsPersistedPort, OpdsPersistedService, OpdsSeriesEntry,
+    OpdsBookFeedEntry, OpdsFeedCatalogPort, OpdsFeedPersistedPort, OpdsFeedService,
+    OpdsFeedUserContext, OpdsLibraryScopeError, OpdsPersistedService, OpdsSeriesEntry,
     PersistedLibraryRecord,
 };
 
@@ -19,12 +19,23 @@ pub enum OpdsV2FeedContent {
 
 pub struct OpdsV2FeedPage {
     pub title: String,
-    pub self_path: String,
+    pub kind: OpdsV2FeedKind,
+    pub library_id: Option<String>,
     pub modified: Option<String>,
     pub page: usize,
     pub size: usize,
     pub total: usize,
     pub content: OpdsV2FeedContent,
+}
+
+struct OpdsV2FeedPageContent {
+    total: usize,
+    content: OpdsV2FeedContent,
+}
+
+struct OpdsV2RecommendedBooksPage {
+    books: Vec<OpdsBookFeedEntry>,
+    total: usize,
 }
 
 pub enum OpdsV2RecommendedGroupContent {
@@ -35,19 +46,21 @@ pub enum OpdsV2RecommendedGroupContent {
 
 pub struct OpdsV2RecommendedGroup {
     pub title: String,
-    pub self_path: String,
+    pub kind: OpdsV2RecommendedGroupKind,
     pub total: usize,
     pub content: OpdsV2RecommendedGroupContent,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpdsV2RecommendedGroupKind {
+    Libraries,
+    Feed(OpdsV2FeedKind),
+}
+
 pub struct OpdsV2RecommendedPage {
     pub title: String,
-    pub self_path: String,
+    pub library_id: Option<String>,
     pub modified: Option<String>,
-    pub recommended_path: String,
-    pub browse_path: String,
-    pub collections_path: String,
-    pub readlists_path: String,
     pub has_visible_collections: bool,
     pub has_visible_readlists: bool,
     pub groups: Vec<OpdsV2RecommendedGroup>,
@@ -59,13 +72,16 @@ pub enum OpdsV2FeedPageError {
     Load(String),
 }
 
-pub struct OpdsV2FeedCompositionService<'a> {
-    catalog: &'a dyn OpdsCatalogPort,
-    persisted: &'a dyn OpdsPersistedPort,
+pub struct OpdsV2FeedCompositionService<'a, P: ?Sized> {
+    catalog: &'a dyn OpdsFeedCatalogPort,
+    persisted: &'a P,
 }
 
-impl<'a> OpdsV2FeedCompositionService<'a> {
-    pub fn new(catalog: &'a dyn OpdsCatalogPort, persisted: &'a dyn OpdsPersistedPort) -> Self {
+impl<'a, P> OpdsV2FeedCompositionService<'a, P>
+where
+    P: OpdsFeedPersistedPort + ?Sized,
+{
+    pub fn new(catalog: &'a dyn OpdsFeedCatalogPort, persisted: &'a P) -> Self {
         Self { catalog, persisted }
     }
 
@@ -81,57 +97,58 @@ impl<'a> OpdsV2FeedCompositionService<'a> {
         let query_library_id = kind.subfeed_query_library_id(library_id);
         let feed_service = OpdsFeedService::new(self.catalog);
 
-        let (total, content) = match kind {
+        let page_content = match kind {
             OpdsV2FeedKind::KeepReading => {
                 let page = feed_service
                     .keep_reading_page(user, query_library_id, page, size)
                     .await
                     .map_err(OpdsV2FeedPageError::Load)?;
-                (
-                    page.total_visible_books,
-                    OpdsV2FeedContent::Publications(page.books),
-                )
+                OpdsV2FeedPageContent {
+                    total: page.total_visible_books,
+                    content: OpdsV2FeedContent::Publications(page.books),
+                }
             }
             OpdsV2FeedKind::OnDeck => {
                 let page = feed_service
                     .on_deck_page(user, query_library_id, page, size)
                     .await
                     .map_err(OpdsV2FeedPageError::Load)?;
-                (
-                    page.total_visible_books,
-                    OpdsV2FeedContent::Publications(page.books),
-                )
+                OpdsV2FeedPageContent {
+                    total: page.total_visible_books,
+                    content: OpdsV2FeedContent::Publications(page.books),
+                }
             }
             OpdsV2FeedKind::LatestBooks => {
                 let page = feed_service
                     .latest_books_page(user, query_library_id, page, size)
                     .await
                     .map_err(OpdsV2FeedPageError::Load)?;
-                (
-                    page.total_visible_books,
-                    OpdsV2FeedContent::Publications(page.books),
-                )
+                OpdsV2FeedPageContent {
+                    total: page.total_visible_books,
+                    content: OpdsV2FeedContent::Publications(page.books),
+                }
             }
             OpdsV2FeedKind::LatestSeries => {
                 let page = feed_service
                     .latest_series_page(user, query_library_id, page, size)
                     .await
                     .map_err(OpdsV2FeedPageError::Load)?;
-                (
-                    page.total_visible_series,
-                    OpdsV2FeedContent::Navigation(page.series),
-                )
+                OpdsV2FeedPageContent {
+                    total: page.total_visible_series,
+                    content: OpdsV2FeedContent::Navigation(page.series),
+                }
             }
         };
 
         Ok(OpdsV2FeedPage {
             title: feed_title(kind, selected_library.as_ref()),
-            self_path: feed_self_path(kind, library_id),
+            kind,
+            library_id: library_id.map(str::to_string),
             modified: selected_library.map(|library| library.last_modified),
             page,
             size,
-            total,
-            content,
+            total: page_content.total,
+            content: page_content.content,
         })
     }
 
@@ -146,17 +163,14 @@ impl<'a> OpdsV2FeedCompositionService<'a> {
             .await
             .map_err(OpdsV2FeedPageError::Load)?;
         let selected_library = visible_library_from_loaded(user, &libraries, library_id)?;
-        let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-        let recommended_path = format!("/opds/v2/libraries{library_segment}");
-        let browse_path = format!("/opds/v2/libraries{library_segment}/browse");
-        let collections_path = format!("/opds/v2/libraries{library_segment}/collections");
-        let readlists_path = format!("/opds/v2/libraries{library_segment}/readlists");
         let has_visible_collections = persisted_service
             .has_visible_collections_for_scope(user, library_id)
-            .await;
+            .await
+            .map_err(OpdsV2FeedPageError::Load)?;
         let has_visible_readlists = persisted_service
             .has_visible_readlists_for_scope(user, library_id)
-            .await;
+            .await
+            .map_err(OpdsV2FeedPageError::Load)?;
 
         let mut groups = Vec::new();
         if selected_library.is_none() {
@@ -167,7 +181,7 @@ impl<'a> OpdsV2FeedCompositionService<'a> {
             if !visible_libraries.is_empty() {
                 groups.push(OpdsV2RecommendedGroup {
                     title: "Libraries".to_string(),
-                    self_path: "/opds/v2/libraries".to_string(),
+                    kind: OpdsV2RecommendedGroupKind::Libraries,
                     total: visible_libraries.len(),
                     content: OpdsV2RecommendedGroupContent::Libraries(visible_libraries),
                 });
@@ -175,49 +189,53 @@ impl<'a> OpdsV2FeedCompositionService<'a> {
         }
 
         let feed_service = OpdsFeedService::new(self.catalog);
+        let page = feed_service
+            .keep_reading_page(user, library_id, 0, 5)
+            .await
+            .map_err(OpdsV2FeedPageError::Load)?;
         push_books_group(
             &mut groups,
             OpdsV2FeedKind::KeepReading,
-            feed_service
-                .keep_reading_page(user, library_id, 0, 5)
-                .await
-                .ok()
-                .map(|page| (page.books, page.total_visible_books)),
-            library_id,
+            OpdsV2RecommendedBooksPage {
+                books: page.books,
+                total: page.total_visible_books,
+            },
         );
+        let page = feed_service
+            .on_deck_page(user, library_id, 0, 5)
+            .await
+            .map_err(OpdsV2FeedPageError::Load)?;
         push_books_group(
             &mut groups,
             OpdsV2FeedKind::OnDeck,
-            feed_service
-                .on_deck_page(user, library_id, 0, 5)
-                .await
-                .ok()
-                .map(|page| (page.books, page.total_visible_books)),
-            library_id,
+            OpdsV2RecommendedBooksPage {
+                books: page.books,
+                total: page.total_visible_books,
+            },
         );
+        let page = feed_service
+            .latest_books_page_with_read_progress(user, library_id, 0, 5)
+            .await
+            .map_err(OpdsV2FeedPageError::Load)?;
         push_books_group(
             &mut groups,
             OpdsV2FeedKind::LatestBooks,
-            feed_service
-                .latest_books_page_with_read_progress(user, library_id, 0, 5)
-                .await
-                .ok()
-                .map(|page| (page.books, page.total_visible_books)),
-            library_id,
+            OpdsV2RecommendedBooksPage {
+                books: page.books,
+                total: page.total_visible_books,
+            },
         );
-        match feed_service
+        let page = feed_service
             .latest_series_page(user, library_id, 0, 5)
             .await
-        {
-            Ok(page) if !page.series.is_empty() => {
-                groups.push(OpdsV2RecommendedGroup {
-                    title: OpdsV2FeedKind::LatestSeries.title().to_string(),
-                    self_path: feed_self_path(OpdsV2FeedKind::LatestSeries, library_id),
-                    total: page.total_visible_series,
-                    content: OpdsV2RecommendedGroupContent::Navigation(page.series),
-                });
-            }
-            _ => {}
+            .map_err(OpdsV2FeedPageError::Load)?;
+        if !page.series.is_empty() {
+            groups.push(OpdsV2RecommendedGroup {
+                title: OpdsV2FeedKind::LatestSeries.title().to_string(),
+                kind: OpdsV2RecommendedGroupKind::Feed(OpdsV2FeedKind::LatestSeries),
+                total: page.total_visible_series,
+                content: OpdsV2RecommendedGroupContent::Navigation(page.series),
+            });
         }
 
         Ok(OpdsV2RecommendedPage {
@@ -225,12 +243,8 @@ impl<'a> OpdsV2FeedCompositionService<'a> {
                 .as_ref()
                 .map(|library| format!("{} - Recommended", library.name))
                 .unwrap_or_else(|| "All libraries - Recommended".to_string()),
-            self_path: recommended_path.clone(),
+            library_id: library_id.map(str::to_string),
             modified: selected_library.map(|library| library.last_modified),
-            recommended_path,
-            browse_path,
-            collections_path,
-            readlists_path,
             has_visible_collections,
             has_visible_readlists,
             groups,
@@ -259,15 +273,6 @@ impl OpdsV2FeedKind {
         }
     }
 
-    fn path_suffix(self) -> &'static str {
-        match self {
-            Self::KeepReading => "keep-reading",
-            Self::OnDeck => "on-deck",
-            Self::LatestBooks => "books/latest",
-            Self::LatestSeries => "series/latest",
-        }
-    }
-
     fn subfeed_query_library_id(self, library_id: Option<&str>) -> Option<&str> {
         match self {
             Self::KeepReading | Self::LatestBooks => None,
@@ -279,21 +284,17 @@ impl OpdsV2FeedKind {
 fn push_books_group(
     groups: &mut Vec<OpdsV2RecommendedGroup>,
     kind: OpdsV2FeedKind,
-    page: Option<(Vec<OpdsBookFeedEntry>, usize)>,
-    library_id: Option<&str>,
+    page: OpdsV2RecommendedBooksPage,
 ) {
-    let Some((books, total)) = page else {
-        return;
-    };
-    if books.is_empty() {
+    if page.books.is_empty() {
         return;
     }
 
     groups.push(OpdsV2RecommendedGroup {
         title: kind.title().to_string(),
-        self_path: feed_self_path(kind, library_id),
-        total,
-        content: OpdsV2RecommendedGroupContent::Publications(books),
+        kind: OpdsV2RecommendedGroupKind::Feed(kind),
+        total: page.total,
+        content: OpdsV2RecommendedGroupContent::Publications(page.books),
     });
 }
 
@@ -326,25 +327,21 @@ fn feed_title(kind: OpdsV2FeedKind, library: Option<&PersistedLibraryRecord>) ->
         .unwrap_or_else(|| format!("All libraries - {}", kind.title()))
 }
 
-fn feed_self_path(kind: OpdsV2FeedKind, library_id: Option<&str>) -> String {
-    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    format!("/opds/v2/libraries{library_segment}/{}", kind.path_suffix())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
     use async_trait::async_trait;
+    use komga_domain::discovery::QueryRestrictions;
 
     use super::*;
     use crate::opds::{
-        BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookFeedKind, OpdsBookFeedQuery,
-        OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
-        PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedNamedRecord,
-        PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesBookRecord,
-        PersistedSeriesRecord, PersistedSeriesSearchRecord,
+        OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCollectionVisibilityPersistedPort,
+        OpdsFeedCatalogPort, OpdsLatestSeriesFeedQuery, OpdsLibraryPersistedPort,
+        OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
+        OpdsReadlistVisibilityPersistedPort, OpdsSeriesFeedPage, PersistedNamedRecord,
+        PersistedReadlistBookRecord, PersistedReadlistRecord, PersistedSeriesRecord,
     };
 
     type LatestBooksCall = (Option<String>, Option<String>);
@@ -360,10 +357,12 @@ mod tests {
         on_deck_calls: Mutex<Vec<Option<String>>>,
         latest_books_calls: Mutex<Vec<LatestBooksCall>>,
         latest_series_calls: Mutex<Vec<LatestSeriesCall>>,
+        latest_books_error: Option<String>,
+        latest_series_error: Option<String>,
     }
 
     #[async_trait]
-    impl OpdsCatalogPort for TestCatalog {
+    impl OpdsFeedCatalogPort for TestCatalog {
         async fn load_book_feed_page(
             &self,
             query: OpdsBookFeedQuery<'_>,
@@ -392,6 +391,9 @@ mod tests {
                 OpdsBookFeedKind::LatestBooks {
                     include_read_progress,
                 } => {
+                    if let Some(error) = self.latest_books_error.clone() {
+                        return Err(error);
+                    }
                     self.latest_books_calls
                         .lock()
                         .expect("test calls lock should not be poisoned")
@@ -421,6 +423,9 @@ mod tests {
                 .lock()
                 .expect("test calls lock should not be poisoned")
                 .push(query.library_id.map(str::to_string));
+            if let Some(error) = self.latest_series_error.clone() {
+                return Err(error);
+            }
             let series = self
                 .latest_series
                 .lock()
@@ -436,38 +441,11 @@ mod tests {
         async fn load_library_series_feed_page(
             &self,
             _query: OpdsLibrarySeriesQuery<'_>,
-        ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
-            unimplemented!()
-        }
-
-        async fn load_browse_series_navigation_entries(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _library_id: Option<&str>,
-            _publishers: &[String],
-            _page: usize,
-            _size: usize,
-        ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String> {
-            unimplemented!()
-        }
-
-        async fn load_browse_publisher_entries(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _library_id: Option<&str>,
-        ) -> Result<Vec<BrowsePublisherEntry>, String> {
-            unimplemented!()
-        }
-
-        async fn load_series_page(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-            _search: Option<&str>,
-            _publishers: &[String],
-            _offset: i64,
-            _limit: i64,
-        ) -> Result<Vec<OpdsSeriesEntry>, String> {
-            unimplemented!()
+        ) -> Result<OpdsSeriesFeedPage, String> {
+            Ok(OpdsSeriesFeedPage {
+                series: Vec::new(),
+                has_next: false,
+            })
         }
     }
 
@@ -475,10 +453,12 @@ mod tests {
     struct TestPersisted {
         libraries: HashMap<String, PersistedLibraryRecord>,
         load_library_calls: Mutex<Vec<String>>,
+        collection_visibility_error: Option<String>,
+        readlist_visibility_error: Option<String>,
     }
 
     #[async_trait]
-    impl OpdsPersistedPort for TestPersisted {
+    impl OpdsLibraryPersistedPort for TestPersisted {
         async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
             Ok(self.libraries.values().cloned().collect())
         }
@@ -493,44 +473,25 @@ mod tests {
                 .push(library_id.to_string());
             Ok(self.libraries.get(library_id).cloned())
         }
+    }
 
+    #[async_trait]
+    impl OpdsReadlistVisibilityPersistedPort for TestPersisted {
         async fn load_readlists_for_library(
             &self,
             _library_id: &str,
         ) -> Result<Vec<PersistedReadlistRecord>, String> {
+            if let Some(error) = self.readlist_visibility_error.clone() {
+                return Err(error);
+            }
             Ok(Vec::new())
         }
 
         async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+            if let Some(error) = self.readlist_visibility_error.clone() {
+                return Err(error);
+            }
             Ok(Vec::new())
-        }
-
-        async fn load_series(
-            &self,
-            _series_id: &str,
-        ) -> Result<Option<PersistedSeriesRecord>, String> {
-            unimplemented!()
-        }
-
-        async fn load_series_books_paged(
-            &self,
-            _series_id: &str,
-            _user_id: &str,
-            _offset: i64,
-            _limit: i64,
-        ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
-            unimplemented!()
-        }
-
-        async fn load_series_tags(&self, _series_id: &str) -> Result<Vec<String>, String> {
-            unimplemented!()
-        }
-
-        async fn load_readlist(
-            &self,
-            _readlist_id: &str,
-        ) -> Result<Option<PersistedReadlistRecord>, String> {
-            unimplemented!()
         }
 
         async fn load_readlist_books(
@@ -539,48 +500,18 @@ mod tests {
         ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
             Ok(Vec::new())
         }
+    }
 
-        async fn load_unified_search_results(
-            &self,
-            _query: &str,
-        ) -> Result<
-            (
-                Vec<PersistedSeriesSearchRecord>,
-                Vec<PersistedBookSearchRecord>,
-                Vec<PersistedNamedRecord>,
-                Vec<PersistedNamedRecord>,
-            ),
-            String,
-        > {
-            unimplemented!()
-        }
-
-        async fn load_publishers(
-            &self,
-            _allowed_library_ids: Option<&HashSet<String>>,
-        ) -> Result<Vec<String>, String> {
-            unimplemented!()
-        }
-
+    #[async_trait]
+    impl OpdsCollectionVisibilityPersistedPort for TestPersisted {
         async fn load_collections(
             &self,
             _library_id: Option<&str>,
         ) -> Result<Vec<PersistedNamedRecord>, String> {
+            if let Some(error) = self.collection_visibility_error.clone() {
+                return Err(error);
+            }
             Ok(Vec::new())
-        }
-
-        async fn load_collection(
-            &self,
-            _collection_id: &str,
-        ) -> Result<Option<PersistedNamedRecord>, String> {
-            unimplemented!()
-        }
-
-        async fn load_collection_books(
-            &self,
-            _collection_id: &str,
-        ) -> Result<Vec<PersistedBookFeedRecord>, String> {
-            unimplemented!()
         }
 
         async fn load_collection_series(
@@ -593,7 +524,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn library_scoped_keep_reading_keeps_route_metadata_without_catalog_scope() {
+    async fn library_scoped_keep_reading_keeps_feed_identity_without_catalog_scope() {
         let catalog = TestCatalog {
             keep_reading_books: Mutex::new(vec![book("book-lib-b", "lib-b")]),
             ..Default::default()
@@ -613,7 +544,8 @@ mod tests {
             .expect("keep-reading page should load");
 
         assert_eq!(page.title, "Library A - Keep Reading");
-        assert_eq!(page.self_path, "/opds/v2/libraries/lib-a/keep-reading");
+        assert_eq!(page.kind, OpdsV2FeedKind::KeepReading);
+        assert_eq!(page.library_id.as_deref(), Some("lib-a"));
         assert_eq!(page.modified.as_deref(), Some("2024-02-03 04:05:06"));
         assert_eq!(page.total, 1);
         assert_eq!(
@@ -776,11 +708,15 @@ mod tests {
             .expect("recommended page should load");
 
         assert_eq!(page.title, "All libraries - Recommended");
-        assert_eq!(page.self_path, "/opds/v2/libraries");
+        assert_eq!(page.library_id.as_deref(), None);
         assert_eq!(page.groups.len(), 5);
+        assert_eq!(page.groups[0].kind, OpdsV2RecommendedGroupKind::Libraries);
         assert_group_libraries(&page.groups[0], &["lib-a"]);
         assert_eq!(page.groups[1].title, "Keep Reading");
-        assert_eq!(page.groups[1].self_path, "/opds/v2/libraries/keep-reading");
+        assert_eq!(
+            page.groups[1].kind,
+            OpdsV2RecommendedGroupKind::Feed(OpdsV2FeedKind::KeepReading)
+        );
         assert_eq!(page.groups[2].title, "On Deck");
         assert_eq!(page.groups[3].title, "Latest Books");
         assert_eq!(page.groups[4].title, "Latest Series");
@@ -791,6 +727,88 @@ mod tests {
                 .expect("test calls lock should not be poisoned")
                 .as_slice(),
             &[(Some("user-1".to_string()), None)]
+        );
+    }
+
+    #[tokio::test]
+    async fn recommended_page_propagates_visibility_load_errors() {
+        let catalog = TestCatalog::default();
+        let collection_persisted = TestPersisted {
+            libraries: HashMap::from([("lib-a".to_string(), library("lib-a", "Library A"))]),
+            collection_visibility_error: Some("collections unavailable".to_string()),
+            ..Default::default()
+        };
+        let service = OpdsV2FeedCompositionService::new(&catalog, &collection_persisted);
+
+        let result = service
+            .recommended_page(&user_with_libraries(Some(&["lib-a"])), None)
+            .await;
+        let Err(error) = result else {
+            panic!("collection visibility load failure should fail recommended page");
+        };
+
+        assert_eq!(
+            error,
+            OpdsV2FeedPageError::Load("collections unavailable".to_string())
+        );
+
+        let readlist_persisted = TestPersisted {
+            libraries: HashMap::from([("lib-a".to_string(), library("lib-a", "Library A"))]),
+            readlist_visibility_error: Some("readlists unavailable".to_string()),
+            ..Default::default()
+        };
+        let service = OpdsV2FeedCompositionService::new(&catalog, &readlist_persisted);
+
+        let result = service
+            .recommended_page(&user_with_libraries(Some(&["lib-a"])), None)
+            .await;
+        let Err(error) = result else {
+            panic!("readlist visibility load failure should fail recommended page");
+        };
+
+        assert_eq!(
+            error,
+            OpdsV2FeedPageError::Load("readlists unavailable".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn recommended_page_propagates_feed_group_load_errors() {
+        let persisted = persisted_with_libraries([library("lib-a", "Library A")]);
+        let latest_books_catalog = TestCatalog {
+            latest_books_error: Some("latest books unavailable".to_string()),
+            ..Default::default()
+        };
+        let service = OpdsV2FeedCompositionService::new(&latest_books_catalog, &persisted);
+
+        let result = service
+            .recommended_page(&user_with_libraries(Some(&["lib-a"])), None)
+            .await;
+        let Err(error) = result else {
+            panic!("recommended page must not hide latest books load errors");
+        };
+
+        assert_eq!(
+            error,
+            OpdsV2FeedPageError::Load("latest books unavailable".to_string())
+        );
+
+        let latest_series_catalog = TestCatalog {
+            latest_series_error: Some("latest series unavailable".to_string()),
+            ..Default::default()
+        };
+        let service = OpdsV2FeedCompositionService::new(&latest_series_catalog, &persisted);
+
+        let result = service
+            .recommended_page(&user_with_libraries(Some(&["lib-a"])), None)
+            .await;
+        let Err(error) = result else {
+            panic!("recommended page must not hide latest series load errors");
+        };
+
+        assert_eq!(
+            error,
+            OpdsV2FeedPageError::Load("latest series unavailable".to_string())
         );
     }
 
@@ -819,10 +837,12 @@ mod tests {
             user_id: "user-1".to_string(),
             allowed_library_ids: allowed_library_ids
                 .map(|ids| ids.iter().map(|id| id.to_string()).collect::<HashSet<_>>()),
-            age: None,
-            age_restriction: None,
-            labels_allow: Vec::new(),
-            labels_exclude: Vec::new(),
+            restrictions: QueryRestrictions {
+                age: None,
+                age_restriction: None,
+                labels_allow: Vec::new(),
+                labels_exclude: Vec::new(),
+            },
         }
     }
 

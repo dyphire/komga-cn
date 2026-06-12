@@ -14,9 +14,18 @@ pub struct QueryRestrictions {
     pub labels_exclude: Vec<String>,
 }
 
+impl QueryRestrictions {
+    pub fn is_restricted(&self) -> bool {
+        self.age.is_some()
+            || self.age_restriction.is_some()
+            || !self.labels_allow.is_empty()
+            || !self.labels_exclude.is_empty()
+    }
+}
+
 pub fn content_allowed_by_restrictions(
     restrictions: &QueryRestrictions,
-    age_rating: Option<u16>,
+    age_rating: Option<u32>,
     sharing_labels: &[String],
 ) -> bool {
     let labels = normalized_sharing_labels(sharing_labels);
@@ -24,7 +33,7 @@ pub fn content_allowed_by_restrictions(
     let age_allowed = if restrictions.age_restriction == Some(AgeRestrictionKind::AllowOnly) {
         restrictions
             .age
-            .map(|age_limit| age_rating.is_some_and(|age| age <= age_limit))
+            .map(|age_limit| age_rating.is_some_and(|age| age <= u32::from(age_limit)))
     } else {
         None
     };
@@ -51,7 +60,7 @@ pub fn content_allowed_by_restrictions(
     let age_denied = if restrictions.age_restriction == Some(AgeRestrictionKind::Exclude) {
         restrictions
             .age
-            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= age_limit))
+            .is_some_and(|age_limit| age_rating.is_some_and(|age| age >= u32::from(age_limit)))
     } else {
         false
     };

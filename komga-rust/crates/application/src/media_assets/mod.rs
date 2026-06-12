@@ -1,3 +1,6 @@
+mod archive_delivery;
+#[cfg(test)]
+mod archive_delivery_tests;
 mod book_access;
 mod book_import;
 mod book_media_delivery;
@@ -14,47 +17,60 @@ mod epub_navigation;
 mod epub_navigation_tests;
 mod manifest_builder;
 mod metadata_update;
-pub mod metadata_writer;
-pub mod operations;
-mod page_hash_models;
+mod metadata_writer;
 mod page_retrieval;
 mod ports;
 mod read_progress_service;
 mod thumbnail_operations;
 
+pub use komga_domain::media_assets::ThumbnailType;
+
+pub use archive_delivery::{
+    ArchiveBuilderPort, ArchiveContentPort, ArchiveDelivery, ArchiveDeliveryAsset,
+    ArchiveDeliveryService, ArchiveFileEntry, ArchiveReaderPort,
+};
 pub use book_import::{
     BookImportPort, BookImportService, BookImportSubmissionFailure,
     BookImportSubmissionFailureKind, BooksImportEntry, BooksImportPayload, ImportBookOutcome,
-    ImportCopyMode, QueuedBookImportPayload, RuntimeBookImportEvent,
-    current_runtime_book_import_event_cursor, generate_prefixed_id, parse_books_import_payload,
-    pending_runtime_book_import_events, register_runtime_book_import_event,
+    ImportCopyMode, RuntimeBookImportEvent, RuntimeBookImportEventBatch,
+    current_runtime_book_import_event_cursor, pending_runtime_book_import_events,
+    register_runtime_book_import_event,
 };
 pub use book_media_delivery::{
     BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
     BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookThumbnailAsset,
-    BookThumbnailDelivery, PersistedBookIdResolverPort,
+    BookThumbnailDelivery,
 };
 pub use book_progression::{
-    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionReaderPort,
-    BookProgressionService,
+    BookProgressionGetOutcome, BookProgressionLocator, BookProgressionOutcome,
+    BookProgressionReaderPort, BookProgressionService, BookProgressionSurfacePort,
+    BookProgressionUpdate, BookProgressionUpdateInput,
 };
 pub(crate) use book_progression_write::{
     BookProgressionConflictPolicy, BookProgressionWrite, BookProgressionWriteError,
     BookProgressionWriteService, BookProgressionWriteSource,
 };
+pub use book_progression_write::{BookProgressionWriteReaderPort, BookProgressionWriterPort};
 pub use epub_navigation::{
-    EpubNavigation, EpubNavigationError, EpubNavigationLoadError, EpubNavigationReaderPort,
-    load_book_epub_navigation, normalized_href_base,
+    EpubNavigation, EpubNavigationContentPort, EpubNavigationError,
+    EpubNavigationExtensionReaderPort, EpubNavigationLoadError, EpubNavigationReaderPort,
+    NormalizedEpubLocator, load_book_epub_navigation, load_book_epub_navigation_extension,
+    load_book_epub_positions, normalized_href_base,
 };
 pub use manifest_builder::{
-    ManifestBuildOutcome, ManifestVariant, PersistedManifest, build_persisted_book_manifest,
+    ManifestBuildOutcome, ManifestContentPort, ManifestContributor, ManifestHref, ManifestLinkItem,
+    ManifestMetadata, ManifestMetadataPort, ManifestNavigationItem, ManifestProfile,
+    ManifestReaderPort, ManifestReadingProgression, ManifestVariant, PersistedManifest,
+    build_persisted_book_manifest,
 };
 pub use metadata_update::{
-    BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataPort,
-    BookMetadataService,
+    BookMetadata, BookMetadataAuthor, BookMetadataBatchUpdateOutcome, BookMetadataLink,
+    BookMetadataPatch, BookMetadataPort, BookMetadataService, BookMetadataUpdate,
+    BookMetadataUpdateError,
 };
-pub use metadata_writer::{MetadataUpdateResult, MetadataWriter};
-pub use page_hash_models::{PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashThumbnail};
+pub use metadata_writer::{
+    BookEventEmitter, MetadataUpdateResult, MetadataWriter, SearchSyncPort, TaskEnqueuePort,
+};
 pub use page_retrieval::{
     BookMediaRecord, BookPageRecord, PersistedMediaFileRecord, book_media_is_epub,
     book_media_is_pdf, book_media_is_rar_archive, book_media_is_single_image,
@@ -62,13 +78,16 @@ pub use page_retrieval::{
     content_type_from_filename, is_supported_page_image_file_name,
 };
 pub use ports::{
-    BookMediaPort, BookProgressionInput, ContentAccessPort, ContentResolverPort,
-    EntityExistencePort, EpubPositionsExtension, MediaReaderPort, ProgressWriterPort,
-    ReadProgressReadPort, ReadProgressSurfacePort, SeriesRelationPort, ThumbnailReadPort,
-    ThumbnailWriterPort,
+    ArchiveEntry, BookAccessRestrictions, BookMediaPort, BookProgressionInput,
+    BookProgressionRecord, ContentAccessPort, ContentResolverPort, EntityExistencePort,
+    EpubCoverImage, EpubExtensionBlob, EpubNavigationExtension, EpubNavigationLink,
+    EpubNavigationPosition, ManifestBookRecord, MediaImageDimensions, ProgressWriterPort,
+    ReadProgressReadPort, ReadProgressReaderPort, ReadProgressSurfacePort,
+    ReadlistTachiyomiCounters, SeriesArchiveEntries, SeriesBookNumberSort, SeriesRelationPort,
+    SeriesTachiyomiProgress, SeriesTachiyomiProgressBook, ThumbnailReadPort, ThumbnailWriterPort,
 };
-pub use read_progress_service::ReadProgressService;
+pub use read_progress_service::{ReadProgressService, SeriesReadProgressWriterPort};
 pub use thumbnail_operations::{
     CollectionThumbnailRecord, EntityThumbnailBinary, EntityThumbnailRecord,
-    ReadlistThumbnailRecord, SeriesThumbnailRecord,
+    ReadlistThumbnailRecord, SeriesThumbnailRecord, ThumbnailReaderPort,
 };

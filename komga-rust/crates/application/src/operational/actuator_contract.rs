@@ -1,64 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
-
-use super::metrics_port::OperationalMetricsPort;
+use super::metrics_port::{LibraryMetricValue, OperationalMetricsPort};
 use crate::task_processing::TaskKind;
-
-const PRODUCT_GROUP: &str = "huihuimoe";
-const PRODUCT_ARTIFACT: &str = "komga";
-const PRODUCT_NAME: &str = "komga-rust";
-const DEFAULT_PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-pub fn actuator_root_payload() -> Value {
-    json!({
-        "_links": actuator_root_links(),
-    })
-}
-
-fn actuator_root_links() -> Value {
-    let links = [
-        ("self", "/actuator", false),
-        ("beans", "/actuator/beans", false),
-        ("caches", "/actuator/caches", false),
-        ("conditions", "/actuator/conditions", false),
-        ("configprops", "/actuator/configprops", false),
-        ("env", "/actuator/env", false),
-        ("env-toMatch", "/actuator/env/{toMatch}", true),
-        ("flyway", "/actuator/flyway", false),
-        ("health", "/actuator/health", false),
-        ("health-path", "/actuator/health/{*path}", true),
-        ("heapdump", "/actuator/heapdump", false),
-        ("httpexchanges", "/actuator/httpexchanges", false),
-        ("info", "/actuator/info", false),
-        ("logfile", "/actuator/logfile", false),
-        ("loggers", "/actuator/loggers", false),
-        ("loggers-name", "/actuator/loggers/{name}", true),
-        ("mappings", "/actuator/mappings", false),
-        ("metrics", "/actuator/metrics", false),
-        (
-            "metrics-requiredMetricName",
-            "/actuator/metrics/{requiredMetricName}",
-            true,
-        ),
-        ("scheduledtasks", "/actuator/scheduledtasks", false),
-        ("shutdown", "/actuator/shutdown", false),
-        ("threaddump", "/actuator/threaddump", false),
-    ];
-
-    Value::Object(serde_json::Map::from_iter(links.into_iter().map(
-        |(name, href, templated)| {
-            (
-                name.to_string(),
-                json!({
-                    "href": href,
-                    "templated": templated,
-                }),
-            )
-        },
-    )))
-}
 
 #[derive(Clone, Debug)]
 pub struct ActuatorHealthSnapshot {
@@ -77,39 +21,88 @@ pub struct ActuatorDiskSpaceSnapshot {
     pub path: String,
 }
 
-pub fn actuator_health_payload(snapshot: ActuatorHealthSnapshot, include_details: bool) -> Value {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActuatorHealthStatus {
+    Up,
+    Down,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorHealthReport {
+    pub status: ActuatorHealthStatus,
+    pub db: ActuatorDatabaseHealthReport,
+    pub disk_space: ActuatorDiskSpaceHealthReport,
+    pub ping: ActuatorPingHealthReport,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorDatabaseHealthReport {
+    pub status: ActuatorHealthStatus,
+    pub sqlite_rw: ActuatorDatasourceHealthReport,
+    pub sqlite_ro: ActuatorDatasourceHealthReport,
+    pub tasks_rw: ActuatorDatasourceHealthReport,
+    pub tasks_ro: ActuatorDatasourceHealthReport,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorDatasourceHealthReport {
+    pub status: ActuatorHealthStatus,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorDiskSpaceHealthReport {
+    pub status: ActuatorHealthStatus,
+    pub total: Option<u64>,
+    pub free: Option<u64>,
+    pub threshold: u64,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorPingHealthReport {
+    pub status: ActuatorHealthStatus,
+}
+
+pub fn actuator_health_report(snapshot: ActuatorHealthSnapshot) -> ActuatorHealthReport {
     let db = db_health_component(&snapshot);
     let disk_space = disk_space_component(&snapshot.disk_space);
     let ping = ping_component();
-    let status = aggregate_health_status([db.is_up, disk_space.is_up, ping.is_up]);
+    let status = aggregate_health_status([db.status, disk_space.status, ping.status]);
 
-    if !include_details {
-        return json!({ "status": status });
+    ActuatorHealthReport {
+        status,
+        db,
+        disk_space,
+        ping,
     }
-
-    json!({
-        "status": status,
-        "components": {
-            "db": db.payload,
-            "diskSpace": disk_space.payload,
-            "ping": ping.payload,
-        }
-    })
 }
 
-fn aggregate_health_status(statuses: impl IntoIterator<Item = bool>) -> &'static str {
-    component_status(aggregate_health_is_up(statuses))
+fn aggregate_health_status(
+    statuses: impl IntoIterator<Item = ActuatorHealthStatus>,
+) -> ActuatorHealthStatus {
+    if statuses
+        .into_iter()
+        .all(|status| status == ActuatorHealthStatus::Up)
+    {
+        ActuatorHealthStatus::Up
+    } else {
+        ActuatorHealthStatus::Down
+    }
 }
 
 fn aggregate_health_is_up(statuses: impl IntoIterator<Item = bool>) -> bool {
     statuses.into_iter().all(|status| status)
 }
 
-fn component_status(is_up: bool) -> &'static str {
-    if is_up { "UP" } else { "DOWN" }
+fn component_status(is_up: bool) -> ActuatorHealthStatus {
+    if is_up {
+        ActuatorHealthStatus::Up
+    } else {
+        ActuatorHealthStatus::Down
+    }
 }
 
-fn db_health_component(snapshot: &ActuatorHealthSnapshot) -> HealthComponentPayload {
+fn db_health_component(snapshot: &ActuatorHealthSnapshot) -> ActuatorDatabaseHealthReport {
     let is_up = aggregate_health_is_up([
         snapshot.sqlite_rw_ready,
         snapshot.sqlite_ro_ready,
@@ -117,68 +110,45 @@ fn db_health_component(snapshot: &ActuatorHealthSnapshot) -> HealthComponentPayl
         snapshot.tasks_ro_ready,
     ]);
 
-    HealthComponentPayload {
-        is_up,
-        payload: json!({
-            "status": component_status(is_up),
-            "components": {
-                "sqliteDataSourceRW": sqlite_datasource_health_component(snapshot.sqlite_rw_ready),
-                "sqliteDataSourceRO": sqlite_datasource_health_component(snapshot.sqlite_ro_ready),
-                "tasksDataSourceRW": sqlite_datasource_health_component(snapshot.tasks_rw_ready),
-                "tasksDataSourceRO": sqlite_datasource_health_component(snapshot.tasks_ro_ready),
-            }
-        }),
+    ActuatorDatabaseHealthReport {
+        status: component_status(is_up),
+        sqlite_rw: sqlite_datasource_health_component(snapshot.sqlite_rw_ready),
+        sqlite_ro: sqlite_datasource_health_component(snapshot.sqlite_ro_ready),
+        tasks_rw: sqlite_datasource_health_component(snapshot.tasks_rw_ready),
+        tasks_ro: sqlite_datasource_health_component(snapshot.tasks_ro_ready),
     }
 }
 
-fn sqlite_datasource_health_component(is_up: bool) -> Value {
-    json!({
-        "status": component_status(is_up),
-        "details": {
-            "database": "SQLite",
-            "validationQuery": "isValid()",
-        }
-    })
-}
-
-struct HealthComponentPayload {
-    is_up: bool,
-    payload: Value,
-}
-
-fn ping_component() -> HealthComponentPayload {
-    HealthComponentPayload {
-        is_up: true,
-        payload: json!({ "status": "UP" }),
+fn sqlite_datasource_health_component(is_up: bool) -> ActuatorDatasourceHealthReport {
+    ActuatorDatasourceHealthReport {
+        status: component_status(is_up),
     }
 }
 
-fn disk_space_component(snapshot: &ActuatorDiskSpaceSnapshot) -> HealthComponentPayload {
+fn ping_component() -> ActuatorPingHealthReport {
+    ActuatorPingHealthReport {
+        status: ActuatorHealthStatus::Up,
+    }
+}
+
+fn disk_space_component(snapshot: &ActuatorDiskSpaceSnapshot) -> ActuatorDiskSpaceHealthReport {
     match (snapshot.total, snapshot.free) {
         (Some(total), Some(free)) => {
             let is_up = free >= snapshot.threshold;
-            HealthComponentPayload {
-                is_up,
-                payload: json!({
-                    "status": component_status(is_up),
-                    "details": {
-                        "total": total,
-                        "free": free,
-                        "threshold": snapshot.threshold,
-                        "path": snapshot.path,
-                    }
-                }),
+            ActuatorDiskSpaceHealthReport {
+                status: component_status(is_up),
+                total: Some(total),
+                free: Some(free),
+                threshold: snapshot.threshold,
+                path: snapshot.path.clone(),
             }
         }
-        _ => HealthComponentPayload {
-            is_up: false,
-            payload: json!({
-                "status": "DOWN",
-                "details": {
-                    "threshold": snapshot.threshold,
-                    "path": snapshot.path,
-                }
-            }),
+        _ => ActuatorDiskSpaceHealthReport {
+            status: ActuatorHealthStatus::Down,
+            total: snapshot.total,
+            free: snapshot.free,
+            threshold: snapshot.threshold,
+            path: snapshot.path.clone(),
         },
     }
 }
@@ -225,102 +195,6 @@ pub struct ActuatorInfoSnapshot {
     pub process: ActuatorProcessInfo,
 }
 
-pub fn actuator_info_payload(snapshot: ActuatorInfoSnapshot) -> Value {
-    let mut payload = serde_json::Map::new();
-    payload.insert("build".to_string(), build_info_json(&snapshot.build));
-    payload.insert("os".to_string(), os_info_json(snapshot.os));
-    payload.insert("process".to_string(), process_info_json(snapshot.process));
-
-    if snapshot.build.git_branch.is_some()
-        || snapshot.build.git_commit_id.is_some()
-        || snapshot.build.git_commit_time.is_some()
-    {
-        payload.insert(
-            "git".to_string(),
-            json!({
-                "branch": snapshot.build.git_branch,
-                "commit": {
-                    "id": snapshot.build.git_commit_id,
-                    "time": snapshot.build.git_commit_time,
-                }
-            }),
-        );
-    }
-    Value::Object(payload)
-}
-
-fn process_info_json(process: ActuatorProcessInfo) -> Value {
-    json!({
-        "pid": process.pid,
-        "parentPid": process.parent_pid,
-        "cpus": process.cpus,
-        "virtualThreads": process.virtual_threads,
-        "memory": {
-            "heap": {
-                "used": process.memory.heap_used,
-                "committed": process.memory.heap_committed,
-                "max": process.memory.heap_max,
-            },
-            "nonHeap": {
-                "used": process.memory.non_heap_used,
-                "committed": process.memory.non_heap_committed,
-                "max": process.memory.non_heap_max,
-            }
-        }
-    })
-}
-
-fn build_info_json(build: &ActuatorBuildInfo) -> Value {
-    let version = build
-        .version
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| DEFAULT_PRODUCT_VERSION.to_string());
-
-    Value::Object(serde_json::Map::from_iter([
-        (
-            "artifact".to_string(),
-            Value::String(PRODUCT_ARTIFACT.to_string()),
-        ),
-        ("name".to_string(), Value::String(PRODUCT_NAME.to_string())),
-        ("version".to_string(), Value::String(version)),
-        (
-            "group".to_string(),
-            Value::String(PRODUCT_GROUP.to_string()),
-        ),
-    ]))
-}
-
-fn os_info_json(os: ActuatorOsInfo) -> Value {
-    let mut payload = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(os.name)),
-        ("arch".to_string(), Value::String(os.arch)),
-    ]);
-
-    if let Some(version) = os.version {
-        payload.insert("version".to_string(), Value::String(version));
-    }
-
-    Value::Object(payload)
-}
-
-pub fn actuator_metrics_index_payload() -> Value {
-    json!({
-        "names": actuator_metric_names(),
-    })
-}
-
-pub fn actuator_metric_query_tags(query: Option<&str>) -> HashMap<String, String> {
-    query
-        .unwrap_or_default()
-        .split('&')
-        .filter_map(|pair| pair.strip_prefix("tag="))
-        .filter_map(|pair| pair.split_once(':'))
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect()
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct ActuatorMetricProbeSnapshot {
     pub application_ready_time_seconds: f64,
@@ -352,6 +226,45 @@ pub struct ActuatorHttpServerRequestMetric {
     pub max_time_seconds: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorMetricDetail {
+    pub name: String,
+    pub description: String,
+    pub base_unit: Option<String>,
+    pub measurements: Vec<ActuatorMetricMeasurement>,
+    pub available_tags: Vec<ActuatorMetricAvailableTag>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorMetricMeasurement {
+    pub statistic: String,
+    pub value: f64,
+}
+
+impl ActuatorMetricMeasurement {
+    fn new(statistic: impl Into<String>, value: f64) -> Self {
+        Self {
+            statistic: statistic.into(),
+            value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActuatorMetricAvailableTag {
+    pub tag: String,
+    pub values: Vec<String>,
+}
+
+impl ActuatorMetricAvailableTag {
+    fn new(tag: impl Into<String>, values: Vec<String>) -> Self {
+        Self {
+            tag: tag.into(),
+            values,
+        }
+    }
+}
+
 pub struct ActuatorMetricService<'a> {
     runtime: &'a dyn OperationalMetricsPort,
 }
@@ -361,12 +274,12 @@ impl<'a> ActuatorMetricService<'a> {
         Self { runtime }
     }
 
-    pub async fn metric_detail_payload(
+    pub async fn metric_detail(
         &self,
         metric_name: &str,
         probes: &ActuatorMetricProbeSnapshot,
         tag_filters: &HashMap<String, String>,
-    ) -> Result<Option<Value>, String> {
+    ) -> Result<Option<ActuatorMetricDetail>, String> {
         match metric_name {
             "application.ready.time" => Ok(Some(single_measurement_metric(
                 metric_name,
@@ -553,67 +466,62 @@ impl<'a> ActuatorMetricService<'a> {
         }
     }
 
-    async fn metric_tasks_execution(&self, task_type: Option<&str>) -> Result<Value, String> {
+    async fn metric_tasks_execution(
+        &self,
+        task_type: Option<&str>,
+    ) -> Result<ActuatorMetricDetail, String> {
         let values = self.runtime.load_task_execution_values().await?;
 
         let count = if let Some(task_type) = task_type {
             values
                 .iter()
-                .find(|(kind, _)| kind.as_str() == task_type)
-                .map(|(_, value)| *value)
+                .find(|value| value.task_type == task_type)
+                .map(|value| value.count)
                 .unwrap_or(0.0)
         } else {
-            values.iter().map(|(_, value)| *value).sum::<f64>()
+            values.iter().map(|value| value.count).sum::<f64>()
         };
 
         let tags = unique_strings(
             values
                 .iter()
-                .map(|(kind, _)| kind.clone())
+                .map(|value| value.task_type.clone())
                 .chain(known_task_metric_types()),
         );
         let total_time = count * 0.01;
         let max_time = if count > 0.0 { 0.01 } else { 0.0 };
 
-        Ok(json!({
-            "name": "komga.tasks.execution",
-            "description": "Task execution statistics",
-            "measurements": [
-                { "statistic": "COUNT", "value": count },
-                { "statistic": "TOTAL_TIME", "value": total_time },
-                { "statistic": "MAX", "value": max_time }
+        Ok(ActuatorMetricDetail {
+            name: "komga.tasks.execution".to_string(),
+            description: "Task execution statistics".to_string(),
+            base_unit: None,
+            measurements: vec![
+                ActuatorMetricMeasurement::new("COUNT", count),
+                ActuatorMetricMeasurement::new("TOTAL_TIME", total_time),
+                ActuatorMetricMeasurement::new("MAX", max_time),
             ],
-            "availableTags": [
-                {
-                    "tag": "type",
-                    "values": tags,
-                }
-            ]
-        }))
+            available_tags: vec![ActuatorMetricAvailableTag::new("type", tags)],
+        })
     }
 
-    async fn metric_tasks_failure(&self) -> Result<Value, String> {
+    async fn metric_tasks_failure(&self) -> Result<ActuatorMetricDetail, String> {
         let failures = self.runtime.load_task_failure_count().await?;
         let task_types = unique_strings(
             self.runtime
                 .load_task_execution_values()
                 .await?
                 .into_iter()
-                .map(|(kind, _)| kind)
+                .map(|value| value.task_type)
                 .chain(known_task_metric_types()),
         );
 
-        Ok(json!({
-            "name": "komga.tasks.failure",
-            "description": "Count of failed tasks",
-            "measurements": [{ "statistic": "COUNT", "value": failures }],
-            "availableTags": [
-                {
-                    "tag": "type",
-                    "values": task_types,
-                }
-            ],
-        }))
+        Ok(ActuatorMetricDetail {
+            name: "komga.tasks.failure".to_string(),
+            description: "Count of failed tasks".to_string(),
+            base_unit: None,
+            measurements: vec![ActuatorMetricMeasurement::new("COUNT", failures)],
+            available_tags: vec![ActuatorMetricAvailableTag::new("type", task_types)],
+        })
     }
 
     async fn jdbc_connections_metric(
@@ -623,10 +531,10 @@ impl<'a> ActuatorMetricService<'a> {
         description: &str,
         tag_filters: &HashMap<String, String>,
         field: JdbcConnectionsField,
-    ) -> Result<Option<Value>, String> {
+    ) -> Result<Option<ActuatorMetricDetail>, String> {
         let samples = self
             .runtime
-            .load_sqlite_pool_snapshots(&[
+            .load_database_pool_snapshots(&[
                 probes.main_db_path.clone(),
                 probes.tasks_db_path.clone(),
             ])
@@ -640,7 +548,7 @@ impl<'a> ActuatorMetricService<'a> {
                     JdbcConnectionsField::Min => pool.min_connections,
                 } as f64;
                 MetricSample::with_owned_tags(
-                    vec![(
+                    vec![MetricTag::new(
                         "name",
                         datasource_pool_name(
                             &probes.main_db_path,
@@ -649,7 +557,7 @@ impl<'a> ActuatorMetricService<'a> {
                             pool.max_connections,
                         ),
                     )],
-                    [("VALUE", value)],
+                    [MetricMeasurement::new("VALUE", value)],
                 )
             })
             .collect();
@@ -668,66 +576,40 @@ fn metric_library_value(
     name: &str,
     description: &str,
     base_unit: Option<&str>,
-    values: Vec<(String, f64)>,
+    values: Vec<LibraryMetricValue>,
     requested_library: Option<&str>,
-) -> Value {
+) -> ActuatorMetricDetail {
     let value = match requested_library {
         Some(library) => values
             .iter()
-            .find(|(candidate, _)| candidate == library)
-            .map(|(_, value)| *value)
+            .find(|value| value.library_name == library)
+            .map(|value| value.value)
             .unwrap_or(0.0),
-        None => values.iter().map(|(_, value)| *value).sum::<f64>(),
+        None => values.iter().map(|value| value.value).sum::<f64>(),
     };
 
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": "VALUE", "value": value }]),
-        ),
-        (
-            "availableTags".to_string(),
-            json!([
-                {
-                    "tag": "library",
-                    "values": values
-                        .iter()
-                        .map(|(library, _)| library.clone())
-                        .collect::<Vec<_>>(),
-                }
-            ]),
-        ),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
+    ActuatorMetricDetail {
+        name: name.to_string(),
+        description: description.to_string(),
+        base_unit: base_unit.map(str::to_string),
+        measurements: vec![ActuatorMetricMeasurement::new("VALUE", value)],
+        available_tags: vec![ActuatorMetricAvailableTag::new(
+            "library",
+            values
+                .iter()
+                .map(|value| value.library_name.clone())
+                .collect::<Vec<_>>(),
+        )],
     }
-
-    Value::Object(metric)
 }
 
-fn simple_metric(name: &str, description: &str, base_unit: Option<&str>, value: f64) -> Value {
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": "VALUE", "value": value }]),
-        ),
-        ("availableTags".to_string(), Value::Array(vec![])),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
-    }
-
-    Value::Object(metric)
+fn simple_metric(
+    name: &str,
+    description: &str,
+    base_unit: Option<&str>,
+    value: f64,
+) -> ActuatorMetricDetail {
+    single_measurement_metric(name, description, base_unit, "VALUE", value)
 }
 
 pub fn actuator_metric_names() -> Vec<&'static str> {
@@ -777,14 +659,40 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 struct MetricSample {
-    tags: Vec<(&'static str, String)>,
-    measurements: Vec<(&'static str, f64)>,
+    tags: Vec<MetricTag>,
+    measurements: Vec<MetricMeasurement>,
+}
+
+struct MetricTag {
+    key: &'static str,
+    value: String,
+}
+
+impl MetricTag {
+    fn new(key: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            key,
+            value: value.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MetricMeasurement {
+    statistic: &'static str,
+    value: f64,
+}
+
+impl MetricMeasurement {
+    fn new(statistic: &'static str, value: f64) -> Self {
+        Self { statistic, value }
+    }
 }
 
 impl MetricSample {
     fn with_owned_tags<const M: usize>(
-        tags: Vec<(&'static str, String)>,
-        measurements: [(&'static str, f64); M],
+        tags: Vec<MetricTag>,
+        measurements: [MetricMeasurement; M],
     ) -> Self {
         Self {
             tags,
@@ -795,8 +703,8 @@ impl MetricSample {
     fn tag_value(&self, key: &str) -> Option<&str> {
         self.tags
             .iter()
-            .find(|(candidate, _)| *candidate == key)
-            .map(|(_, value)| value.as_str())
+            .find(|tag| tag.key == key)
+            .map(|tag| tag.value.as_str())
     }
 
     fn matches_filters(&self, filters: &HashMap<String, String>) -> bool {
@@ -822,23 +730,14 @@ fn single_measurement_metric(
     base_unit: Option<&str>,
     statistic: &'static str,
     value: f64,
-) -> Value {
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            json!([{ "statistic": statistic, "value": value }]),
-        ),
-        ("availableTags".to_string(), Value::Array(vec![])),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
+) -> ActuatorMetricDetail {
+    ActuatorMetricDetail {
+        name: name.to_string(),
+        description: description.to_string(),
+        base_unit: base_unit.map(str::to_string),
+        measurements: vec![ActuatorMetricMeasurement::new(statistic, value)],
+        available_tags: Vec::new(),
     }
-    Value::Object(metric)
 }
 
 fn metric_from_samples(
@@ -847,31 +746,31 @@ fn metric_from_samples(
     base_unit: Option<&str>,
     samples: Vec<MetricSample>,
     tag_filters: &HashMap<String, String>,
-) -> Value {
+) -> ActuatorMetricDetail {
     let matching_samples = samples
         .iter()
         .filter(|sample| sample.matches_filters(tag_filters))
         .collect::<Vec<_>>();
 
-    let mut aggregated_measurements = Vec::<(&'static str, f64)>::new();
+    let mut aggregated_measurements = Vec::<MetricMeasurement>::new();
     for sample in &matching_samples {
-        for (statistic, value) in &sample.measurements {
-            if let Some((_, existing)) = aggregated_measurements
+        for measurement in &sample.measurements {
+            if let Some(existing) = aggregated_measurements
                 .iter_mut()
-                .find(|(candidate, _)| candidate == statistic)
+                .find(|candidate| candidate.statistic == measurement.statistic)
             {
-                *existing += *value;
+                existing.value += measurement.value;
             } else {
-                aggregated_measurements.push((statistic, *value));
+                aggregated_measurements.push(*measurement);
             }
         }
     }
 
     let mut ordered_tag_keys = Vec::<&'static str>::new();
     for sample in &samples {
-        for (key, _) in &sample.tags {
-            if !ordered_tag_keys.contains(key) {
-                ordered_tag_keys.push(*key);
+        for tag in &sample.tags {
+            if !ordered_tag_keys.contains(&tag.key) {
+                ordered_tag_keys.push(tag.key);
             }
         }
     }
@@ -895,54 +794,44 @@ fn metric_from_samples(
             if values.is_empty() {
                 None
             } else {
-                Some(json!({ "tag": key, "values": values }))
+                Some(ActuatorMetricAvailableTag::new(key, values))
             }
         })
         .collect::<Vec<_>>();
 
-    let mut metric = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(name.to_string())),
-        (
-            "description".to_string(),
-            Value::String(description.to_string()),
-        ),
-        (
-            "measurements".to_string(),
-            Value::Array(
-                aggregated_measurements
-                    .into_iter()
-                    .map(|(statistic, value)| json!({ "statistic": statistic, "value": value }))
-                    .collect(),
-            ),
-        ),
-        ("availableTags".to_string(), Value::Array(available_tags)),
-    ]);
-    if let Some(base_unit) = base_unit {
-        metric.insert("baseUnit".to_string(), Value::String(base_unit.to_string()));
+    ActuatorMetricDetail {
+        name: name.to_string(),
+        description: description.to_string(),
+        base_unit: base_unit.map(str::to_string),
+        measurements: aggregated_measurements
+            .into_iter()
+            .map(|measurement| {
+                ActuatorMetricMeasurement::new(measurement.statistic, measurement.value)
+            })
+            .collect(),
+        available_tags,
     }
-
-    Value::Object(metric)
 }
 
 fn http_server_requests_metric(
     requests: &[ActuatorHttpServerRequestMetric],
     tag_filters: &HashMap<String, String>,
-) -> Value {
+) -> ActuatorMetricDetail {
     let samples = requests
         .iter()
         .map(|request| {
             MetricSample::with_owned_tags(
                 vec![
-                    ("exception", request.exception.clone()),
-                    ("method", request.method.clone()),
-                    ("outcome", request.outcome.clone()),
-                    ("status", request.status.clone()),
-                    ("uri", request.uri.clone()),
+                    MetricTag::new("exception", request.exception.clone()),
+                    MetricTag::new("method", request.method.clone()),
+                    MetricTag::new("outcome", request.outcome.clone()),
+                    MetricTag::new("status", request.status.clone()),
+                    MetricTag::new("uri", request.uri.clone()),
                 ],
                 [
-                    ("COUNT", request.count as f64),
-                    ("TOTAL_TIME", request.total_time_seconds),
-                    ("MAX", request.max_time_seconds),
+                    MetricMeasurement::new("COUNT", request.count as f64),
+                    MetricMeasurement::new("TOTAL_TIME", request.total_time_seconds),
+                    MetricMeasurement::new("MAX", request.max_time_seconds),
                 ],
             )
         })
@@ -1003,24 +892,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn health_payload_hides_components_without_details() {
-        let payload = actuator_health_payload(
-            ActuatorHealthSnapshot {
-                sqlite_rw_ready: true,
-                sqlite_ro_ready: true,
-                tasks_rw_ready: false,
-                tasks_ro_ready: false,
-                disk_space: ActuatorDiskSpaceSnapshot {
-                    total: Some(100),
-                    free: Some(50),
-                    threshold: 10,
-                    path: "/tmp".to_string(),
-                },
+    fn health_report_aggregates_component_statuses() {
+        let report = actuator_health_report(ActuatorHealthSnapshot {
+            sqlite_rw_ready: true,
+            sqlite_ro_ready: true,
+            tasks_rw_ready: false,
+            tasks_ro_ready: false,
+            disk_space: ActuatorDiskSpaceSnapshot {
+                total: Some(100),
+                free: Some(50),
+                threshold: 10,
+                path: "/tmp".to_string(),
             },
-            false,
-        );
+        });
 
-        assert_eq!(payload, json!({ "status": "DOWN" }));
+        assert_eq!(report.status, ActuatorHealthStatus::Down);
+        assert_eq!(report.db.status, ActuatorHealthStatus::Down);
+        assert_eq!(report.disk_space.status, ActuatorHealthStatus::Up);
+        assert_eq!(report.ping.status, ActuatorHealthStatus::Up);
     }
 
     #[test]
@@ -1047,21 +936,33 @@ mod tests {
                 max_time_seconds: 0.1,
             },
         ];
-        let filters = actuator_metric_query_tags(Some("tag=method:GET&tag=outcome:SUCCESS"));
+        let filters = HashMap::from_iter([
+            ("method".to_string(), "GET".to_string()),
+            ("outcome".to_string(), "SUCCESS".to_string()),
+        ]);
 
-        let payload = http_server_requests_metric(&requests, &filters);
+        let metric = http_server_requests_metric(&requests, &filters);
 
         assert_eq!(
-            payload["measurements"][0],
-            json!({"statistic": "COUNT", "value": 2.0})
+            metric.measurements[0],
+            ActuatorMetricMeasurement {
+                statistic: "COUNT".to_string(),
+                value: 2.0,
+            }
         );
         assert_eq!(
-            payload["availableTags"][0],
-            json!({"tag": "exception", "values": ["None"]})
+            metric.available_tags[0],
+            ActuatorMetricAvailableTag {
+                tag: "exception".to_string(),
+                values: vec!["None".to_string()],
+            }
         );
         assert_eq!(
-            payload["availableTags"][1],
-            json!({"tag": "status", "values": ["200"]})
+            metric.available_tags[1],
+            ActuatorMetricAvailableTag {
+                tag: "status".to_string(),
+                values: vec!["200".to_string()],
+            }
         );
     }
 }

@@ -1,15 +1,22 @@
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
 use super::events;
 use super::support::generated_readlist_id;
 
 pub(super) struct ComicInfoReadListEntry {
-    pub name: String,
-    pub number: Option<i64>,
+    pub(super) name: String,
+    pub(super) number: Option<i64>,
+}
+
+struct ComicInfoReadListTarget {
+    id: String,
+    created: bool,
 }
 
 pub(super) async fn upsert_comicinfo_readlist(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     readlist: ComicInfoReadListEntry,
 ) -> Result<Option<String>, String> {
@@ -25,8 +32,11 @@ pub(super) async fn upsert_comicinfo_readlist(
         })?
         .map(|row| row.get::<String, _>("ID"));
 
-    let (readlist_id, created) = match readlist_id {
-        Some(readlist_id) => (readlist_id, false),
+    let target = match readlist_id {
+        Some(readlist_id) => ComicInfoReadListTarget {
+            id: readlist_id,
+            created: false,
+        },
         None => {
             let generated_id = generated_readlist_id(&readlist.name);
             sqlx::query(
@@ -42,13 +52,16 @@ pub(super) async fn upsert_comicinfo_readlist(
                     readlist.name, book_id,
                 )
             })?;
-            (generated_id, true)
+            ComicInfoReadListTarget {
+                id: generated_id,
+                created: true,
+            }
         }
     };
 
     let book_already_in_readlist =
         sqlx::query("SELECT 1 FROM READLIST_BOOK WHERE READLIST_ID = ? AND BOOK_ID = ? LIMIT 1")
-            .bind(&readlist_id)
+            .bind(&target.id)
             .bind(book_id)
             .fetch_optional(pool)
             .await
@@ -63,7 +76,7 @@ pub(super) async fn upsert_comicinfo_readlist(
         return Ok(None);
     }
 
-    let assigned_number = assign_comicinfo_readlist_number(pool, &readlist_id, readlist.number)
+    let assigned_number = assign_comicinfo_readlist_number(pool, &target.id, readlist.number)
         .await
         .map_err(|error| {
             format!(
@@ -73,7 +86,7 @@ pub(super) async fn upsert_comicinfo_readlist(
         })?;
 
     sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
-        .bind(&readlist_id)
+        .bind(&target.id)
         .bind(book_id)
         .bind(assigned_number)
         .execute(pool)
@@ -93,8 +106,8 @@ pub(super) async fn upsert_comicinfo_readlist(
         WHERE ID = ?
         "#,
     )
-    .bind(&readlist_id)
-    .bind(&readlist_id)
+    .bind(&target.id)
+    .bind(&target.id)
     .execute(pool)
     .await
     .map_err(|error| {
@@ -104,10 +117,15 @@ pub(super) async fn upsert_comicinfo_readlist(
         )
     })?;
 
-    let readlist_book_ids = load_readlist_book_ids(pool, &readlist_id).await?;
-    events::emit_readlist(&readlist_id, &readlist_book_ids, created);
+    let readlist_book_ids = load_readlist_book_ids(pool, &target.id).await?;
+    events::emit_readlist(
+        runtime_events,
+        &target.id,
+        &readlist_book_ids,
+        target.created,
+    );
 
-    Ok(Some(readlist_id))
+    Ok(Some(target.id))
 }
 
 async fn load_readlist_book_ids(

@@ -6,9 +6,9 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
 
     let transient_dir = unique_transient_dir("scan-analyze");
     std::fs::create_dir_all(&transient_dir).expect("transient import directory should be created");
-    let candidate_file = transient_dir.join("candidate.jpg");
-    let candidate_bytes = b"transient-image-bytes";
-    std::fs::write(&candidate_file, candidate_bytes)
+    let candidate_file = transient_dir.join("candidate.png");
+    let candidate_bytes = fixture_png_bytes();
+    std::fs::write(&candidate_file, &candidate_bytes)
         .expect("transient candidate file should be written");
 
     let app = ctx.app().clone();
@@ -83,7 +83,7 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
     assert_eq!(analyzed_pages.len(), 1);
     assert_eq!(
         analyzed_pages[0].get("fileName"),
-        Some(&Value::String("candidate.jpg".to_string())),
+        Some(&Value::String("candidate.png".to_string())),
     );
 
     let page_response = app
@@ -104,12 +104,12 @@ async fn router_transient_books_scan_and_analyze_returns_non_placeholder_payload
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok()),
-        Some("image/jpeg")
+        Some("image/png")
     );
     let page_bytes = to_bytes(page_response.into_body(), usize::MAX)
         .await
         .expect("transient page response body should be readable");
-    assert_eq!(page_bytes.as_ref(), candidate_bytes);
+    assert_eq!(page_bytes.as_ref(), candidate_bytes.as_slice());
 
     let invalid_page_response = app
         .oneshot(
@@ -228,8 +228,8 @@ async fn router_transient_books_rescan_generates_a_new_id_like_kotlin() {
 
     let transient_dir = unique_transient_dir("rescan-new-id");
     std::fs::create_dir_all(&transient_dir).expect("rescan transient directory should be created");
-    let candidate_file = transient_dir.join("candidate.jpg");
-    std::fs::write(&candidate_file, b"transient-image-bytes")
+    let candidate_file = transient_dir.join("candidate.png");
+    std::fs::write(&candidate_file, fixture_png_bytes())
         .expect("rescan transient candidate file should be written");
 
     let app = ctx.app().clone();
@@ -380,8 +380,8 @@ async fn router_transient_book_page_returns_not_found_with_message_when_file_is_
 
     let transient_dir = unique_transient_dir("page-file-missing");
     std::fs::create_dir_all(&transient_dir).expect("file-missing transient directory should exist");
-    let candidate_file = transient_dir.join("candidate.jpg");
-    std::fs::write(&candidate_file, b"transient-image-bytes")
+    let candidate_file = transient_dir.join("candidate.png");
+    std::fs::write(&candidate_file, fixture_png_bytes())
         .expect("file-missing transient candidate file should be written");
 
     let app = ctx.app().clone();

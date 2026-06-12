@@ -1,8 +1,8 @@
 use super::support::*;
 use super::*;
+use crate::support::sqlite::connect_test_pool;
 use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
-use komga_infrastructure::sqlite::connect_test_pool;
-use komga_infrastructure::task_queue::library_scan_pipeline::SqliteFilesystemLibraryScanPipeline;
+use komga_infrastructure::SqliteFilesystemLibraryScanPipeline;
 
 #[tokio::test]
 async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_book_and_sidecar_tables()
@@ -136,7 +136,11 @@ async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_ru
 
     let scheduler = scheduler_for_config(&fixture.config).await;
     assert!(
-        scheduler.count_by_simple_type().await.is_empty(),
+        scheduler
+            .count_by_simple_type()
+            .await
+            .expect("runtime queue counts should load after worker execution")
+            .is_empty(),
         "runtime queue should be drained after worker execution instead of leaving persisted pending rows",
     );
 
@@ -238,6 +242,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         runtime_before_restart
             .count_by_simple_type()
             .await
+            .expect("runtime pre-restart queue counts should load")
             .is_empty(),
         "runtime pre-restart queue should be empty after worker completion",
     );
@@ -264,6 +269,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
         runtime_after_restart
             .count_by_simple_type()
             .await
+            .expect("runtime post-restart queue counts should load")
             .is_empty(),
         "runtime post-restart queue should stay empty after persisted completion",
     );

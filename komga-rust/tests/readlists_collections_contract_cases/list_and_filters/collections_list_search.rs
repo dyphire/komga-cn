@@ -1,5 +1,5 @@
 use super::*;
-use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
+use komga_infrastructure::{SearchEntityType, SearchIndexLifecycle};
 
 #[tokio::test]
 async fn router_collections_supports_search_library_id_and_unpaged() {
@@ -132,8 +132,8 @@ async fn router_collections_search_uses_index_relevance_order_like_kotlin() {
 }
 
 #[tokio::test]
-async fn router_collections_missing_search_index_returns_empty_results_like_kotlin() {
-    let ctx = TestFixture::builder("router-collections-search-missing-index-empty")
+async fn router_collections_missing_search_index_returns_internal_error() {
+    let ctx = TestFixture::builder("router-collections-search-missing-index-error")
         .with_search_index()
         .with_seed(|paths| async move {
             seed_collection_listing_variants(&paths).await;
@@ -163,13 +163,7 @@ async fn router_collections_missing_search_index_returns_empty_results_like_kotl
         .await
         .expect("collections missing-index search request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let payload = response_json(response).await;
-    let content = payload
-        .get("content")
-        .and_then(Value::as_array)
-        .expect("collections missing-index payload should expose content array");
-    assert!(content.is_empty());
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert!(
         !config.lucene_data_directory.exists(),
         "query-only collection search must not recreate the missing index directory",

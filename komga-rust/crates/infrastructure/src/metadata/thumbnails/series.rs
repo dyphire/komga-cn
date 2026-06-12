@@ -1,10 +1,13 @@
-use komga_application::media_assets::{EntityThumbnailBinary, SeriesThumbnailRecord};
-use reqwest::Url;
+use komga_application::media_assets::{
+    EntityThumbnailBinary, SeriesThumbnailRecord, ThumbnailType,
+};
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
-use super::{emit_thumbnail_series_event, generated_thumbnail_id};
+use super::{emit_thumbnail_series_event, generated_thumbnail_id, load_thumbnail_bytes_or_sidecar};
+use crate::parsing::parse_thumbnail_type;
 
-pub async fn load_persisted_series_thumbnails(
+pub(crate) async fn load_persisted_series_thumbnails(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Vec<SeriesThumbnailRecord>, String> {
@@ -21,31 +24,34 @@ pub async fn load_persisted_series_thumbnails(
     .await
     .map_err(|error| format!("query persisted series thumbnails: {error}"))?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| SeriesThumbnailRecord {
-            id: row.get::<String, _>("ID"),
-            series_id: row.get::<String, _>("SERIES_ID"),
-            thumbnail_type: row.get::<String, _>("TYPE"),
-            selected: row.get::<i64, _>("SELECTED") != 0,
-            media_type: row.get::<String, _>("MEDIA_TYPE"),
-            file_size: row.get::<i64, _>("FILE_SIZE"),
-            width: row.get::<i64, _>("WIDTH"),
-            height: row.get::<i64, _>("HEIGHT"),
+    rows.into_iter()
+        .map(|row| {
+            Ok(SeriesThumbnailRecord {
+                id: row.get::<String, _>("ID"),
+                series_id: row.get::<String, _>("SERIES_ID"),
+                thumbnail_type: parse_thumbnail_type(&row.get::<String, _>("TYPE")),
+                selected: row.get::<i64, _>("SELECTED") != 0,
+                media_type: row.get::<String, _>("MEDIA_TYPE"),
+                file_size: row.get::<i64, _>("FILE_SIZE"),
+                width: row.get::<i64, _>("WIDTH"),
+                height: row.get::<i64, _>("HEIGHT"),
+            })
         })
-        .collect())
+        .collect()
 }
 
-pub async fn load_selected_series_thumbnail(
+pub(crate) async fn load_selected_series_thumbnail(
     pool: &SqlitePool,
     series_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT TYPE, MEDIA_TYPE, THUMBNAIL
-        FROM THUMBNAIL_SERIES
-        WHERE SERIES_ID = ?
-        ORDER BY SELECTED DESC, LAST_MODIFIED_DATE DESC, ID ASC
+        SELECT ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
+        FROM THUMBNAIL_SERIES ts
+        JOIN SERIES s ON s.ID = ts.SERIES_ID
+        JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+        WHERE ts.SERIES_ID = ?
+        ORDER BY ts.SELECTED DESC, ts.LAST_MODIFIED_DATE DESC, ts.ID ASC
         LIMIT 1
         "#,
     )
@@ -54,24 +60,37 @@ pub async fn load_selected_series_thumbnail(
     .await
     .map_err(|error| format!("query selected series thumbnail: {error}"))?;
 
-    Ok(row.map(|row| EntityThumbnailBinary {
-        thumbnail_type: row.get::<String, _>("TYPE"),
-        media_type: row.get::<String, _>("MEDIA_TYPE"),
-        thumbnail: row
-            .get::<Option<Vec<u8>>, _>("THUMBNAIL")
-            .unwrap_or_default(),
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let thumbnail_type = parse_thumbnail_type(&row.get::<String, _>("TYPE"));
+    let media_type = row.get::<String, _>("MEDIA_TYPE");
+    let thumbnail = load_thumbnail_bytes_or_sidecar(
+        row.get::<Option<Vec<u8>>, _>("THUMBNAIL"),
+        row.get::<Option<String>, _>("URL"),
+        row.get::<Option<String>, _>("LIBRARY_ROOT"),
+        &format!("selected series thumbnail '{series_id}'"),
+    )?;
+
+    Ok(thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        thumbnail_type,
+        media_type,
+        thumbnail,
     }))
 }
 
-pub async fn load_series_thumbnail_by_id(
+pub(crate) async fn load_series_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT TYPE, MEDIA_TYPE, THUMBNAIL, URL
-        FROM THUMBNAIL_SERIES
-        WHERE ID = ?
+        SELECT ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
+        FROM THUMBNAIL_SERIES ts
+        LEFT JOIN SERIES s ON s.ID = ts.SERIES_ID
+        LEFT JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
+        WHERE ts.ID = ?
         LIMIT 1
         "#,
     )
@@ -84,11 +103,14 @@ pub async fn load_series_thumbnail_by_id(
         return Ok(None);
     };
 
-    let thumbnail_type = row.get::<String, _>("TYPE");
+    let thumbnail_type = parse_thumbnail_type(&row.get::<String, _>("TYPE"));
     let media_type = row.get::<String, _>("MEDIA_TYPE");
-    let thumbnail = row.get::<Option<Vec<u8>>, _>("THUMBNAIL");
-    let url = row.get::<Option<String>, _>("URL");
-    let maybe_thumbnail = load_thumbnail_bytes_or_sidecar(thumbnail, url)?;
+    let maybe_thumbnail = load_thumbnail_bytes_or_sidecar(
+        row.get::<Option<Vec<u8>>, _>("THUMBNAIL"),
+        row.get::<Option<String>, _>("URL"),
+        row.get::<Option<String>, _>("LIBRARY_ROOT"),
+        &format!("series thumbnail '{thumbnail_id}'"),
+    )?;
 
     Ok(maybe_thumbnail.map(|thumbnail| EntityThumbnailBinary {
         thumbnail_type,
@@ -97,8 +119,13 @@ pub async fn load_series_thumbnail_by_id(
     }))
 }
 
-pub async fn insert_series_thumbnail(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "This persistence boundary writes the thumbnail record fields directly."
+)]
+pub(crate) async fn insert_series_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     thumbnail: &[u8],
     media_type: &str,
@@ -156,7 +183,7 @@ pub async fn insert_series_thumbnail(
     .bind(&id)
     .bind(selected)
     .bind(thumbnail)
-    .bind("USER_UPLOADED")
+    .bind(ThumbnailType::UserUploaded.persisted_name())
     .bind(series_id)
     .bind(media_type)
     .bind(thumbnail.len() as i64)
@@ -173,41 +200,20 @@ pub async fn insert_series_thumbnail(
     let record = SeriesThumbnailRecord {
         id,
         series_id: series_id.to_string(),
-        thumbnail_type: "USER_UPLOADED".to_string(),
+        thumbnail_type: ThumbnailType::UserUploaded,
         selected,
         media_type: media_type.to_string(),
         file_size: thumbnail.len() as i64,
         width,
         height,
     };
-    emit_thumbnail_series_event(&record.series_id, record.selected, true);
+    emit_thumbnail_series_event(runtime_events, &record.series_id, record.selected, true);
     Ok(record)
 }
 
-fn load_thumbnail_bytes_or_sidecar(
-    thumbnail: Option<Vec<u8>>,
-    url: Option<String>,
-) -> Result<Option<Vec<u8>>, String> {
-    if let Some(thumbnail) = thumbnail {
-        return Ok(Some(thumbnail));
-    }
-
-    let Some(url) = url else {
-        return Ok(None);
-    };
-
-    let parsed =
-        Url::parse(&url).map_err(|error| format!("parse series thumbnail sidecar url: {error}"))?;
-    let path = parsed
-        .to_file_path()
-        .map_err(|_| format!("series thumbnail sidecar url is not a file path: {url}"))?;
-    let bytes = std::fs::read(&path)
-        .map_err(|error| format!("read series thumbnail sidecar {}: {error}", path.display()))?;
-    Ok(Some(bytes))
-}
-
-pub async fn select_series_thumbnail(
+pub(crate) async fn select_series_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
@@ -282,12 +288,13 @@ pub async fn select_series_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit series thumbnail select tx: {error}"))?;
-    emit_thumbnail_series_event(&target_series_id, true, true);
+    emit_thumbnail_series_event(runtime_events, &target_series_id, true, true);
     Ok(true)
 }
 
-pub async fn delete_series_thumbnail(
+pub(crate) async fn delete_series_thumbnail(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     thumbnail_id: &str,
 ) -> Result<bool, String> {
@@ -360,6 +367,6 @@ pub async fn delete_series_thumbnail(
     tx.commit()
         .await
         .map_err(|error| format!("commit series thumbnail delete tx: {error}"))?;
-    emit_thumbnail_series_event(series_id, deleted_selected, false);
+    emit_thumbnail_series_event(runtime_events, series_id, deleted_selected, false);
     Ok(true)
 }

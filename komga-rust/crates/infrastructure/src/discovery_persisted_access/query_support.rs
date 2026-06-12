@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use komga_application::discovery::{
     AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry, ReadlistSearchPort,
+    ScoredSearchHit,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -112,9 +113,8 @@ impl CollectionSearchPort for DiscoveryQuerySupportAccess {
         query: &str,
         limit: usize,
     ) -> Result<Vec<String>, String> {
-        Ok(self
-            .search
-            .search_ids_or_empty(query, SearchEntityType::Collection, limit))
+        self.search
+            .search_ids(query, SearchEntityType::Collection, limit)
     }
 }
 
@@ -124,9 +124,15 @@ impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
+    ) -> Result<Vec<ScoredSearchHit>, String> {
         Ok(self
             .search
-            .search_scored_ids_or_empty(query, SearchEntityType::ReadList, limit))
+            .search_scored_ids(query, SearchEntityType::ReadList, limit)?
+            .into_iter()
+            .map(|hit| ScoredSearchHit {
+                score: hit.score,
+                id: hit.id,
+            })
+            .collect())
     }
 }

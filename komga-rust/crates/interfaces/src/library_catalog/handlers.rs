@@ -18,7 +18,7 @@ use super::request_mapping::{
 use super::response_mapping::{libraries_payload, library_payload};
 use super::task_mapping::LibraryCatalogCommands;
 
-pub async fn libraries_route(
+pub(crate) async fn libraries_route(
     State(app): State<LibraryCatalogState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -28,14 +28,15 @@ pub async fn libraries_route(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     runtime_owned_libraries_response(context, &app).await
 }
 
-pub async fn library_detail_route(
+pub(crate) async fn library_detail_route(
     State(app): State<LibraryCatalogState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -46,14 +47,15 @@ pub async fn library_detail_route(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     runtime_owned_library_detail_response(context, &app, &library_id).await
 }
 
-pub async fn library_create_route(
+pub(crate) async fn library_create_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Json(body): Json<Value>,
@@ -67,7 +69,7 @@ pub async fn library_create_route(
         .await
 }
 
-pub async fn library_update_route(
+pub(crate) async fn library_update_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
@@ -82,7 +84,7 @@ pub async fn library_update_route(
         .await
 }
 
-pub async fn library_delete_route(
+pub(crate) async fn library_delete_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
@@ -92,7 +94,7 @@ pub async fn library_delete_route(
         .await
 }
 
-pub async fn library_scan_route(
+pub(crate) async fn library_scan_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     uri: Uri,
@@ -104,7 +106,7 @@ pub async fn library_scan_route(
         .await
 }
 
-pub async fn library_analyze_route(
+pub(crate) async fn library_analyze_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
@@ -114,7 +116,7 @@ pub async fn library_analyze_route(
         .await
 }
 
-pub async fn library_metadata_refresh_route(
+pub(crate) async fn library_metadata_refresh_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Path(library_id): Path<String>,
@@ -124,7 +126,7 @@ pub async fn library_metadata_refresh_route(
         .await
 }
 
-pub async fn library_empty_trash_route(
+pub(crate) async fn library_empty_trash_route(
     State(app): State<LibraryCatalogState>,
     Admin(_admin): Admin,
     Path(library_id): Path<String>,

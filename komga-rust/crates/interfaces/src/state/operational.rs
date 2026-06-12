@@ -1,4 +1,5 @@
-use super::*;
+use std::sync::Arc;
+
 use axum::extract::FromRef;
 
 use komga_application::operational::{
@@ -6,12 +7,19 @@ use komga_application::operational::{
     HistoryPort, OperationalMetricsPort, PageHashService, RemoteFeedService, ServerSettingsService,
     SyncpointPort, TransientBookService,
 };
+use komga_application::runtime_sse::RuntimeSseEventSource;
+
+use super::app_state::{HttpAppState, OperationalState};
+use super::core::RuntimeState;
+use super::identity::IdentityState;
+use super::task_queue::TaskQueueState;
 
 #[derive(Clone)]
 pub struct OperationalApiState {
     pub(crate) operational: OperationalState,
     pub(crate) identity: IdentityState,
     pub(crate) task_queue: TaskQueueState,
+    pub(crate) runtime_events: Arc<dyn RuntimeSseEventSource>,
     pub(crate) operational_runtime: Arc<dyn OperationalMetricsPort>,
     pub(crate) actuator_snapshots: Arc<dyn ActuatorSnapshotPort>,
     pub(crate) remote_feeds: Arc<RemoteFeedService>,
@@ -31,6 +39,7 @@ impl FromRef<Arc<HttpAppState>> for OperationalApiState {
             operational: app.operational.clone(),
             identity: IdentityState::from_ref(app),
             task_queue: TaskQueueState::from_ref(app),
+            runtime_events: app.services.runtime_events.clone(),
             operational_runtime: app.services.operational_runtime.clone(),
             actuator_snapshots: app.services.actuator_snapshots.clone(),
             remote_feeds: app.services.remote_feeds.clone(),

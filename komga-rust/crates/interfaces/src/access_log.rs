@@ -20,14 +20,14 @@ static ACCESS_LOG_REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(test, allow(dead_code))]
-pub struct RequestConnectionInfo {
+pub(crate) struct RequestConnectionInfo {
     #[cfg_attr(test, allow(dead_code))]
     remote_addr: Option<SocketAddr>,
 }
 
 #[cfg_attr(test, allow(dead_code))]
 impl RequestConnectionInfo {
-    pub fn remote_addr(self) -> Option<SocketAddr> {
+    pub(crate) fn remote_addr(self) -> Option<SocketAddr> {
         self.remote_addr
     }
 }
@@ -36,7 +36,7 @@ tokio::task_local! {
     static ACCESS_LOG_USER_ID: RefCell<String>;
 }
 
-pub fn make_request_span<B>(request: &Request<B>) -> Span {
+pub(crate) fn make_request_span<B>(request: &Request<B>) -> Span {
     let metadata = AccessLogRequestMetadata::from_request(request);
 
     tracing::info_span!(
@@ -53,9 +53,9 @@ pub fn make_request_span<B>(request: &Request<B>) -> Span {
     )
 }
 
-pub fn on_request<B>(_: &Request<B>, _: &Span) {}
+pub(crate) fn on_request<B>(_: &Request<B>, _: &Span) {}
 
-pub fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
+pub(crate) fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
     let Some(state) = response.extensions().get::<AccessLogResponseState>() else {
         return;
     };
@@ -65,7 +65,7 @@ pub fn on_response<B>(response: &Response<B>, latency: Duration, span: &Span) {
     }
 }
 
-pub fn on_failure<F>(_: F, _: Duration, _: &Span) {}
+pub(crate) fn on_failure<F>(_: F, _: Duration, _: &Span) {}
 
 pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
     let user_id = user_id.unwrap_or(ANONYMOUS_USER_ID);
@@ -76,7 +76,7 @@ pub(crate) fn record_resolved_auth_user_id(user_id: Option<&str>) {
     });
 }
 
-pub async fn prepare_access_log_middleware(
+pub(crate) async fn prepare_access_log_middleware(
     State(http_server_requests): State<HttpServerRequestsState>,
     request: Request,
     next: Next,

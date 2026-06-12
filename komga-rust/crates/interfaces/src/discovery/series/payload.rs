@@ -19,9 +19,12 @@ fn series_read_model_to_persisted(model: &SeriesReadModel) -> PersistedSeriesSum
         books_read_count: model.books_read_count,
         books_unread_count: model.books_unread_count,
         books_in_progress_count: model.books_in_progress_count,
-        status: model.status.clone(),
+        status: model.status.persisted_name().to_string(),
         summary: model.summary.clone(),
-        reading_direction: model.reading_direction.clone(),
+        reading_direction: model
+            .reading_direction
+            .map(|value| value.persisted_name().to_string())
+            .unwrap_or_default(),
         publisher: model.publisher.clone(),
         age_rating: model.age_rating,
         language: model.language.clone(),

@@ -1,5 +1,9 @@
-use super::*;
-use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
+use komga_application::task_processing::{
+    BookPayload, TaskExecutionOutcome, TaskKind, TaskProcessingError, TaskRequest,
+};
+
+use super::super::media_helpers::{convert_book, find_books_to_convert, repair_extension};
+use super::super::runtime_context::JobRuntime;
 
 pub(in crate::task_queue) async fn execute_repair_extension(
     runtime: &JobRuntime<'_>,
@@ -9,7 +13,7 @@ pub(in crate::task_queue) async fn execute_repair_extension(
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    super::super::repair_extension(runtime, book_id).await?;
+    repair_extension(runtime, book_id).await?;
 
     Ok(TaskExecutionOutcome::completed())
 }
@@ -23,7 +27,7 @@ pub(in crate::task_queue) async fn execute_find_books_to_convert(
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    let books = super::super::find_books_to_convert(runtime, library_id).await?;
+    let books = find_books_to_convert(runtime, library_id).await?;
 
     let follow_up_tasks = books
         .into_iter()
@@ -45,16 +49,16 @@ pub(in crate::task_queue) async fn execute_convert_book(
         return Ok(TaskExecutionOutcome::completed());
     }
 
-    super::super::convert_book(runtime, book_id).await?;
+    convert_book(runtime, book_id).await?;
     Ok(TaskExecutionOutcome::completed())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::sqlite::connect_test_pool;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
     use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
+    use komga_application::task_processing::{BookPayload, TaskKind, TaskRequest};
     use sqlx::{Row, SqlitePool};
 
     fn archive_fixture_path(file_name: &str) -> std::path::PathBuf {
@@ -146,12 +150,10 @@ mod tests {
 
         let runtime = fixture.runtime_context(true, true).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            "FindBooksToConvert_library-1",
-            1_000,
-            Some("library-1".to_string()),
-        )
-        .with_simple_type("FindBooksToConvert");
+        let task = TaskRequest::new(TaskKind::FindBooksToConvert)
+            .priority(1_000)
+            .group("library-1")
+            .into_queue_record_with_id("library-1");
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -159,6 +161,7 @@ mod tests {
             scheduler
                 .count_by_simple_type()
                 .await
+                .expect("conversion fixture queue counts should load")
                 .get("ConvertBook")
                 .copied(),
             Some(1),
@@ -169,11 +172,11 @@ mod tests {
             .await
             .expect("tasks db should open for convert-book grouping verification");
         let row = sqlx::query(
-            "SELECT ID, GROUP_ID, PRIORITY, PAYLOAD FROM TASK WHERE SIMPLE_TYPE = 'ConvertBook' LIMIT 1",
+            "SELECT ID, GROUP_ID, PRIORITY FROM TASK WHERE SIMPLE_TYPE = 'ConvertBook' LIMIT 1",
         )
-                .fetch_one(&tasks_pool)
-                .await
-                .expect("convert-book task row should be queryable");
+        .fetch_one(&tasks_pool)
+        .await
+        .expect("convert-book task row should be queryable");
         tasks_pool.close().await;
 
         assert_eq!(row.get::<String, _>("ID"), "ConvertBook_book-1");
@@ -182,16 +185,6 @@ mod tests {
             Some("series-1".to_string())
         );
         assert_eq!(row.get::<i64, _>("PRIORITY"), 1_001);
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&row.get::<String, _>("PAYLOAD"))
-                .expect("convert-book payload should be valid JSON"),
-            serde_json::json!({
-                "bookId": "book-1",
-                "priority": 1001,
-                "groupId": "series-1",
-                "uniqueId": "ConvertBook_book-1"
-            }),
-        );
 
         fixture.cleanup().await;
     }
@@ -248,17 +241,19 @@ mod tests {
 
         let runtime = fixture.runtime_context(true, true).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            "FindBooksToConvert_library-1",
-            1_000,
-            Some("library-1".to_string()),
-        )
-        .with_simple_type("FindBooksToConvert");
+        let task = TaskRequest::new(TaskKind::FindBooksToConvert)
+            .priority(1_000)
+            .group("library-1")
+            .into_queue_record_with_id("library-1");
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
         assert!(
-            scheduler.count_by_simple_type().await.is_empty(),
+            scheduler
+                .count_by_simple_type()
+                .await
+                .expect("conversion fixture queue counts should load")
+                .is_empty(),
             "find-books-to-convert should not enqueue convert-book tasks when convert-to-cbz is disabled",
         );
 
@@ -340,12 +335,10 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, true).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            format!("ConvertBook_{book_id}"),
-            900,
-            Some("series-1".to_string()),
-        )
-        .with_simple_type("ConvertBook");
+        let task = TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book_id))
+            .priority(900)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -363,6 +356,73 @@ mod tests {
         verify_pool.close().await;
 
         assert_eq!(row.get::<String, _>("URL"), "books/book-1.cbr");
+
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn convert_book_propagates_invalid_source_path_metadata_error() {
+        let book_id = "convert-invalid-source-path-book-1";
+        let fixture = RuntimeTestFixture::new("convert-book-invalid-source-path");
+
+        let pool = fixture.main_pool().await;
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind(fixture.library_root.to_string_lossy().to_string())
+            .bind(true)
+            .execute(&pool)
+            .await
+            .expect("convert-book invalid path library row should be inserted");
+        insert_series(&pool, "library-1", "series-1").await;
+        sqlx::query(
+            r#"
+            INSERT INTO BOOK (
+                ID,
+                NAME,
+                URL,
+                LIBRARY_ID,
+                SERIES_ID,
+                FILE_LAST_MODIFIED,
+                FILE_SIZE
+            )
+            VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'), ?)
+            "#,
+        )
+        .bind(book_id)
+        .bind("book-1")
+        .bind("books/book-1\0.cbr")
+        .bind("library-1")
+        .bind("series-1")
+        .bind(0_i64)
+        .bind(12_i64)
+        .execute(&pool)
+        .await
+        .expect("convert-book invalid path book row should be inserted");
+        sqlx::query("INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)")
+            .bind(book_id)
+            .bind("application/x-rar-compressed; version=5")
+            .bind("READY")
+            .execute(&pool)
+            .await
+            .expect("convert-book invalid path media row should be inserted");
+        pool.close().await;
+
+        let runtime = fixture.runtime_context(false, true).await;
+        let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+        let task = TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book_id))
+            .priority(900)
+            .group("series-1")
+            .into_queue_record();
+
+        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
+        let Some(Err(error)) = result else {
+            panic!("invalid source path metadata error should fail convert-book");
+        };
+        assert!(
+            error.to_string().contains("source file metadata"),
+            "{error}"
+        );
 
         fixture.cleanup().await;
     }
@@ -430,12 +490,10 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, true).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            format!("ConvertBook_{book_id}"),
-            900,
-            Some("series-1".to_string()),
-        )
-        .with_simple_type("ConvertBook");
+        let task = TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book_id))
+            .priority(900)
+            .group("series-1")
+            .into_queue_record();
 
         let first = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(first, Some(Err(_))));
@@ -444,6 +502,38 @@ mod tests {
         assert!(matches!(second, Some(Ok(()))));
         assert!(source_path.exists());
         assert!(!fixture.library_root.join("books/book-1.cbz").exists());
+
+        std::fs::copy(archive_fixture_path("rar4.rar"), &source_path)
+            .expect("convert-book failed-cache source should be replaced with a valid RAR");
+        let repaired_metadata = std::fs::metadata(&source_path)
+            .expect("convert-book repaired source metadata should be readable");
+        let repaired_last_modified = repaired_metadata
+            .modified()
+            .expect("convert-book repaired source modified time should be readable")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("convert-book repaired source time should be after unix epoch")
+            .as_secs() as i64;
+        let pool = connect_test_pool(fixture.database_file.as_path(), 1)
+            .await
+            .expect("convert-book failed-cache db should reopen for repaired source metadata");
+        sqlx::query(
+            "UPDATE BOOK SET FILE_LAST_MODIFIED = datetime(?, 'unixepoch'), FILE_SIZE = ? WHERE ID = ?",
+        )
+        .bind(repaired_last_modified)
+        .bind(i64::try_from(repaired_metadata.len()).expect("fixture size should fit in i64"))
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .expect("convert-book repaired source metadata should be persisted");
+        pool.close().await;
+
+        let retry_runtime = fixture.runtime_context(false, true).await;
+        let retry_scheduler =
+            TaskQueueScheduler::for_runtime(retry_runtime.clone(), "rust-main").await;
+        let retry = execute_and_enqueue(&retry_scheduler, &retry_runtime, &task).await;
+        assert!(matches!(retry, Some(Ok(()))));
+        assert!(!source_path.exists());
+        assert!(fixture.library_root.join("books/book-1.cbz").exists());
 
         fixture.cleanup().await;
     }
@@ -560,12 +650,10 @@ mod tests {
 
         let runtime = fixture.runtime_context(false, false).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            format!("ConvertBook_{book_id}"),
-            900,
-            Some("series-1".to_string()),
-        )
-        .with_simple_type("ConvertBook");
+        let task = TaskRequest::with_payload(TaskKind::ConvertBook, BookPayload::new(book_id))
+            .priority(900)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -746,21 +834,10 @@ mod tests {
 
         let runtime = fixture.runtime_context(true, true).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        let task = TaskQueueRecord::new(
-            format!("RepairExtension_{book_id}"),
-            1_000,
-            Some("series-1".to_string()),
-        )
-        .with_simple_type("RepairExtension")
-        .with_payload(
-            serde_json::json!({
-                "bookId": book_id,
-                "priority": 1000,
-                "groupId": "series-1",
-                "uniqueId": format!("RepairExtension_{book_id}"),
-            })
-            .to_string(),
-        );
+        let task = TaskRequest::with_payload(TaskKind::RepairExtension, BookPayload::new(book_id))
+            .priority(1_000)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::super::user_models::AuthUser;
+use super::proxy_transport::KoboProxyHeader;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KoboStoreSyncMergeResult {
@@ -16,10 +17,8 @@ pub struct KoboLibrarySyncRequest {
     pub current_api_key_id: Option<String>,
     pub sync_token: Option<String>,
     pub store_sync_enabled: bool,
-    pub forwarded_headers: Vec<(String, String)>,
+    pub forwarded_headers: Vec<KoboProxyHeader>,
     pub query: Option<String>,
-    pub base_url: String,
-    pub auth_token: String,
     pub limit: usize,
 }
 
@@ -32,18 +31,46 @@ pub struct KoboSyncPageRequest {
     pub limit: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct KoboLibrarySyncResponse {
-    pub events: Vec<Value>,
+    pub events: Vec<KoboSyncEvent>,
     pub sync_token_payload: String,
     pub should_continue: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KoboLibrarySyncPayload {
-    pub events: Vec<Value>,
-    pub encoded_sync_token: String,
-    pub should_continue: bool,
+#[derive(Clone, Debug, PartialEq)]
+pub struct KoboSyncBookState {
+    pub book_id: String,
+    pub book: Option<KoboSyncBookSnapshot>,
+    pub progress: Option<KoboSyncReadProgressSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum KoboSyncEvent {
+    Raw(Value),
+    NewEntitlement {
+        book: KoboSyncBookSnapshot,
+        progress: Option<KoboSyncReadProgressSnapshot>,
+    },
+    ChangedProductMetadata {
+        book: KoboSyncBookSnapshot,
+    },
+    ChangedEntitlementRemoved {
+        book: KoboSyncBookSnapshot,
+    },
+    ChangedReadingState {
+        book: KoboSyncBookSnapshot,
+        progress: KoboSyncReadProgressSnapshot,
+    },
+    NewTag {
+        readlist: KoboSyncReadListSnapshot,
+    },
+    ChangedTag {
+        readlist: KoboSyncReadListSnapshot,
+    },
+    DeletedTag {
+        readlist: KoboSyncReadListSnapshot,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

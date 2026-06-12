@@ -3,7 +3,12 @@ use komga_application::media_assets::{
 };
 use sqlx::{Row, SqlitePool};
 
+use crate::filesystem::media_access::db_queries::public_page_number_to_persisted;
 use crate::resolve_library_item_path;
+
+fn persisted_page_number_to_public(number: i64) -> u64 {
+    number as u64 + 1
+}
 
 pub(super) async fn load_book_media_for_refresh(
     pool: &SqlitePool,
@@ -43,9 +48,13 @@ pub(super) async fn load_book_page_row_for_refresh(
     book_id: &str,
     page_number: u64,
 ) -> Result<Option<BookPageRecord>, String> {
+    let Some(persisted_page_number) = public_page_number_to_persisted(page_number) else {
+        return Ok(None);
+    };
+
     let row = sqlx::query(
         r#"
-        SELECT NUMBER, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT,
+        SELECT NUMBER, FILE_NAME, MEDIA_TYPE, width, height,
                CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
         FROM MEDIA_PAGE
         WHERE BOOK_ID = ? AND NUMBER = ?
@@ -53,17 +62,17 @@ pub(super) async fn load_book_page_row_for_refresh(
         "#,
     )
     .bind(book_id)
-    .bind(page_number as i64)
+    .bind(persisted_page_number)
     .fetch_optional(pool)
     .await
     .map_err(|error| format!("query single persisted book page for refresh: {error}"))?;
 
     Ok(row.map(|row| BookPageRecord {
-        number: row.get::<i64, _>("NUMBER") as u64,
+        number: persisted_page_number_to_public(row.get::<i64, _>("NUMBER")),
         file_name: row.get::<String, _>("FILE_NAME"),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
-        width: row.get::<Option<i64>, _>("WIDTH"),
-        height: row.get::<Option<i64>, _>("HEIGHT"),
+        width: row.get::<Option<i64>, _>("width"),
+        height: row.get::<Option<i64>, _>("height"),
         file_size: row.get::<i64, _>("FILE_SIZE"),
     }))
 }
@@ -259,4 +268,33 @@ pub(super) async fn persist_book_metadata_for_refresh(
         .await
         .map_err(|error| format!("commit book metadata refresh tx: {error}"))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_book_page_row_for_refresh;
+    use crate::test_support::BootstrappedBookFixture;
+
+    #[tokio::test]
+    async fn load_book_page_row_for_refresh_maps_public_page_number_to_persisted_row() {
+        let fixture = BootstrappedBookFixture::open("refresh-page-row").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+        fixture
+            .insert_media_page("book-1", 0, "0001.jpg", "image/jpeg", Some(1234))
+            .await;
+
+        let page = load_book_page_row_for_refresh(&fixture.pool, "book-1", 1)
+            .await
+            .expect("load book page")
+            .expect("public page one should map to persisted row zero");
+
+        assert_eq!(1, page.number);
+        assert_eq!("0001.jpg", page.file_name);
+        assert_eq!(Some(640), page.width);
+        assert_eq!(Some(480), page.height);
+        assert_eq!(1234, page.file_size);
+
+        fixture.close().await;
+    }
 }

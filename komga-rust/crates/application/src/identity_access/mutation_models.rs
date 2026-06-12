@@ -1,3 +1,5 @@
+use super::AuthUserRole;
+
 #[derive(Clone, Debug)]
 pub struct SharedLibrariesInput {
     pub all: bool,
@@ -15,7 +17,7 @@ pub struct CreateAuthUserInput {
     pub user_id: String,
     pub email: String,
     pub password_hash: String,
-    pub roles: Vec<String>,
+    pub roles: Vec<AuthUserRole>,
     pub shared_libraries: SharedLibrariesInput,
     pub labels_allow: Vec<String>,
     pub labels_exclude: Vec<String>,
@@ -24,7 +26,7 @@ pub struct CreateAuthUserInput {
 
 #[derive(Clone, Debug)]
 pub struct UpdateAuthUserInput {
-    pub roles: Option<Vec<String>>,
+    pub roles: Option<Vec<AuthUserRole>>,
     pub shared_libraries: Option<SharedLibrariesInput>,
     pub labels_allow: Option<Vec<String>>,
     pub labels_exclude: Option<Vec<String>>,

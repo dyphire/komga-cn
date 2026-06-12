@@ -7,19 +7,22 @@ mod persisted_service;
 mod records;
 
 pub use catalog_port::{
-    OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCatalogPort, OpdsLatestSeriesFeedQuery,
-    OpdsLibrarySeriesQuery,
+    BrowseSeriesNavigationPage, OpdsBookFeedKind, OpdsBookFeedQuery, OpdsBrowseCatalogPort,
+    OpdsFeedCatalogPort, OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsSeriesFeedPage,
 };
 pub use feed_composition::{
     OpdsV2FeedCompositionService, OpdsV2FeedContent, OpdsV2FeedKind, OpdsV2FeedPage,
     OpdsV2FeedPageError, OpdsV2RecommendedGroup, OpdsV2RecommendedGroupContent,
-    OpdsV2RecommendedPage,
+    OpdsV2RecommendedGroupKind, OpdsV2RecommendedPage,
 };
-pub use feed_context::{
-    OpdsAgeRestrictionKind, OpdsFeedUserContext, OpdsPagedBooks, OpdsPagedSeries,
-};
+pub use feed_context::{OpdsFeedUserContext, OpdsPagedBooks, OpdsPagedSeries};
 pub use feed_service::OpdsFeedService;
-pub use persisted_port::OpdsPersistedPort;
+pub use persisted_port::{
+    OpdsCollectionDetailPersistedPort, OpdsCollectionVisibilityPersistedPort,
+    OpdsFeedPersistedPort, OpdsLibraryPersistedPort, OpdsPersistedUnifiedSearchRecords,
+    OpdsPublisherPersistedPort, OpdsReadlistDetailPersistedPort,
+    OpdsReadlistVisibilityPersistedPort, OpdsSearchPersistedPort, OpdsSeriesPersistedPort,
+};
 pub use persisted_service::{
     OpdsCollectionDetail, OpdsLibraryScopeError, OpdsPersistedService, OpdsReadlistDetail,
     OpdsSeriesAccessError, OpdsUnifiedSearchResults,

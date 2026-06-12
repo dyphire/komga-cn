@@ -1,11 +1,17 @@
+use super::super::media_helpers::analyze_book_media_file;
 use super::super::media_helpers::media_updates::adjust_analyzed_book_read_progress;
-use super::*;
+use super::super::runtime_context::JobRuntime;
+use super::book_analysis_persistence::{
+    AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
+};
 use crate::resolve_library_item_path;
+use komga_application::task_processing::TaskProcessingError;
+use komga_domain::discovery::MediaStatus;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::task_queue) struct AnalyzeBookOutcome {
     pub(in crate::task_queue) series_id: String,
-    pub(in crate::task_queue) media_status: String,
+    pub(in crate::task_queue) media_status: Option<MediaStatus>,
 }
 
 pub(in crate::task_queue) async fn analyze_book(
@@ -16,7 +22,7 @@ pub(in crate::task_queue) async fn analyze_book(
     if !runtime.database().owns_main_database() {
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
-            media_status: String::new(),
+            media_status: None,
         });
     }
 
@@ -26,7 +32,7 @@ pub(in crate::task_queue) async fn analyze_book(
     else {
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
-            media_status: String::new(),
+            media_status: None,
         });
     };
 
@@ -70,7 +76,7 @@ pub(in crate::task_queue) async fn analyze_book(
         runtime.database().write_pool(),
         &book_id,
         &input.series_id,
-        &input.previous_media_status,
+        input.previous_media_status,
         input.previous_page_count,
         current_page_count,
     )
@@ -79,6 +85,6 @@ pub(in crate::task_queue) async fn analyze_book(
 
     Ok(AnalyzeBookOutcome {
         series_id: input.series_id,
-        media_status: persisted.status,
+        media_status: Some(persisted.status),
     })
 }

@@ -1,5 +1,5 @@
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, ContentResolverPort, MediaReaderPort,
+    BookMediaContentPort, BookMediaReaderPort, BookMediaRecord, BookPageRecord,
 };
 
 use super::media_helpers::{
@@ -7,23 +7,23 @@ use super::media_helpers::{
 };
 
 async fn render_book_page_thumbnail(
-    content: &dyn ContentResolverPort,
+    content: &dyn BookMediaContentPort,
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
     max_edge: u32,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>, String> {
     content
         .render_page_thumbnail(media, page, page_number, max_edge)
         .await
 }
 
 pub(crate) async fn load_book_thumbnail_page_source_bytes(
-    reader: &dyn MediaReaderPort,
-    content: &dyn ContentResolverPort,
+    reader: &dyn BookMediaReaderPort,
+    content: &dyn BookMediaContentPort,
     book_id: &str,
     media: &BookMediaRecord,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>, String> {
     if book_media_is_single_image(media) {
         return content.read_media_file_bytes(&media.file_path).await;
     }
@@ -31,21 +31,26 @@ pub(crate) async fn load_book_thumbnail_page_source_bytes(
     if book_media_is_pdf(media) {
         let page_row = reader
             .book_page(book_id, 1)
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| content.pdf_page_row(media, 1))?;
+            .await?
+            .map_or_else(|| content.pdf_page_row(media, 1), |row| Ok(Some(row)))?;
+        let Some(page_row) = page_row else {
+            return Ok(None);
+        };
         return render_book_page_thumbnail(content, media, &page_row, 1, 300).await;
     }
 
-    let page_row = if let Some(page_row) = reader.book_page(book_id, 1).await.ok().flatten() {
-        page_row
-    } else {
-        content.archive_page_row(media, 1).await?
+    let page_row = match reader.book_page(book_id, 1).await? {
+        Some(page_row) => page_row,
+        None => {
+            let Some(page_row) = content.archive_page_row(media, 1).await? else {
+                return Ok(None);
+            };
+            page_row
+        }
     };
     let media_type = page_row_media_type(&page_row, media);
     if !media_type.to_ascii_lowercase().starts_with("image/") {
-        return None;
+        return Ok(None);
     }
 
     content.resolve_page_bytes(media, &page_row, 1).await

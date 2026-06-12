@@ -1,6 +1,12 @@
 use sqlx::SqlitePool;
 
-pub async fn table_has_rows(pool: &SqlitePool, table: &str, label: &str) -> Result<bool, String> {
+pub(super) use crate::parsing::clamp_kotlin_int_u32;
+
+pub(super) async fn table_has_rows(
+    pool: &SqlitePool,
+    table: &str,
+    label: &str,
+) -> Result<bool, String> {
     let sql = format!("SELECT 1 AS FOUND FROM {table} LIMIT 1");
     let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .fetch_optional(pool)
@@ -9,7 +15,7 @@ pub async fn table_has_rows(pool: &SqlitePool, table: &str, label: &str) -> Resu
     Ok(row.is_some())
 }
 
-pub async fn replace_ordered_children(
+pub(super) async fn replace_ordered_children(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     child_table: &str,
     parent_id_column: &str,
@@ -38,7 +44,7 @@ pub async fn replace_ordered_children(
     Ok(())
 }
 
-pub async fn delete_parent_with_children(
+pub(super) async fn delete_parent_with_children(
     pool: &SqlitePool,
     thumbnail_table: &str,
     child_table: &str,

@@ -1,9 +1,23 @@
-use super::kobo_routes::proxy_kobo_catch_all_request;
-use super::*;
-use crate::state::IdentityAccessState;
-use axum::body::to_bytes;
-use axum::extract::State;
-use komga_application::identity_access::generated_kobo_token_triplet;
+use super::kobo_routes::execute_kobo_proxy_request;
+use axum::Json;
+use axum::body::{Bytes, to_bytes};
+use axum::extract::{Extension, Path, State};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{
+    AuthOutcome, AuthUser, AuthUserRole, generate_kobo_device_tokens, user_has_role,
+};
+use serde_json::{Value, json};
+use std::net::SocketAddr;
+
+use crate::access_log::RequestConnectionInfo;
+use crate::identity_access::auth::persisted_api_key_user_by_token;
+use crate::identity_access::device_auth::auth_resolvers::{
+    required_kobo_user, valid_kobo_path_token,
+};
+use crate::identity_access::device_auth::helpers::record_successful_api_key_authentication_by_token;
+use crate::identity_access::device_auth::{kobo_request_base_url, load_kobo_proxy_enabled};
+use crate::state::{IdentityAccessState, IdentityState};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -16,7 +30,7 @@ struct KoboDeviceAuthResponse {
     user_key: String,
 }
 
-pub async fn kobo_ping(
+pub(crate) async fn kobo_ping(
     State(app): State<IdentityAccessState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
@@ -36,7 +50,7 @@ pub async fn kobo_ping(
 
     "pong".into_response()
 }
-pub async fn kobo_initialization(
+pub(crate) async fn kobo_initialization(
     State(app): State<IdentityAccessState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
@@ -57,11 +71,17 @@ pub async fn kobo_initialization(
         Ok(resources) => resources,
         Err(status) => return status.into_response(),
     };
-    apply_initialization_overrides(
-        &mut resources,
-        auth_token.as_str(),
-        kobo_request_base_url(&app, &headers).await.as_str(),
-    );
+    let base_url = match kobo_request_base_url(
+        app.server_settings.as_ref(),
+        &app.operational.runtime,
+        &headers,
+    )
+    .await
+    {
+        Ok(base_url) => base_url,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    apply_initialization_overrides(&mut resources, auth_token.as_str(), base_url.as_str());
 
     let mut response = (StatusCode::OK, Json(json!({ "Resources": resources }))).into_response();
     response.headers_mut().insert(
@@ -75,11 +95,14 @@ async fn initialization_resources(
     app: &IdentityAccessState,
     headers: &HeaderMap,
 ) -> Result<Value, StatusCode> {
-    if load_kobo_proxy_enabled(app.server_settings.as_ref()).await {
-        match proxied_initialization_resources(headers).await {
+    if load_kobo_proxy_enabled(app.server_settings.as_ref())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        match proxied_initialization_resources(app, headers).await {
             Ok(Some(resources)) => return Ok(resources),
-            Err(status) if status == StatusCode::UNAUTHORIZED => return Err(status),
-            Ok(None) | Err(_) => {}
+            Ok(None) => {}
+            Err(status) => return Err(status),
         }
     }
 
@@ -88,10 +111,12 @@ async fn initialization_resources(
 }
 
 async fn proxied_initialization_resources(
+    app: &IdentityAccessState,
     headers: &HeaderMap,
 ) -> Result<Option<Value>, StatusCode> {
-    let response = match proxy_kobo_catch_all_request(
-        &axum::http::Method::GET,
+    let response = match execute_kobo_proxy_request(
+        app.identity.kobo_proxy(),
+        &Method::GET,
         "/v1/initialization",
         None,
         headers,
@@ -100,13 +125,7 @@ async fn proxied_initialization_resources(
     .await
     {
         Ok(response) => response,
-        Err(status) => {
-            return if status == StatusCode::UNAUTHORIZED {
-                Err(status)
-            } else {
-                Ok(None)
-            };
-        }
+        Err(status) => return Err(status),
     };
 
     let status = response.status();
@@ -152,12 +171,12 @@ fn apply_initialization_overrides(resources: &mut Value, auth_token: &str, conte
     );
 }
 
-pub async fn kobo_auth_device(
+pub(crate) async fn kobo_auth_device(
     State(app): State<IdentityAccessState>,
     Path(auth_token): Path<String>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
-    uri: axum::http::Uri,
+    uri: Uri,
     body: Bytes,
 ) -> Response {
     if let Err(status) = required_kobo_user(
@@ -176,27 +195,35 @@ pub async fn kobo_auth_device(
         Err(status) => return status.into_response(),
     };
 
-    if load_kobo_proxy_enabled(app.server_settings.as_ref()).await
-        && let Ok(response) = proxy_kobo_catch_all_request(
-            &axum::http::Method::POST,
+    let proxy_enabled = match load_kobo_proxy_enabled(app.server_settings.as_ref()).await {
+        Ok(enabled) => enabled,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    if proxy_enabled {
+        match execute_kobo_proxy_request(
+            app.identity.kobo_proxy(),
+            &Method::POST,
             "/v1/auth/device",
             uri.query(),
             &headers,
             &body,
         )
         .await
-        && response.status().is_success()
-    {
-        return response;
+        {
+            Ok(response) if response.status().is_success() => return response,
+            Ok(_) => {}
+            Err(status) => return status.into_response(),
+        }
     }
 
-    let (access_token, refresh_token, tracking_id) = generated_kobo_token_triplet();
+    let tokens = generate_kobo_device_tokens();
 
     Json(KoboDeviceAuthResponse {
-        access_token,
-        refresh_token,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
         token_type: "Bearer",
-        tracking_id,
+        tracking_id: tokens.tracking_id,
         user_key,
     })
     .into_response()
@@ -241,7 +268,7 @@ async fn kobo_path_user_status(
     }
 
     match persisted_api_key_user_by_token(identity, auth_token).await {
-        Some(AuthOutcome::Valid(user)) => {
+        Ok(AuthOutcome::Valid(user)) => {
             let _ = record_successful_api_key_authentication_by_token(
                 identity,
                 headers,
@@ -250,12 +277,13 @@ async fn kobo_path_user_status(
                 auth_token,
             )
             .await;
-            if user.roles.iter().any(|role| role == "KOBO_SYNC") {
+            if user_has_role(&user, AuthUserRole::KoboSync) {
                 Ok(*user)
             } else {
                 Err(StatusCode::FORBIDDEN)
             }
         }
-        _ => Err(StatusCode::UNAUTHORIZED),
+        Ok(AuthOutcome::Invalid | AuthOutcome::Missing) => Err(StatusCode::UNAUTHORIZED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

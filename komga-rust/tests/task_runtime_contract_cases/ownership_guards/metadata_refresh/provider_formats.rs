@@ -66,7 +66,7 @@ pub(in super::super) fn write_router_epub_with_package_document_and_entries(
         .expect("epub metadata fixture should finish successfully");
 }
 
-fn write_router_cbz_with_single_page(
+pub(in super::super) fn write_router_cbz_with_single_page(
     paths: &RuntimeDbPaths,
     relative_book_path: &str,
     page_file_name: &str,
@@ -200,11 +200,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
         .execute(&pool)
         .await
         .expect("book sidecars should be cleared before EPUB metadata refresh test");
-    sqlx::query("UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_EPUB_BOOK = 1 WHERE ID = ?")
-        .bind("library-1")
-        .execute(&pool)
-        .await
-        .expect("library metadata import flags should isolate EPUB provider for refresh test");
+    isolate_book_metadata_imports(&pool, 0, 0, 1, 0).await;
     sqlx::query(
         "UPDATE BOOK_METADATA SET RELEASE_DATE = ?, RELEASE_DATE_LOCK = 1, ISBN = ?, ISBN_LOCK = 0, NUMBER = ?, NUMBER_SORT = ? WHERE BOOK_ID = ?",
     )
@@ -319,13 +315,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for barcode metadata fixture setup");
-    sqlx::query(
-        "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_EPUB_BOOK = 0, IMPORT_BARCODE_ISBN = 1 WHERE ID = ?",
-    )
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("library metadata import flags should isolate barcode provider for refresh test");
+    isolate_book_metadata_imports(&pool, 0, 0, 0, 1).await;
     sqlx::query("UPDATE BOOK_METADATA SET ISBN = ?, ISBN_LOCK = 0 WHERE BOOK_ID = ?")
         .bind("")
         .bind("book-barcode-1")

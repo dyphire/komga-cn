@@ -6,13 +6,18 @@ edition.workspace = true
 [dependencies]
 async-trait.workspace = true
 base64.workspace = true
-flate2.workspace = true
+getrandom.workspace = true
 icu.workspace = true
 komga-domain = { path = "../domain" }
+language-tags.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+quick-xml.workspace = true
 time.workspace = true
-tokio.workspace = true
 tsid.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

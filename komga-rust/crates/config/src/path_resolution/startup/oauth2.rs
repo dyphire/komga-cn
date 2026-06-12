@@ -1,4 +1,8 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+use config::Config as LayeredConfig;
+
+use crate::env_config::OAuth2ClientConfig;
 
 pub(crate) fn resolve_oauth2_clients_for_startup_slice(
     layered: &LayeredConfig,
@@ -312,7 +316,11 @@ fn parse_scope_value(value: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
+
+    use config::Config as LayeredConfig;
+
+    use super::{resolve_oauth2_clients_from_env, resolve_oauth2_clients_from_layered};
 
     #[test]
     fn env_accepts_oidc_issuer_without_explicit_oauth2_endpoints() {

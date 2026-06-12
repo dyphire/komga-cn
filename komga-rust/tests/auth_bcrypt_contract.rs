@@ -1,12 +1,15 @@
-use axum::http::{HeaderMap, header};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
-use komga_application::identity_access::AuthOutcome;
-use komga_infrastructure::runtime_identity_access::{
-    persisted_basic_user, persisted_update_password_by_user_id,
+use komga_application::identity_access::{AuthOutcome, AuthenticationPort};
+use komga_infrastructure::{
+    ContentResolver, DatabaseHandle, IdentityAccess, bootstrap_pool,
+    persisted_update_password_by_user_id,
 };
-use komga_infrastructure::sqlite::{connect_test_pool, setup};
+use std::sync::Arc;
 use tempfile::TempDir;
+
+#[path = "support/sqlite.rs"]
+mod sqlite_support;
+use sqlite_support::connect_test_pool;
 
 async fn create_test_db(case: &str) -> (TempDir, sqlx::Pool<sqlx::Sqlite>) {
     let temp_dir = TempDir::new().expect("temp dir should be created");
@@ -14,11 +17,23 @@ async fn create_test_db(case: &str) -> (TempDir, sqlx::Pool<sqlx::Sqlite>) {
     let pool = connect_test_pool(&db_path, 1)
         .await
         .expect("test db should open");
-    setup::bootstrap_pool(&pool)
+    bootstrap_pool(&pool)
         .await
         .expect("test db should bootstrap main schema");
 
     (temp_dir, pool)
+}
+
+fn identity_access(
+    temp_dir: &TempDir,
+    case: &str,
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+) -> IdentityAccess {
+    let db_path = temp_dir.path().join(format!("{case}.sqlite"));
+    IdentityAccess::new(
+        DatabaseHandle::single_pool(db_path, pool.clone()),
+        Arc::new(ContentResolver),
+    )
 }
 
 async fn insert_test_user(
@@ -41,17 +56,6 @@ async fn insert_test_user(
     .expect("user row should be inserted");
 }
 
-fn basic_auth_headers(email: &str, password: &str) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    let credentials = STANDARD.encode(format!("{email}:{password}"));
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(&format!("Basic {credentials}"))
-            .expect("basic auth header should be valid"),
-    );
-    headers
-}
-
 fn kotlin_style_bcrypt_hash(password: &str) -> String {
     // Kotlin's BCryptPasswordEncoder uses the historical $2a$ envelope; the verifier must keep
     // accepting that format even when the underlying bcrypt body is identical.
@@ -70,20 +74,19 @@ async fn persisted_password(pool: &sqlx::Pool<sqlx::Sqlite>, user_id: &str) -> S
 
 #[tokio::test]
 async fn kotlin_bcrypt_hashes_verify_in_rust() {
-    let (_temp_dir, pool) = create_test_db("legacy-bcrypt").await;
+    let (temp_dir, pool) = create_test_db("legacy-bcrypt").await;
+    let identity = identity_access(&temp_dir, "legacy-bcrypt", &pool);
     let raw_password = "kotlin-password";
     let legacy_hash = kotlin_style_bcrypt_hash(raw_password);
 
     insert_test_user(&pool, "user-1", "admin@example.com", &legacy_hash).await;
 
-    let outcome = persisted_basic_user(
-        &basic_auth_headers("admin@example.com", raw_password),
-        &pool,
-    )
-    .await;
+    let outcome = identity
+        .authenticate_basic("admin@example.com", raw_password)
+        .await;
 
     match outcome {
-        Some(AuthOutcome::Valid(user)) => {
+        Ok(AuthOutcome::Valid(user)) => {
             assert_eq!(user.email, "admin@example.com");
         }
         other => panic!("legacy bcrypt hash should authenticate, got {other:?}"),
@@ -92,28 +95,44 @@ async fn kotlin_bcrypt_hashes_verify_in_rust() {
 
 #[tokio::test]
 async fn password_updates_emit_bcrypt_hashes() {
-    let (_temp_dir, pool) = create_test_db("password-update").await;
+    let (temp_dir, pool) = create_test_db("password-update").await;
+    let identity = identity_access(&temp_dir, "password-update", &pool);
     insert_test_user(&pool, "user-1", "admin@example.com", "old-password-hash").await;
 
     let updated = persisted_update_password_by_user_id(&pool, "user-1", "new-password").await;
 
-    assert_eq!(updated, Some(true));
+    assert_eq!(updated, Ok(true));
 
     let stored_password = persisted_password(&pool, "user-1").await;
     assert!(stored_password.starts_with("$2"));
     assert_eq!(stored_password.len(), 60);
 
-    let outcome = persisted_basic_user(
-        &basic_auth_headers("admin@example.com", "new-password"),
-        &pool,
-    )
-    .await;
+    let outcome = identity
+        .authenticate_basic("admin@example.com", "new-password")
+        .await;
 
     match outcome {
-        Some(AuthOutcome::Valid(user)) => {
+        Ok(AuthOutcome::Valid(user)) => {
             assert_eq!(user.id, "user-1");
             assert_eq!(user.email, "admin@example.com");
         }
         other => panic!("updated bcrypt hash should still authenticate, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn malformed_persisted_bcrypt_hash_fails_as_storage_error() {
+    let (temp_dir, pool) = create_test_db("malformed-bcrypt").await;
+    let identity = identity_access(&temp_dir, "malformed-bcrypt", &pool);
+
+    insert_test_user(&pool, "user-1", "admin@example.com", "not-a-bcrypt-hash").await;
+
+    let outcome = identity
+        .authenticate_basic("admin@example.com", "password")
+        .await;
+
+    assert!(
+        matches!(outcome, Err(ref error) if error.contains("failed to verify persisted password hash")),
+        "malformed persisted hash should be a storage error, got {outcome:?}"
+    );
 }

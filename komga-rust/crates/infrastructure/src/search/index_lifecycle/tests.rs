@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -159,6 +160,23 @@ fn query_bootstrap_refuses_missing_index_without_creating_state() {
         !index_dir.exists(),
         "query lifecycle must not create index directories while serving read-only searches",
     );
+}
+
+#[test]
+fn query_bootstrap_propagates_index_path_probe_errors() {
+    let root = temp_index_dir("query-bootstrap-propagates-path-probe-errors");
+    let file_component = root.join("not-a-directory");
+    std::fs::write(&file_component, b"not a directory").expect("file component should be created");
+    let index_dir = file_component.join("index");
+
+    let result = SearchQueryLifecycle::bootstrap(index_dir.as_path());
+
+    assert!(
+        matches!(result, Err(SearchError::Io(error)) if error.kind() == ErrorKind::NotADirectory),
+        "query lifecycle must not treat path probe errors as a missing index",
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

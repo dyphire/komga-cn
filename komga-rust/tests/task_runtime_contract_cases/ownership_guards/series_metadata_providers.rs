@@ -73,7 +73,8 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -187,7 +188,8 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -289,7 +291,8 @@ async fn runtime_refresh_series_metadata_ignores_generic_series_xml_sidecar_with
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -410,7 +413,8 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -604,7 +608,8 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -724,7 +729,8 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -831,7 +837,8 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await

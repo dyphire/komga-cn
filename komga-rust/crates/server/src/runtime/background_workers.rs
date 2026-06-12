@@ -4,16 +4,14 @@ use komga_application::task_processing::TaskQueueAdmin;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::search::index_lifecycle::{
-    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
+use komga_infrastructure::TaskRuntimeContext;
+use komga_infrastructure::{
+    DatabaseHandle, SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
-use komga_infrastructure::task_queue::RuntimeTaskEngine;
-use komga_infrastructure::task_queue::TaskExecutionPoolHandle;
-use komga_infrastructure::task_queue::TaskRuntimeContext;
-use komga_infrastructure::task_queue::worker_runtime::{
-    SharedTaskQueue, TaskQueueWakeSignal, prepare_task_queue, process_startup_library_scans,
+use komga_infrastructure::{
+    RuntimeBackgroundState, prepare_task_queue, process_startup_library_scans,
 };
+use komga_interfaces::state::RuntimeSseEventHub;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -34,6 +32,7 @@ pub(crate) struct HttpRuntimeParts {
     pub(crate) main_db: DatabaseHandle,
     pub(crate) tasks_db: DatabaseHandle,
     pub(crate) task_engine: Box<dyn TaskQueueAdmin>,
+    pub(crate) runtime_events: Arc<RuntimeSseEventHub>,
 }
 
 pub(crate) struct RouterRuntimeLifecycle {
@@ -58,8 +57,17 @@ pub(crate) async fn start_task_runtime(
     config: &RuntimeConfig,
     mode: TaskRuntimeMode,
 ) -> std::io::Result<TaskRouterParts> {
+    let runtime_events = RuntimeSseEventHub::new();
+    start_task_runtime_with_events(config, mode, runtime_events).await
+}
+
+pub(crate) async fn start_task_runtime_with_events(
+    config: &RuntimeConfig,
+    mode: TaskRuntimeMode,
+    runtime_events: Arc<RuntimeSseEventHub>,
+) -> std::io::Result<TaskRouterParts> {
     let startup_scan_runtime = if matches!(config.runtime_profile, RuntimeProfile::LiveLocaldb) {
-        let runtime = crate::config::task_runtime_context(config).await;
+        let runtime = crate::config::task_runtime_context(config, runtime_events.clone()).await;
         process_startup_library_scans(runtime.clone()).await;
         Some(runtime)
     } else {
@@ -69,32 +77,27 @@ pub(crate) async fn start_task_runtime(
     let startup_search_plan = plan_startup_search_task_with_logging(config)?;
     let runtime = match startup_scan_runtime {
         Some(runtime) => runtime,
-        None => crate::config::task_runtime_context(config).await,
+        None => crate::config::task_runtime_context(config, runtime_events.clone()).await,
     };
     let background = prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
     let tasks_db =
         open_database_handle(runtime.worker().tasks_db_file().to_path_buf(), "tasks").await?;
     let worker_runtime_guard = match mode {
         TaskRuntimeMode::WorkersEnabled { shutdown_rx } => Some(spawn_runtime_workers(
-            background.task_queue.clone(),
-            background.task_execution_pool.clone(),
+            &background,
             runtime.clone(),
-            background.task_wakeup.clone(),
             shutdown_rx,
         )),
         TaskRuntimeMode::WorkersDisabled => None,
     };
-    let task_engine = Box::new(RuntimeTaskEngine::new(
-        background.task_queue,
-        background.task_execution_pool,
-        background.task_wakeup,
-    ));
+    let task_engine = background.task_engine();
 
     Ok(TaskRouterParts {
         http: HttpRuntimeParts {
             main_db: runtime.job().database().main_db().clone(),
             tasks_db,
             task_engine,
+            runtime_events,
         },
         lifecycle: RouterRuntimeLifecycle {
             worker_runtime_guard,
@@ -126,10 +129,8 @@ async fn open_database_handle(
 }
 
 fn spawn_runtime_workers(
-    task_queue: SharedTaskQueue,
-    task_execution_pool: TaskExecutionPoolHandle,
+    background: &RuntimeBackgroundState,
     runtime: TaskRuntimeContext,
-    task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> WorkerRuntimeGuard {
     let (internal_shutdown_tx, internal_shutdown_rx) = watch::channel(false);
@@ -141,13 +142,7 @@ fn spawn_runtime_workers(
         });
     }
 
-    komga_infrastructure::task_queue::worker_runtime::spawn_runtime_workers(
-        task_queue,
-        task_execution_pool,
-        runtime,
-        task_wakeup,
-        Some(internal_shutdown_rx),
-    );
+    background.spawn_workers(runtime, Some(internal_shutdown_rx));
 
     Arc::new(WorkerRuntimeLifecycleGuard {
         shutdown_tx: internal_shutdown_tx,

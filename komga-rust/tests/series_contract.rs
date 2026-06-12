@@ -1,6 +1,6 @@
+use crate::support::sqlite::connect_test_pool;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use komga_infrastructure::sqlite::connect_test_pool;
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::io::Cursor;

@@ -1,27 +1,16 @@
-use axum::Json;
-use axum::body::Bytes;
-use axum::extract::Path;
-use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
-use komga_domain::discovery::PageEnvelope;
 use serde_json::{Map, Value, json};
 
-use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
 use crate::helpers::{
-    api_file_path, detail_access_denial_response, normalized_date_time,
-    normalized_file_last_modified, normalized_optional_read_progress_date, query_bool, query_value,
-    query_values, restricted_book_url, to_domain_query_context,
-};
-use crate::state::DiscoveryState;
-use crate::state::{
-    PersistedBookSiblingDirectionRecord, PersistedComicrackMatchCandidateRecord,
-    PersistedSeriesDetailRecord, SeriesAlternateTitleRecord, SeriesMetadataLinkRecord,
-    SeriesMetadataUpdateRecord,
+    api_file_path, normalized_date_time, normalized_file_last_modified,
+    normalized_optional_read_progress_date, restricted_book_url,
 };
 use komga_application::discovery::{
-    BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, CollectionVisibilityService,
-    ReadListReadModel, ReadlistVisibilityService, SeriesReadModel,
+    BookMetadataAuthorReadModel, BookReadModel, CollectionReadModel, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord, SeriesReadingDirection,
 };
+use komga_domain::discovery::{MediaProfile, SeriesStatus};
+
+use crate::state::DiscoveryState;
 
 mod books_detail;
 mod books_persistence;
@@ -33,36 +22,22 @@ mod readlists_support;
 mod series_detail;
 mod series_persistence;
 
-pub use books_detail::{book_detail, book_readlists, book_sibling_next, book_sibling_previous};
-use books_persistence::load_persisted_book_sibling_detail;
-pub use books_persistence::{
-    PersistedBookSiblingDirection, load_persisted_book_resource, load_persisted_book_series_id,
-    resolve_book_id_for_persisted,
+pub(crate) use books_detail::{
+    book_detail, book_readlists, book_sibling_next, book_sibling_previous,
 };
-pub use collections::{
+pub(in crate::discovery) use books_persistence::load_persisted_book_resource;
+pub(crate) use collections::{
     collection_create, collection_delete, collection_detail, collection_series, collection_update,
     collections,
 };
-use collections_support::{
-    collection_payload, collections_page_payload, collections_unpaged_payload,
-    load_persisted_collection_detail,
-};
-pub use detail_utils::{
-    format_size_bytes, internal_error_response, media_profile_for_media_type, parse_csv_values,
-    random_hex_token,
-};
-pub use readlists::{
+use collections_support::collection_payload;
+use detail_utils::format_size_bytes;
+pub(crate) use readlists::{
     readlist_book_sibling_next, readlist_book_sibling_previous, readlist_books, readlist_create,
     readlist_delete, readlist_detail, readlist_match_comicrack, readlist_update, readlists,
 };
-use readlists_support::{load_persisted_readlist_detail, readlist_payload, readlists_page_payload};
-pub use readlists_support::{match_comicrack_readlist, parse_comicrack_readlist};
-pub use series_detail::{series_collections, series_detail, series_metadata_update};
-pub use series_persistence::{
-    load_existing_series_metadata, load_persisted_series_resource, persist_series_metadata_update,
-    resolve_series_id_for_persisted, sync_series_search_documents_after_metadata_update,
-};
-use series_persistence::{load_persisted_series_collections, load_persisted_series_detail};
+pub(crate) use series_detail::{series_collections, series_detail, series_metadata_update};
+pub(in crate::discovery) use series_persistence::load_persisted_series_resource;
 
 pub(super) type BookDetailReadModel = BookReadModel;
 
@@ -81,11 +56,11 @@ pub(super) struct SeriesDetailReadModel {
     books_read_count: u32,
     books_unread_count: u32,
     books_in_progress_count: u32,
-    status: String,
+    status: SeriesStatus,
     status_lock: bool,
     summary: String,
     summary_lock: bool,
-    reading_direction: String,
+    reading_direction: Option<SeriesReadingDirection>,
     reading_direction_lock: bool,
     publisher: String,
     publisher_lock: bool,
@@ -135,7 +110,9 @@ pub(super) fn book_detail_payload(book: &BookReadModel, is_admin: bool) -> Value
     } else {
         restricted_book_url(&admin_url, false)
     };
-    let media_profile = media_profile_for_media_type(&book.media_type);
+    let media_profile = MediaProfile::from_media_type(&book.media_type)
+        .map(MediaProfile::api_name)
+        .unwrap_or_default();
 
     json!({
         "id": book.id,
@@ -151,7 +128,7 @@ pub(super) fn book_detail_payload(book: &BookReadModel, is_admin: bool) -> Value
         "sizeBytes": book.size_bytes,
         "size": format_size_bytes(book.size_bytes),
         "media": {
-            "status": book.media_status,
+            "status": book.media_status.persisted_name(),
             "mediaType": book.media_type,
             "pagesCount": book.media_pages_count,
             "comment": book.media_comment,
@@ -204,7 +181,10 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     };
 
     let mut metadata = Map::new();
-    metadata.insert("status".to_string(), Value::String(series.status.clone()));
+    metadata.insert(
+        "status".to_string(),
+        Value::String(series.status.persisted_name().to_string()),
+    );
     metadata.insert("statusLock".to_string(), Value::Bool(series.status_lock));
     metadata.insert("title".to_string(), Value::String(series.title.clone()));
     metadata.insert("titleLock".to_string(), Value::Bool(series.title_lock));
@@ -220,7 +200,12 @@ fn series_detail_payload(series: &SeriesDetailReadModel, is_admin: bool) -> Valu
     metadata.insert("summaryLock".to_string(), Value::Bool(series.summary_lock));
     metadata.insert(
         "readingDirection".to_string(),
-        Value::String(series.reading_direction.clone()),
+        Value::String(
+            series
+                .reading_direction
+                .map(|value| value.persisted_name().to_string())
+                .unwrap_or_default(),
+        ),
     );
     metadata.insert(
         "readingDirectionLock".to_string(),
@@ -419,6 +404,7 @@ fn series_collections_payload(collections: &[CollectionReadModel]) -> Value {
 mod tests {
     use super::*;
     use komga_application::discovery::BookMetadataLinkReadModel;
+    use komga_domain::discovery::MediaStatus;
 
     #[test]
     fn book_detail_payload_uses_persisted_lock_link_and_media_flags() {
@@ -436,7 +422,7 @@ mod tests {
                 last_modified: "2024-01-02T00:00:00Z".to_string(),
                 file_last_modified: "2024-01-03T00:00:00Z".to_string(),
                 size_bytes: 123,
-                media_status: "READY".to_string(),
+                media_status: MediaStatus::Ready,
                 media_type: "application/epub+zip".to_string(),
                 media_pages_count: 5,
                 media_comment: "ok".to_string(),
@@ -516,7 +502,7 @@ mod tests {
                 last_modified: "2024-01-02T00:00:00Z".to_string(),
                 file_last_modified: "2024-01-03T00:00:00Z".to_string(),
                 size_bytes: 123,
-                media_status: "READY".to_string(),
+                media_status: MediaStatus::Ready,
                 media_type: "application/vnd.comicbook+zip".to_string(),
                 media_pages_count: 5,
                 media_comment: "ok".to_string(),
@@ -573,11 +559,11 @@ mod tests {
                 books_read_count: 1,
                 books_unread_count: 1,
                 books_in_progress_count: 0,
-                status: "ONGOING".to_string(),
+                status: SeriesStatus::Ongoing,
                 status_lock: false,
                 summary: "Summary".to_string(),
                 summary_lock: false,
-                reading_direction: "LEFT_TO_RIGHT".to_string(),
+                reading_direction: Some(SeriesReadingDirection::LeftToRight),
                 reading_direction_lock: false,
                 publisher: "Publisher".to_string(),
                 publisher_lock: false,

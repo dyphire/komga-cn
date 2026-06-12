@@ -1,26 +1,46 @@
 use super::epub::load_epub_locator_for_page;
-use super::*;
 use crate::identity_access::auth::Authenticated;
-use crate::opds::OpdsV2Authenticated;
+use crate::opds_auth::OpdsV2Authenticated;
 use crate::state::MediaAssetsState;
-use axum::extract::State;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{AuthUser, user_id};
 use komga_application::media_assets::{
-    BookProgressionGetOutcome, BookProgressionOutcome, BookProgressionService,
+    BookProgressionGetOutcome, BookProgressionLocator, BookProgressionOutcome,
+    BookProgressionRecord, BookProgressionService, BookProgressionUpdate,
+    BookProgressionUpdateInput,
 };
+use serde_json::{Value, json};
+
+use crate::helpers::{
+    invalid_progression_payload, invalid_read_progress_payload,
+    read_progress_validation_error_response,
+};
+use crate::identity_access::auth::{resolved_auth_user, resolved_token};
+use crate::media_assets::access_control::user_can_access_book_media;
+use crate::media_assets::http_helpers::internal_error_response;
+use crate::media_assets::read_progress::READIUM_PROGRESSION_MEDIA_TYPE;
+use crate::media_assets::types::PersistedBookMedia;
 
 fn request_progress_token(
     identity: &crate::state::IdentityState,
     headers: &HeaderMap,
     user: &AuthUser,
-) -> String {
-    if resolved_auth_user(identity, headers).is_some() {
+) -> Result<String, StatusCode> {
+    if resolved_auth_user(identity, headers)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some()
+    {
         let token = resolved_token(headers);
         if !token.trim().is_empty() {
-            return token;
+            return Ok(token);
         }
     }
 
-    format!("user:{}", user_id(user))
+    Ok(format!("user:{}", user_id(user)))
 }
 
 async fn load_accessible_book_media(
@@ -28,15 +48,17 @@ async fn load_accessible_book_media(
     book_id: &str,
     user: &AuthUser,
 ) -> Result<PersistedBookMedia, Response> {
-    let Some(media) = (match app.reader.book_media(book_id).await {
+    let Some(media) = (match app.book_media_reader.book_media(book_id).await {
         Ok(media) => media,
         Err(error) => return Err(internal_error_response(error)),
     }) else {
         return Err(StatusCode::NOT_FOUND.into_response());
     };
 
-    if !user_can_access_book_media(app.reader.as_ref(), book_id, user, &media).await {
-        return Err(StatusCode::FORBIDDEN.into_response());
+    match user_can_access_book_media(app.book_media_reader.as_ref(), book_id, user, &media).await {
+        Ok(true) => {}
+        Ok(false) => return Err(StatusCode::FORBIDDEN.into_response()),
+        Err(error) => return Err(internal_error_response(error)),
     }
 
     Ok(media)
@@ -61,18 +83,29 @@ async fn persist_and_record_read_progress(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    set_read_progress(&app.read_progress, token.to_string(), book_id.to_string());
+    app.read_progress
+        .record(token.to_string(), book_id.to_string());
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn book_read_progress(
+async fn book_exists(app: &MediaAssetsState, book_id: &str) -> Result<bool, Response> {
+    app.read_progress_reader
+        .book_exists(book_id)
+        .await
+        .map_err(internal_error_response)
+}
+
+pub(crate) async fn book_read_progress(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let supports_persisted_flow = app.reader.book_exists(&book_id).await.unwrap_or(false);
+    let supports_persisted_flow = match book_exists(&app, &book_id).await {
+        Ok(exists) => exists,
+        Err(response) => return response,
+    };
 
     if !supports_persisted_flow {
         return StatusCode::NOT_FOUND.into_response();
@@ -86,13 +119,16 @@ pub async fn book_read_progress(
         return response;
     }
     let persisted_user_id = Some(user_id(&user));
-    let page_count = match app.reader.book_page_count(&book_id).await {
+    let page_count = match app.read_progress_reader.book_page_count(&book_id).await {
         Ok(Some(value)) if value > 0 => value,
         Ok(_) => 1,
         Err(error) => return internal_error_response(error),
     };
 
-    let token = request_progress_token(&app.identity, &headers, &user);
+    let token = match request_progress_token(&app.identity, &headers, &user) {
+        Ok(token) => token,
+        Err(status) => return status.into_response(),
+    };
 
     let page_value = payload.get("page");
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
@@ -158,13 +194,16 @@ pub async fn book_read_progress(
     .await
 }
 
-pub async fn book_read_progress_delete(
+pub(crate) async fn book_read_progress_delete(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let supports_persisted_flow = app.reader.book_exists(&book_id).await.unwrap_or(false);
+    let supports_persisted_flow = match book_exists(&app, &book_id).await {
+        Ok(exists) => exists,
+        Err(response) => return response,
+    };
 
     if !supports_persisted_flow {
         return StatusCode::NOT_FOUND.into_response();
@@ -173,18 +212,11 @@ pub async fn book_read_progress_delete(
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
         return response;
     }
-    let token = request_progress_token(&app.identity, &headers, &user);
-    {
-        let mut all_progress = app
-            .read_progress
-            .progress_by_token
-            .lock()
-            .expect("read-progress state lock should not be poisoned");
-
-        if let Some(user_progress) = all_progress.get_mut(&token) {
-            user_progress.remove(&book_id);
-        }
-    }
+    let token = match request_progress_token(&app.identity, &headers, &user) {
+        Ok(token) => token,
+        Err(status) => return status.into_response(),
+    };
+    app.read_progress.remove(&token, &book_id);
 
     if supports_persisted_flow
         && app
@@ -199,7 +231,7 @@ pub async fn book_read_progress_delete(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn book_progression(
+pub(crate) async fn book_progression(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
@@ -208,7 +240,7 @@ pub async fn book_progression(
     book_progression_response(&app, &user, &book_id, body).await
 }
 
-pub async fn opds_v2_book_progression(
+pub(crate) async fn opds_v2_book_progression(
     State(app): State<MediaAssetsState>,
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     Path(book_id): Path<String>,
@@ -226,12 +258,13 @@ async fn book_progression_response(
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
         return invalid_progression_payload();
     };
+    let update = book_progression_update_input(&payload);
     let service = BookProgressionService::new(
-        app.reader.as_ref(),
-        app.content.as_ref(),
+        app.book_progression_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
         app.progress.as_ref(),
     );
-    match service.update_progression(user, book_id, &payload).await {
+    match service.update_progression(user, book_id, update).await {
         BookProgressionOutcome::Updated => StatusCode::NO_CONTENT.into_response(),
         BookProgressionOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookProgressionOutcome::Forbidden => StatusCode::FORBIDDEN.into_response(),
@@ -246,7 +279,60 @@ async fn book_progression_response(
     }
 }
 
-pub async fn book_progression_get(
+fn book_progression_update_input(payload: &Value) -> BookProgressionUpdateInput {
+    let Some(modified) = payload.get("modified").and_then(Value::as_str) else {
+        return BookProgressionUpdateInput::InvalidPayload;
+    };
+    let Some(device_id) = payload
+        .get("device")
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+    else {
+        return BookProgressionUpdateInput::InvalidPayload;
+    };
+    let Some(device_name) = payload
+        .get("device")
+        .and_then(|value| value.get("name"))
+        .and_then(Value::as_str)
+    else {
+        return BookProgressionUpdateInput::InvalidPayload;
+    };
+
+    BookProgressionUpdateInput::Update(BookProgressionUpdate {
+        modified: modified.to_string(),
+        device_id: device_id.to_string(),
+        device_name: device_name.to_string(),
+        locator: book_progression_locator(payload),
+    })
+}
+
+fn book_progression_locator(payload: &Value) -> Option<BookProgressionLocator> {
+    let locator = payload.get("locator")?.clone();
+    let locations = locator.get("locations");
+    let href = locator
+        .get("href")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let progression = locations
+        .and_then(|value| value.get("progression"))
+        .and_then(Value::as_f64);
+    let position = locations
+        .and_then(|value| value.get("position"))
+        .and_then(Value::as_u64);
+    let total_progression = locations
+        .and_then(|value| value.get("totalProgression"))
+        .and_then(Value::as_f64);
+
+    Some(BookProgressionLocator::new(
+        locator,
+        href,
+        progression,
+        position,
+        total_progression,
+    ))
+}
+
+pub(crate) async fn book_progression_get(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
@@ -254,7 +340,7 @@ pub async fn book_progression_get(
     book_progression_get_response(&app, &user, &book_id).await
 }
 
-pub async fn opds_v2_book_progression_get(
+pub(crate) async fn opds_v2_book_progression_get(
     State(app): State<MediaAssetsState>,
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     Path(book_id): Path<String>,
@@ -268,8 +354,8 @@ async fn book_progression_get_response(
     book_id: &str,
 ) -> Response {
     let service = BookProgressionService::new(
-        app.reader.as_ref(),
-        app.content.as_ref(),
+        app.book_progression_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
         app.progress.as_ref(),
     );
     match service.progression(user, book_id).await {
@@ -278,7 +364,7 @@ async fn book_progression_get_response(
                 header::CONTENT_TYPE,
                 HeaderValue::from_static(READIUM_PROGRESSION_MEDIA_TYPE),
             )],
-            Json(progression),
+            Json(book_progression_payload(progression)),
         )
             .into_response(),
         BookProgressionGetOutcome::NoContent => StatusCode::NO_CONTENT.into_response(),
@@ -294,4 +380,15 @@ fn progression_bad_request_response(message: impl Into<String>) -> Response {
         Json(json!({ "error": message.into() })),
     )
         .into_response()
+}
+
+fn book_progression_payload(progression: BookProgressionRecord) -> Value {
+    json!({
+        "modified": progression.modified,
+        "device": {
+            "id": progression.device_id,
+            "name": progression.device_name,
+        },
+        "locator": progression.locator,
+    })
 }

@@ -16,7 +16,8 @@ pub use filesystem::{FilesystemBrowseAccess, FontAccess};
 pub use history::HistoryAccess;
 pub use page_hashes::PageHashAccess;
 pub use remote_feeds::RemoteFeedAccess;
-pub use server_settings::{load_remember_me_runtime_settings, load_server_settings};
+pub(crate) use server_settings::load_server_settings;
+pub use server_settings::{RememberMeRuntimeSettings, load_remember_me_runtime_settings};
 pub use syncpoints::SyncpointAccess;
 pub use transient_books::TransientBookAccess;
 
@@ -34,7 +35,12 @@ use syncpoints::{delete_syncpoints_by_user, delete_syncpoints_by_user_and_key_id
 mod tests {
     use super::*;
     use crate::sqlite::connect_test_pool;
+    use komga_application::operational::{
+        ClientGlobalSetting, ClientUserSetting, HistorySort, HistorySortDirection,
+        HistorySortProperty, HistorySortSelection,
+    };
     use sqlx::Row;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -135,22 +141,29 @@ mod tests {
         let all = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should load");
-        let all = all
-            .as_object()
-            .expect("global settings should be an object");
-        assert_eq!(all["public.setting"]["value"], "public-value");
-        assert_eq!(all["private.setting"]["value"], "private-value");
-        assert!(all.get("webui.oauth2.hide_login").is_none());
+        assert_eq!(
+            all.get("public.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("public-value")
+        );
+        assert_eq!(
+            all.get("private.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("private-value")
+        );
+        assert!(!all.contains_key("webui.oauth2.hide_login"));
 
         let unauthorized_only = load_client_settings_global(&pool, true)
             .await
             .expect("filtered global settings should load");
-        let unauthorized_only = unauthorized_only
-            .as_object()
-            .expect("filtered global settings should be an object");
-        assert_eq!(unauthorized_only["public.setting"]["value"], "public-value");
-        assert!(unauthorized_only.get("private.setting").is_none());
-        assert!(unauthorized_only.get("webui.oauth2.hide_login").is_none());
+        assert_eq!(
+            unauthorized_only
+                .get("public.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("public-value")
+        );
+        assert!(!unauthorized_only.contains_key("private.setting"));
+        assert!(!unauthorized_only.contains_key("webui.oauth2.hide_login"));
     }
 
     #[tokio::test]
@@ -159,25 +172,34 @@ mod tests {
 
         upsert_client_settings_global(
             &pool,
-            &[
+            &BTreeMap::from([
                 (
                     "public.setting".to_string(),
-                    "public-value".to_string(),
-                    true,
+                    ClientGlobalSetting {
+                        value: "public-value".to_string(),
+                        allow_unauthorized: true,
+                    },
                 ),
                 (
                     "private.setting".to_string(),
-                    "private-value".to_string(),
-                    false,
+                    ClientGlobalSetting {
+                        value: "private-value".to_string(),
+                        allow_unauthorized: false,
+                    },
                 ),
-            ],
+            ]),
         )
         .await
         .expect("global settings should persist");
         upsert_client_settings_user(
             &pool,
             "user-1",
-            &[("reader.page_size".to_string(), "42".to_string())],
+            &BTreeMap::from([(
+                "reader.page_size".to_string(),
+                ClientUserSetting {
+                    value: "42".to_string(),
+                },
+            )]),
         )
         .await
         .expect("user settings should persist");
@@ -185,17 +207,27 @@ mod tests {
         let global = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should reload");
-        let global = global
-            .as_object()
-            .expect("global settings should be an object");
-        assert_eq!(global["public.setting"]["value"], "public-value");
-        assert_eq!(global["private.setting"]["value"], "private-value");
+        assert_eq!(
+            global
+                .get("public.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("public-value")
+        );
+        assert_eq!(
+            global
+                .get("private.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("private-value")
+        );
 
         let user = load_client_settings_user(&pool, "user-1")
             .await
             .expect("user settings should reload");
-        let user = user.as_object().expect("user settings should be an object");
-        assert_eq!(user["reader.page_size"]["value"], "42");
+        assert_eq!(
+            user.get("reader.page_size")
+                .map(|setting| setting.value.as_str()),
+            Some("42")
+        );
 
         delete_client_settings_global(&pool, &["private.setting".to_string()])
             .await
@@ -207,24 +239,22 @@ mod tests {
         let global = load_client_settings_global(&pool, false)
             .await
             .expect("global settings should reload after delete");
-        let global = global
-            .as_object()
-            .expect("global settings should be an object");
-        assert!(global.get("private.setting").is_none());
-        assert_eq!(global["public.setting"]["value"], "public-value");
+        assert!(!global.contains_key("private.setting"));
+        assert_eq!(
+            global
+                .get("public.setting")
+                .map(|setting| setting.value.as_str()),
+            Some("public-value")
+        );
 
         let user = load_client_settings_user(&pool, "user-1")
             .await
             .expect("user settings should reload after delete");
-        assert!(
-            user.as_object()
-                .expect("user settings should be an object")
-                .is_empty()
-        );
+        assert!(user.is_empty());
     }
 
     #[tokio::test]
-    async fn load_history_page_returns_expected_shape_and_order() {
+    async fn load_history_page_returns_expected_entries_and_pagination_facts() {
         let pool = create_history_test_db("history-page").await;
 
         sqlx::query(
@@ -259,40 +289,29 @@ mod tests {
         .await
         .expect("event property should be inserted");
 
-        let page = load_history_page(&pool, 0, 20, &[])
+        let page = load_history_page(&pool, 0, 20, HistorySortSelection::default_timestamp_desc())
             .await
             .expect("history page should load");
-        let page = page.as_object().expect("history page should be an object");
 
-        assert_eq!(page["totalElements"], 2);
-        assert_eq!(page["totalPages"], 1);
-        assert_eq!(page["number"], 0);
-        assert_eq!(page["size"], 20);
-        assert_eq!(page["numberOfElements"], 2);
-        assert_eq!(page["first"], true);
-        assert_eq!(page["last"], true);
-        assert_eq!(page["empty"], false);
+        assert_eq!(page.total_elements, 2);
+        assert_eq!(page.total_pages, 1);
+        assert_eq!(page.page, 0);
+        assert_eq!(page.size, 20);
+        assert_eq!(page.number_of_elements(), 2);
+        assert_eq!(page.offset(), 0);
+        assert!(page.sorted);
 
-        let pageable = page["pageable"]
-            .as_object()
-            .expect("pageable should be an object");
-        assert_eq!(pageable["pageNumber"], 0);
-        assert_eq!(pageable["pageSize"], 20);
-        assert_eq!(pageable["offset"], 0);
-        assert_eq!(pageable["paged"], true);
-        assert_eq!(pageable["unpaged"], false);
-
-        let content = page["content"]
-            .as_array()
-            .expect("content should be an array");
-        assert_eq!(content.len(), 2);
-        assert_eq!(content[0]["id"], "event-2");
-        assert_eq!(content[0]["type"], "SERIES_ADDED");
-        assert_eq!(content[0]["seriesId"], "series-1");
-        assert_eq!(content[0]["properties"]["source"], "scanner");
-        assert_eq!(content[1]["id"], "event-1");
-        assert_eq!(content[1]["bookId"], "book-1");
-        assert_eq!(content[1]["properties"], serde_json::json!({}));
+        assert_eq!(page.content.len(), 2);
+        assert_eq!(page.content[0].id, "event-2");
+        assert_eq!(page.content[0].event_type, "SERIES_ADDED");
+        assert_eq!(page.content[0].series_id.as_deref(), Some("series-1"));
+        assert_eq!(
+            page.content[0].properties.get("source").map(String::as_str),
+            Some("scanner")
+        );
+        assert_eq!(page.content[1].id, "event-1");
+        assert_eq!(page.content[1].book_id.as_deref(), Some("book-1"));
+        assert!(page.content[1].properties.is_empty());
     }
 
     #[tokio::test]
@@ -322,53 +341,20 @@ mod tests {
         .await
         .expect("book event should be inserted");
 
-        let page = load_history_page(&pool, 0, 20, &["type,asc".to_string()])
-            .await
-            .expect("history page with type sort should load");
-        let content = page["content"]
-            .as_array()
-            .expect("history content should be an array");
-
-        assert_eq!(content[0]["id"], "event-book");
-        assert_eq!(content[1]["id"], "event-series");
-    }
-
-    #[tokio::test]
-    async fn load_history_page_marks_unknown_sort_as_unsorted() {
-        let pool = create_history_test_db("history-page-unknown-sort").await;
-
-        sqlx::query(
-            "INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP) VALUES (?, ?, ?, ?, ?)",
+        let page = load_history_page(
+            &pool,
+            0,
+            20,
+            HistorySortSelection::from_requested_sorts(vec![HistorySort {
+                property: HistorySortProperty::Type,
+                direction: HistorySortDirection::Asc,
+            }]),
         )
-        .bind("event-1")
-        .bind("BOOK_ADDED")
-        .bind(Some("book-1"))
-        .bind(None::<&str>)
-        .bind("2024-01-01T00:00:00Z")
-        .execute(&pool)
         .await
-        .expect("event should be inserted");
+        .expect("history page with type sort should load");
 
-        let page = load_history_page(&pool, 0, 20, &["unknown,asc".to_string()])
-            .await
-            .expect("history page with unknown sort should load");
-
-        assert_eq!(
-            page["sort"],
-            serde_json::json!({
-                "empty": true,
-                "sorted": false,
-                "unsorted": true,
-            })
-        );
-        assert_eq!(
-            page["pageable"]["sort"],
-            serde_json::json!({
-                "empty": true,
-                "sorted": false,
-                "unsorted": true,
-            })
-        );
+        assert_eq!(page.content[0].id, "event-book");
+        assert_eq!(page.content[1].id, "event-series");
     }
 
     #[tokio::test]

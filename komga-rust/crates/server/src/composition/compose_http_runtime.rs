@@ -1,50 +1,38 @@
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use komga_application::discovery::{
-    AuthorFacetPort, BookDetailPort, BookSpecialListPort, CollectionPort, CollectionSearchPort,
-    DiscoveryBrowseService, DiscoveryFacetService, LibraryIdMappingPort, ReadlistBookPort,
-    ReadlistPort, ReadlistSearchPort, SeriesDetailPort,
+    AuthorFacetPort, BookDetailPort, BookSpecialListPort, CollectionSeriesPort,
+    DiscoveryBrowseService, DiscoveryFacetService, LibraryIdMappingPort,
+    PersistedBookIdResolverPort, PersistedSeriesIdResolverPort, PersistedSetService,
+    PersistedSetVisibilityService, SeriesDetailPort, SeriesMetadataWritePort,
 };
-use komga_application::media_assets::{BookImportService, MetadataWriter, ReadProgressService};
+use komga_application::media_assets::{
+    ArchiveBuilderPort, BookImportService, MetadataWriter, ReadProgressService,
+};
 use komga_application::operational::{
     ActuatorRuntimeMetadata, ActuatorSnapshotPort, HttpServerRequestsState, OperationalMetricsPort,
     PageHashService, RemoteFeedService, ServerSettingsService, StartupTimingState,
     TransientBookService,
 };
+use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventSource};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_config::writer_ownership::WriterKind;
-use komga_infrastructure::content_resolver::ContentResolver;
-use komga_infrastructure::discovery_detail_access::DiscoveryDetailAccess;
-use komga_infrastructure::discovery_persisted_access::browse::SqliteDiscoveryBrowseService;
-use komga_infrastructure::discovery_persisted_access::query_support::DiscoveryQuerySupportAccess;
-use komga_infrastructure::event_emitter_adapter::SseBookEventEmitter;
-use komga_infrastructure::filesystem::import::FilesystemBookImport;
-use komga_infrastructure::library_catalog::LibraryCatalogAccess;
-use komga_infrastructure::media_reader::MediaReader;
-use komga_infrastructure::metadata::SqliteBookMetadataPort;
-use komga_infrastructure::opds_catalog_access::OpdsCatalogAccess;
-use komga_infrastructure::opds_persisted_access::OpdsPersistedAccess;
-use komga_infrastructure::operational_access::{
-    self, AnnouncementAccess, ClaimAccess, ClientSettingsAccess, FilesystemBrowseAccess,
-    FontAccess, HistoryAccess, PageHashAccess, RemoteFeedAccess, SyncpointAccess,
-    TransientBookAccess,
+use komga_infrastructure::ServerSettingsStore;
+use komga_infrastructure::{
+    ActuatorSnapshotAccess, AnnouncementAccess, ClaimAccess, ClientSettingsAccess, ContentResolver,
+    DiscoveryDetailAccess, DiscoveryQuerySupportAccess, FilesystemBookImport,
+    FilesystemBrowseAccess, FontAccess, HistoryAccess, IdentityAccess, LibraryCatalogAccess,
+    MediaReader, OpdsCatalogAccess, OpdsPersistedAccess, OperationalMetricsAccess, PageHashAccess,
+    ProgressWriter, RemoteFeedAccess, SearchSyncAdapter, SqliteBookMetadataPort,
+    SqliteDiscoveryBrowseService, SseBookEventEmitter, SyncpointAccess, TaskEnqueueAdapter,
+    ThumbnailWriter, TransientBookAccess, ZipArchiveBuilder, load_remember_me_runtime_settings,
 };
-use komga_infrastructure::operational_actuator_access::ActuatorSnapshotAccess;
-use komga_infrastructure::operational_metrics_access::OperationalMetricsAccess;
-use komga_infrastructure::progress_writer::ProgressWriter;
-use komga_infrastructure::runtime_identity_access::IdentityAccess;
-use komga_infrastructure::search_sync_adapter::SearchSyncAdapter;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
-use komga_infrastructure::task_enqueue_adapter::TaskEnqueueAdapter;
-use komga_infrastructure::thumbnail_writer::ThumbnailWriter;
-use komga_interfaces::discovery_auth::state::DiscoveryAuthState;
 use komga_interfaces::state::{
-    AuthDatabaseState, BookImportSseEvent, HttpAppState, HttpServices, IdentityState,
+    AuthDatabaseState, DiscoveryAuthState, HttpAppState, HttpServices, IdentityState,
     OAuth2ClientConfig, OperationalBuildMetadata, OperationalState, ReadProgressState,
-    RuntimeProfile, RuntimeState, SseOperationalState,
+    RuntimeProfile, RuntimeState, ShutdownTrigger, SseConnectionState,
 };
 use sha2::Digest;
 use tokio::sync::watch;
@@ -52,7 +40,7 @@ use tokio::sync::watch;
 use crate::build_metadata::current_build_metadata;
 use crate::runtime::HttpRuntimeParts;
 
-pub fn compose_http_runtime(
+pub(super) fn compose_http_runtime(
     config: &RuntimeConfig,
     runtime: HttpRuntimeParts,
     shutdown_trigger: Option<watch::Sender<bool>>,
@@ -62,8 +50,19 @@ pub fn compose_http_runtime(
         main_db: db,
         tasks_db,
         task_engine,
+        runtime_events,
     } = runtime;
-    let identity = IdentityState::new(Arc::new(IdentityAccess::new(db.clone())));
+    let runtime_event_source: Arc<dyn RuntimeSseEventSource> = runtime_events.clone();
+    let runtime_event_sink: Arc<dyn RuntimeSseEventSink> = runtime_events;
+    let content_resolver_access = Arc::new(ContentResolver);
+    let epub_navigation_content: Arc<
+        dyn komga_application::media_assets::EpubNavigationContentPort,
+    > = content_resolver_access.clone();
+    let identity = IdentityState::new(Arc::new(IdentityAccess::with_kobo_proxy_base_url(
+        db.clone(),
+        kobo_proxy_base_url(),
+        epub_navigation_content.clone(),
+    )));
     let operational_runtime_service: Arc<dyn OperationalMetricsPort> =
         Arc::new(OperationalMetricsAccess::new(db.clone(), tasks_db));
     let owns_search_index = config
@@ -73,32 +72,58 @@ pub fn compose_http_runtime(
         db.clone(),
         config.lucene_data_directory.clone(),
         owns_search_index,
+        runtime_event_sink.clone(),
     ));
     let book_detail: Arc<dyn BookDetailPort> = discovery_detail_access.clone();
-    let readlist_books: Arc<dyn ReadlistBookPort> = discovery_detail_access.clone();
     let series_detail: Arc<dyn SeriesDetailPort> = discovery_detail_access.clone();
-    let collection: Arc<dyn CollectionPort> = discovery_detail_access.clone();
-    let readlist: Arc<dyn ReadlistPort> = discovery_detail_access;
+    let series_metadata: Arc<dyn SeriesMetadataWritePort> = discovery_detail_access.clone();
+    let series_access: Arc<dyn CollectionSeriesPort> = discovery_detail_access.clone();
+    let book_id_resolver: Arc<dyn PersistedBookIdResolverPort> = discovery_detail_access.clone();
+    let series_id_resolver: Arc<dyn PersistedSeriesIdResolverPort> =
+        discovery_detail_access.clone();
+    let manifest_metadata: Arc<dyn komga_application::media_assets::ManifestMetadataPort> =
+        discovery_detail_access.clone();
+    let persisted_set_visibility: Arc<dyn PersistedSetVisibilityService> =
+        discovery_detail_access.clone();
+    let persisted_sets: Arc<dyn PersistedSetService> = discovery_detail_access;
     let discovery_query_support = Arc::new(DiscoveryQuerySupportAccess::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
     let author_facets: Arc<dyn AuthorFacetPort> = discovery_query_support.clone();
     let library_id_mapping: Arc<dyn LibraryIdMappingPort> = discovery_query_support.clone();
-    let book_special_lists: Arc<dyn BookSpecialListPort> = discovery_query_support.clone();
-    let collection_search: Arc<dyn CollectionSearchPort> = discovery_query_support.clone();
-    let readlist_search: Arc<dyn ReadlistSearchPort> = discovery_query_support;
+    let book_special_lists: Arc<dyn BookSpecialListPort> = discovery_query_support;
     let discovery_browse_service = Arc::new(SqliteDiscoveryBrowseService::new(
         db.clone(),
         config.lucene_data_directory.clone(),
     ));
     let discovery_browse: Arc<dyn DiscoveryBrowseService> = discovery_browse_service.clone();
     let discovery_facets: Arc<dyn DiscoveryFacetService> = discovery_browse_service;
-    let opds_catalog: Arc<dyn komga_application::opds::OpdsCatalogPort> =
-        Arc::new(OpdsCatalogAccess::new(db.clone()));
-    let opds_persisted: Arc<dyn komga_application::opds::OpdsPersistedPort> = Arc::new(
-        OpdsPersistedAccess::new(db.clone(), config.lucene_data_directory.clone()),
-    );
+    let opds_catalog_access = Arc::new(OpdsCatalogAccess::new(db.clone()));
+    let opds_feed_catalog: Arc<dyn komga_application::opds::OpdsFeedCatalogPort> =
+        opds_catalog_access.clone();
+    let opds_browse_catalog: Arc<dyn komga_application::opds::OpdsBrowseCatalogPort> =
+        opds_catalog_access;
+    let opds_persisted_access = Arc::new(OpdsPersistedAccess::new(
+        db.clone(),
+        config.lucene_data_directory.clone(),
+    ));
+    let opds_feed_persisted: Arc<dyn komga_application::opds::OpdsFeedPersistedPort> =
+        opds_persisted_access.clone();
+    let opds_library_persisted: Arc<dyn komga_application::opds::OpdsLibraryPersistedPort> =
+        opds_persisted_access.clone();
+    let opds_publisher_persisted: Arc<dyn komga_application::opds::OpdsPublisherPersistedPort> =
+        opds_persisted_access.clone();
+    let opds_collection_detail_persisted: Arc<
+        dyn komga_application::opds::OpdsCollectionDetailPersistedPort,
+    > = opds_persisted_access.clone();
+    let opds_readlist_detail_persisted: Arc<
+        dyn komga_application::opds::OpdsReadlistDetailPersistedPort,
+    > = opds_persisted_access.clone();
+    let opds_series_persisted: Arc<dyn komga_application::opds::OpdsSeriesPersistedPort> =
+        opds_persisted_access.clone();
+    let opds_search_persisted: Arc<dyn komga_application::opds::OpdsSearchPersistedPort> =
+        opds_persisted_access;
     let remember_me_runtime_key = runtime_identity_key(config.database_file.as_path());
     identity
         .session_lifecycle()
@@ -112,9 +137,7 @@ pub fn compose_http_runtime(
         config.session_max_inactive_seconds,
     );
 
-    let read_progress = ReadProgressState {
-        progress_by_token: Arc::new(Mutex::new(HashMap::new())),
-    };
+    let read_progress = ReadProgressState::new();
     let profile = runtime_profile(config);
     let discovery_auth = DiscoveryAuthState::default();
     let auth_db = AuthDatabaseState {
@@ -136,22 +159,57 @@ pub fn compose_http_runtime(
             owns_search_index,
         )),
         Box::new(TaskEnqueueAdapter::new(task_engine_arc.clone())),
-        Box::new(SseBookEventEmitter),
+        Box::new(SseBookEventEmitter::new(runtime_event_sink.clone())),
     ));
     let server_settings = Arc::new(ServerSettingsStore::new(config.database_file.clone()));
     let page_hashes = Arc::new(PageHashAccess::new(db.clone()));
     let announcement_access = Arc::new(AnnouncementAccess::new(db.clone()));
     let remote_feeds = Arc::new(RemoteFeedService::new(
-        Arc::new(RemoteFeedAccess),
+        Arc::new(RemoteFeedAccess::new(
+            announcements_feed_url(),
+            releases_feed_url(),
+        )),
         announcement_access,
     ));
     let media_reader = Arc::new(MediaReader::new(db.read_pool().clone()));
-    let media_reader_port: Arc<dyn komga_application::media_assets::MediaReaderPort> =
+    let book_media_reader: Arc<dyn komga_application::media_assets::BookMediaReaderPort> =
         media_reader.clone();
+    let manifest_reader: Arc<dyn komga_application::media_assets::ManifestReaderPort> =
+        media_reader.clone();
+    let archive_reader: Arc<dyn komga_application::media_assets::ArchiveReaderPort> =
+        media_reader.clone();
+    let archive_builder: Arc<dyn ArchiveBuilderPort> = Arc::new(ZipArchiveBuilder);
+    let thumbnail_reader: Arc<dyn komga_application::media_assets::ThumbnailReaderPort> =
+        media_reader.clone();
+    let epub_navigation_reader: Arc<dyn komga_application::media_assets::EpubNavigationReaderPort> =
+        media_reader.clone();
+    let book_progression_reader: Arc<
+        dyn komga_application::media_assets::BookProgressionSurfacePort,
+    > = media_reader.clone();
+    let read_progress_reader: Arc<dyn komga_application::media_assets::ReadProgressReaderPort> =
+        media_reader.clone();
+    let series_relation: Arc<dyn komga_application::media_assets::SeriesRelationPort> =
+        media_reader.clone();
+    let device_progress_reader: Arc<
+        dyn komga_application::identity_access::DeviceProgressReaderPort,
+    > = media_reader.clone();
     let read_progress_surface: Arc<dyn komga_application::media_assets::ReadProgressSurfacePort> =
         media_reader;
+    let progress_writer_access = Arc::new(ProgressWriter::new(
+        db.write_pool().clone(),
+        runtime_event_sink.clone(),
+    ));
     let progress_writer: Arc<dyn komga_application::media_assets::ProgressWriterPort> =
-        Arc::new(ProgressWriter::new(db.write_pool().clone()));
+        progress_writer_access.clone();
+    let series_read_progress_writer: Arc<
+        dyn komga_application::media_assets::SeriesReadProgressWriterPort,
+    > = progress_writer_access;
+    let manifest_content: Arc<dyn komga_application::media_assets::ManifestContentPort> =
+        content_resolver_access.clone();
+    let book_media_content: Arc<dyn komga_application::media_assets::BookMediaContentPort> =
+        content_resolver_access.clone();
+    let content_resolver: Arc<dyn komga_application::media_assets::ContentResolverPort> =
+        content_resolver_access;
     let http_server_requests = HttpServerRequestsState::default();
     let build_metadata = current_build_metadata();
     let actuator_snapshots: Arc<dyn ActuatorSnapshotPort> = Arc::new(ActuatorSnapshotAccess::new(
@@ -172,6 +230,7 @@ pub fn compose_http_runtime(
         library_catalog: Arc::new(LibraryCatalogAccess::new(
             db.read_pool().clone(),
             db.write_pool().clone(),
+            runtime_event_sink.clone(),
         )),
         task_queue: task_engine_arc.clone(),
         server_settings: server_settings.clone(),
@@ -179,6 +238,7 @@ pub fn compose_http_runtime(
             server_settings,
             task_engine_arc.clone(),
         )),
+        runtime_events: runtime_event_source,
         identity,
         operational_runtime: operational_runtime_service,
         actuator_snapshots,
@@ -193,33 +253,60 @@ pub fn compose_http_runtime(
         transient_books: Arc::new(TransientBookService::new(Arc::new(
             TransientBookAccess::new(db.clone()),
         ))),
-        opds_catalog,
-        opds_persisted,
+        opds_feed_catalog,
+        opds_browse_catalog,
+        opds_feed_persisted,
+        opds_library_persisted,
+        opds_publisher_persisted,
+        opds_collection_detail_persisted,
+        opds_readlist_detail_persisted,
+        opds_series_persisted,
+        opds_search_persisted,
         author_facets,
         library_id_mapping,
         book_special_lists,
-        collection_search,
-        readlist_search,
+        persisted_sets,
+        persisted_set_visibility,
         book_detail,
-        readlist_books,
         series_detail,
-        collection,
-        readlist,
+        series_metadata,
+        series_access,
         discovery_browse,
         discovery_facets,
-        media_reader: media_reader_port,
-        content_resolver: Arc::new(ContentResolver),
-        thumbnail_writer: Arc::new(ThumbnailWriter::new(db.write_pool().clone())),
+        book_id_resolver,
+        series_id_resolver,
+        book_media_reader,
+        manifest_reader,
+        manifest_content,
+        manifest_metadata,
+        archive_reader,
+        archive_builder,
+        thumbnail_reader,
+        epub_navigation_reader,
+        book_progression_reader,
+        read_progress_reader,
+        series_relation,
+        device_progress_reader,
+        epub_navigation_content,
+        book_media_content,
+        content_resolver,
+        thumbnail_writer: Arc::new(ThumbnailWriter::new(
+            db.write_pool().clone(),
+            runtime_event_sink.clone(),
+        )),
         progress_writer: progress_writer.clone(),
         read_progress_service: Arc::new(ReadProgressService::new(
             read_progress_surface,
-            progress_writer,
+            series_read_progress_writer,
         )),
         metadata_writer,
-        import_service: Arc::new(BookImportService::new(Arc::new(FilesystemBookImport::new(
-            db.read_pool().clone(),
-            db.write_pool().clone(),
-        )))),
+        import_service: Arc::new(BookImportService::new(
+            Arc::new(FilesystemBookImport::new(
+                db.read_pool().clone(),
+                db.write_pool().clone(),
+            )),
+            runtime_event_sink,
+        )),
     };
     let operational = compose_operational_state(
         config,
@@ -259,20 +346,52 @@ fn runtime_identity_key(database_file: &Path) -> String {
     format!("auth-runtime-{}", &encoded[..16])
 }
 
+fn kobo_proxy_base_url() -> String {
+    std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
+        .unwrap_or_else(|_| IdentityAccess::default_kobo_proxy_base_url().to_string())
+}
+
+fn announcements_feed_url() -> String {
+    std::env::var("KOMGA_RUST_ANNOUNCEMENTS_URL")
+        .unwrap_or_else(|_| RemoteFeedAccess::default_announcements_url().to_string())
+}
+
+fn releases_feed_url() -> String {
+    std::env::var("KOMGA_RUST_RELEASES_URL")
+        .unwrap_or_else(|_| RemoteFeedAccess::default_releases_url().to_string())
+}
+
+fn actuator_enabled() -> bool {
+    !std::env::var("KOMGA_RUST_DISABLE_ACTUATOR")
+        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
+        .unwrap_or(false)
+}
+
+fn spring_profile_enabled(expected: &str) -> bool {
+    std::env::var("SPRING_PROFILES_ACTIVE")
+        .ok()
+        .map(|profiles| {
+            profiles
+                .split(',')
+                .map(str::trim)
+                .any(|profile| profile.eq_ignore_ascii_case(expected))
+        })
+        .unwrap_or(false)
+}
+
 fn preload_remember_me_runtime_settings(
     config: &RuntimeConfig,
     remember_me_runtime_key: &str,
     identity: &IdentityState,
 ) {
-    let (remember_me_key, remember_me_duration_days) =
-        operational_access::load_remember_me_runtime_settings(config.database_file.as_path())
-            .expect("remember-me startup settings should load");
+    let remember_me_settings = load_remember_me_runtime_settings(config.database_file.as_path())
+        .expect("remember-me startup settings should load");
     identity
         .session_lifecycle()
         .sync_remember_me_runtime_settings(
             remember_me_runtime_key,
-            remember_me_key.as_str(),
-            remember_me_duration_days,
+            remember_me_settings.key.as_str(),
+            remember_me_settings.duration_days,
         );
 }
 
@@ -295,6 +414,8 @@ fn compose_operational_state(
             configuration_bind_address: config.configuration_bind_address,
             server_context_path: config.server_context_path.clone(),
             configuration_server_context_path: config.configuration_server_context_path.clone(),
+            actuator_enabled: actuator_enabled(),
+            dev_cors_enabled: spring_profile_enabled("dev"),
         },
         startup_timing,
         http_server_requests,
@@ -309,13 +430,8 @@ fn compose_operational_state(
         oauth2_clients: oauth2_clients(config),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        sse: Arc::new(Mutex::new(SseOperationalState {
-            accepting_connections: true,
-            book_import_events: Vec::<BookImportSseEvent>::new(),
-            session_expired_events: Vec::new(),
-            next_session_expired_event_id: 1,
-        })),
-        shutdown_trigger,
+        sse: SseConnectionState::accepting(),
+        shutdown_trigger: shutdown_trigger.map(ShutdownTrigger::new),
     }
 }
 

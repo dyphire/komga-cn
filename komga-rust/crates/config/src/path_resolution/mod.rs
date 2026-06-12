@@ -1,28 +1,15 @@
-use config::{Config as LayeredConfig, Environment, File as ConfigFile, FileFormat};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 
-use super::cli_args::*;
-use super::env_config::{
-    AdminActionConfig, DEFAULT_SESSION_MAX_INACTIVE_SECONDS, OAuth2ClientConfig, RuntimeConfig,
-};
+use super::cli_args::RuntimeCli;
+use super::env_config::{AdminActionConfig, RuntimeConfig};
 use super::error::ConfigError;
-use super::profile::{
-    DEFAULT_CONFIG_DIR, DEFAULT_LOG_FILE_NAME, PlatformProfile, RuntimeMode, RuntimeProfile,
-};
-use super::writer_ownership::WriterOwnershipPolicy;
 
 mod runtime_resolution;
 mod startup;
 
 pub(crate) use startup::{
-    build_layered_config, default_home_config_dir, default_log_file_for_config_dir,
-    ensure_runtime_directories, expand_path_placeholders, is_default_home_config_dir,
-    is_valid_startup_context_path, path_to_string, preferred_string, read_string,
-    resolve_bind_address_and_context_path, resolve_derived_runtime_paths,
-    resolve_oauth2_clients_for_startup_slice, resolve_writer_ownership_policy_for_startup_slice,
-    validate_temp_directory,
+    default_log_file_for_config_dir, ensure_runtime_directories, is_default_home_config_dir,
+    is_valid_startup_context_path, preferred_string, validate_temp_directory,
 };
 
 pub(crate) fn resolve_runtime_config_with_env(

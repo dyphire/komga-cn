@@ -1,6 +1,20 @@
-use super::*;
-use komga_application::identity_access::KoboReadingStateUpdate;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Extension, Path, State};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{
+    DeviceSyncPort, KoboReadingStateSnapshot, KoboReadingStateStatus, KoboReadingStateUpdate,
+    now_sync_marker, user_id,
+};
 use serde::Deserialize;
+use serde_json::{Map, Value, json};
+
+use super::{proxied_missing_kobo_book_response, resolved_kobo_request_api_key_metadata};
+use crate::access_log::RequestConnectionInfo;
+use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
+use crate::identity_access::device_auth::device_progress_service;
+use crate::state::IdentityAccessState;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -44,12 +58,22 @@ fn default_kobo_location_type() -> String {
     "KoboSpan".to_string()
 }
 
-pub async fn kobo_library_book_state(
+async fn persisted_book_exists(
+    device_sync: &dyn DeviceSyncPort,
+    book_id: &str,
+) -> Result<bool, Response> {
+    device_sync
+        .persisted_book_exists(book_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+pub(crate) async fn kobo_library_book_state(
     State(app): State<IdentityAccessState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
-    uri: axum::http::Uri,
+    uri: Uri,
 ) -> Response {
     let current_user = match required_kobo_user(
         &app.identity,
@@ -63,11 +87,17 @@ pub async fn kobo_library_book_state(
         Err(status) => return status.into_response(),
     };
 
-    if !persisted_book_exists(&app, &book_id).await.unwrap_or(false) {
+    let device_sync = app.identity.device_sync();
+    let book_exists = match persisted_book_exists(device_sync, &book_id).await {
+        Ok(exists) => exists,
+        Err(response) => return response,
+    };
+    if !book_exists {
         let proxy_path = format!("/v1/library/{book_id}/state");
-        if let Some(response) = proxied_missing_kobo_book_response(
-            &app,
-            &axum::http::Method::GET,
+        match proxied_missing_kobo_book_response(
+            app.server_settings.as_ref(),
+            app.identity.kobo_proxy(),
+            &Method::GET,
             proxy_path.as_str(),
             uri.query(),
             &headers,
@@ -75,35 +105,86 @@ pub async fn kobo_library_book_state(
         )
         .await
         {
-            return response;
+            Ok(Some(response)) => return response,
+            Ok(None) => {}
+            Err(status) => return status.into_response(),
         }
 
         return StatusCode::NOT_FOUND.into_response();
     }
 
     let user_id_value = user_id(&current_user);
-    let created_timestamp = load_book_created_timestamp(&app, &book_id)
-        .await
-        .unwrap_or(None)
-        .unwrap_or_else(now_sync_marker);
-
-    let payload = match device_progress_service(&app)
-        .kobo_reading_state(&book_id, user_id_value, created_timestamp.as_str())
-        .await
-    {
-        Ok(payload) => payload,
+    let created_timestamp = match device_sync.load_book_created_timestamp(&book_id).await {
+        Ok(Some(timestamp)) => timestamp,
+        Ok(None) => now_sync_marker(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(json!([payload])).into_response()
+    let progress_service = device_progress_service(
+        app.identity.device_sync(),
+        app.device_progress_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
+        app.progress.as_ref(),
+    );
+    let reading_state = match progress_service
+        .kobo_reading_state(&book_id, user_id_value, created_timestamp.as_str())
+        .await
+    {
+        Ok(reading_state) => reading_state,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(json!([kobo_reading_state_payload(reading_state)])).into_response()
 }
 
-pub async fn kobo_library_book_state_update(
+fn kobo_reading_state_payload(reading_state: KoboReadingStateSnapshot) -> Value {
+    let mut current_bookmark = Map::new();
+    current_bookmark.insert(
+        "LastModified".to_string(),
+        Value::String(reading_state.last_modified.clone()),
+    );
+    if let Some(progress_percent) = reading_state.total_progress_percent {
+        current_bookmark.insert("ProgressPercent".to_string(), json!(progress_percent));
+    }
+    if let Some(content_source_progress_percent) = reading_state.content_source_progress_percent {
+        current_bookmark.insert(
+            "ContentSourceProgressPercent".to_string(),
+            json!(content_source_progress_percent),
+        );
+    }
+    if let Some(location) = reading_state.location {
+        let mut location_payload = Map::new();
+        location_payload.insert("Source".to_string(), Value::String(location.source));
+        location_payload.insert("Type".to_string(), Value::String("KoboSpan".to_string()));
+        if let Some(kobo_span) = location.kobo_span {
+            location_payload.insert("Value".to_string(), Value::String(kobo_span));
+        }
+        current_bookmark.insert("Location".to_string(), Value::Object(location_payload));
+    }
+
+    json!({
+        "Created": reading_state.created,
+        "CurrentBookmark": Value::Object(current_bookmark),
+        "EntitlementId": reading_state.book_id,
+        "LastModified": reading_state.last_modified,
+        "PriorityTimestamp": reading_state.last_modified,
+        "Statistics": {
+            "LastModified": reading_state.last_modified,
+        },
+        "StatusInfo": {
+            "LastModified": reading_state.last_modified,
+            "Status": reading_state.status.as_str(),
+            "TimesStartedReading": reading_state.times_started_reading,
+        },
+    })
+}
+
+pub(crate) async fn kobo_library_book_state_update(
     State(app): State<IdentityAccessState>,
     Path((auth_token, book_id)): Path<(String, String)>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     headers: HeaderMap,
-    uri: axum::http::Uri,
+    uri: Uri,
     body: Bytes,
 ) -> Response {
     let current_user = match required_kobo_user(
@@ -129,11 +210,17 @@ pub async fn kobo_library_book_state_update(
         }
     };
 
-    if !persisted_book_exists(&app, &book_id).await.unwrap_or(false) {
+    let device_sync = app.identity.device_sync();
+    let book_exists = match persisted_book_exists(device_sync, &book_id).await {
+        Ok(exists) => exists,
+        Err(response) => return response,
+    };
+    if !book_exists {
         let proxy_path = format!("/v1/library/{book_id}/state");
-        if let Some(response) = proxied_missing_kobo_book_response(
-            &app,
-            &axum::http::Method::PUT,
+        match proxied_missing_kobo_book_response(
+            app.server_settings.as_ref(),
+            app.identity.kobo_proxy(),
+            &Method::PUT,
             proxy_path.as_str(),
             uri.query(),
             &headers,
@@ -141,7 +228,9 @@ pub async fn kobo_library_book_state_update(
         )
         .await
         {
-            return response;
+            Ok(Some(response)) => return response,
+            Ok(None) => {}
+            Err(status) => return status.into_response(),
         }
 
         return StatusCode::NOT_FOUND.into_response();
@@ -165,28 +254,44 @@ pub async fn kobo_library_book_state_update(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let user_id_value = user_id(&current_user);
-    let (device_id, device_name) = resolved_kobo_request_api_key_metadata(
+    let api_key_metadata = resolved_kobo_request_api_key_metadata(
         &app.identity,
         &current_user,
         auth_token.as_str(),
         &headers,
     )
-    .await
-    .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
-    let persist_result = device_progress_service(&app)
+    .await;
+    let api_key_metadata = match api_key_metadata {
+        Ok(metadata) => metadata,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let device_id = api_key_metadata
+        .as_ref()
+        .map(|metadata| metadata.id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let device_name = api_key_metadata
+        .as_ref()
+        .map(|metadata| metadata.comment.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let progress_service = device_progress_service(
+        app.identity.device_sync(),
+        app.device_progress_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
+        app.progress.as_ref(),
+    );
+    let persist_result = progress_service
         .update_kobo_reading_state(
             &book_id,
             user_id_value,
             KoboReadingStateUpdate {
                 last_modified: state.last_modified.clone(),
-                status: state.status_info.status.clone(),
+                status: kobo_reading_state_status(&state.status_info.status),
                 progress_percent: state.current_bookmark.progress_percent,
                 content_source_progress_percent: state
                     .current_bookmark
                     .content_source_progress_percent,
                 location_source: location.source.clone(),
-                location_type: location.location_type.clone(),
-                location_value: location.value.clone(),
+                kobo_span: kobo_span_location_value(location),
                 device_id,
                 device_name,
             },
@@ -211,4 +316,20 @@ pub async fn kobo_library_book_state_update(
         ],
     }))
     .into_response()
+}
+
+fn kobo_reading_state_status(value: &str) -> KoboReadingStateStatus {
+    if value.eq_ignore_ascii_case("Finished") {
+        KoboReadingStateStatus::Finished
+    } else {
+        KoboReadingStateStatus::Reading
+    }
+}
+
+fn kobo_span_location_value(location: &KoboReadingStateLocation) -> Option<String> {
+    if location.location_type.eq_ignore_ascii_case("KoboSpan") {
+        location.value.clone()
+    } else {
+        None
+    }
 }

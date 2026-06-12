@@ -74,19 +74,31 @@ pub(super) fn most_frequent_owned<T>(values: impl IntoIterator<Item = T>) -> Opt
 where
     T: Eq + Hash + Clone,
 {
-    let mut counts = HashMap::<T, (usize, usize)>::new();
+    let mut counts = HashMap::<T, FrequencyRank>::new();
 
     for (index, value) in values.into_iter().enumerate() {
-        let entry = counts.entry(value).or_insert((0, index));
-        entry.0 += 1;
+        counts
+            .entry(value)
+            .or_insert(FrequencyRank {
+                count: 0,
+                first_index: index,
+            })
+            .count += 1;
     }
 
     counts
         .into_iter()
-        .max_by(|(_, (count_a, index_a)), (_, (count_b, index_b))| {
-            count_a.cmp(count_b).then_with(|| index_b.cmp(index_a))
+        .max_by(|(_, left), (_, right)| {
+            left.count
+                .cmp(&right.count)
+                .then_with(|| right.first_index.cmp(&left.first_index))
         })
         .map(|(value, _)| value)
+}
+
+struct FrequencyRank {
+    count: usize,
+    first_index: usize,
 }
 
 pub(super) fn dedupe_strings_preserve_order(

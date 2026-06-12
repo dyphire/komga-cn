@@ -1,32 +1,32 @@
 use async_trait::async_trait;
 use komga_application::identity_access::{
-    AuthUser, KoboStoreSyncMergeResult, KoboStoreSyncPort, KoboSyncPage, KoboSyncPageRequest,
-    KoboSyncStatePort, random_uuid_like, user_id,
+    AuthUser, KoboProxyRequest, KoboProxyResponse, KoboSyncBookState, KoboSyncPage,
+    KoboSyncPageRequest, KoboSyncPointBook, KoboSyncStatePort, random_uuid_like, user_id,
 };
 use sqlx::{Row, SqlitePool};
 
-use super::device_auth::{
-    KoboMetadataRecord, PersistedReadProgressRecord, load_kobo_metadata_record, load_read_progress,
-};
-
+mod book_state;
 mod proxy;
 mod seeding;
 mod sync_point_diff;
 
+use book_state::load_sync_book_states;
 use seeding::{seed_sync_point_books, seed_sync_point_ondeck};
 use sync_point_diff::{load_incremental_sync_page, load_initial_sync_page};
+
+pub(crate) const DEFAULT_KOBO_PROXY_BASE_URL: &str = "https://storeapi.kobo.com";
 
 #[derive(Clone, Debug)]
 struct PersistedSyncPoint {
     id: String,
 }
 
-pub struct SqliteKoboSyncState<'a> {
+pub(crate) struct SqliteKoboSyncState<'a> {
     pool: &'a SqlitePool,
 }
 
 impl<'a> SqliteKoboSyncState<'a> {
-    pub fn new(pool: &'a SqlitePool) -> Self {
+    pub(crate) fn new(pool: &'a SqlitePool) -> Self {
         Self { pool }
     }
 }
@@ -48,21 +48,12 @@ impl KoboSyncStatePort for SqliteKoboSyncState<'_> {
         .map_err(|error| error.to_string())
     }
 
-    async fn load_kobo_metadata_record(
+    async fn load_sync_book_states(
         &self,
-        book_id: &str,
-    ) -> Result<Option<KoboMetadataRecord>, String> {
-        load_kobo_metadata_record(self.pool, book_id)
-            .await
-            .map_err(|error| error.to_string())
-    }
-
-    async fn load_read_progress(
-        &self,
-        book_id: &str,
+        books: &[KoboSyncPointBook],
         user_id: &str,
-    ) -> Result<Option<PersistedReadProgressRecord>, String> {
-        load_read_progress(self.pool, book_id, user_id)
+    ) -> Result<Vec<KoboSyncBookState>, String> {
+        load_sync_book_states(self.pool, books, user_id)
             .await
             .map_err(|error| error.to_string())
     }
@@ -74,20 +65,11 @@ impl KoboSyncStatePort for SqliteKoboSyncState<'_> {
     }
 }
 
-pub struct HttpKoboStoreSync;
-
-#[async_trait]
-impl KoboStoreSyncPort for HttpKoboStoreSync {
-    async fn sync_store_library(
-        &self,
-        forwarded_headers: &[(String, String)],
-        query: Option<&str>,
-        raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, String> {
-        proxy::proxy_kobo_store_library_sync(forwarded_headers, query, raw_sync_token)
-            .await
-            .map_err(|_| "kobo store sync proxy failed".to_string())
-    }
+pub(crate) async fn proxy_kobo_request(
+    base_url: &str,
+    request: KoboProxyRequest,
+) -> Result<KoboProxyResponse, String> {
+    proxy::execute_kobo_proxy_request(base_url, request).await
 }
 
 async fn load_kobo_sync_page(
@@ -207,10 +189,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use komga_application::identity_access::{
-        AuthUser, KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest, KoboLibrarySyncService,
-        KoboSyncPageRequest, parse_komga_sync_token_payload,
-    };
+    use komga_application::identity_access::{AuthUser, AuthUserRole, KoboSyncPageRequest};
 
     use super::*;
     use crate::sqlite::{connect_test_pool, setup};
@@ -228,7 +207,7 @@ mod tests {
             id: "kobo-user".to_string(),
             email: "kobo-user@example.org".to_string(),
             password: "secret".to_string(),
-            roles: vec!["USER".to_string(), "KOBO_SYNC".to_string()],
+            roles: vec![AuthUserRole::KoboSync],
             shared_all_libraries: true,
             shared_library_ids: Vec::new(),
             labels_allow: Vec::new(),
@@ -238,7 +217,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sqlite_kobo_sync_state_persists_empty_page_for_pipeline() {
+    async fn sqlite_kobo_sync_state_persists_empty_sync_page() {
         let db_path = temp_db_path("empty-page");
         let pool = connect_test_pool(db_path.as_path(), 1)
             .await
@@ -255,27 +234,21 @@ mod tests {
             .expect("sync user should be inserted");
 
         let state = SqliteKoboSyncState::new(&pool);
-        let response = KoboLibrarySyncService::new(&state, &HttpKoboStoreSync)
-            .sync_library(KoboLibrarySyncRequest {
+        let page = state
+            .load_sync_page(KoboSyncPageRequest {
                 user: sync_user(),
                 current_api_key_id: Some("api-key-1".to_string()),
-                sync_token: None,
-                store_sync_enabled: false,
-                forwarded_headers: Vec::new(),
-                query: None,
-                base_url: "http://localhost:8080".to_string(),
-                auth_token: "kobo-token".to_string(),
-                limit: KOBO_SYNC_ITEM_LIMIT,
+                ongoing_sync_point_id: None,
+                last_successful_sync_point_id: None,
+                limit: 200,
             })
             .await
             .expect("empty sync page should complete");
 
-        assert!(response.events.is_empty());
-        assert!(!response.should_continue);
-        let token = parse_komga_sync_token_payload(response.sync_token_payload.as_str())
-            .expect("pipeline response should include a valid Komga sync token payload");
-        assert!(token.ongoing_sync_point_id.is_none());
-        assert!(token.last_successful_sync_point_id.is_some());
+        assert!(page.books_added.is_empty());
+        assert!(page.readlists_added.is_empty());
+        assert!(page.from_sync_point_id.is_none());
+        assert!(!page.should_continue);
 
         let sync_point = sqlx::query("SELECT USER_ID, API_KEY_ID FROM SYNC_POINT LIMIT 1")
             .fetch_one(&pool)

@@ -1,14 +1,10 @@
-use super::*;
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
-pub(super) fn parse_csv_values(raw: &str) -> Vec<String> {
-    if raw.trim().is_empty() {
-        return vec![];
-    }
-    raw.split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
+pub(super) use crate::parsing::clamp_kotlin_int_u32;
+use crate::parsing::parse_sqlite_group_concat_values;
+
+pub(super) fn parse_group_concat_values(raw: &str) -> Vec<String> {
+    parse_sqlite_group_concat_values(raw)
 }
 
 pub(super) struct ScopedStringQuery<'a> {

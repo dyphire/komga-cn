@@ -1,41 +1,36 @@
-use super::principal::{AgeRestrictionKind, ContentRestrictions, DiscoveryPrincipal};
+use komga_domain::discovery::QueryRestrictions;
+
+use super::principal::DiscoveryPrincipal;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueryRestrictions {
-    pub age: Option<u16>,
-    pub age_restriction: Option<AgeRestrictionKind>,
-    pub labels_allow: Vec<String>,
-    pub labels_exclude: Vec<String>,
+pub(crate) struct DiscoveryQueryContext {
+    pub(crate) user_id: Option<String>,
+    pub(crate) is_admin: bool,
+    pub(crate) authorized_library_ids: Option<Vec<String>>,
+    pub(crate) restrictions: Option<QueryRestrictions>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiscoveryQueryContext {
-    pub user_id: Option<String>,
-    pub is_admin: bool,
-    pub authorized_library_ids: Option<Vec<String>>,
-    pub restrictions: Option<QueryRestrictions>,
+pub(crate) struct DetailContentContext {
+    pub(crate) age_rating: Option<u32>,
+    pub(crate) sharing_labels: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DetailContentContext {
-    pub age_rating: Option<u32>,
-    pub sharing_labels: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DetailResourceContext {
-    pub library_id: Option<String>,
-    pub content: Option<DetailContentContext>,
+pub(crate) struct DetailResourceContext {
+    pub(crate) library_id: Option<String>,
+    pub(crate) content: Option<DetailContentContext>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DetailAccessDenial {
+pub(crate) enum DetailAccessDenial {
     Unauthorized,
     Forbidden,
     NotFound,
+    StorageFailure,
 }
 
-pub fn to_query_context(
+pub(crate) fn to_query_context(
     principal: &DiscoveryPrincipal,
     requested_library_ids: Option<&[String]>,
 ) -> DiscoveryQueryContext {
@@ -47,16 +42,11 @@ pub fn to_query_context(
     }
 }
 
-fn restrictions_for_query(restrictions: &ContentRestrictions) -> Option<QueryRestrictions> {
+fn restrictions_for_query(restrictions: &QueryRestrictions) -> Option<QueryRestrictions> {
     let has_restrictions = restrictions.age.is_some()
         || restrictions.age_restriction.is_some()
         || !restrictions.labels_allow.is_empty()
         || !restrictions.labels_exclude.is_empty();
 
-    has_restrictions.then(|| QueryRestrictions {
-        age: restrictions.age,
-        age_restriction: restrictions.age_restriction,
-        labels_allow: restrictions.labels_allow.clone(),
-        labels_exclude: restrictions.labels_exclude.clone(),
-    })
+    has_restrictions.then(|| restrictions.clone())
 }

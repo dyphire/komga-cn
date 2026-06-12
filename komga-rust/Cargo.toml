@@ -54,6 +54,7 @@ async-trait = "0.1.89"
 image = "0.25.8"
 mime_guess = "2.0.5"
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }
+getrandom = "0.3.4"
 language-tags = "0.3.2"
 rusqlite = "0.39.0"
 pdfium-render = { version = "0.9.1", features = ["thread_safe"] }
@@ -64,6 +65,7 @@ libc = "0.2.186"
 mimalloc = "0.1.50"
 windows-sys = "0.61.2"
 chrono = "0.4.42"
+url = "2.5.8"
 
 [package]
 name = "komga-rust"

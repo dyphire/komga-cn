@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::helpers::query_values;
 use komga_domain::discovery::DiscoveryError;
 
-pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
+pub(in crate::discovery) fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     let values = query_values(query, key)
         .into_iter()
         .filter(|value| !value.is_empty())
@@ -16,7 +16,7 @@ pub fn requested_query_values(query: &str, key: &str) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
-pub fn decode_query_component(value: &str) -> String {
+pub(in crate::discovery) fn decode_query_component(value: &str) -> String {
     let mut decoded = Vec::with_capacity(value.len());
     let bytes = value.as_bytes();
     let mut index = 0usize;
@@ -49,7 +49,7 @@ pub fn decode_query_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-pub fn internal_error_response(error: String) -> Response {
+pub(in crate::discovery) fn internal_error_response(error: String) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": error })),
@@ -57,7 +57,7 @@ pub fn internal_error_response(error: String) -> Response {
         .into_response()
 }
 
-pub fn discovery_error_response(error: DiscoveryError) -> Response {
+pub(in crate::discovery) fn discovery_error_response(error: DiscoveryError) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": format!("{error:?}") })),
@@ -65,22 +65,28 @@ pub fn discovery_error_response(error: DiscoveryError) -> Response {
         .into_response()
 }
 
-pub fn filter_rows<T>(rows: Vec<T>, mut predicate: impl FnMut(&T) -> bool) -> Vec<T> {
+pub(in crate::discovery) fn filter_rows<T>(
+    rows: Vec<T>,
+    mut predicate: impl FnMut(&T) -> bool,
+) -> Vec<T> {
     rows.into_iter().filter(|row| predicate(row)).collect()
 }
 
 #[derive(Clone, Copy)]
-pub struct PagePayloadMetadata {
-    pub page: usize,
-    pub size: usize,
-    pub total_elements: usize,
-    pub total_pages: usize,
-    pub paged: bool,
-    pub sorted: bool,
-    pub offset: usize,
+pub(in crate::discovery::persisted) struct PagePayloadMetadata {
+    pub(in crate::discovery::persisted) page: usize,
+    pub(in crate::discovery::persisted) size: usize,
+    pub(in crate::discovery::persisted) total_elements: usize,
+    pub(in crate::discovery::persisted) total_pages: usize,
+    pub(in crate::discovery::persisted) paged: bool,
+    pub(in crate::discovery::persisted) sorted: bool,
+    pub(in crate::discovery::persisted) offset: usize,
 }
 
-pub fn page_payload(content: Vec<Value>, metadata: PagePayloadMetadata) -> Value {
+pub(in crate::discovery::persisted) fn page_payload(
+    content: Vec<Value>,
+    metadata: PagePayloadMetadata,
+) -> Value {
     let number_of_elements = content.len();
     let first = metadata.page == 0;
     let last = metadata.total_pages == 0 || metadata.page + 1 >= metadata.total_pages;

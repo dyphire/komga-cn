@@ -1,15 +1,15 @@
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use komga_application::opds::{
+    OpdsFeedUserContext, OpdsLibraryScopeError, OpdsPersistedService, OpdsV2FeedCompositionService,
+    OpdsV2FeedContent, OpdsV2FeedKind, OpdsV2FeedPage, OpdsV2FeedPageError,
+};
 use serde_json::json;
 
-use crate::identity_access::auth::AuthUser;
 use crate::request_urls::app_absolute_url;
-use crate::state::{
-    OpdsFeedUserContext, OpdsLibraryScopeError, OpdsPersistedService, OpdsState,
-    OpdsV2FeedCompositionService, OpdsV2FeedContent, OpdsV2FeedKind, OpdsV2FeedPage,
-    OpdsV2FeedPageError,
-};
+use crate::state::OpdsState;
+use komga_application::identity_access::AuthUser;
 
 use super::feeds::{
     OpdsV2PagedFeed, normalize_opds_updated, opds_navigation_response_with_paging,
@@ -92,13 +92,21 @@ async fn opds_v2_feed(
     user: &AuthUser,
     kind: OpdsV2FeedKind,
 ) -> Response {
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let service =
-        OpdsV2FeedCompositionService::new(app.opds_catalog.as_ref(), app.opds_persisted.as_ref());
+    let service = OpdsV2FeedCompositionService::new(
+        app.opds_feed_catalog.as_ref(),
+        app.opds_feed_persisted.as_ref(),
+    );
 
     match service
-        .feed_page(&feed_user, kind, library_id, page, size)
+        .feed_page(
+            &feed_user,
+            kind,
+            library_id,
+            page_request.page,
+            page_request.size,
+        )
         .await
     {
         Ok(page) => render_opds_v2_feed_page(&headers, page),
@@ -109,7 +117,8 @@ async fn opds_v2_feed(
 fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> Response {
     let OpdsV2FeedPage {
         title,
-        self_path,
+        kind,
+        library_id,
         modified,
         page,
         size,
@@ -117,6 +126,7 @@ fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> R
         content,
     } = feed_page;
     let modified = modified.as_deref().filter(|value| !value.is_empty());
+    let self_path = opds_v2_feed_path(kind, library_id.as_deref());
 
     match content {
         OpdsV2FeedContent::Publications(books) => {
@@ -164,6 +174,40 @@ fn render_opds_v2_feed_page(headers: &HeaderMap, feed_page: OpdsV2FeedPage) -> R
     }
 }
 
+pub(super) fn opds_v2_recommended_path(library_id: Option<&str>) -> String {
+    let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
+    format!("/opds/v2/libraries{library_segment}")
+}
+
+pub(super) fn opds_v2_feed_path(kind: OpdsV2FeedKind, library_id: Option<&str>) -> String {
+    format!(
+        "{}/{}",
+        opds_v2_recommended_path(library_id),
+        opds_v2_feed_path_suffix(kind)
+    )
+}
+
+pub(super) fn opds_v2_browse_path(library_id: Option<&str>) -> String {
+    format!("{}/browse", opds_v2_recommended_path(library_id))
+}
+
+pub(super) fn opds_v2_collections_path(library_id: Option<&str>) -> String {
+    format!("{}/collections", opds_v2_recommended_path(library_id))
+}
+
+pub(super) fn opds_v2_readlists_path(library_id: Option<&str>) -> String {
+    format!("{}/readlists", opds_v2_recommended_path(library_id))
+}
+
+fn opds_v2_feed_path_suffix(kind: OpdsV2FeedKind) -> &'static str {
+    match kind {
+        OpdsV2FeedKind::KeepReading => "keep-reading",
+        OpdsV2FeedKind::OnDeck => "on-deck",
+        OpdsV2FeedKind::LatestBooks => "books/latest",
+        OpdsV2FeedKind::LatestSeries => "series/latest",
+    }
+}
+
 fn opds_v2_feed_error_response(kind: OpdsV2FeedKind, error: OpdsV2FeedPageError) -> Response {
     match error {
         OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::NotFound) => {
@@ -183,6 +227,14 @@ fn opds_v2_feed_error_response(kind: OpdsV2FeedKind, error: OpdsV2FeedPageError)
         )
             .into_response(),
     }
+}
+
+fn opds_v2_load_error(context: &str, error: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({ "error": format!("load OPDS {context}: {error}") })),
+    )
+        .into_response()
 }
 
 trait OpdsV2FeedKindErrorLabel {
@@ -209,7 +261,7 @@ pub(super) async fn opds_v2_collections_feed(
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
+        app.opds_library_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -218,7 +270,7 @@ pub(super) async fn opds_v2_collections_feed(
         return response;
     }
 
-    let libraries = match load_libraries(app.opds_persisted.as_ref()).await {
+    let libraries = match load_libraries(app.opds_library_persisted.as_ref()).await {
         Ok(libraries) => libraries,
         Err(error) => {
             return (
@@ -230,9 +282,9 @@ pub(super) async fn opds_v2_collections_feed(
     };
     let selected_library =
         library_id.and_then(|id| libraries.iter().find(|library| library.id == id));
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let persisted_service = OpdsPersistedService::new(app.opds_feed_persisted.as_ref());
 
     let collections = match persisted_service
         .all_collections(&feed_user, library_id, false)
@@ -249,8 +301,9 @@ pub(super) async fn opds_v2_collections_feed(
     };
 
     let total_visible_collections = collections.len();
-    let (paged_collections, has_next) = paginate_vec(collections, page, size);
-    let collection_navigation = paged_collections
+    let collections_page = paginate_vec(collections, page_request);
+    let collection_navigation = collections_page
+        .items
         .into_iter()
         .map(|collection| {
             json!({
@@ -263,12 +316,20 @@ pub(super) async fn opds_v2_collections_feed(
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
     let self_path = format!("/opds/v2/libraries{library_segment}/collections");
-    let has_visible_collections = persisted_service
+    let has_visible_collections = match persisted_service
         .has_visible_collections_for_scope(&feed_user, library_id)
-        .await;
-    let has_visible_readlists = persisted_service
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return opds_v2_load_error("collections navigation", error),
+    };
+    let has_visible_readlists = match persisted_service
         .has_visible_readlists_for_scope(&feed_user, library_id)
-        .await;
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return opds_v2_load_error("readlists navigation", error),
+    };
 
     let mut navigation = vec![
         json!({
@@ -326,16 +387,16 @@ pub(super) async fn opds_v2_collections_feed(
             "templated": true,
         }),
     ];
-    if page > 0 {
+    if page_request.page > 0 {
         links.push(json!({
             "rel": "previous",
-            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page.saturating_sub(1)).as_str()),
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page_request.page.saturating_sub(1)).as_str()),
         }));
     }
-    if has_next {
+    if collections_page.has_next {
         links.push(json!({
             "rel": "next",
-            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page + 1).as_str()),
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page_request.page + 1).as_str()),
         }));
     }
 
@@ -352,8 +413,8 @@ pub(super) async fn opds_v2_collections_feed(
                     .map(|library| format!("{} - Collections", library.name))
                     .unwrap_or_else(|| "All libraries - Collections".to_string()),
                 "modified": modified,
-                "itemsPerPage": size,
-                "currentPage": page + 1,
+                "itemsPerPage": page_request.size,
+                "currentPage": page_request.page + 1,
                 "numberOfItems": total_visible_collections,
             },
             "links": links,
@@ -380,7 +441,7 @@ pub(super) async fn opds_v2_readlists_feed(
 ) -> Response {
     let allowed_library_ids = allowed_library_ids_for_user(user);
     if let Some(response) = validate_library_scope(
-        app.opds_persisted.as_ref(),
+        app.opds_library_persisted.as_ref(),
         &allowed_library_ids,
         library_id,
     )
@@ -390,7 +451,7 @@ pub(super) async fn opds_v2_readlists_feed(
     }
 
     let selected_library = if let Some(id) = library_id {
-        match load_library(app.opds_persisted.as_ref(), id).await {
+        match load_library(app.opds_library_persisted.as_ref(), id).await {
             Ok(library) => library,
             Err(error) => {
                 return (
@@ -404,9 +465,9 @@ pub(super) async fn opds_v2_readlists_feed(
         None
     };
 
-    let (page, size) = parse_page_size(uri.query().unwrap_or_default());
+    let page_request = parse_page_size(uri.query().unwrap_or_default());
     let feed_user = OpdsFeedUserContext::from_auth_user(user);
-    let persisted_service = OpdsPersistedService::new(app.opds_persisted.as_ref());
+    let persisted_service = OpdsPersistedService::new(app.opds_feed_persisted.as_ref());
     let readlists = match persisted_service
         .all_readlists(&feed_user, library_id)
         .await
@@ -422,10 +483,10 @@ pub(super) async fn opds_v2_readlists_feed(
     };
 
     let total_readlists = readlists.len();
-    let readlist_navigation = readlists
+    let readlists_page = paginate_vec(readlists, page_request);
+    let readlist_navigation = readlists_page
+        .items
         .into_iter()
-        .skip(page.saturating_mul(size))
-        .take(size)
         .map(|readlist| {
             json!({
                 "title": readlist.name,
@@ -436,12 +497,20 @@ pub(super) async fn opds_v2_readlists_feed(
         .collect::<Vec<_>>();
 
     let library_segment = library_id.map(|id| format!("/{id}")).unwrap_or_default();
-    let has_visible_collections = persisted_service
+    let has_visible_collections = match persisted_service
         .has_visible_collections_for_scope(&feed_user, library_id)
-        .await;
-    let has_visible_readlists = persisted_service
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return opds_v2_load_error("collections navigation", error),
+    };
+    let has_visible_readlists = match persisted_service
         .has_visible_readlists_for_scope(&feed_user, library_id)
-        .await;
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return opds_v2_load_error("readlists navigation", error),
+    };
     let mut navigation = vec![
         opds_subsection_navigation_link(
             &headers,
@@ -495,16 +564,16 @@ pub(super) async fn opds_v2_readlists_feed(
             "templated": true,
         }),
     ];
-    if page > 0 {
+    if page_request.page > 0 {
         links.push(json!({
             "rel": "previous",
-            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page.saturating_sub(1)).as_str()),
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page_request.page.saturating_sub(1)).as_str()),
         }));
     }
-    if page.saturating_add(1).saturating_mul(size) < total_readlists {
+    if readlists_page.has_next {
         links.push(json!({
             "rel": "next",
-            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page + 1).as_str()),
+            "href": app_absolute_url(&headers, format!("{self_path}?page={}", page_request.page + 1).as_str()),
         }));
     }
 
@@ -528,8 +597,8 @@ pub(super) async fn opds_v2_readlists_feed(
                     .map(|library| format!("{} - Read Lists", library.name))
                     .unwrap_or_else(|| "All libraries - Read Lists".to_string()),
                 "modified": modified,
-                "itemsPerPage": size,
-                "currentPage": page + 1,
+                "itemsPerPage": page_request.size,
+                "currentPage": page_request.page + 1,
                 "numberOfItems": total_readlists,
             },
             "links": links,

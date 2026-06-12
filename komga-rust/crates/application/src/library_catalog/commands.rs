@@ -1,13 +1,12 @@
-use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::task_records::{
     analyze_library_task_records, background_scan_library_task_record, empty_trash_task_records,
     library_should_rescan, manual_scan_library_task_record, metadata_refresh_task_records,
 };
 use super::{
-    LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryChangeSet, LibraryRecord,
+    LibraryBookSeriesRecord, LibraryCatalogMutationError, LibraryCatalogMutationPort,
+    LibraryChangeSet, LibraryRecord,
 };
+use crate::random_tokens::random_hex_token;
 use crate::task_processing::{
     BookSeriesRef, LibraryTaskCommand, TaskQueueRecord, emit_library_task_batch,
 };
@@ -121,7 +120,7 @@ where
             .await
             .map_err(LibraryCatalogMutationError::persistence)?
             .unwrap_or_default()
-            .1;
+            .books;
         Ok(task_result(analyze_library_task_records(books)))
     }
 
@@ -129,14 +128,15 @@ where
         &self,
         library_id: &str,
     ) -> Result<LibraryTaskResult, LibraryCatalogMutationError> {
-        let (series_ids, books) = self
+        let ids = self
             .port
             .library_series_and_book_ids(library_id)
             .await
             .map_err(LibraryCatalogMutationError::persistence)?
             .unwrap_or_default();
         Ok(task_result(metadata_refresh_task_records(
-            series_ids, books,
+            ids.series_ids,
+            ids.books,
         )))
     }
 
@@ -226,23 +226,6 @@ fn generated_library_id() -> String {
     format!("library-{}", random_hex_token(12))
 }
 
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(17);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn hash_book_task_records(book_ids: Vec<String>, priority: i32) -> Vec<TaskQueueRecord> {
     emit_library_task_batch(LibraryTaskCommand::HashBooks { book_ids, priority })
         .into_queue_records()
@@ -261,11 +244,14 @@ fn find_books_with_missing_page_hash_task_records(library_id: &str) -> Vec<TaskQ
 }
 
 fn repair_extension_task_records(
-    books: Vec<(String, String)>,
+    books: Vec<LibraryBookSeriesRecord>,
     priority: i32,
 ) -> Vec<TaskQueueRecord> {
     emit_library_task_batch(LibraryTaskCommand::RepairExtensions {
-        books: books.into_iter().map(BookSeriesRef::from).collect(),
+        books: books
+            .into_iter()
+            .map(|book| BookSeriesRef::new(book.book_id, book.series_id))
+            .collect(),
         priority,
     })
     .into_queue_records()

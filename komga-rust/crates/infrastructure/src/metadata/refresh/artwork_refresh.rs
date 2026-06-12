@@ -2,6 +2,9 @@ use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
 };
+use komga_application::runtime_sse::RuntimeSseEventSink;
+use komga_application::task_processing::ThumbnailRegenerationPolicy;
+use komga_domain::media_assets::ThumbnailType;
 use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_cover_bytes;
@@ -9,16 +12,21 @@ use crate::filesystem::media_access::page_content::{
     load_archive_page_row, resolve_book_page_bytes,
 };
 use crate::metadata::thumbnails::{emit_thumbnail_book_event, emit_thumbnail_series_event};
+use crate::parsing::parse_thumbnail_type;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
     MarkSelectedPreference, book_thumbnail_housekeeping, import_book_local_artwork_thumbnail,
     import_series_local_artwork_thumbnail, load_book_local_artwork_urls,
     load_series_local_artwork_urls, render_generated_thumbnail_from_image_bytes,
-    render_pdf_thumbnail, thumbnail_max_edge_from_setting,
+    render_pdf_thumbnail,
 };
 
-pub async fn refresh_book_local_artwork(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
+pub(crate) async fn refresh_book_local_artwork(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+) -> Result<(), String> {
     let book_id = book_id.to_string();
 
     let result: Result<(), String> = 'result: {
@@ -90,7 +98,7 @@ pub async fn refresh_book_local_artwork(pool: &SqlitePool, book_id: &str) -> Res
                     selected,
                 )
                 .await?;
-                emit_thumbnail_book_event(&book_id, &series_id, selected, true);
+                emit_thumbnail_book_event(runtime_events, &book_id, &series_id, selected, true);
             }
         }
 
@@ -129,7 +137,12 @@ pub async fn refresh_book_local_artwork(pool: &SqlitePool, book_id: &str) -> Res
     result
 }
 
-pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result<(), String> {
+pub async fn generate_book_thumbnail(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    policy: ThumbnailRegenerationPolicy,
+) -> Result<(), String> {
     let book_id = book_id.to_string();
     let result: Result<(), String> = 'result: {
         let media_row = sqlx::query(
@@ -174,85 +187,56 @@ pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result
             page_count: media_row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
         };
 
-        let thumbnail_size_setting = sqlx::query(
-            r#"
-            SELECT VALUE
-            FROM SERVER_SETTINGS
-            WHERE KEY = 'THUMBNAIL_SIZE'
-            LIMIT 1
-            "#,
-        )
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| format!("failed to load thumbnail size setting: {error}"))?
-        .and_then(|row| row.get::<Option<String>, _>("VALUE"));
-        let configured_max_edge =
-            thumbnail_max_edge_from_setting(thumbnail_size_setting.as_deref());
+        let configured_max_edge = policy.generated_thumbnail_max_edge;
 
         let epub_cover = if book_media_is_epub(&media) {
-            load_epub_cover_bytes(&media).await
+            load_epub_cover_bytes(&media).await?
         } else {
             None
         };
 
-        let persisted_page_row = sqlx::query(
-            r#"
-            SELECT NUMBER,
-                   FILE_NAME,
-                   MEDIA_TYPE,
-                   WIDTH,
-                   HEIGHT,
-                   COALESCE(FILE_SIZE, 0) AS FILE_SIZE
-            FROM MEDIA_PAGE
-            WHERE BOOK_ID = ? AND NUMBER = 1
-            LIMIT 1
-            "#,
-        )
-        .bind(&book_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            format!("failed to resolve page row for thumbnail generation '{book_id}': {error}")
-        })?;
-
-        let (thumbnail_bytes, thumbnail_media_type, width, height) = if book_media_is_pdf(&media) {
+        let thumbnail = if book_media_is_pdf(&media) {
             let Some(rendered) = render_pdf_thumbnail(&media, configured_max_edge)? else {
                 break 'result Ok(());
             };
             rendered
-        } else if let Some((bytes, _media_type)) = epub_cover {
-            render_generated_thumbnail_from_image_bytes(&book_id, &bytes, configured_max_edge)?
+        } else if let Some(cover) = epub_cover {
+            render_generated_thumbnail_from_image_bytes(
+                &book_id,
+                &cover.bytes,
+                configured_max_edge,
+            )?
         } else {
-            let page_row = if let Some(row) = persisted_page_row {
-                Some(BookPageRecord {
-                    number: row.get::<i64, _>("NUMBER") as u64,
-                    file_name: row.get::<String, _>("FILE_NAME"),
-                    media_type: row.get::<String, _>("MEDIA_TYPE"),
-                    width: row.get::<Option<i64>, _>("width"),
-                    height: row.get::<Option<i64>, _>("height"),
-                    file_size: row.get::<i64, _>("FILE_SIZE"),
-                })
+            let page_row = if let Some(row) =
+                super::load_book_page_row_for_refresh(pool, &book_id, 1).await?
+            {
+                Some(row)
             } else if book_media_is_single_image(&media) {
+                let file_size = tokio::fs::metadata(&media.file_path)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to inspect single-image media '{}' for thumbnail generation '{book_id}': {error}",
+                            media.file_path.display()
+                        )
+                    })?
+                    .len() as i64;
                 Some(BookPageRecord {
                     number: 1,
                     file_name: media.file_name.clone(),
                     media_type: content_type_from_filename(&media.file_name, &media.media_type),
                     width: None,
                     height: None,
-                    file_size: tokio::fs::metadata(&media.file_path)
-                        .await
-                        .ok()
-                        .map(|metadata| metadata.len() as i64)
-                        .unwrap_or(0),
+                    file_size,
                 })
             } else {
-                load_archive_page_row(&media, 1).await
+                load_archive_page_row(&media, 1).await?
             };
 
             let Some(page_row) = page_row else {
                 break 'result Ok(());
             };
-            let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, 1).await else {
+            let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, 1).await? else {
                 break 'result Ok(());
             };
             let thumbnail_media_type = if page_row.media_type.is_empty() {
@@ -286,18 +270,18 @@ pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result
         .fetch_optional(pool)
         .await
         .map_err(|error| format!("failed to query selected thumbnail for '{book_id}': {error}"))?
-        .map(|row| row.get::<String, _>("TYPE"));
+        .map(|row| parse_thumbnail_type(&row.get::<String, _>("TYPE")));
         let should_select = selected_thumbnail_type
-            .as_deref()
-            .is_none_or(|thumbnail_type| thumbnail_type == "GENERATED");
+            .is_none_or(|thumbnail_type| thumbnail_type == ThumbnailType::Generated);
 
         let mut tx = pool
             .begin()
             .await
             .map_err(|error| format!("begin generate thumbnail tx: {error}"))?;
 
-        sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'GENERATED'")
+        sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = ?")
             .bind(&book_id)
+            .bind(ThumbnailType::Generated.persisted_name())
             .execute(&mut *tx)
             .await
             .map_err(|error| {
@@ -319,17 +303,18 @@ pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result
             r#"
             INSERT INTO THUMBNAIL_BOOK
                 (ID, SELECTED, THUMBNAIL, TYPE, BOOK_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, LAST_MODIFIED_DATE)
-            VALUES (?, ?, ?, 'GENERATED', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             "#,
         )
         .bind(&thumbnail_id)
         .bind(should_select)
-        .bind(&thumbnail_bytes)
+        .bind(&thumbnail.bytes)
+        .bind(ThumbnailType::Generated.persisted_name())
         .bind(&book_id)
-        .bind(&thumbnail_media_type)
-        .bind(thumbnail_bytes.len() as i64)
-        .bind(width)
-        .bind(height)
+        .bind(&thumbnail.media_type)
+        .bind(thumbnail.bytes.len() as i64)
+        .bind(thumbnail.width)
+        .bind(thumbnail.height)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
@@ -343,15 +328,16 @@ pub async fn generate_book_thumbnail(pool: &SqlitePool, book_id: &str) -> Result
         tx.commit()
             .await
             .map_err(|error| format!("commit generate thumbnail tx: {error}"))?;
-        emit_thumbnail_book_event(&book_id, &series_id, should_select, true);
+        emit_thumbnail_book_event(runtime_events, &book_id, &series_id, should_select, true);
 
         Ok(())
     };
     result
 }
 
-pub async fn refresh_series_local_artwork(
+pub(crate) async fn refresh_series_local_artwork(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
 ) -> Result<(), String> {
     let series_id = series_id.to_string();
@@ -362,7 +348,7 @@ pub async fn refresh_series_local_artwork(
             SELECT s.URL AS SERIES_URL,
                    l.ROOT AS LIBRARY_ROOT,
                    l.IMPORT_LOCAL_ARTWORK AS IMPORT_LOCAL_ARTWORK,
-                   COALESCE(s.ONESHOT, 0) AS ONESHOT
+                   s.ONESHOT AS ONESHOT
             FROM SERIES s
             JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
             WHERE s.ID = ?
@@ -405,7 +391,7 @@ pub async fn refresh_series_local_artwork(
                     },
                 )
                 .await?;
-                emit_thumbnail_series_event(&series_id, selected, true);
+                emit_thumbnail_series_event(runtime_events, &series_id, selected, true);
             }
         }
 
@@ -442,4 +428,141 @@ pub async fn refresh_series_local_artwork(
         Ok(())
     };
     result
+}
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use image::{ImageBuffer, Rgba};
+    use komga_application::runtime_sse::RuntimeSseEventStore;
+    use komga_application::task_processing::ThumbnailRegenerationPolicy;
+    use sqlx::Row;
+
+    use super::generate_book_thumbnail;
+    use crate::test_support::{BootstrappedBookFixture, MediaPageFixture};
+
+    fn unique_temp_dir(case: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-thumbnail-refresh-{case}-{nanos}"))
+    }
+
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let image =
+            ImageBuffer::<Rgba<u8>, Vec<u8>>::from_pixel(width, height, Rgba([1, 2, 3, 255]));
+        let mut output = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .expect("png fixture should encode");
+        output.into_inner()
+    }
+
+    #[tokio::test]
+    async fn generate_book_thumbnail_reads_public_page_one_from_persisted_row_zero() {
+        let root = unique_temp_dir("persisted-row-zero");
+        let series_dir = root.join("series");
+        fs::create_dir_all(&series_dir).expect("series directory should be created");
+        fs::write(series_dir.join("0001.png"), png_bytes(6, 4))
+            .expect("page image fixture should be written");
+        let fixture = BootstrappedBookFixture::open("thumbnail-row-zero").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+        fixture
+            .insert_media_with_page_count("book-1", Some("application/zip"), "READY", 1)
+            .await;
+        sqlx::query("UPDATE LIBRARY SET ROOT = ? WHERE ID = 'library-1'")
+            .bind(root.to_string_lossy().as_ref())
+            .execute(&fixture.pool)
+            .await
+            .expect("update library root");
+        fixture
+            .insert_media_page_with_dimensions(MediaPageFixture {
+                book_id: "book-1",
+                page_number: 0,
+                file_name: "0001.png",
+                media_type: "image/png",
+                width: 6,
+                height: 4,
+                file_size: Some(128),
+            })
+            .await;
+        let runtime_events = RuntimeSseEventStore::default();
+
+        generate_book_thumbnail(
+            &fixture.pool,
+            &runtime_events,
+            "book-1",
+            ThumbnailRegenerationPolicy::default(),
+        )
+        .await
+        .expect("generate thumbnail");
+
+        let row = sqlx::query(
+            "SELECT MEDIA_TYPE, WIDTH, HEIGHT FROM THUMBNAIL_BOOK WHERE BOOK_ID = 'book-1' AND TYPE = 'GENERATED'",
+        )
+        .fetch_optional(&fixture.pool)
+        .await
+        .expect("load generated thumbnail")
+        .expect("generated thumbnail should exist");
+
+        assert_eq!("image/jpeg", row.get::<String, _>("MEDIA_TYPE"));
+        assert_eq!(6, row.get::<i64, _>("WIDTH"));
+        assert_eq!(4, row.get::<i64, _>("HEIGHT"));
+
+        fixture.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn generate_book_thumbnail_propagates_single_image_metadata_errors() {
+        let root = unique_temp_dir("single-image-metadata-error");
+        fs::create_dir_all(&root).expect("thumbnail root should be created");
+        fs::write(root.join("blocked"), b"not a directory")
+            .expect("blocking file should be written");
+        let fixture = BootstrappedBookFixture::open("thumbnail-single-image-metadata-error").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+        fixture.insert_media("book-1", Some("image/png")).await;
+        sqlx::query("UPDATE LIBRARY SET ROOT = ? WHERE ID = 'library-1'")
+            .bind(root.to_string_lossy().as_ref())
+            .execute(&fixture.pool)
+            .await
+            .expect("update library root");
+        sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = 'book-1'")
+            .bind("book.png")
+            .bind("blocked/book.png")
+            .execute(&fixture.pool)
+            .await
+            .expect("update book path");
+        let runtime_events = RuntimeSseEventStore::default();
+
+        let error = generate_book_thumbnail(
+            &fixture.pool,
+            &runtime_events,
+            "book-1",
+            ThumbnailRegenerationPolicy::default(),
+        )
+        .await
+        .expect_err("single-image metadata errors should fail thumbnail generation");
+
+        assert!(
+            error.contains("failed to inspect single-image media"),
+            "unexpected thumbnail generation error: {error}"
+        );
+        let generated_count = sqlx::query(
+            "SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE BOOK_ID = 'book-1' AND TYPE = 'GENERATED'",
+        )
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("generated thumbnail count should be queryable")
+        .get::<i64, _>("COUNT");
+        assert_eq!(generated_count, 0);
+
+        fixture.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
 }

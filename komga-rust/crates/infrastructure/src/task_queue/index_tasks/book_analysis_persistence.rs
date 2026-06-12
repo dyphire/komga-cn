@@ -1,29 +1,30 @@
+use komga_domain::discovery::MediaStatus;
 use sqlx::SqlitePool;
 
 #[derive(Clone, Debug)]
 pub(super) struct BookAnalysisInput {
-    pub url: String,
-    pub root: String,
-    pub analyze_dimensions: bool,
-    pub series_id: String,
-    pub previous_media_status: String,
-    pub previous_page_count: i64,
+    pub(super) url: String,
+    pub(super) root: String,
+    pub(super) analyze_dimensions: bool,
+    pub(super) series_id: String,
+    pub(super) previous_media_status: Option<MediaStatus>,
+    pub(super) previous_page_count: i64,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct AnalyzedBookPage {
-    pub file_name: String,
-    pub media_type: String,
-    pub width: Option<i64>,
-    pub height: Option<i64>,
-    pub file_size: i64,
+    pub(super) file_name: String,
+    pub(super) media_type: String,
+    pub(super) width: Option<i64>,
+    pub(super) height: Option<i64>,
+    pub(super) file_size: i64,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct AnalyzedBookMedia {
-    pub status: String,
-    pub media_type: String,
-    pub pages: Vec<AnalyzedBookPage>,
+    pub(super) status: MediaStatus,
+    pub(super) media_type: String,
+    pub(super) pages: Vec<AnalyzedBookPage>,
 }
 
 pub(super) async fn analyze_book_input(
@@ -55,7 +56,9 @@ pub(super) async fn analyze_book_input(
         root: sqlx::Row::get::<String, _>(&row, "ROOT"),
         analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
         series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
-        previous_media_status: sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS"),
+        previous_media_status: MediaStatus::parse(
+            sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS").as_str(),
+        ),
         previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
     }))
 }
@@ -114,7 +117,7 @@ pub(super) async fn persist_book_analysis(
             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
     )
     .bind(book_id)
-    .bind(&analysis.status)
+    .bind(analysis.status.persisted_name())
     .bind(&analysis.media_type)
     .bind(analysis.pages.len() as i32)
     .execute(&mut *tx)

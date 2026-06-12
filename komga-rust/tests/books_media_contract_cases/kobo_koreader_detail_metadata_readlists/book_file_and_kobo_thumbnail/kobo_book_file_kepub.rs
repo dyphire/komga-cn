@@ -46,3 +46,38 @@ async fn router_kobo_book_file_epub_convert_kepub_uses_kepub_attachment_name() {
     assert!(!body.is_empty());
     assert_eq!(&body.as_ref()[..2], b"PK");
 }
+
+#[tokio::test]
+async fn router_kobo_book_file_epub_convert_kepub_returns_not_found_when_file_is_missing() {
+    let ctx = TestFixture::builder("router-kobo-book-file-convert-kepub-missing")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/books/book-1/file/epub?convert_kepub=true")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("missing convert kepub request should build"),
+        )
+        .await
+        .expect("missing convert kepub request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("error"),
+        Some(&Value::String(
+            "File not found, it may have moved".to_string()
+        ))
+    );
+}

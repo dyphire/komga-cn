@@ -3,9 +3,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use async_trait::async_trait;
+use serde_json::Value;
 
 use super::{
-    LibraryCatalogCommandService, LibraryCatalogMutationPort, LibraryChangeSet, LibraryRecord,
+    LibraryBookSeriesRecord, LibraryCatalogCommandService, LibraryCatalogMutationPort,
+    LibraryChangeSet, LibraryRecord, LibrarySeriesAndBookIds,
 };
 
 #[test]
@@ -29,6 +31,44 @@ fn update_command_emits_follow_up_tasks_from_library_feature_toggles() {
     assert_eq!(result.task_records[0].simple_type, "FindBooksToConvert");
     assert_eq!(result.task_records[0].priority, 0);
     assert_eq!(result.task_records[0].group, None);
+}
+
+#[test]
+fn update_command_enqueues_repair_extension_tasks_for_mismatched_books() {
+    let service = LibraryCatalogCommandService::new(TestPort {
+        library: Some(LibraryRecord::default_record("library-1".to_string())),
+        mismatched_extension_books: vec![LibraryBookSeriesRecord {
+            book_id: "book-1".to_string(),
+            series_id: "series-1".to_string(),
+        }],
+        ..TestPort::default()
+    });
+
+    let result = block_on(service.update_library(
+        "library-1",
+        LibraryChangeSet {
+            repair_extensions: Some(true),
+            ..LibraryChangeSet::default()
+        },
+    ))
+    .expect("enabling repair extensions should enqueue mismatched book repair tasks");
+
+    assert_eq!(result.task_records.len(), 1);
+    let task = &result.task_records[0];
+    assert_eq!(task.id, "RepairExtension_book-1");
+    assert_eq!(task.simple_type, "RepairExtension");
+    assert_eq!(task.priority, 0);
+    assert_eq!(task.group.as_deref(), Some("series-1"));
+    let payload: Value = serde_json::from_str(
+        task.payload
+            .as_deref()
+            .expect("repair extension task should include book payload"),
+    )
+    .expect("repair extension task payload should be JSON");
+    assert_eq!(
+        payload.get("bookId").and_then(Value::as_str),
+        Some("book-1")
+    );
 }
 
 #[test]
@@ -69,9 +109,9 @@ struct TestPort {
     library: Option<LibraryRecord>,
     empty_hash_book_ids: Vec<String>,
     empty_hash_koreader_book_ids: Vec<String>,
-    mismatched_extension_books: Vec<(String, String)>,
+    mismatched_extension_books: Vec<LibraryBookSeriesRecord>,
     library_book_ids: Option<Vec<String>>,
-    library_series_and_book_ids: Option<(Vec<String>, Vec<(String, String)>)>,
+    library_series_and_book_ids: Option<LibrarySeriesAndBookIds>,
 }
 
 #[async_trait]
@@ -111,7 +151,7 @@ impl LibraryCatalogMutationPort for TestPort {
     async fn library_books_with_mismatched_extensions(
         &self,
         _library_id: &str,
-    ) -> Result<Vec<(String, String)>, String> {
+    ) -> Result<Vec<LibraryBookSeriesRecord>, String> {
         Ok(self.mismatched_extension_books.clone())
     }
 
@@ -122,7 +162,7 @@ impl LibraryCatalogMutationPort for TestPort {
     async fn library_series_and_book_ids(
         &self,
         _library_id: &str,
-    ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, String> {
+    ) -> Result<Option<LibrarySeriesAndBookIds>, String> {
         Ok(self.library_series_and_book_ids.clone())
     }
 }

@@ -1,13 +1,21 @@
-use super::*;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::AuthUser;
+use serde_json::json;
+
 use crate::identity_access::auth::Authenticated;
-use crate::request_urls::absolutize_json_hrefs;
+use crate::media_assets::http_helpers::internal_error_response;
+use crate::media_assets::manifest_renderer::{
+    ManifestHrefSurface, manifest_content_type, render_manifest_payload,
+};
 use crate::state::MediaAssetsState;
-use axum::extract::State;
 use komga_application::media_assets::{
     ManifestBuildOutcome, ManifestVariant, build_persisted_book_manifest,
 };
 
-pub async fn book_manifest(
+pub(crate) async fn book_manifest(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
@@ -16,7 +24,7 @@ pub async fn book_manifest(
     book_manifest_variant(app, user, headers, book_id, ManifestVariant::Default).await
 }
 
-pub async fn book_manifest_epub(
+pub(crate) async fn book_manifest_epub(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
@@ -25,7 +33,7 @@ pub async fn book_manifest_epub(
     book_manifest_variant(app, user, headers, book_id, ManifestVariant::Epub).await
 }
 
-pub async fn book_manifest_pdf(
+pub(crate) async fn book_manifest_pdf(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
@@ -34,7 +42,7 @@ pub async fn book_manifest_pdf(
     book_manifest_variant(app, user, headers, book_id, ManifestVariant::Pdf).await
 }
 
-pub async fn book_manifest_divina(
+pub(crate) async fn book_manifest_divina(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
@@ -51,22 +59,21 @@ async fn book_manifest_variant(
     variant: ManifestVariant,
 ) -> Response {
     match build_persisted_book_manifest(
-        app.reader.as_ref(),
-        app.content.as_ref(),
-        app.book_detail.as_ref(),
-        app.series_detail.as_ref(),
+        app.manifest_reader.as_ref(),
+        app.manifest_content.as_ref(),
+        app.manifest_metadata.as_ref(),
         &user,
         &book_id,
         variant,
     )
     .await
     {
-        Ok(ManifestBuildOutcome::Found(mut manifest)) => {
-            absolutize_json_hrefs(&headers, &mut manifest.payload);
+        Ok(ManifestBuildOutcome::Found(manifest)) => {
+            let payload = render_manifest_payload(&headers, &manifest, ManifestHrefSurface::ApiV1);
             (
                 StatusCode::OK,
-                [(header::CONTENT_TYPE, manifest.content_type)],
-                Json(manifest.payload),
+                [(header::CONTENT_TYPE, manifest_content_type(&manifest))],
+                Json(payload),
             )
                 .into_response()
         }

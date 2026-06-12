@@ -5,6 +5,7 @@ use axum::middleware;
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
+use komga_application::operational::HttpServerRequestsState;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
@@ -18,6 +19,8 @@ use crate::state::HttpAppState;
 pub fn build_router(app: HttpAppState) -> Router {
     let runtime_context_path =
         mounted_runtime_context_path(app.operational.runtime.server_context_path.as_deref());
+    let dev_cors_enabled = app.operational.runtime.dev_cors_enabled;
+    let actuator_enabled = app.operational.runtime.actuator_enabled;
     let app = Arc::new(app);
     let router = Router::new()
         .route(
@@ -670,13 +673,13 @@ pub fn build_router(app: HttpAppState) -> Router {
         .route("/", get(operational::webui_entrypoint))
         .route("/{*webui_path}", get(operational::webui_asset));
 
-    let router = if should_enable_dev_cors() {
+    let router = if dev_cors_enabled {
         router.layer(middleware::from_fn(operational::dev_cors_middleware))
     } else {
         router
     };
 
-    let router = if should_expose_actuator_default_contract() {
+    let router = if actuator_enabled {
         router
             .route("/actuator", get(operational::actuator_root))
             .route("/actuator/health", get(operational::actuator_health))
@@ -695,20 +698,11 @@ pub fn build_router(app: HttpAppState) -> Router {
         router
     };
 
-    let router = router
-        .route_layer(middleware::from_fn(cache::cache_workflow_middleware))
-        .route_layer(middleware::from_fn_with_state(
-            app.operational.http_server_requests.clone(),
-            access_log::prepare_access_log_middleware,
-        ))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(access_log::make_request_span)
-                .on_request(access_log::on_request)
-                .on_response(access_log::on_response)
-                .on_failure(access_log::on_failure),
-        )
-        .with_state(app);
+    let router = with_access_logging(
+        router.route_layer(middleware::from_fn(cache::cache_workflow_middleware)),
+        app.operational.http_server_requests.clone(),
+    )
+    .with_state(app);
 
     if let Some(runtime_context_path) = runtime_context_path {
         Router::new().nest(
@@ -723,22 +717,25 @@ pub fn build_router(app: HttpAppState) -> Router {
     }
 }
 
-fn should_expose_actuator_default_contract() -> bool {
-    !std::env::var("KOMGA_RUST_DISABLE_ACTUATOR")
-        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
-        .unwrap_or(false)
-}
-
-fn should_enable_dev_cors() -> bool {
-    std::env::var("SPRING_PROFILES_ACTIVE")
-        .ok()
-        .map(|profiles| {
-            profiles
-                .split(',')
-                .map(str::trim)
-                .any(|profile| profile.eq_ignore_ascii_case("dev"))
-        })
-        .unwrap_or(false)
+pub fn with_access_logging<S>(
+    router: Router<S>,
+    http_server_requests: HttpServerRequestsState,
+) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router
+        .route_layer(middleware::from_fn_with_state(
+            http_server_requests,
+            access_log::prepare_access_log_middleware,
+        ))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(access_log::make_request_span)
+                .on_request(access_log::on_request)
+                .on_response(access_log::on_response)
+                .on_failure(access_log::on_failure),
+        )
 }
 
 fn mounted_runtime_context_path(value: Option<&str>) -> Option<String> {

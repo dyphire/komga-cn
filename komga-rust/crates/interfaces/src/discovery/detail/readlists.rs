@@ -1,25 +1,33 @@
-use super::readlists_support::merge_readlist_write_input;
-use super::*;
-use crate::helpers::validation_error_response;
-use crate::identity_access::auth::{Admin, Authenticated};
-use crate::state::DiscoveryState;
-use axum::extract::State;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use komga_application::discovery::{
-    ReadlistMutationError, ReadlistMutationInput, ReadlistMutationService,
-    ReadlistVisibilityService, resolve_readlist_books_query,
+    ReadlistMutationError, ReadlistMutationInput, parse_comicrack_readlist,
 };
+use komga_domain::discovery::PageEnvelope;
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn readlists(
+use super::detail_utils::internal_error_response;
+use super::readlists_support::{
+    comicrack_match_payload, merge_readlist_write_input, readlist_payload, readlists_page_payload,
+};
+use super::{BookDetailReadModel, book_detail_payload};
+use crate::discovery::query::{resolve_readlist_books_query, resolve_readlists_query};
+use crate::helpers::{to_domain_query_context, validation_error_response};
+use crate::identity_access::auth::{Admin, Authenticated};
+use crate::state::DiscoveryState;
+pub(crate) async fn readlists(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let query =
-        komga_application::discovery::resolve_readlists_query(uri.query().unwrap_or_default());
+    let query = resolve_readlists_query(&uri);
 
     let requested_context = match app
         .discovery_auth
@@ -30,24 +38,22 @@ pub async fn readlists(
         )
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let visibility_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let service = komga_application::discovery::ReadlistListService::new(
-        app.readlist.as_ref(),
-        app.readlist_books.as_ref(),
-        app.readlist_search.as_ref(),
-    );
-    let page = match service
+    let page = match app
+        .persisted_sets
         .list_readlists(
             &to_domain_query_context(requested_context),
             &to_domain_query_context(visibility_context),
@@ -62,20 +68,32 @@ pub async fn readlists(
     Json(readlists_page_payload(page)).into_response()
 }
 
-pub async fn readlist_create(State(app): State<DiscoveryState>, _: Admin, body: Bytes) -> Response {
-    let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
+pub(crate) async fn readlist_create(
+    State(app): State<DiscoveryState>,
+    _: Admin,
+    body: Bytes,
+) -> Response {
+    let payload = match serde_json::from_slice::<Value>(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return readlist_create_bad_request("Request body must be a JSON object");
+        }
+    };
     let input = match parse_readlist_create_input(&payload) {
         Ok(input) => input,
         Err(response) => return response,
     };
 
-    let service = ReadlistMutationService::new(app.readlist.as_ref());
-    let created = match service.create_readlist(input).await {
+    let created = match app.persisted_sets.create_readlist(input).await {
         Ok(created) => created,
         Err(error) => return readlist_mutation_error_response(error, "/api/v1/readlists"),
     };
 
-    match load_persisted_readlist_detail(&app, &created.readlist_id, None).await {
+    match app
+        .persisted_sets
+        .readlist_for_mutation(&created.readlist_id)
+        .await
+    {
         Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -207,7 +225,7 @@ fn readlist_mutation_error_response(error: ReadlistMutationError, path: &str) ->
     }
 }
 
-pub async fn readlist_match_comicrack(
+pub(crate) async fn readlist_match_comicrack(
     State(app): State<DiscoveryState>,
     _: Admin,
     multipart: Result<Multipart, MultipartRejection>,
@@ -219,11 +237,11 @@ pub async fn readlist_match_comicrack(
 
     let request = match parse_comicrack_readlist(&xml) {
         Ok(request) => request,
-        Err(error_code) => return comicrack_bad_request_response(error_code),
+        Err(error) => return comicrack_bad_request_response(error.error_code()),
     };
 
-    match match_comicrack_readlist(&app, &request).await {
-        Ok(payload) => Json(payload).into_response(),
+    match app.persisted_sets.match_comicrack_readlist(&request).await {
+        Ok(result) => Json(comicrack_match_payload(&result)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -245,14 +263,20 @@ fn comicrack_bad_request_response(error_code: &str) -> Response {
         .into_response()
 }
 
-pub async fn readlist_update(
+pub(crate) async fn readlist_update(
     State(app): State<DiscoveryState>,
     _: Admin,
     Path(readlist_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-    let Some(existing) = (match load_persisted_readlist_detail(&app, &readlist_id, None).await {
+    let path = format!("/api/v1/readlists/{readlist_id}");
+    let payload = match serde_json::from_slice::<Value>(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return readlist_bad_request("Request body must be a JSON object", path.as_str());
+        }
+    };
+    let Some(existing) = (match app.persisted_sets.readlist_for_mutation(&readlist_id).await {
         Ok(readlist) => readlist,
         Err(error) => return internal_error_response(error),
     }) else {
@@ -260,37 +284,41 @@ pub async fn readlist_update(
     };
     let input = merge_readlist_write_input(&existing, &payload);
 
-    let service = ReadlistMutationService::new(app.readlist.as_ref());
-    let path = format!("/api/v1/readlists/{readlist_id}");
-    match service.update_readlist(&readlist_id, input).await {
+    match app
+        .persisted_sets
+        .update_readlist(&readlist_id, input)
+        .await
+    {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => readlist_mutation_error_response(error, path.as_str()),
     }
 }
 
-pub async fn readlist_delete(
+pub(crate) async fn readlist_delete(
     State(app): State<DiscoveryState>,
     _: Admin,
     Path(readlist_id): Path<String>,
 ) -> Response {
-    let service = ReadlistMutationService::new(app.readlist.as_ref());
-    match service.delete_readlist(&readlist_id).await {
+    match app.persisted_sets.delete_readlist(&readlist_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error.to_string()),
     }
 }
 
-pub async fn readlist_books(
+pub(crate) async fn readlist_books(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     Path(readlist_id): Path<String>,
     uri: Uri,
 ) -> Response {
-    let query = resolve_readlist_books_query(readlist_id, uri.query().unwrap_or_default());
-    let Some(response_context) = app
+    let query = match resolve_readlist_books_query(readlist_id, &uri) {
+        Ok(query) => query,
+        Err(error) => return error.into_response(),
+    };
+    let response_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(
             &app.identity,
@@ -298,21 +326,24 @@ pub async fn readlist_books(
             query.library_ids.as_deref(),
         )
         .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let Some(visibility_context) = app
+    let visibility_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     let paged = !query.unpaged;
-    let service =
-        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
-    let page = match service
+    let page = match app
+        .persisted_sets
         .list_readlist_books(&to_domain_query_context(visibility_context), query)
         .await
     {
@@ -329,7 +360,7 @@ pub async fn readlist_books(
     .into_response()
 }
 
-pub async fn readlist_detail(
+pub(crate) async fn readlist_detail(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -340,13 +371,13 @@ pub async fn readlist_detail(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let service =
-        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
-    match service
+    match app
+        .persisted_sets
         .readlist_detail(&to_domain_query_context(context), &readlist_id)
         .await
     {
@@ -356,7 +387,7 @@ pub async fn readlist_detail(
     }
 }
 
-pub async fn readlist_book_sibling_previous(
+pub(crate) async fn readlist_book_sibling_previous(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -365,7 +396,7 @@ pub async fn readlist_book_sibling_previous(
     sibling_response(&app, &headers, &readlist_id, &book_id, false).await
 }
 
-pub async fn readlist_book_sibling_next(
+pub(crate) async fn readlist_book_sibling_next(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -381,17 +412,18 @@ async fn sibling_response(
     book_id: &str,
     next: bool,
 ) -> Response {
-    let Some(context) = app
+    let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, headers, None)
         .await
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    {
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let is_admin = context.is_admin;
-    let service =
-        ReadlistVisibilityService::new(app.readlist.as_ref(), app.readlist_books.as_ref());
-    let sibling = match service
+    let sibling = match app
+        .persisted_sets
         .readlist_book_sibling(
             &to_domain_query_context(context),
             readlist_id,

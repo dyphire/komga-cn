@@ -1,6 +1,14 @@
-use super::*;
+use std::collections::HashMap;
 
-pub async fn load_persisted_series_summaries(
+use komga_application::discovery::{SeriesReadModel, SeriesReadingDirection};
+use komga_domain::discovery::SeriesStatus;
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Error, QueryBuilder, Row, Sqlite, SqlitePool};
+
+use super::common;
+use super::models::SeriesSummary;
+
+pub(super) async fn load_persisted_series_summaries(
     pool: &SqlitePool,
 ) -> Result<Vec<SeriesSummary>, String> {
     let rows = fetch_persisted_series_summary_rows(pool, None)
@@ -10,7 +18,7 @@ pub async fn load_persisted_series_summaries(
     Ok(rows.into_iter().map(map_series_summary).collect())
 }
 
-pub async fn load_persisted_series_summaries_by_ids(
+pub(super) async fn load_persisted_series_summaries_by_ids(
     pool: &SqlitePool,
     ids: &[String],
 ) -> Result<Vec<SeriesSummary>, String> {
@@ -32,9 +40,9 @@ pub async fn load_persisted_series_summaries_by_ids(
 }
 
 async fn fetch_persisted_series_summary_rows(
-    pool: &sqlx::SqlitePool,
+    pool: &SqlitePool,
     ids: Option<&[String]>,
-) -> Result<Vec<sqlx::sqlite::SqliteRow>, sqlx::Error> {
+) -> Result<Vec<SqliteRow>, Error> {
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"SELECT s.ID,
                   s.LIBRARY_ID,
@@ -43,7 +51,7 @@ async fn fetch_persisted_series_summary_rows(
                   CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED,
                   s.BOOK_COUNT,
                   s.DELETED_DATE,
-                  CAST(COALESCE(s.ONESHOT, 0) AS INTEGER) AS ONESHOT,
+                  s.ONESHOT AS ONESHOT,
                   COALESCE(sm.TITLE, s.NAME) AS TITLE,
                   COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
                   COALESCE(sm.STATUS, 'ONGOING') AS STATUS,
@@ -61,37 +69,45 @@ async fn fetch_persisted_series_summary_rows(
                    COALESCE(bma.CREATED_DATE, s.CREATED_DATE) AS BOOKS_METADATA_CREATED,
                    COALESCE(bma.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS BOOKS_METADATA_LAST_MODIFIED,
                    s.NAME AS NAME,
-                   COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS LABELS,
-                  COALESCE(GROUP_CONCAT(DISTINCT smg.GENRE), '') AS GENRES,
-                  COALESCE(GROUP_CONCAT(DISTINCT smt.TAG), '') AS TAGS,
+                   COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                             FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                                   FROM SERIES_METADATA_SHARING sms
+                                   WHERE sms.SERIES_ID = s.ID)), '') AS LABELS,
+                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
+                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                                  FROM SERIES_METADATA_GENRE smg
+                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
+                  COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
+                            FROM (SELECT DISTINCT smt.TAG AS TAG
+                                  FROM SERIES_METADATA_TAG smt
+                                  WHERE smt.SERIES_ID = s.ID)), '') AS TAGS,
                   COALESCE(
-                    GROUP_CONCAT(
-                      DISTINCT CASE
-                        WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
-                        ELSE smat.LABEL || '::' || smat.TITLE
-                      END
-                    ),
+                    (SELECT GROUP_CONCAT(ALTERNATE_TITLE, char(30))
+                     FROM (SELECT DISTINCT CASE
+                             WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
+                             ELSE smat.LABEL || '::' || smat.TITLE
+                           END AS ALTERNATE_TITLE
+                           FROM SERIES_METADATA_ALTERNATE_TITLE smat
+                           WHERE smat.SERIES_ID = s.ID)),
                     ''
                   ) AS ALTERNATE_TITLES,
                   COALESCE(
-                    GROUP_CONCAT(
-                      DISTINCT CASE
-                        WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
-                        ELSE bmaa.NAME || '::' || bmaa.ROLE
-                      END
-                    ),
+                    (SELECT GROUP_CONCAT(AUTHOR, char(30))
+                     FROM (SELECT DISTINCT CASE
+                             WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
+                             ELSE bmaa.NAME || '::' || bmaa.ROLE
+                           END AS AUTHOR
+                           FROM BOOK_METADATA_AGGREGATION_AUTHOR bmaa
+                           WHERE bmaa.SERIES_ID = s.ID)),
                     ''
                   ) AS BOOKS_METADATA_AUTHORS,
-                  COALESCE(GROUP_CONCAT(DISTINCT bmat.TAG), '') AS BOOKS_METADATA_TAGS
+                  COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
+                            FROM (SELECT DISTINCT bmat.TAG AS TAG
+                                  FROM BOOK_METADATA_AGGREGATION_TAG bmat
+                                  WHERE bmat.SERIES_ID = s.ID)), '') AS BOOKS_METADATA_TAGS
            FROM SERIES s
            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
-           LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
-           LEFT JOIN SERIES_METADATA_GENRE smg ON smg.SERIES_ID = s.ID
-           LEFT JOIN SERIES_METADATA_TAG smt ON smt.SERIES_ID = s.ID
-           LEFT JOIN SERIES_METADATA_ALTERNATE_TITLE smat ON smat.SERIES_ID = s.ID
-           LEFT JOIN BOOK_METADATA_AGGREGATION_AUTHOR bmaa ON bmaa.SERIES_ID = s.ID
-           LEFT JOIN BOOK_METADATA_AGGREGATION_TAG bmat ON bmat.SERIES_ID = s.ID"#,
+           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
     );
 
     if let Some(ids) = ids.filter(|ids| !ids.is_empty()) {
@@ -103,38 +119,18 @@ async fn fetch_persisted_series_summary_rows(
         separated.push_unseparated(")");
     }
 
-    query.push(
-        r#" GROUP BY s.ID,
-                    s.LIBRARY_ID,
-                    s.CREATED_DATE,
-                    s.LAST_MODIFIED_DATE,
-                    s.FILE_LAST_MODIFIED,
-                    s.BOOK_COUNT,
-                    s.DELETED_DATE,
-                    s.ONESHOT,
-                    sm.TITLE,
-                    sm.TITLE_SORT,
-                    sm.STATUS,
-                    sm.SUMMARY,
-                    sm.READING_DIRECTION,
-                    sm.PUBLISHER,
-                    sm.AGE_RATING,
-                    sm.TOTAL_BOOK_COUNT,
-                    sm.LANGUAGE,
-                    sm.CREATED_DATE,
-                    sm.LAST_MODIFIED_DATE,
-                    bma.RELEASE_DATE,
-                    bma.SUMMARY,
-                    bma.SUMMARY_NUMBER,
-                    bma.CREATED_DATE,
-                    bma.LAST_MODIFIED_DATE,
-                    s.NAME"#,
-    );
-
     query.build().fetch_all(pool).await
 }
 
-pub async fn load_persisted_series_count(pool: &SqlitePool) -> Result<usize, String> {
+pub(crate) async fn load_persisted_series_read_models(
+    pool: &SqlitePool,
+) -> Result<Vec<SeriesReadModel>, String> {
+    load_persisted_series_summaries(pool)
+        .await
+        .map(|summaries| summaries.into_iter().map(series_read_model).collect())
+}
+
+pub(super) async fn load_persisted_series_count(pool: &SqlitePool) -> Result<usize, String> {
     let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")
         .fetch_one(pool)
         .await
@@ -142,14 +138,52 @@ pub async fn load_persisted_series_count(pool: &SqlitePool) -> Result<usize, Str
     Ok(row.get::<i64, _>("COUNT").max(0) as usize)
 }
 
-fn map_series_summary(row: sqlx::sqlite::SqliteRow) -> SeriesSummary {
+fn series_read_model(summary: SeriesSummary) -> SeriesReadModel {
+    SeriesReadModel {
+        id: summary.id,
+        library_id: summary.library_id,
+        name: summary.name,
+        title: summary.title,
+        title_sort: summary.title_sort,
+        labels: summary.labels,
+        created: summary.created,
+        last_modified: summary.last_modified,
+        file_last_modified: summary.file_last_modified,
+        books_count: summary.books_count,
+        books_read_count: summary.books_read_count,
+        books_unread_count: summary.books_unread_count,
+        books_in_progress_count: summary.books_in_progress_count,
+        status: SeriesStatus::parse(&summary.status).unwrap_or(SeriesStatus::Ongoing),
+        summary: summary.summary,
+        reading_direction: SeriesReadingDirection::parse(&summary.reading_direction),
+        publisher: summary.publisher,
+        age_rating: summary.age_rating,
+        language: summary.language,
+        genres: summary.genres,
+        tags: summary.tags,
+        alternate_titles: summary.alternate_titles,
+        metadata_created: summary.metadata_created,
+        metadata_last_modified: summary.metadata_last_modified,
+        books_metadata_authors: summary.books_metadata_authors,
+        books_metadata_tags: summary.books_metadata_tags,
+        books_metadata_release_date: summary.books_metadata_release_date,
+        books_metadata_summary: summary.books_metadata_summary,
+        books_metadata_summary_number: summary.books_metadata_summary_number,
+        books_metadata_created: summary.books_metadata_created,
+        books_metadata_last_modified: summary.books_metadata_last_modified,
+        deleted: summary.deleted,
+        oneshot: summary.oneshot,
+    }
+}
+
+fn map_series_summary(row: SqliteRow) -> SeriesSummary {
     SeriesSummary {
         id: row.get::<String, _>("ID"),
         library_id: row.get::<String, _>("LIBRARY_ID"),
         name: row.get::<String, _>("NAME"),
         title: row.get::<String, _>("TITLE"),
         title_sort: row.get::<String, _>("TITLE_SORT"),
-        labels: common::parse_csv_values(&row.get::<String, _>("LABELS")),
+        labels: common::parse_group_concat_values(&row.get::<String, _>("LABELS")),
         created: row.get::<String, _>("CREATED_DATE"),
         last_modified: row.get::<String, _>("LAST_MODIFIED_DATE"),
         file_last_modified: row.get::<String, _>("FILE_LAST_MODIFIED"),
@@ -163,17 +197,21 @@ fn map_series_summary(row: sqlx::sqlite::SqliteRow) -> SeriesSummary {
         publisher: row.get::<String, _>("PUBLISHER"),
         age_rating: row
             .get::<Option<i64>, _>("AGE_RATING")
-            .map(|value| value as u16),
+            .map(common::clamp_kotlin_int_u32),
         language: row.get::<String, _>("LANGUAGE"),
-        genres: common::parse_csv_values(&row.get::<String, _>("GENRES")),
-        tags: common::parse_csv_values(&row.get::<String, _>("TAGS")),
-        alternate_titles: common::parse_csv_values(&row.get::<String, _>("ALTERNATE_TITLES")),
+        genres: common::parse_group_concat_values(&row.get::<String, _>("GENRES")),
+        tags: common::parse_group_concat_values(&row.get::<String, _>("TAGS")),
+        alternate_titles: common::parse_group_concat_values(
+            &row.get::<String, _>("ALTERNATE_TITLES"),
+        ),
         metadata_created: row.get::<String, _>("METADATA_CREATED"),
         metadata_last_modified: row.get::<String, _>("METADATA_LAST_MODIFIED"),
-        books_metadata_authors: common::parse_csv_values(
+        books_metadata_authors: common::parse_group_concat_values(
             &row.get::<String, _>("BOOKS_METADATA_AUTHORS"),
         ),
-        books_metadata_tags: common::parse_csv_values(&row.get::<String, _>("BOOKS_METADATA_TAGS")),
+        books_metadata_tags: common::parse_group_concat_values(
+            &row.get::<String, _>("BOOKS_METADATA_TAGS"),
+        ),
         books_metadata_release_date: row.get::<Option<String>, _>("BOOKS_METADATA_RELEASE_DATE"),
         books_metadata_summary: row.get::<String, _>("BOOKS_METADATA_SUMMARY"),
         books_metadata_summary_number: row.get::<String, _>("BOOKS_METADATA_SUMMARY_NUMBER"),
@@ -184,10 +222,46 @@ fn map_series_summary(row: sqlx::sqlite::SqliteRow) -> SeriesSummary {
     }
 }
 
-pub async fn persisted_series_exist(pool: &SqlitePool) -> Result<bool, String> {
-    let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")
-        .fetch_one(pool)
-        .await
-        .map_err(|error| format!("query persisted series count: {error}"))?;
-    Ok(row.get::<i64, _>("COUNT") > 0)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::BootstrappedBookFixture;
+
+    #[tokio::test]
+    async fn load_persisted_series_summaries_preserves_commas_in_metadata_values() {
+        let fixture = BootstrappedBookFixture::open("series-summary-comma-values").await;
+        fixture.insert_library_series().await;
+        fixture.insert_series_metadata().await;
+
+        sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+            .bind("series-1")
+            .bind("Kids, Family")
+            .execute(&fixture.pool)
+            .await
+            .expect("sharing label should be inserted");
+        sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+            .bind("series-1")
+            .bind("Sci, Fi")
+            .execute(&fixture.pool)
+            .await
+            .expect("genre should be inserted");
+        sqlx::query("INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+            .bind("series-1")
+            .bind("Slice, Life")
+            .execute(&fixture.pool)
+            .await
+            .expect("tag should be inserted");
+
+        let summaries = load_persisted_series_summaries(&fixture.pool)
+            .await
+            .expect("series summary should load");
+        let summary = summaries
+            .first()
+            .expect("series summary should include seeded series");
+
+        assert_eq!(summary.labels, vec!["Kids, Family"]);
+        assert_eq!(summary.genres, vec!["Sci, Fi"]);
+        assert_eq!(summary.tags, vec!["Slice, Life"]);
+        fixture.close().await;
+    }
 }

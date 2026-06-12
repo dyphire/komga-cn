@@ -3,41 +3,34 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use komga_domain::discovery::MediaStatus;
 use tsid::create_tsid_256;
 
 use super::{
-    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
-    TransientBookScanEntry,
+    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPageContent,
+    TransientBookPort, TransientBookScanEntry, TransientBookSeriesInference,
 };
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct TransientBooksStore {
     pub records: HashMap<String, TransientBookRecord>,
-    #[serde(default)]
     last_access_epoch_seconds: HashMap<String, i64>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TransientBookRecord {
     pub id: String,
     pub name: String,
     pub path: String,
     pub file_last_modified_unix_nanos: i128,
     pub size_bytes: u64,
-    pub status: String,
+    pub status: MediaStatus,
     pub media_type: String,
-    #[serde(default)]
     pub page_count: u32,
-    #[serde(default)]
     pub pages: Vec<TransientBookPage>,
-    #[serde(default)]
     pub files: Vec<String>,
-    #[serde(default)]
     pub comment: String,
-    #[serde(default)]
     pub number: Option<f64>,
-    #[serde(default)]
     pub series_id: Option<String>,
 }
 
@@ -48,18 +41,18 @@ pub enum TransientBookScanError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TransientBookAnalyzeError {
+    NotFound,
+    Internal,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransientBookPageError {
     NotFound,
     AnalysisFailed,
     FileMissing,
     BadPageNumber,
     Internal,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransientBookPageContent {
-    pub content_type: String,
-    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -95,9 +88,10 @@ impl TransientBookService {
         let mut records = self
             .port
             .list_transient_book_entries(Path::new(requested_path))
+            .map_err(|_| TransientBookScanError::Internal)?
             .into_iter()
-            .filter_map(|entry| self.transient_book_record(entry))
-            .collect::<Vec<_>>();
+            .map(|entry| self.transient_book_record(entry))
+            .collect::<Result<Vec<_>, _>>()?;
         records.sort_by(|left, right| left.path.cmp(&right.path));
 
         let mut store = self.lock_store();
@@ -108,18 +102,36 @@ impl TransientBookService {
         Ok(records)
     }
 
-    pub async fn analyze(&self, transient_book_id: &str) -> Option<TransientBookRecord> {
-        let record = self.lock_store().get_cloned(transient_book_id)?;
-        let analysis = self.port.analyze_transient_book(&record.path);
-        let (inferred_series_id, inferred_number) = self
+    pub async fn analyze(
+        &self,
+        transient_book_id: &str,
+    ) -> Result<TransientBookRecord, TransientBookAnalyzeError> {
+        let record = self
+            .lock_store()
+            .get_cloned(transient_book_id)
+            .ok_or(TransientBookAnalyzeError::NotFound)?;
+        let analysis = self
             .port
-            .infer_transient_series_and_number(&record.path)
-            .await;
+            .analyze_transient_book(&record.path)
+            .map_err(|_| TransientBookAnalyzeError::Internal)?;
+        let series_inference = if analysis.status == MediaStatus::Ready {
+            self.port
+                .infer_transient_series_and_number(&record.path)
+                .await
+                .map_err(|_| TransientBookAnalyzeError::Internal)?
+        } else {
+            TransientBookSeriesInference {
+                series_id: None,
+                number: None,
+            }
+        };
 
         let mut store = self.lock_store();
-        let entry = store.get_mut(transient_book_id)?;
-        apply_transient_book_analysis(entry, analysis, inferred_series_id, inferred_number);
-        Some(entry.clone())
+        let entry = store
+            .get_mut(transient_book_id)
+            .ok_or(TransientBookAnalyzeError::NotFound)?;
+        apply_transient_book_analysis(entry, analysis, series_inference);
+        Ok(entry.clone())
     }
 
     pub fn page_content(
@@ -136,10 +148,14 @@ impl TransientBookService {
             .lock_store()
             .get_cloned(transient_book_id)
             .ok_or(TransientBookPageError::NotFound)?;
-        if !record.status.eq_ignore_ascii_case("READY") {
+        if record.status != MediaStatus::Ready {
             return Err(TransientBookPageError::AnalysisFailed);
         }
-        if !self.port.transient_book_exists(&record.path) {
+        if !self
+            .port
+            .transient_book_exists(&record.path)
+            .map_err(|_| TransientBookPageError::Internal)?
+        {
             return Err(TransientBookPageError::FileMissing);
         }
         if record.media_type == "application/epub+zip" && record.pages.is_empty() {
@@ -149,26 +165,27 @@ impl TransientBookService {
             return Err(TransientBookPageError::Internal);
         }
 
-        let (content_type, bytes) = self
-            .port
+        self.port
             .transient_book_page_content(
                 &record.path,
                 &record.media_type,
                 &record.pages,
                 page_number,
             )
-            .ok_or(TransientBookPageError::BadPageNumber)?;
-
-        Ok(TransientBookPageContent {
-            content_type,
-            bytes,
-        })
+            .map_err(|_| TransientBookPageError::Internal)?
+            .ok_or(TransientBookPageError::BadPageNumber)
     }
 
-    fn transient_book_record(&self, entry: TransientBookScanEntry) -> Option<TransientBookRecord> {
-        let file_metadata = self.port.load_transient_book_file_metadata(&entry.path)?;
+    fn transient_book_record(
+        &self,
+        entry: TransientBookScanEntry,
+    ) -> Result<TransientBookRecord, TransientBookScanError> {
+        let file_metadata = self
+            .port
+            .load_transient_book_file_metadata(&entry.path)
+            .map_err(|_| TransientBookScanError::Internal)?;
 
-        Some(unknown_transient_book_record(entry, file_metadata))
+        Ok(unknown_transient_book_record(entry, file_metadata))
     }
 
     fn lock_store(&self) -> MutexGuard<'_, TransientBooksStore> {
@@ -251,7 +268,7 @@ fn unknown_transient_book_record(
         path: entry.path,
         file_last_modified_unix_nanos: file_metadata.file_last_modified_unix_nanos,
         size_bytes: file_metadata.size_bytes,
-        status: "UNKNOWN".to_string(),
+        status: MediaStatus::Unknown,
         media_type: String::new(),
         page_count: 0,
         pages: Vec::new(),
@@ -265,8 +282,7 @@ fn unknown_transient_book_record(
 fn apply_transient_book_analysis(
     entry: &mut TransientBookRecord,
     analysis: TransientBookAnalysis,
-    inferred_series_id: Option<String>,
-    inferred_number: Option<f64>,
+    series_inference: TransientBookSeriesInference,
 ) {
     entry.status = analysis.status;
     entry.media_type = analysis.media_type;
@@ -274,8 +290,8 @@ fn apply_transient_book_analysis(
     entry.pages = analysis.pages;
     entry.files = analysis.files;
     entry.comment = analysis.comment;
-    entry.number = analysis.number.or(inferred_number);
-    entry.series_id = analysis.series_id.or(inferred_series_id);
+    entry.number = analysis.number.or(series_inference.number);
+    entry.series_id = analysis.series_id.or(series_inference.series_id);
 }
 
 fn transient_book_id() -> String {
@@ -293,7 +309,22 @@ fn current_unix_epoch_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::transient_book_id;
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use komga_domain::discovery::MediaStatus;
+
+    use super::{
+        TransientBookAnalyzeError, TransientBookPageContent, TransientBookPageError,
+        TransientBookPort, TransientBookRecord, TransientBookScanEntry, TransientBookScanError,
+        TransientBookService, TransientBooksStore, transient_book_id,
+    };
+    use crate::operational::{
+        TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage,
+        TransientBookSeriesInference,
+    };
 
     #[test]
     fn transient_book_id_uses_kotlin_compatible_tsid_shape() {
@@ -305,5 +336,307 @@ mod tests {
             id.chars()
                 .all(|ch| "0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(ch))
         );
+    }
+
+    #[test]
+    fn page_content_accepts_typed_ready_status() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort::default()),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                TransientBookRecord {
+                    id: "book-a".to_string(),
+                    name: "Book".to_string(),
+                    path: "/tmp/book.cbz".to_string(),
+                    file_last_modified_unix_nanos: 0,
+                    size_bytes: 1,
+                    status: MediaStatus::Ready,
+                    media_type: "application/zip".to_string(),
+                    page_count: 1,
+                    pages: vec![TransientBookPage {
+                        number: 1,
+                        file_name: "page.jpg".to_string(),
+                        media_type: "image/jpeg".to_string(),
+                        width: None,
+                        height: None,
+                        size_bytes: None,
+                    }],
+                    files: Vec::new(),
+                    comment: String::new(),
+                    number: None,
+                    series_id: None,
+                },
+            )])),
+        );
+
+        let content = service
+            .page_content("book-a", 1)
+            .expect("typed ready status should allow page delivery");
+
+        assert_eq!(content.content_type, "image/jpeg");
+        assert_eq!(content.bytes, b"page".to_vec());
+    }
+
+    #[tokio::test]
+    async fn scan_returns_internal_when_listing_entries_fails() {
+        let service = TransientBookService::new(Arc::new(TestTransientBookPort {
+            scan_entries: Err("read transient directory failed".to_string()),
+            ..TestTransientBookPort::default()
+        }));
+
+        let result = service.scan("/tmp/transient-books").await;
+
+        assert_eq!(result, Err(TransientBookScanError::Internal));
+    }
+
+    #[tokio::test]
+    async fn scan_returns_internal_when_file_metadata_fails() {
+        let service = TransientBookService::new(Arc::new(TestTransientBookPort {
+            scan_entries: Ok(vec![TransientBookScanEntry {
+                path: "/tmp/transient-books/book.cbz".to_string(),
+                name: "book".to_string(),
+            }]),
+            file_metadata: Err("read transient book metadata failed".to_string()),
+            ..TestTransientBookPort::default()
+        }));
+
+        let result = service.scan("/tmp/transient-books").await;
+
+        assert_eq!(result, Err(TransientBookScanError::Internal));
+    }
+
+    #[tokio::test]
+    async fn analyze_returns_internal_when_series_inference_fails() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort {
+                series_inference: Err("transient series lookup failed".to_string()),
+                ..TestTransientBookPort::default()
+            }),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                unknown_record("book-a"),
+            )])),
+        );
+
+        let result = service.analyze("book-a").await;
+
+        assert_eq!(result, Err(TransientBookAnalyzeError::Internal));
+    }
+
+    #[tokio::test]
+    async fn analyze_returns_internal_when_media_analysis_fails() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort {
+                analysis: Err("check transient book existence failed".to_string()),
+                ..TestTransientBookPort::default()
+            }),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                unknown_record("book-a"),
+            )])),
+        );
+
+        let result = service.analyze("book-a").await;
+
+        assert_eq!(result, Err(TransientBookAnalyzeError::Internal));
+    }
+
+    #[tokio::test]
+    async fn analyze_keeps_failed_media_analysis_without_series_inference() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort {
+                analysis: Ok(TransientBookAnalysis {
+                    status: MediaStatus::Error,
+                    media_type: "application/zip".to_string(),
+                    page_count: 0,
+                    pages: Vec::new(),
+                    files: Vec::new(),
+                    comment: "ERR_1006".to_string(),
+                    number: None,
+                    series_id: None,
+                }),
+                series_inference: Err("transient series lookup failed".to_string()),
+                ..TestTransientBookPort::default()
+            }),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                unknown_record("book-a"),
+            )])),
+        );
+
+        let record = service
+            .analyze("book-a")
+            .await
+            .expect("failed media analysis should be returned as an analysis result");
+
+        assert_eq!(record.status, MediaStatus::Error);
+        assert_eq!(record.comment, "ERR_1006");
+        assert_eq!(record.series_id, None);
+        assert_eq!(record.number, None);
+    }
+
+    #[test]
+    fn page_content_returns_internal_when_existence_check_fails() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort {
+                exists: Err("check transient book existence failed".to_string()),
+                ..TestTransientBookPort::default()
+            }),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                ready_record("book-a"),
+            )])),
+        );
+
+        let result = service.page_content("book-a", 1);
+
+        assert_eq!(result, Err(TransientBookPageError::Internal));
+    }
+
+    #[test]
+    fn page_content_returns_internal_when_page_loader_fails() {
+        let service = TransientBookService::with_store(
+            Arc::new(TestTransientBookPort {
+                page_content: Err("read transient page failed".to_string()),
+                ..TestTransientBookPort::default()
+            }),
+            TransientBooksStore::with_records(HashMap::from([(
+                "book-a".to_string(),
+                ready_record("book-a"),
+            )])),
+        );
+
+        let result = service.page_content("book-a", 1);
+
+        assert_eq!(result, Err(TransientBookPageError::Internal));
+    }
+
+    #[derive(Clone)]
+    struct TestTransientBookPort {
+        analysis: Result<TransientBookAnalysis, String>,
+        scan_entries: Result<Vec<TransientBookScanEntry>, String>,
+        file_metadata: Result<TransientBookFileMetadata, String>,
+        series_inference: Result<TransientBookSeriesInference, String>,
+        exists: Result<bool, String>,
+        page_content: Result<Option<TransientBookPageContent>, String>,
+    }
+
+    impl Default for TestTransientBookPort {
+        fn default() -> Self {
+            Self {
+                analysis: Ok(TransientBookAnalysis {
+                    status: MediaStatus::Ready,
+                    media_type: "image/jpeg".to_string(),
+                    page_count: 1,
+                    pages: vec![TransientBookPage {
+                        number: 1,
+                        file_name: "page.jpg".to_string(),
+                        media_type: "image/jpeg".to_string(),
+                        width: None,
+                        height: None,
+                        size_bytes: None,
+                    }],
+                    files: Vec::new(),
+                    comment: String::new(),
+                    number: None,
+                    series_id: None,
+                }),
+                scan_entries: Ok(Vec::new()),
+                file_metadata: Ok(TransientBookFileMetadata {
+                    file_last_modified_unix_nanos: 0,
+                    size_bytes: 1,
+                }),
+                series_inference: Ok(TransientBookSeriesInference {
+                    series_id: None,
+                    number: None,
+                }),
+                exists: Ok(true),
+                page_content: Ok(Some(TransientBookPageContent {
+                    content_type: "image/jpeg".to_string(),
+                    bytes: b"page".to_vec(),
+                })),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TransientBookPort for TestTransientBookPort {
+        fn analyze_transient_book(&self, _path: &str) -> Result<TransientBookAnalysis, String> {
+            self.analysis.clone()
+        }
+
+        async fn infer_transient_series_and_number(
+            &self,
+            _transient_name: &str,
+        ) -> Result<TransientBookSeriesInference, String> {
+            self.series_inference.clone()
+        }
+
+        fn list_transient_book_entries(
+            &self,
+            _root: &Path,
+        ) -> Result<Vec<TransientBookScanEntry>, String> {
+            self.scan_entries.clone()
+        }
+
+        async fn validate_transient_scan_root(&self, _path: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn load_transient_book_file_metadata(
+            &self,
+            _path: &str,
+        ) -> Result<TransientBookFileMetadata, String> {
+            self.file_metadata.clone()
+        }
+
+        fn transient_book_exists(&self, _path: &str) -> Result<bool, String> {
+            self.exists.clone()
+        }
+
+        fn transient_book_page_content(
+            &self,
+            _path: &str,
+            _media_type: &str,
+            _pages: &[TransientBookPage],
+            _page_number: u32,
+        ) -> Result<Option<TransientBookPageContent>, String> {
+            self.page_content.clone()
+        }
+    }
+
+    fn unknown_record(id: &str) -> TransientBookRecord {
+        TransientBookRecord {
+            id: id.to_string(),
+            name: "Book".to_string(),
+            path: "/tmp/book.cbz".to_string(),
+            file_last_modified_unix_nanos: 0,
+            size_bytes: 1,
+            status: MediaStatus::Unknown,
+            media_type: String::new(),
+            page_count: 0,
+            pages: Vec::new(),
+            files: Vec::new(),
+            comment: String::new(),
+            number: None,
+            series_id: None,
+        }
+    }
+
+    fn ready_record(id: &str) -> TransientBookRecord {
+        TransientBookRecord {
+            status: MediaStatus::Ready,
+            media_type: "image/jpeg".to_string(),
+            page_count: 1,
+            pages: vec![TransientBookPage {
+                number: 1,
+                file_name: "page.jpg".to_string(),
+                media_type: "image/jpeg".to_string(),
+                width: None,
+                height: None,
+                size_bytes: None,
+            }],
+            ..unknown_record(id)
+        }
     }
 }

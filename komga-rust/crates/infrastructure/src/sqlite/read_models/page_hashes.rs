@@ -1,29 +1,33 @@
 use std::collections::BTreeMap;
 
-use komga_application::media_assets::{PageHashDeleteTarget, PageHashDeleteTargetPage};
 use komga_application::operational::{
-    PageHashAction, PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry,
+    PageHashAction, PageHashDeleteTarget, PageHashDeleteTargetPage, PageHashKnownEntry,
+    PageHashKnownQuery, PageHashKnownSortProperty, PageHashMatchEntry, PageHashMatchSortProperty,
     PageHashMatchesQuery, PageHashPage, PageHashSort, PageHashSortDirection, PageHashUnknownEntry,
-    PageHashUnknownQuery,
+    PageHashUnknownQuery, PageHashUnknownSortProperty,
 };
 use reqwest::Url;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
+use super::super::page_hash_action::{
+    parse_persisted_page_hash_action, persisted_page_hash_action,
+};
+
 #[derive(Clone, Debug)]
-pub struct PageHashUnknownSource {
-    pub library_root: String,
-    pub book_url: String,
-    pub file_name: String,
-    pub media_type: String,
+pub(crate) struct PageHashUnknownSource {
+    pub(crate) library_root: String,
+    pub(crate) book_url: String,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct PageHashUnknownMatchTarget {
-    pub book_id: String,
-    pub page_number: u64,
+pub(crate) struct PageHashUnknownMatchTarget {
+    pub(crate) book_id: String,
+    pub(crate) page_number: u64,
 }
 
-pub async fn load_page_hashes_page(
+pub(crate) async fn load_page_hashes_page(
     pool: &SqlitePool,
     request: PageHashKnownQuery,
 ) -> Result<PageHashPage<PageHashKnownEntry>, sqlx::Error> {
@@ -82,7 +86,7 @@ pub async fn load_page_hashes_page(
             Ok(PageHashKnownEntry {
                 hash: row.get::<String, _>("HASH"),
                 size: row.get::<Option<i64>, _>("SIZE"),
-                action: PageHashAction::parse(raw_action.as_str()).ok_or_else(|| {
+                action: parse_persisted_page_hash_action(raw_action.as_str()).ok_or_else(|| {
                     sqlx::Error::Protocol(format!("unsupported page hash action: {raw_action}"))
                 })?,
                 delete_count: row.get::<i64, _>("DELETE_COUNT"),
@@ -104,7 +108,7 @@ pub async fn load_page_hashes_page(
     ))
 }
 
-pub async fn load_page_hashes_unknown_page(
+pub(crate) async fn load_page_hashes_unknown_page(
     pool: &SqlitePool,
     request: PageHashUnknownQuery,
 ) -> Result<PageHashPage<PageHashUnknownEntry>, sqlx::Error> {
@@ -165,7 +169,7 @@ pub async fn load_page_hashes_unknown_page(
     ))
 }
 
-pub async fn load_page_hash_matches_page(
+pub(crate) async fn load_page_hash_matches_page(
     pool: &SqlitePool,
     request: PageHashMatchesQuery,
 ) -> Result<PageHashPage<PageHashMatchEntry>, sqlx::Error> {
@@ -233,7 +237,7 @@ pub async fn load_page_hash_matches_page(
     ))
 }
 
-pub async fn load_page_hash_thumbnail(
+pub(crate) async fn load_page_hash_thumbnail(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<Vec<u8>>, sqlx::Error> {
@@ -249,7 +253,7 @@ pub async fn load_page_hash_thumbnail(
     Ok(thumbnail)
 }
 
-pub async fn load_page_hash_delete_targets(
+pub(crate) async fn load_page_hash_delete_targets(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Vec<PageHashDeleteTarget>, sqlx::Error> {
@@ -290,7 +294,7 @@ pub async fn load_page_hash_delete_targets(
         .collect())
 }
 
-pub async fn load_unknown_page_hash_match_target(
+pub(crate) async fn load_unknown_page_hash_match_target(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<PageHashUnknownMatchTarget>, sqlx::Error> {
@@ -307,11 +311,11 @@ pub async fn load_unknown_page_hash_match_target(
 
     Ok(row.map(|row| PageHashUnknownMatchTarget {
         book_id: row.get::<String, _>("BOOK_ID"),
-        page_number: row.get::<i64, _>("NUMBER").max(0) as u64 + 1,
+        page_number: row.get::<i64, _>("NUMBER") as u64 + 1,
     }))
 }
 
-pub async fn load_unknown_page_hash_source(
+pub(crate) async fn load_unknown_page_hash_source(
     pool: &SqlitePool,
     page_hash: &str,
 ) -> Result<Option<PageHashUnknownSource>, sqlx::Error> {
@@ -353,69 +357,86 @@ fn push_known_page_hash_action_filter(
     query.push(r#" WHERE ph.ACTION IN ("#);
     let mut separated = query.separated(", ");
     for action in actions {
-        separated.push_bind(action.as_str());
+        separated.push_bind(persisted_page_hash_action(*action));
     }
     separated.push_unseparated(r#")"#);
 }
 
-fn known_page_hash_order_by(sorts: &[PageHashSort]) -> Vec<String> {
+fn known_page_hash_order_by(sorts: &[PageHashSort<PageHashKnownSortProperty>]) -> Vec<String> {
     sorts
         .iter()
-        .filter_map(|sort| {
-            let column = match sort.property.as_str() {
-                "hash" => "ph.HASH",
-                "matchCount" => "MATCH_COUNT",
-                "deleteCount" => "ph.DELETE_COUNT",
-                "deleteSize" => "ph.SIZE * ph.DELETE_COUNT",
-                "fileSize" => "ph.SIZE",
-                "createdDate" => "ph.CREATED_DATE",
-                "lastModifiedDate" => "ph.LAST_MODIFIED_DATE",
-                _ => return None,
+        .map(|sort| {
+            let column = match sort.property {
+                PageHashKnownSortProperty::Hash => "ph.HASH",
+                PageHashKnownSortProperty::MatchCount => "MATCH_COUNT",
+                PageHashKnownSortProperty::DeleteCount => "ph.DELETE_COUNT",
+                PageHashKnownSortProperty::DeleteSize => "ph.SIZE * ph.DELETE_COUNT",
+                PageHashKnownSortProperty::FileSize => "ph.SIZE",
+                PageHashKnownSortProperty::CreatedDate => "ph.CREATED_DATE",
+                PageHashKnownSortProperty::LastModifiedDate => "ph.LAST_MODIFIED_DATE",
             };
-            Some(format!("{column} {}", sort_direction_sql(sort.direction)))
+            format!("{column} {}", sort_direction_sql(sort.direction))
         })
         .collect()
 }
 
-fn unknown_page_hash_order_by(sorts: &[PageHashSort]) -> Vec<String> {
+fn unknown_page_hash_order_by(sorts: &[PageHashSort<PageHashUnknownSortProperty>]) -> Vec<String> {
     sorts
         .iter()
-        .filter_map(|sort| {
-            let column = match sort.property.as_str() {
-                "hash" => "HASH",
-                "fileSize" => "SIZE",
-                "matchCount" => "MATCH_COUNT",
-                "totalSize" => "TOTAL_SIZE",
-                "url" => "b.URL",
-                "bookId" => "mp.BOOK_ID",
-                "pageNumber" => "mp.NUMBER",
-                _ => return None,
+        .map(|sort| {
+            let column = match sort.property {
+                PageHashUnknownSortProperty::Hash => "HASH",
+                PageHashUnknownSortProperty::FileSize => "SIZE",
+                PageHashUnknownSortProperty::MatchCount => "MATCH_COUNT",
+                PageHashUnknownSortProperty::TotalSize => "TOTAL_SIZE",
+                PageHashUnknownSortProperty::Url => "b.URL",
+                PageHashUnknownSortProperty::BookId => "mp.BOOK_ID",
+                PageHashUnknownSortProperty::PageNumber => "mp.NUMBER",
             };
-            Some(format!("{column} {}", sort_direction_sql(sort.direction)))
+            format!("{column} {}", sort_direction_sql(sort.direction))
         })
         .collect()
 }
 
-fn page_hash_match_order_by(sorts: &[PageHashSort]) -> Result<Vec<String>, sqlx::Error> {
+fn page_hash_match_order_by(
+    sorts: &[PageHashSort<PageHashMatchSortProperty>],
+) -> Result<Vec<String>, sqlx::Error> {
     let mut order_by = Vec::new();
     for sort in sorts {
-        let property = sort.property.as_str();
-        if matches!(property, "matchCount" | "totalSize") {
+        if matches!(
+            sort.property,
+            PageHashMatchSortProperty::MatchCount | PageHashMatchSortProperty::TotalSize
+        ) {
             return Err(sqlx::Error::Protocol(format!(
-                "page hash match sort key is unsupported by Kotlin baseline: {property}",
+                "page hash match sort key is unsupported by Kotlin baseline: {}",
+                page_hash_match_sort_key(sort.property),
             )));
         }
-        let column = match property {
-            "hash" => "mp.FILE_HASH",
-            "fileSize" => "mp.FILE_SIZE",
-            "url" => "b.URL",
-            "bookId" => "mp.BOOK_ID",
-            "pageNumber" => "mp.NUMBER",
-            _ => continue,
+        let column = match sort.property {
+            PageHashMatchSortProperty::Hash => "mp.FILE_HASH",
+            PageHashMatchSortProperty::FileSize => "mp.FILE_SIZE",
+            PageHashMatchSortProperty::Url => "b.URL",
+            PageHashMatchSortProperty::BookId => "mp.BOOK_ID",
+            PageHashMatchSortProperty::PageNumber => "mp.NUMBER",
+            PageHashMatchSortProperty::MatchCount | PageHashMatchSortProperty::TotalSize => {
+                unreachable!("aggregate sort keys return before SQL mapping")
+            }
         };
         order_by.push(format!("{column} {}", sort_direction_sql(sort.direction)));
     }
     Ok(order_by)
+}
+
+fn page_hash_match_sort_key(property: PageHashMatchSortProperty) -> &'static str {
+    match property {
+        PageHashMatchSortProperty::Hash => "hash",
+        PageHashMatchSortProperty::FileSize => "fileSize",
+        PageHashMatchSortProperty::Url => "url",
+        PageHashMatchSortProperty::BookId => "bookId",
+        PageHashMatchSortProperty::PageNumber => "pageNumber",
+        PageHashMatchSortProperty::MatchCount => "matchCount",
+        PageHashMatchSortProperty::TotalSize => "totalSize",
+    }
 }
 
 fn sort_direction_sql(direction: PageHashSortDirection) -> &'static str {

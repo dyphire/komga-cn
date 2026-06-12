@@ -1,3 +1,4 @@
+use super::support::connect_test_pool;
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password, verify as verify_bcrypt_password};
 use sqlx::Row;
 use std::fs;
@@ -6,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_infrastructure::sqlite::write_models::bootstrap_users::{
-    InitialBootstrapUserWriteModel, persist_initial_bootstrap_users,
+use komga_infrastructure::{
+    InitialBootstrapUserWriteModel, bootstrap_pool, bootstrap_tasks_pool,
+    persist_initial_bootstrap_users,
 };
 
 fn run_cli(args: &[&str]) -> std::process::Output {
@@ -47,17 +49,17 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
         let database_file = config_dir.join("database.sqlite");
         let tasks_db_file = config_dir.join("tasks.sqlite");
 
-        let main_pool = komga_infrastructure::sqlite::connect_test_pool(&database_file, 1)
+        let main_pool = connect_test_pool(&database_file, 1)
             .await
             .expect("CLI action main pool should open");
-        komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool)
+        bootstrap_pool(&main_pool)
             .await
             .expect("CLI action main schema should bootstrap");
 
-        let tasks_pool = komga_infrastructure::sqlite::connect_test_pool(&tasks_db_file, 1)
+        let tasks_pool = connect_test_pool(&tasks_db_file, 1)
             .await
             .expect("CLI action tasks pool should open");
-        komga_infrastructure::sqlite::setup::bootstrap_tasks_pool(&tasks_pool)
+        bootstrap_tasks_pool(&tasks_pool)
             .await
             .expect("CLI action tasks schema should bootstrap");
         tasks_pool.close().await;
@@ -88,7 +90,7 @@ fn prepare_action_fixture_with_users(config_dir: &Path, users: &[(&str, &str)]) 
 fn load_password_hash(config_dir: &Path, email: &str) -> String {
     run_async(async {
         let database_file = config_dir.join("database.sqlite");
-        let pool = komga_infrastructure::sqlite::connect_test_pool(&database_file, 1)
+        let pool = connect_test_pool(&database_file, 1)
             .await
             .expect("password verification pool should open");
         let password = sqlx::query("SELECT PASSWORD FROM USER WHERE EMAIL = ? LIMIT 1")

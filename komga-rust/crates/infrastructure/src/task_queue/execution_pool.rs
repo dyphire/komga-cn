@@ -46,19 +46,19 @@ struct TaskExecutionPoolInner {
 }
 
 #[derive(Clone)]
-pub struct TaskExecutionPoolHandle {
+pub(super) struct TaskExecutionPoolHandle {
     inner: Arc<TaskExecutionPoolInner>,
 }
 
 impl TaskExecutionPoolHandle {
-    pub fn new(task_pool_size: usize) -> Self {
+    pub(super) fn new(task_pool_size: usize) -> Self {
         Self::new_with_executor(
             task_pool_size,
             Arc::new(|runtime, task| {
                 Box::pin(async move {
                     let job = runtime.job();
-                    super::task_job_pipeline::TaskJobPipeline::new(job)
-                        .execute(&task)
+                    super::task_job_dispatch::TaskJobDispatcher::new(job)
+                        .execute_record(&task)
                         .await
                 })
             }),
@@ -66,7 +66,7 @@ impl TaskExecutionPoolHandle {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_for_test<F, Fut>(task_pool_size: usize, execute_task: F) -> Self
+    pub(super) fn new_for_test<F, Fut>(task_pool_size: usize, execute_task: F) -> Self
     where
         F: Fn(TaskRuntimeContext, TaskQueueRecord) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<TaskExecutionOutcome, TaskProcessingError>> + Send + 'static,
@@ -96,11 +96,11 @@ impl TaskExecutionPoolHandle {
         Self { inner }
     }
 
-    pub fn desired_size(&self) -> usize {
+    pub(super) fn desired_size(&self) -> usize {
         self.inner.desired_size.load(Ordering::SeqCst)
     }
 
-    pub fn resize(&self, task_pool_size: usize) {
+    pub(super) fn resize(&self, task_pool_size: usize) {
         let next_size = task_pool_size.max(1);
         let previous_size = self.inner.desired_size.swap(next_size, Ordering::SeqCst);
         if next_size > previous_size {
@@ -113,7 +113,7 @@ impl TaskExecutionPoolHandle {
         }
     }
 
-    pub(crate) fn submit(
+    pub(super) fn submit(
         &self,
         task: TaskQueueRecord,
         runtime: TaskRuntimeContext,
@@ -127,7 +127,7 @@ impl TaskExecutionPoolHandle {
             .map_err(|_| "task execution pool job channel closed".to_string())
     }
 
-    pub(crate) fn take_result_receiver(
+    pub(super) fn take_result_receiver(
         &self,
     ) -> Option<mpsc::UnboundedReceiver<TaskExecutionResult>> {
         self.inner

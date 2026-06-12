@@ -1,8 +1,6 @@
-use komga_domain::discovery::{
-    AgeRestrictionKind, QueryRestrictions, content_allowed_by_restrictions,
-};
+use komga_domain::discovery::content_allowed_by_restrictions;
 
-use super::super::user_models::{AuthUser, user_is_admin};
+use super::super::user_models::{AuthUser, user_is_admin, user_query_restrictions};
 
 pub struct KoboSyncAccessPolicy<'a> {
     user: &'a AuthUser,
@@ -16,12 +14,12 @@ impl<'a> KoboSyncAccessPolicy<'a> {
     pub fn can_access_book(
         &self,
         library_id: &str,
-        age_rating: Option<u16>,
+        age_rating: Option<u32>,
         sharing_labels: &[String],
     ) -> bool {
         self.can_access_library(library_id)
             && content_allowed_by_restrictions(
-                &query_restrictions(self.user),
+                &user_query_restrictions(self.user),
                 age_rating,
                 sharing_labels,
             )
@@ -36,33 +34,4 @@ impl<'a> KoboSyncAccessPolicy<'a> {
                 .iter()
                 .any(|shared_library_id| shared_library_id == library_id)
     }
-}
-
-fn query_restrictions(user: &AuthUser) -> QueryRestrictions {
-    QueryRestrictions {
-        age: user
-            .age_restriction
-            .as_ref()
-            .and_then(|restriction| u16::try_from(restriction.age).ok()),
-        age_restriction: user.age_restriction.as_ref().and_then(|restriction| {
-            match restriction.restriction.as_str() {
-                value if value.eq_ignore_ascii_case("ALLOW_ONLY") => {
-                    Some(AgeRestrictionKind::AllowOnly)
-                }
-                value if value.eq_ignore_ascii_case("EXCLUDE") => Some(AgeRestrictionKind::Exclude),
-                _ => None,
-            }
-        }),
-        labels_allow: normalized_user_labels(&user.labels_allow),
-        labels_exclude: normalized_user_labels(&user.labels_exclude),
-    }
-}
-
-fn normalized_user_labels(labels: &[String]) -> Vec<String> {
-    labels
-        .iter()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect()
 }

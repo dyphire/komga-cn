@@ -1,10 +1,9 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::random_tokens::random_hex_token;
 use crate::task_processing::TaskQueueAdmin;
 
-use super::ServerSettingsPort;
+use super::{ServerSettingChange, ServerSettingsPort};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedServerSettings {
@@ -12,7 +11,7 @@ pub struct PersistedServerSettings {
     pub delete_empty_read_lists: bool,
     pub remember_me_key: String,
     pub remember_me_duration_days: u64,
-    pub thumbnail_size: &'static str,
+    pub thumbnail_size: ThumbnailSize,
     pub task_pool_size: u64,
     pub server_port: Option<u16>,
     pub server_context_path: Option<String>,
@@ -26,7 +25,7 @@ pub struct ServerSettingsUpdateCommand {
     pub delete_empty_read_lists: Option<bool>,
     pub remember_me_duration_days: Option<u64>,
     pub renew_remember_me_key: Option<bool>,
-    pub thumbnail_size: Option<String>,
+    pub thumbnail_size: Option<ThumbnailSize>,
     pub task_pool_size: Option<u64>,
     pub server_port: ServerSettingPatch<u64>,
     pub server_context_path: ServerSettingPatch<String>,
@@ -40,6 +39,45 @@ pub enum ServerSettingPatch<T> {
     Unchanged,
     Clear,
     Set(T),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ThumbnailSize {
+    #[default]
+    Default,
+    Medium,
+    Large,
+    XLarge,
+}
+
+impl ThumbnailSize {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "DEFAULT" => Some(Self::Default),
+            "MEDIUM" => Some(Self::Medium),
+            "LARGE" => Some(Self::Large),
+            "XLARGE" => Some(Self::XLarge),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "DEFAULT",
+            Self::Medium => "MEDIUM",
+            Self::Large => "LARGE",
+            Self::XLarge => "XLARGE",
+        }
+    }
+
+    pub fn max_edge(self) -> u32 {
+        match self {
+            Self::Default => 300,
+            Self::Medium => 600,
+            Self::Large => 900,
+            Self::XLarge => 1200,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -85,22 +123,22 @@ impl ServerSettingsService {
             .load_settings()
             .await
             .map_err(ServerSettingsUpdateError::Load)?;
-        let mut persistence_changes: Vec<(String, Option<String>)> = Vec::new();
+        let mut persistence_changes = Vec::<ServerSettingChange>::new();
         let mut task_pool_size_change: Option<u64> = None;
 
         if let Some(value) = command.delete_empty_collections {
             settings.delete_empty_collections = value;
-            persistence_changes.push((
-                "DELETE_EMPTY_COLLECTIONS".to_string(),
-                Some(value.to_string()),
+            persistence_changes.push(ServerSettingChange::set(
+                "DELETE_EMPTY_COLLECTIONS",
+                value.to_string(),
             ));
         }
 
         if let Some(value) = command.delete_empty_read_lists {
             settings.delete_empty_read_lists = value;
-            persistence_changes.push((
-                "DELETE_EMPTY_READLISTS".to_string(),
-                Some(value.to_string()),
+            persistence_changes.push(ServerSettingChange::set(
+                "DELETE_EMPTY_READLISTS",
+                value.to_string(),
             ));
         }
 
@@ -109,31 +147,25 @@ impl ServerSettingsService {
                 return invalid_payload("rememberMeDurationDays must be greater than 0");
             }
             settings.remember_me_duration_days = value;
-            persistence_changes.push(("REMEMBER_ME_DURATION".to_string(), Some(value.to_string())));
+            persistence_changes.push(ServerSettingChange::set(
+                "REMEMBER_ME_DURATION",
+                value.to_string(),
+            ));
         }
 
         if command.renew_remember_me_key == Some(true) {
             settings.remember_me_key = generate_remember_me_key();
-            persistence_changes.push((
-                "REMEMBER_ME_KEY".to_string(),
-                Some(settings.remember_me_key.clone()),
+            persistence_changes.push(ServerSettingChange::set(
+                "REMEMBER_ME_KEY",
+                settings.remember_me_key.clone(),
             ));
         }
 
         if let Some(value) = command.thumbnail_size {
-            if !matches!(value.as_str(), "DEFAULT" | "MEDIUM" | "LARGE" | "XLARGE") {
-                return invalid_payload("thumbnailSize is invalid");
-            }
-            settings.thumbnail_size = match value.as_str() {
-                "DEFAULT" => "DEFAULT",
-                "MEDIUM" => "MEDIUM",
-                "LARGE" => "LARGE",
-                "XLARGE" => "XLARGE",
-                _ => unreachable!(),
-            };
-            persistence_changes.push((
-                "THUMBNAIL_SIZE".to_string(),
-                Some(settings.thumbnail_size.to_string()),
+            settings.thumbnail_size = value;
+            persistence_changes.push(ServerSettingChange::set(
+                "THUMBNAIL_SIZE",
+                settings.thumbnail_size.as_str().to_string(),
             ));
         }
 
@@ -143,7 +175,10 @@ impl ServerSettingsService {
             }
             settings.task_pool_size = value;
             task_pool_size_change = Some(value);
-            persistence_changes.push(("TASK_POOL_SIZE".to_string(), Some(value.to_string())));
+            persistence_changes.push(ServerSettingChange::set(
+                "TASK_POOL_SIZE",
+                value.to_string(),
+            ));
         }
 
         match command.server_port {
@@ -161,8 +196,8 @@ impl ServerSettingsService {
                         settings.server_port = Some(value as u16);
                     }
                 }
-                persistence_changes.push((
-                    "SERVER_PORT".to_string(),
+                persistence_changes.push(server_setting_change(
+                    "SERVER_PORT",
                     settings.server_port.map(|value| value.to_string()),
                 ));
             }
@@ -175,14 +210,14 @@ impl ServerSettingsService {
                     ServerSettingPatch::Unchanged => {}
                     ServerSettingPatch::Clear => settings.server_context_path = None,
                     ServerSettingPatch::Set(value) => {
-                        if !is_valid_context_path(&value) {
+                        if !is_valid_server_context_path(&value) {
                             return invalid_payload("serverContextPath is invalid");
                         }
                         settings.server_context_path = Some(value);
                     }
                 }
-                persistence_changes.push((
-                    "SERVER_CONTEXT_PATH".to_string(),
+                persistence_changes.push(server_setting_change(
+                    "SERVER_CONTEXT_PATH",
                     settings.server_context_path.clone(),
                 ));
             }
@@ -190,7 +225,7 @@ impl ServerSettingsService {
 
         if let Some(value) = command.kobo_proxy {
             settings.kobo_proxy = value;
-            persistence_changes.push(("KOBO_PROXY".to_string(), Some(value.to_string())));
+            persistence_changes.push(ServerSettingChange::set("KOBO_PROXY", value.to_string()));
         }
 
         match command.kobo_port {
@@ -208,8 +243,8 @@ impl ServerSettingsService {
                         settings.kobo_port = Some(value as u16);
                     }
                 }
-                persistence_changes.push((
-                    "KOBO_PORT".to_string(),
+                persistence_changes.push(server_setting_change(
+                    "KOBO_PORT",
                     settings.kobo_port.map(|value| value.to_string()),
                 ));
             }
@@ -231,6 +266,13 @@ impl ServerSettingsService {
     }
 }
 
+fn server_setting_change(key: &str, value: Option<String>) -> ServerSettingChange {
+    match value {
+        Some(value) => ServerSettingChange::set(key, value),
+        None => ServerSettingChange::delete(key),
+    }
+}
+
 fn invalid_payload<T>(message: &str) -> Result<T, ServerSettingsUpdateError> {
     Err(ServerSettingsUpdateError::InvalidPayload(
         message.to_string(),
@@ -238,17 +280,10 @@ fn invalid_payload<T>(message: &str) -> Result<T, ServerSettingsUpdateError> {
 }
 
 fn generate_remember_me_key() -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(1);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let raw = format!("{nanos:032x}{sequence:016x}");
-    raw.chars().take(32).collect()
+    random_hex_token(32)
 }
 
-fn is_valid_context_path(value: &str) -> bool {
+pub fn is_valid_server_context_path(value: &str) -> bool {
     if value.is_empty() || !value.starts_with('/') || value.ends_with('/') {
         return false;
     }
@@ -263,4 +298,31 @@ fn is_valid_context_path(value: &str) -> bool {
     value
         .chars()
         .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thumbnail_size_is_a_typed_setting_value() {
+        assert_eq!(
+            ThumbnailSize::parse("DEFAULT"),
+            Some(ThumbnailSize::Default)
+        );
+        assert_eq!(ThumbnailSize::parse("MEDIUM"), Some(ThumbnailSize::Medium));
+        assert_eq!(ThumbnailSize::parse("LARGE"), Some(ThumbnailSize::Large));
+        assert_eq!(ThumbnailSize::parse("XLARGE"), Some(ThumbnailSize::XLarge));
+        assert_eq!(ThumbnailSize::parse("small"), None);
+        assert_eq!(ThumbnailSize::XLarge.as_str(), "XLARGE");
+        assert_eq!(ThumbnailSize::XLarge.max_edge(), 1200);
+    }
+
+    #[test]
+    fn generated_remember_me_key_uses_32_bytes_of_hex_entropy() {
+        let key = generate_remember_me_key();
+
+        assert_eq!(key.len(), 64);
+        assert!(key.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
 }

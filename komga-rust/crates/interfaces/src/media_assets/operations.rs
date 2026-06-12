@@ -1,55 +1,76 @@
-use super::*;
 use crate::identity_access::auth::Admin;
 use crate::state::MediaAssetsState;
-use axum::extract::State;
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use komga_application::discovery::resolve_persisted_series_id;
 use komga_application::media_assets::{
-    BookMetadataAuthor as ApplicationBookMetadataAuthor,
-    BookMetadataLink as ApplicationBookMetadataLink,
-    BookMetadataPatch as ApplicationBookMetadataPatch, MetadataUpdateResult,
+    BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataUpdate,
+    BookMetadataUpdateError, MetadataUpdateResult,
 };
-use komga_domain::validation::is_valid_isbn13;
+use komga_application::task_processing::{
+    TaskKind, TaskQueueAdmin, TaskRequest, book_analyze_task_record,
+    book_metadata_refresh_task_records, series_analyze_task_records,
+    series_metadata_refresh_task_records,
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::enqueue_task_records;
+use super::http_helpers::internal_error_response;
 
 #[derive(Deserialize)]
-pub struct BooksThumbnailsRegenerateQuery {
+pub(crate) struct BooksThumbnailsRegenerateQuery {
     #[serde(default)]
-    pub for_bigger_result_only: bool,
+    pub(crate) for_bigger_result_only: bool,
 }
 
-pub async fn book_analyze(
+pub(crate) async fn book_analyze(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    match komga_application::media_assets::operations::derive_book_analyze_tasks(
-        app.book_detail.as_ref(),
-        &book_id,
-    )
-    .await
+    match app
+        .book_detail
+        .load_persisted_book_detail(&book_id, None)
+        .await
     {
-        Ok(Some(records)) => enqueue_task_records(&app, records).await,
+        Ok(Some(book)) => {
+            enqueue_task_records(
+                app.task_queue.queue.as_ref(),
+                vec![book_analyze_task_record(&book_id, &book.series_id)],
+            )
+            .await
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
-pub async fn book_metadata_refresh(
+pub(crate) async fn book_metadata_refresh(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    match komga_application::media_assets::operations::derive_book_metadata_refresh_tasks(
-        app.book_detail.as_ref(),
-        &book_id,
-    )
-    .await
+    match app
+        .book_detail
+        .load_persisted_book_detail(&book_id, None)
+        .await
     {
-        Ok(Some(records)) => enqueue_task_records(&app, records).await,
+        Ok(Some(book)) => {
+            enqueue_task_records(
+                app.task_queue.queue.as_ref(),
+                book_metadata_refresh_task_records(&book_id, &book.series_id),
+            )
+            .await
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
-pub async fn book_metadata_update(
+pub(crate) async fn book_metadata_update(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(book_id): Path<String>,
@@ -76,11 +97,11 @@ pub async fn book_metadata_update(
     match app.metadata.update_book(&book_id, &patch).await {
         Ok(MetadataUpdateResult::Updated) => StatusCode::NO_CONTENT.into_response(),
         Ok(MetadataUpdateResult::NotFound) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => metadata_update_error_response(error),
     }
 }
 
-pub async fn book_metadata_batch_update(
+pub(crate) async fn book_metadata_batch_update(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Json(body): Json<Value>,
@@ -126,24 +147,36 @@ pub async fn book_metadata_batch_update(
             }
         };
 
-        updates.push((book_id.clone(), patch));
+        updates.push(BookMetadataUpdate {
+            book_id: book_id.clone(),
+            patch,
+        });
     }
 
     match app.metadata.update_books_batch(updates).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(error) => metadata_update_error_response(error),
+    }
+}
+
+fn metadata_update_error_response(error: BookMetadataUpdateError) -> Response {
+    match error {
+        BookMetadataUpdateError::Validation(error) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
+        }
+        BookMetadataUpdateError::Persistence(error) => internal_error_response(error),
     }
 }
 
 fn parse_book_metadata_patch(
     patch: &serde_json::Map<String, Value>,
-) -> Result<ApplicationBookMetadataPatch, String> {
-    Ok(ApplicationBookMetadataPatch {
-        title: optional_non_blank_string(patch, "title")?,
+) -> Result<BookMetadataPatch, String> {
+    Ok(BookMetadataPatch {
+        title: optional_string(patch, "title")?,
         title_lock: optional_bool(patch, "titleLock")?,
         summary: optional_nullable_string(patch, "summary")?,
         summary_lock: optional_bool(patch, "summaryLock")?,
-        number: optional_non_blank_string(patch, "number")?,
+        number: optional_string(patch, "number")?,
         number_lock: optional_bool(patch, "numberLock")?,
         number_sort: optional_f64(patch, "numberSort")?,
         number_sort_lock: optional_bool(patch, "numberSortLock")?,
@@ -153,7 +186,7 @@ fn parse_book_metadata_patch(
         authors_lock: optional_bool(patch, "authorsLock")?,
         tags: optional_string_vec(patch, "tags")?,
         tags_lock: optional_bool(patch, "tagsLock")?,
-        isbn: optional_nullable_isbn(patch, "isbn")?,
+        isbn: optional_nullable_string(patch, "isbn")?,
         isbn_lock: optional_bool(patch, "isbnLock")?,
         links: optional_links(patch, "links")?,
         links_lock: optional_bool(patch, "linksLock")?,
@@ -185,21 +218,16 @@ fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> Result<Opt
     }
 }
 
-fn optional_non_blank_string(
+fn optional_string(
     patch: &serde_json::Map<String, Value>,
     key: &str,
 ) -> Result<Option<String>, String> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
-        Some(value) => {
-            let value = value
-                .as_str()
-                .ok_or_else(|| format!("{key} must be a string or null"))?;
-            if value.trim().is_empty() {
-                return Err(format!("{key} must not be blank"));
-            }
-            Ok(Some(value.to_string()))
-        }
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.to_string()))
+            .ok_or_else(|| format!("{key} must be a string or null")),
         None => Ok(None),
     }
 }
@@ -214,25 +242,6 @@ fn optional_nullable_string(
             .as_str()
             .map(|value| Some(Some(value.to_string())))
             .ok_or_else(|| format!("{key} must be a string or null")),
-        None => Ok(None),
-    }
-}
-
-fn optional_nullable_isbn(
-    patch: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<Option<Option<String>>, String> {
-    match patch.get(key) {
-        Some(value) if value.is_null() => Ok(Some(None)),
-        Some(value) => {
-            let value = value
-                .as_str()
-                .ok_or_else(|| format!("{key} must be a string or null"))?;
-            if !value.trim().is_empty() && !is_valid_isbn13(value) {
-                return Err(format!("{key} must be null, blank, or a valid ISBN-13"));
-            }
-            Ok(Some(Some(value.to_string())))
-        }
         None => Ok(None),
     }
 }
@@ -262,7 +271,7 @@ fn optional_string_vec(
 fn optional_authors(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<ApplicationBookMetadataAuthor>>, String> {
+) -> Result<Option<Vec<BookMetadataAuthor>>, String> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(Vec::new())),
         Some(value) => value
@@ -276,15 +285,12 @@ fn optional_authors(
                 let name = entry
                     .get("name")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "author.name must be a non-empty string".to_string())?;
+                    .ok_or_else(|| "author.name must be a string".to_string())?;
                 let role = entry
                     .get("role")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "author.role must be a non-empty string".to_string())?;
-                if name.trim().is_empty() || role.trim().is_empty() {
-                    return Err("author name/role must not be blank".to_string());
-                }
-                Ok(ApplicationBookMetadataAuthor {
+                    .ok_or_else(|| "author.role must be a string".to_string())?;
+                Ok(BookMetadataAuthor {
                     name: name.to_string(),
                     role: role.to_string(),
                 })
@@ -298,7 +304,7 @@ fn optional_authors(
 fn optional_links(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<ApplicationBookMetadataLink>>, String> {
+) -> Result<Option<Vec<BookMetadataLink>>, String> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(Vec::new())),
         Some(value) => value
@@ -317,13 +323,7 @@ fn optional_links(
                     .get("url")
                     .and_then(Value::as_str)
                     .ok_or_else(|| "links.url must be a string".to_string())?;
-                if label.trim().is_empty() {
-                    return Err("links.label must not be blank".to_string());
-                }
-                if url.trim().is_empty() || reqwest::Url::parse(url).is_err() {
-                    return Err("links.url must be a valid URL".to_string());
-                }
-                Ok(ApplicationBookMetadataLink {
+                Ok(BookMetadataLink {
                     label: label.to_string(),
                     url: url.to_string(),
                 })
@@ -334,13 +334,13 @@ fn optional_links(
     }
 }
 
-pub async fn books_thumbnails_regenerate(
+pub(crate) async fn books_thumbnails_regenerate(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Query(query): Query<BooksThumbnailsRegenerateQuery>,
 ) -> Response {
     enqueue_task_records(
-        &app,
+        app.task_queue.queue.as_ref(),
         vec![
             TaskRequest::new(TaskKind::FindBookThumbnailsToRegenerate)
                 .into_queue_record()
@@ -355,64 +355,83 @@ pub async fn books_thumbnails_regenerate(
     .await
 }
 
-pub async fn series_file_delete(
+pub(crate) async fn series_file_delete(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(series_id): Path<String>,
 ) -> Response {
-    enqueue_delete_media_task(&app, TaskKind::DeleteSeries, &series_id, 8).await
-}
-
-pub async fn series_analyze(
-    State(app): State<MediaAssetsState>,
-    _: Admin,
-    Path(series_id): Path<String>,
-) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-
-    match komga_application::media_assets::operations::derive_series_analyze_tasks(
-        app.reader.as_ref(),
-        &resolved_series_id,
-    )
-    .await
-    {
-        Ok(records) => enqueue_task_records(&app, records).await,
-        Err(error) => internal_error_response(error),
-    }
-}
-
-pub async fn series_metadata_refresh(
-    State(app): State<MediaAssetsState>,
-    _: Admin,
-    Path(series_id): Path<String>,
-) -> Response {
-    match komga_application::media_assets::operations::derive_series_metadata_refresh_tasks(
-        app.reader.as_ref(),
+    enqueue_delete_media_task(
+        app.task_queue.queue.as_ref(),
+        TaskKind::DeleteSeries,
         &series_id,
+        8,
     )
     .await
+}
+
+pub(crate) async fn series_analyze(
+    State(app): State<MediaAssetsState>,
+    _: Admin,
+    Path(series_id): Path<String>,
+) -> Response {
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+
+    match app
+        .series_relation
+        .series_book_ids(&resolved_series_id)
+        .await
     {
-        Ok(records) => enqueue_task_records(&app, records).await,
+        Ok(book_ids) => {
+            enqueue_task_records(
+                app.task_queue.queue.as_ref(),
+                series_analyze_task_records(book_ids, &resolved_series_id),
+            )
+            .await
+        }
         Err(error) => internal_error_response(error),
     }
 }
 
-pub async fn book_file_delete(
+pub(crate) async fn series_metadata_refresh(
+    State(app): State<MediaAssetsState>,
+    _: Admin,
+    Path(series_id): Path<String>,
+) -> Response {
+    match app.series_relation.series_book_ids(&series_id).await {
+        Ok(book_ids) => {
+            enqueue_task_records(
+                app.task_queue.queue.as_ref(),
+                series_metadata_refresh_task_records(book_ids, &series_id),
+            )
+            .await
+        }
+        Err(error) => internal_error_response(error),
+    }
+}
+
+pub(crate) async fn book_file_delete(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(book_id): Path<String>,
 ) -> Response {
-    enqueue_delete_media_task(&app, TaskKind::DeleteBook, &book_id, 8).await
+    enqueue_delete_media_task(
+        app.task_queue.queue.as_ref(),
+        TaskKind::DeleteBook,
+        &book_id,
+        8,
+    )
+    .await
 }
 
 async fn enqueue_delete_media_task(
-    app: &MediaAssetsState,
+    task_queue: &dyn TaskQueueAdmin,
     kind: TaskKind,
     target_id: &str,
     priority: i32,
 ) -> Response {
     enqueue_task_records(
-        app,
+        task_queue,
         vec![
             TaskRequest::new(kind)
                 .priority(priority)

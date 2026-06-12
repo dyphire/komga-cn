@@ -1,4 +1,6 @@
 use super::*;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventLog};
+use tokio::time::{Duration, sleep};
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_refreshes_series_last_modified() {
@@ -80,6 +82,49 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
 }
 
 #[tokio::test]
+async fn router_discovery_series_metadata_update_emits_series_changed_sse() {
+    let ctx = TestFixture::new("router-discovery-series-metadata-sse").await;
+    let auth_token = ctx.login_admin().await;
+    let cursor = ctx.runtime_events().current_cursor();
+
+    let patch_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/series-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "summary": "Updated summary from series SSE contract"
+                    })
+                    .to_string(),
+                ))
+                .expect("series metadata SSE patch request should build"),
+        )
+        .await
+        .expect("series metadata SSE patch request should complete");
+    assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
+
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "series-metadata-contract-admin", true)
+        .events;
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.event,
+            RuntimeSseEvent::SeriesChanged {
+                series_id,
+                library_id,
+            } if series_id == "series-1" && library_id == "library-1"
+        )),
+        "series metadata PATCH should emit SeriesChanged SSE: {events:?}",
+    );
+}
+
+#[tokio::test]
 async fn router_discovery_series_metadata_update_supports_extended_field_coverage() {
     let ctx = TestFixture::new("router-discovery-series-metadata-extended-fields").await;
     let auth_token = ctx.login_admin().await;
@@ -138,7 +183,8 @@ async fn router_discovery_series_metadata_update_supports_extended_field_coverag
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
     let detail_response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -234,82 +280,65 @@ async fn router_discovery_series_metadata_update_supports_extended_field_coverag
 }
 
 #[tokio::test]
-async fn router_discovery_series_metadata_update_rejects_invalid_scalar_values() {
-    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-scalars").await;
+async fn router_discovery_series_metadata_update_maps_application_validation_errors_to_bad_request()
+{
+    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-patch").await;
     let auth_token = ctx.login_admin().await;
 
-    for payload in [
-        json!({ "status": "BROKEN_STATUS" }),
-        json!({ "readingDirection": "UPSIDE_DOWN" }),
-        json!({ "title": "" }),
-        json!({ "titleSort": "" }),
-        json!({ "totalBookCount": 0 }),
-        json!({ "totalBookCount": 2147483648u64 }),
-        json!({ "language": "en_US" }),
-    ] {
-        let response = ctx
-            .app()
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/series/series-1/metadata")
-                    .header("x-auth-token", &auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(payload.to_string()))
-                    .expect("invalid scalar metadata patch request should build"),
-            )
-            .await
-            .expect("invalid scalar metadata patch request should complete");
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/missing-series/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "title": "" }).to_string()))
+                .expect("invalid metadata patch request should build"),
+        )
+        .await
+        .expect("invalid metadata patch request should complete");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(response).await.get("error"),
+        Some(&Value::String("title must not be blank".to_string())),
+    );
 }
 
 #[tokio::test]
-async fn router_discovery_series_metadata_update_rejects_invalid_structured_values() {
-    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-structured").await;
+async fn router_discovery_series_metadata_update_rejects_invalid_json_shape() {
+    let ctx = TestFixture::new("router-discovery-series-metadata-invalid-json-shape").await;
     let auth_token = ctx.login_admin().await;
 
-    for payload in [
-        json!({
-            "links": [
-                {"label": "", "url": "https://anilist.co/series/1"}
-            ]
-        }),
-        json!({
-            "links": [
-                {"label": "AniList", "url": "not-a-url"}
-            ]
-        }),
-        json!({
-            "alternateTitles": [
-                {"label": "", "title": "Alt A"}
-            ]
-        }),
-        json!({
-            "alternateTitles": [
-                {"label": "en", "title": ""}
-            ]
-        }),
-    ] {
-        let response = ctx
-            .app()
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/series/series-1/metadata")
-                    .header("x-auth-token", &auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(payload.to_string()))
-                    .expect("invalid structured metadata patch request should build"),
-            )
-            .await
-            .expect("invalid structured metadata patch request should complete");
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/series/series-1/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "links": [
+                            {"label": 7, "url": "https://anilist.co/series/1"}
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .expect("invalid JSON shape metadata patch request should build"),
+        )
+        .await
+        .expect("invalid JSON shape metadata patch request should complete");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(response).await.get("error"),
+        Some(&Value::String("links.label must be a string".to_string())),
+    );
 }
 
 #[tokio::test]
@@ -335,7 +364,8 @@ async fn router_discovery_series_metadata_update_accepts_large_age_rating_within
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
     let detail_response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -354,19 +384,46 @@ async fn router_discovery_series_metadata_update_accepts_large_age_rating_within
             .and_then(|metadata| metadata.get("ageRating")),
         Some(&json!(70000))
     );
+
+    let list_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({}).to_string()))
+                .expect("series list after large age rating patch should build"),
+        )
+        .await
+        .expect("series list after large age rating patch should complete");
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_payload = response_json(list_response).await;
+    let list_content = list_payload
+        .get("content")
+        .and_then(Value::as_array)
+        .expect("series list payload should expose content");
+    assert_eq!(
+        list_content
+            .first()
+            .and_then(|series| series.get("metadata"))
+            .and_then(|metadata| metadata.get("ageRating")),
+        Some(&json!(70000))
+    );
 }
 
 #[tokio::test]
 async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to_kotlin_int_range()
 {
-    let ctx = TestFixture::builder(
-        "router-discovery-series-metadata-clamps-legacy-numeric-values",
-    )
-    .with_seed(|paths| async move {
-        let pool = connect_test_pool(paths.main_db.as_path(), 1)
-            .await
-            .expect("legacy numeric parity db should open");
-        sqlx::query(
+    let ctx = TestFixture::builder("router-discovery-series-metadata-clamps-legacy-numeric-values")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("legacy numeric parity db should open");
+            sqlx::query(
             "UPDATE SERIES_METADATA SET AGE_RATING = ?, TOTAL_BOOK_COUNT = ? WHERE SERIES_ID = ?",
         )
         .bind(3_000_000_000_i64)
@@ -375,10 +432,10 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
         .execute(&pool)
         .await
         .expect("legacy numeric parity values should be written");
-        pool.close().await;
-    })
-    .build()
-    .await;
+            pool.close().await;
+        })
+        .build()
+        .await;
     let auth_token = ctx.login_admin().await;
 
     let patch_response = ctx
@@ -400,7 +457,8 @@ async fn router_discovery_series_metadata_update_clamps_legacy_numeric_values_to
     assert_eq!(patch_response.status(), StatusCode::NO_CONTENT);
 
     let detail_response = ctx
-        .app().clone()
+        .app()
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")

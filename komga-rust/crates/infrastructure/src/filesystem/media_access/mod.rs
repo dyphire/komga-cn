@@ -1,5 +1,5 @@
-pub mod db_queries;
-pub mod epub;
-pub mod hashes;
-pub mod page_content;
-pub mod read_progress;
+pub(crate) mod db_queries;
+pub(crate) mod epub;
+pub(crate) mod hashes;
+pub(crate) mod page_content;
+pub(crate) mod read_progress;

@@ -54,6 +54,12 @@ pub struct HttpServerRequestMetricSummary {
     pub max_time_seconds: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct HttpServerRequestMetricSnapshot {
+    pub key: HttpServerRequestMetricKey,
+    pub summary: HttpServerRequestMetricSummary,
+}
+
 #[derive(Default)]
 struct HttpServerRequestMetricCell {
     count: AtomicU64,
@@ -121,12 +127,15 @@ impl HttpServerRequestsState {
         cell.record(elapsed_micros);
     }
 
-    pub fn snapshot(&self) -> Vec<(HttpServerRequestMetricKey, HttpServerRequestMetricSummary)> {
+    pub fn snapshot(&self) -> Vec<HttpServerRequestMetricSnapshot> {
         self.metrics
             .read()
             .expect("http server request metrics lock should not be poisoned")
             .iter()
-            .map(|(key, cell)| (key.clone(), cell.snapshot()))
+            .map(|(key, cell)| HttpServerRequestMetricSnapshot {
+                key: key.clone(),
+                summary: cell.snapshot(),
+            })
             .collect()
     }
 }

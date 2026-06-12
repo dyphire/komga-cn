@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
-use super::models::{KoboLibrarySyncPayload, KoboLibrarySyncResponse};
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KomgaSyncTokenPayload {
@@ -64,17 +62,8 @@ pub fn decode_or_passthrough_sync_token(value: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-pub fn build_kobo_library_sync_payload(
-    response: KoboLibrarySyncResponse,
-) -> KoboLibrarySyncPayload {
-    KoboLibrarySyncPayload {
-        events: response.events,
-        encoded_sync_token: format!(
-            "KOMGA.{}",
-            STANDARD_NO_PAD.encode(response.sync_token_payload)
-        ),
-        should_continue: response.should_continue,
-    }
+pub fn encode_komga_sync_token_payload(payload: &str) -> String {
+    format!("KOMGA.{}", STANDARD_NO_PAD.encode(payload))
 }
 
 pub fn now_sync_marker() -> String {
@@ -148,22 +137,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kobo_protocol_payload_encodes_library_sync_token() {
-        let payload = build_kobo_library_sync_payload(KoboLibrarySyncResponse {
-            events: vec![json!({ "NewTag": {} })],
-            sync_token_payload: r#"{"version":1,"rawKoboSyncToken":""}"#.to_string(),
-            should_continue: true,
-        });
+    fn komga_sync_token_header_encodes_payload() {
+        let payload = r#"{"version":1,"rawKoboSyncToken":""}"#;
 
         assert_eq!(
-            payload.encoded_sync_token,
+            encode_komga_sync_token_payload(payload),
             format!(
                 "KOMGA.{}",
                 STANDARD_NO_PAD.encode(r#"{"version":1,"rawKoboSyncToken":""}"#)
             )
         );
-        assert_eq!(payload.events, vec![json!({ "NewTag": {} })]);
-        assert!(payload.should_continue);
     }
 
     #[test]

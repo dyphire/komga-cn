@@ -1,8 +1,8 @@
 use super::*;
-use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::runtime_identity_access::IdentityAccess;
-use komga_infrastructure::sqlite::setup;
+use komga_infrastructure::bootstrap_pool;
+use komga_infrastructure::{ContentResolver, DatabaseHandle, IdentityAccess};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub(crate) async fn test_identity_state() -> IdentityState {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -10,9 +10,12 @@ pub(crate) async fn test_identity_state() -> IdentityState {
         .connect("sqlite::memory:")
         .await
         .expect("test sqlite pool should connect");
-    setup::bootstrap_pool(&pool)
+    bootstrap_pool(&pool)
         .await
         .expect("test sqlite pool should bootstrap");
     let handle = DatabaseHandle::single_pool(PathBuf::from(":memory:"), pool);
-    IdentityState::new(Arc::new(IdentityAccess::new(handle)))
+    IdentityState::new(Arc::new(IdentityAccess::new(
+        handle,
+        Arc::new(ContentResolver),
+    )))
 }

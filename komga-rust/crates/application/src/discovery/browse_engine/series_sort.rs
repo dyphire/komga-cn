@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::models::{SeriesEvaluationContext, SeriesRow, SeriesSortMode};
 
-pub fn sort_series(
+pub(super) fn sort_series(
     series: &mut [SeriesRow],
     sort_modes: &[SeriesSortMode],
     relevance_ranks: &HashMap<String, usize>,

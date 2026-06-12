@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use komga_application::operational::{
     PersistedServerSettings, ServerSettingPatch, ServerSettingsLoadError,
-    ServerSettingsUpdateCommand, ServerSettingsUpdateError,
+    ServerSettingsUpdateCommand, ServerSettingsUpdateError, ThumbnailSize,
 };
 use serde_json::{Value, json};
 
@@ -119,12 +119,9 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
     if let Some(value) = payload.get("thumbnailSize")
         && !value.is_null()
     {
-        command.thumbnail_size = Some(
-            value
-                .as_str()
-                .ok_or("thumbnailSize must be a string")?
-                .to_string(),
-        );
+        let value = value.as_str().ok_or("thumbnailSize must be a string")?;
+        command.thumbnail_size =
+            Some(ThumbnailSize::parse(value).ok_or("thumbnailSize is invalid")?);
     }
 
     if let Some(value) = payload.get("taskPoolSize")
@@ -198,7 +195,7 @@ fn settings_json(runtime: &RuntimeState, settings: &PersistedServerSettings) -> 
         "deleteEmptyCollections": settings.delete_empty_collections,
         "deleteEmptyReadLists": settings.delete_empty_read_lists,
         "rememberMeDurationDays": settings.remember_me_duration_days,
-        "thumbnailSize": settings.thumbnail_size,
+        "thumbnailSize": settings.thumbnail_size.as_str(),
         "taskPoolSize": settings.task_pool_size,
         "serverPort": multi_source_number(
             Some(u64::from(runtime.configuration_bind_address.port())),

@@ -1,12 +1,17 @@
 use std::collections::HashSet;
 
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_domain::discovery::compare_book_names;
 use sqlx::{Row, SqlitePool};
 
 use crate::persisted_paths::resolve_stored_path;
 use crate::sql::task_queue::{DELETE_BOOK_DEPENDENCY_SQL, DELETE_SERIES_DEPENDENCY_SQL};
 
-use super::scan_models::*;
+use super::scan_models::{
+    BookMetadataRefreshRequest, InsertedBookCandidate, InsertedSeriesCandidate,
+    PersistScannedLibraryOutcome, PersistedScannedSeriesBookRow, ScannedBookRow, ScannedLibrary,
+    ScannedSeriesRow, ScannedSidecarRow,
+};
 use super::scan_restore::{try_restore_deleted_books, try_restore_deleted_series};
 use super::scan_sse::{
     RuntimeSseEventBuffer, RuntimeSseMutationKind, emit_scanned_library_runtime_sse_events,
@@ -15,6 +20,7 @@ use super::scan_sse::{
 
 pub(super) struct ScannedLibraryPersistence<'a> {
     pool: &'a SqlitePool,
+    runtime_events: &'a dyn RuntimeSseEventSink,
     library_id: &'a str,
     scanned: &'a ScannedLibrary,
 }
@@ -30,11 +36,13 @@ pub(super) struct ScannedLibraryPersistenceResult {
 impl<'a> ScannedLibraryPersistence<'a> {
     pub(super) fn new(
         pool: &'a SqlitePool,
+        runtime_events: &'a dyn RuntimeSseEventSink,
         library_id: &'a str,
         scanned: &'a ScannedLibrary,
     ) -> Self {
         Self {
             pool,
+            runtime_events,
             library_id,
             scanned,
         }
@@ -45,7 +53,7 @@ impl<'a> ScannedLibraryPersistence<'a> {
             load_changed_sidecars(self.pool, self.library_id, &self.scanned.sidecars).await?;
         let outcome = persist_scanned_library(self.pool, self.library_id, self.scanned).await?;
         let should_empty_trash = library_empty_trash_after_scan(self.pool, self.library_id).await?;
-        emit_scanned_library_runtime_sse_events(self.library_id, &outcome);
+        emit_scanned_library_runtime_sse_events(self.runtime_events, self.library_id, &outcome);
 
         Ok(ScannedLibraryPersistenceResult {
             changed_sidecar_urls,
@@ -61,7 +69,7 @@ async fn library_empty_trash_after_scan(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<bool, String> {
-    let value = sqlx::query(
+    let row = sqlx::query(
         r#"SELECT EMPTY_TRASH_AFTER_SCAN
 FROM LIBRARY
 WHERE ID = ?
@@ -72,11 +80,13 @@ LIMIT 1"#,
     .await
     .map_err(|error| {
         format!("failed to load empty-trash-after-scan flag for '{library_id}': {error}")
-    })?
-    .map(|row| row.get::<bool, _>("EMPTY_TRASH_AFTER_SCAN"))
-    .unwrap_or(false);
+    })?;
 
-    Ok(value)
+    let Some(row) = row else {
+        return Err(format!("library '{library_id}' does not exist"));
+    };
+
+    Ok(row.get::<bool, _>("EMPTY_TRASH_AFTER_SCAN"))
 }
 
 async fn persist_scanned_library(
@@ -91,7 +101,7 @@ async fn persist_scanned_library(
         let mut changed_series_ids = HashSet::<String>::new();
         let mut inserted_books = Vec::<InsertedBookCandidate>::new();
         let mut inserted_series = Vec::<InsertedSeriesCandidate>::new();
-        let library_was_unavailable = sqlx::query(
+        let library_row = sqlx::query(
             r#"SELECT UNAVAILABLE_DATE
 FROM LIBRARY
 WHERE ID = ?
@@ -102,12 +112,16 @@ LIMIT 1"#,
         .await
         .map_err(|error| {
             format!("failed to load library availability state for '{library_id}': {error}")
-        })?
-        .and_then(|row| row.get::<Option<String>, _>("UNAVAILABLE_DATE"))
-        .is_some();
+        })?;
+        let Some(library_row) = library_row else {
+            return Err(format!("library '{library_id}' does not exist"));
+        };
+        let library_was_unavailable = library_row
+            .get::<Option<String>, _>("UNAVAILABLE_DATE")
+            .is_some();
 
         if !scanned.root_available {
-            sqlx::query(
+            let updated = sqlx::query(
                 r#"UPDATE LIBRARY
 SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
@@ -117,7 +131,11 @@ WHERE ID = ?"#,
             .await
             .map_err(|error| {
                 format!("failed to mark library unavailable for '{library_id}': {error}")
-            })?;
+            })?
+            .rows_affected();
+            if updated == 0 {
+                return Err(format!("library '{library_id}' does not exist"));
+            }
             break 'outcome PersistScannedLibraryOutcome {
                 renumbered_book_ids: Vec::new(),
                 library_changed: !library_was_unavailable,
@@ -128,7 +146,7 @@ WHERE ID = ?"#,
         }
 
         if library_was_unavailable {
-            sqlx::query(
+            let updated = sqlx::query(
                 r#"UPDATE LIBRARY
 SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
@@ -138,7 +156,11 @@ WHERE ID = ?"#,
             .await
             .map_err(|error| {
                 format!("failed to clear library unavailable marker for '{library_id}': {error}")
-            })?;
+            })?
+            .rows_affected();
+            if updated == 0 {
+                return Err(format!("library '{library_id}' does not exist"));
+            }
         }
 
         let discovered_series_ids = scanned.discovered_series_ids.clone();
@@ -163,7 +185,7 @@ WHERE ID = ?
        OR NAME != ?
        OR URL != ?
        OR LIBRARY_ID != ?
-       OR COALESCE(oneshot, 0) != ?
+       OR oneshot != ?
        OR DELETED_DATE IS NOT NULL)"#,
             )
             .bind(series.series_last_modified_unix_seconds)
@@ -244,7 +266,7 @@ WHERE ID = ?
        OR SERIES_ID != ?
        OR FILE_SIZE != ?
        OR LIBRARY_ID != ?
-       OR COALESCE(oneshot, 0) != ?
+       OR oneshot != ?
        OR DELETED_DATE IS NOT NULL)"#,
                     )
                     .bind(book.file_last_modified_unix_seconds)
@@ -487,15 +509,26 @@ WHERE ID = ?"#,
             let metadata_number_sort_changed = !book.metadata_number_sort_lock
                 && (book.metadata_number_sort - new_metadata_number_sort).abs() > f64::EPSILON;
             if metadata_number_changed || metadata_number_sort_changed {
+                let metadata_number = if book.metadata_number_lock {
+                    book.metadata_number.clone()
+                } else {
+                    new_metadata_number
+                };
+                let metadata_number_sort = if book.metadata_number_sort_lock {
+                    book.metadata_number_sort
+                } else {
+                    new_metadata_number_sort
+                };
+
                 sqlx::query(
                     r#"UPDATE BOOK_METADATA
-SET NUMBER = CASE WHEN NUMBER_LOCK = 0 THEN ? ELSE NUMBER END,
-    NUMBER_SORT = CASE WHEN NUMBER_SORT_LOCK = 0 THEN ? ELSE NUMBER_SORT END,
+SET NUMBER = ?,
+    NUMBER_SORT = ?,
     LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE BOOK_ID = ?"#,
                 )
-                .bind(&new_metadata_number)
-                .bind(new_metadata_number_sort)
+                .bind(&metadata_number)
+                .bind(metadata_number_sort)
                 .bind(&book.book_id)
                 .execute(pool)
                 .await?;
@@ -704,10 +737,10 @@ async fn restore_deleted_scan_matches(
     for restored in &restored_series_matches {
         changed_series_ids.insert(restored.inserted_series_id.clone());
     }
-    let (restored_series_ids, restored_book_metadata_refreshes) =
+    let restored_books =
         try_restore_deleted_books(pool, library_root.as_path(), inserted_books).await?;
-    changed_series_ids.extend(restored_series_ids);
-    book_metadata_refreshes.extend(restored_book_metadata_refreshes);
+    changed_series_ids.extend(restored_books.series_ids);
+    book_metadata_refreshes.extend(restored_books.book_metadata_refreshes);
     for restored in &restored_series_matches {
         changed_series_ids.insert(restored.inserted_series_id.clone());
         delete_restored_legacy_series(pool, &restored.deleted_series_id).await?;
@@ -846,4 +879,84 @@ WHERE EXISTS (SELECT 1 FROM BOOK WHERE ID = ? AND DELETED_DATE IS NULL)"#,
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    use komga_application::runtime_sse::RuntimeSseEventStore;
+
+    use super::*;
+    use crate::sqlite::{connect_test_pool, setup};
+
+    fn temp_db_path(case_id: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-rust-scan-persist-{case_id}-{nanos}.sqlite"))
+    }
+
+    #[tokio::test]
+    async fn scanned_library_persistence_rejects_missing_library_row() {
+        let db_path = temp_db_path("missing-library");
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+
+        let scanned = ScannedLibrary {
+            root_available: true,
+            series_rows: Vec::new(),
+            sidecars: Vec::new(),
+            book_ids: Vec::new(),
+            changed_existing_book_ids: HashSet::new(),
+            series_ids_requiring_book_sync: HashSet::new(),
+            discovered_series_ids: HashSet::new(),
+            discovered_book_ids: HashSet::new(),
+        };
+        let runtime_events = RuntimeSseEventStore::default();
+
+        let error = match ScannedLibraryPersistence::new(
+            &pool,
+            &runtime_events,
+            "missing-library",
+            &scanned,
+        )
+        .execute()
+        .await
+        {
+            Ok(_) => panic!("scan persistence should reject a missing library row"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "library 'missing-library' does not exist");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn library_empty_trash_after_scan_rejects_missing_library_row() {
+        let db_path = temp_db_path("missing-empty-trash-library");
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+
+        let error = library_empty_trash_after_scan(&pool, "missing-library")
+            .await
+            .expect_err("empty-trash flag lookup should reject a missing library row");
+
+        assert_eq!(error, "library 'missing-library' does not exist");
+
+        pool.close().await;
+        let _ = std::fs::remove_file(db_path);
+    }
 }

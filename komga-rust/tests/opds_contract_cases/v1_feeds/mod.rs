@@ -22,6 +22,67 @@ mod series_detail;
 mod collection_readlist_details;
 
 #[tokio::test]
+async fn router_opds_v1_top_level_load_errors_return_internal_error() {
+    let ctx = TestFixture::new("router-opds-v1-top-level-load-errors").await;
+    let auth_token = ctx.login_admin().await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("opds v1 top-level load failure db should open");
+    for sql in [
+        "ALTER TABLE LIBRARY RENAME TO LIBRARY_BROKEN",
+        "ALTER TABLE COLLECTION RENAME TO COLLECTION_BROKEN",
+        "ALTER TABLE READLIST RENAME TO READLIST_BROKEN",
+        "ALTER TABLE SERIES RENAME TO SERIES_BROKEN",
+        "ALTER TABLE SERIES_METADATA RENAME TO SERIES_METADATA_BROKEN",
+        "ALTER TABLE BOOK RENAME TO BOOK_BROKEN",
+    ] {
+        sqlx::query(sql)
+            .execute(&pool)
+            .await
+            .expect("opds v1 top-level dependency table should be renamed");
+    }
+    pool.close().await;
+
+    for route in [
+        "/opds/v1.2/libraries",
+        "/opds/v1.2/libraries/library-1",
+        "/opds/v1.2/collections",
+        "/opds/v1.2/collections/collection-1",
+        "/opds/v1.2/readlists",
+        "/opds/v1.2/readlists/readlist-1",
+        "/opds/v1.2/publishers",
+        "/opds/v1.2/series",
+        "/opds/v1.2/series?search=Series",
+        "/opds/v1.2/series/latest",
+        "/opds/v1.2/books/latest",
+        "/opds/v1.2/ondeck",
+        "/opds/v1.2/keep-reading",
+        "/opds/v1.2/series/series-1",
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("opds v1 top-level load failure request should build"),
+            )
+            .await
+            .expect("opds v1 top-level load failure request should complete");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "route={route}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn router_opds_v1_publishers_returns_atom_feed() {
     let ctx = TestFixture::new("router-opds-v1-publishers-feed").await;
     let auth_token = ctx.login_admin().await;
@@ -617,6 +678,45 @@ async fn router_opds_v1_library_detail_hides_age_restricted_series() {
         )
         .await
         .expect("opds v1 restricted library detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(!body.contains("/opds/v1.2/series/series-1"));
+    assert!(body.contains("/opds/v1.2/series/series-0"));
+}
+
+#[tokio::test]
+async fn router_opds_v1_library_detail_hides_series_when_age_rating_exceeds_u16() {
+    let ctx = TestFixture::new("router-opds-v1-library-detail-large-age-rating").await;
+    seed_router_custom_series(ctx.paths(), "series-0", "Visible Series", "library-1").await;
+    update_router_series_age_rating(ctx.paths(), "series-0", 0).await;
+    update_router_series_age_rating(ctx.paths(), "series-1", 65_536).await;
+    seed_router_age_exclude_user(
+        ctx.paths(),
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        18,
+    )
+    .await;
+
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/opds/v1.2/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("opds v1 large age-rating request should build"),
+        )
+        .await
+        .expect("opds v1 large age-rating request should complete");
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;

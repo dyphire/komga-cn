@@ -17,6 +17,11 @@ const INDEX_HTML_CACHE_MAX_ENTRIES: usize = 16;
 static REWRITTEN_INDEX_HTML_CACHE: LazyLock<RwLock<IndexHtmlCache>> =
     LazyLock::new(|| RwLock::new(IndexHtmlCache::default()));
 
+struct EmbeddedAssetReference<'a> {
+    asset_path: &'a str,
+    suffix: &'a str,
+}
+
 #[derive(Default)]
 struct IndexHtmlCache {
     entries: HashMap<String, Bytes>,
@@ -196,8 +201,8 @@ fn rewrite_embedded_asset_reference(value: &str, resource_base_url: &str) -> Opt
         return None;
     }
 
-    let (asset_path, suffix) = split_asset_reference(value);
-    let normalized_asset_path = asset_path.trim_start_matches('/');
+    let asset_reference = split_asset_reference(value);
+    let normalized_asset_path = asset_reference.asset_path.trim_start_matches('/');
     if normalized_asset_path.is_empty()
         || normalized_asset_path.starts_with('.')
         || WebUiAssets::get(normalized_asset_path).is_none()
@@ -206,14 +211,18 @@ fn rewrite_embedded_asset_reference(value: &str, resource_base_url: &str) -> Opt
     }
 
     Some(format!(
-        "{}{suffix}",
-        prefixed_asset_path(resource_base_url, normalized_asset_path)
+        "{}{}",
+        prefixed_asset_path(resource_base_url, normalized_asset_path),
+        asset_reference.suffix,
     ))
 }
 
-fn split_asset_reference(value: &str) -> (&str, &str) {
+fn split_asset_reference(value: &str) -> EmbeddedAssetReference<'_> {
     let suffix_start = value.find(['?', '#']).unwrap_or(value.len());
-    value.split_at(suffix_start)
+    EmbeddedAssetReference {
+        asset_path: &value[..suffix_start],
+        suffix: &value[suffix_start..],
+    }
 }
 
 fn prefixed_asset_path(resource_base_url: &str, asset_path: &str) -> String {

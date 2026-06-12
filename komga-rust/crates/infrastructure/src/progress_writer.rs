@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use komga_application::media_assets::{BookProgressionInput, ProgressWriterPort};
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 
 use crate::filesystem::media_access::read_progress as media_read_progress;
 use crate::metadata;
@@ -11,11 +13,15 @@ use crate::metadata;
 #[derive(Clone)]
 pub struct ProgressWriter {
     pool: SqlitePool,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
 }
 
 impl ProgressWriter {
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(pool: SqlitePool, runtime_events: Arc<dyn RuntimeSseEventSink>) -> Self {
+        Self {
+            pool,
+            runtime_events,
+        }
     }
 }
 
@@ -29,29 +35,28 @@ impl ProgressWriterPort for ProgressWriter {
         completed: bool,
         locator: Option<Value>,
     ) -> Result<(), String> {
-        metadata::persist_read_progress(&self.pool, book_id, user_id, page, completed, locator)
-            .await
+        metadata::persist_read_progress(
+            &self.pool,
+            self.runtime_events.as_ref(),
+            book_id,
+            user_id,
+            page,
+            completed,
+            locator,
+        )
+        .await
     }
 
     async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
-        metadata::persist_book_progression(&self.pool, input).await
+        metadata::persist_book_progression(&self.pool, self.runtime_events.as_ref(), input).await
     }
 
     async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {
-        metadata::delete_persisted_read_progress(&self.pool, book_id, user_id).await
-    }
-
-    async fn persist_readlist_tachiyomi_progress(
-        &self,
-        ordered_book_ids: &[String],
-        user_id: &str,
-        last_book_read: usize,
-    ) -> Result<Option<()>, String> {
-        metadata::persist_readlist_tachiyomi_progress(
+        metadata::delete_persisted_read_progress(
             &self.pool,
-            ordered_book_ids,
+            self.runtime_events.as_ref(),
+            book_id,
             user_id,
-            last_book_read,
         )
         .await
     }

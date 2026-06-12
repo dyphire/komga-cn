@@ -4,11 +4,11 @@ mod metadata;
 mod pdf;
 
 use std::fs;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use komga_domain::discovery::MediaStatus;
 use sqlx::{Row, SqlitePool};
 use zip::ZipArchive;
 
@@ -19,35 +19,58 @@ use crate::rar_support::read_rar_entry_bytes;
 use crate::resolve_stored_path;
 
 use detection::is_recognized_transient_book_file;
-pub use detection::{transient_book_content_type, transient_book_media_type};
+pub(crate) use detection::{transient_book_content_type, transient_book_media_type};
 
 const EPUB_DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
 #[derive(Clone, Debug)]
-pub struct TransientBookFileMetadata {
-    pub file_last_modified_unix_nanos: i128,
-    pub size_bytes: u64,
+pub(crate) struct TransientBookFileMetadata {
+    pub(crate) file_last_modified_unix_nanos: i128,
+    pub(crate) size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
-pub struct TransientBookAnalysis {
-    pub status: String,
-    pub media_type: String,
-    pub page_count: u32,
-    pub pages: Vec<TransientBookPage>,
-    pub files: Vec<String>,
-    pub comment: String,
-    pub number: Option<f64>,
-    pub series_id: Option<String>,
+pub(crate) struct TransientBookSeriesInference {
+    pub(crate) series_id: Option<String>,
+    pub(crate) number: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TransientBookPage {
-    pub number: u32,
-    pub file_name: String,
-    pub media_type: String,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    pub size_bytes: Option<u64>,
+pub(crate) struct TransientBookAnalysis {
+    pub(crate) status: MediaStatus,
+    pub(crate) media_type: String,
+    pub(crate) page_count: u32,
+    pub(crate) pages: Vec<TransientBookPage>,
+    pub(crate) files: Vec<String>,
+    pub(crate) comment: String,
+    pub(crate) number: Option<f64>,
+    pub(crate) series_id: Option<String>,
+}
+
+struct TransientBookMediaAnalysis {
+    pages: Vec<TransientBookPage>,
+    files: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TransientBookPage {
+    pub(crate) number: u32,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) width: Option<u32>,
+    pub(crate) height: Option<u32>,
+    pub(crate) size_bytes: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TransientBookPageContent {
+    pub(crate) content_type: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TransientBookScanEntry {
+    pub(crate) path: String,
+    pub(crate) name: String,
 }
 
 #[derive(Default)]
@@ -62,14 +85,17 @@ struct TransientEpubManifestItem {
     media_type: String,
 }
 
-pub async fn infer_transient_series_and_number(
+pub(crate) async fn infer_transient_series_and_number(
     pool: &SqlitePool,
     path_or_name: &str,
-) -> (Option<String>, Option<f64>) {
-    let inferred = metadata::infer_transient_metadata(path_or_name);
+) -> Result<TransientBookSeriesInference, String> {
+    let inferred = metadata::infer_transient_metadata(path_or_name)?;
     let number = inferred.number;
     if inferred.series_titles.is_empty() {
-        return (None, number);
+        return Ok(TransientBookSeriesInference {
+            series_id: None,
+            number,
+        });
     }
 
     for series_title in &inferred.series_titles {
@@ -84,11 +110,22 @@ pub async fn infer_transient_series_and_number(
         .bind(series_title.as_str())
         .fetch_optional(pool)
         .await
-        .ok()
-        .flatten()
-        .map(|row| row.get::<String, _>("ID"));
+        .map_err(|error| {
+            format!("transient series exact match query failed for '{series_title}': {error}")
+        })?
+        .map(|row| {
+            row.try_get::<String, _>("ID").map_err(|error| {
+                format!(
+                    "transient series exact match ID decode failed for '{series_title}': {error}"
+                )
+            })
+        })
+        .transpose()?;
         if let Some(series_id) = exact_match {
-            return (Some(series_id), number);
+            return Ok(TransientBookSeriesInference {
+                series_id: Some(series_id),
+                number,
+            });
         }
     }
 
@@ -104,18 +141,35 @@ pub async fn infer_transient_series_and_number(
         .bind(format!("%{}%", series_title))
         .fetch_optional(pool)
         .await
-        .ok()
-        .flatten()
-        .map(|row| row.get::<String, _>("ID"));
+        .map_err(|error| {
+            format!("transient series fuzzy match query failed for '{series_title}': {error}")
+        })?
+        .map(|row| {
+            row.try_get::<String, _>("ID").map_err(|error| {
+                format!(
+                    "transient series fuzzy match ID decode failed for '{series_title}': {error}"
+                )
+            })
+        })
+        .transpose()?;
         if let Some(series_id) = fuzzy_match {
-            return (Some(series_id), number);
+            return Ok(TransientBookSeriesInference {
+                series_id: Some(series_id),
+                number,
+            });
         }
     }
 
-    (None, number)
+    Ok(TransientBookSeriesInference {
+        series_id: None,
+        number,
+    })
 }
 
-pub async fn validate_transient_scan_root(pool: &SqlitePool, root: &Path) -> Result<(), String> {
+pub(crate) async fn validate_transient_scan_root(
+    pool: &SqlitePool,
+    root: &Path,
+) -> Result<(), String> {
     let library_roots = sqlx::query("SELECT ROOT AS ROOT FROM LIBRARY")
         .fetch_all(pool)
         .await
@@ -130,20 +184,42 @@ pub async fn validate_transient_scan_root(pool: &SqlitePool, root: &Path) -> Res
         }
     }
 
-    if !root.is_dir() || fs::read_dir(root).is_err() {
+    let metadata = fs::metadata(root).map_err(|error| match error.kind() {
+        ErrorKind::NotFound => "ERR_1016".to_string(),
+        _ => format!(
+            "read transient scan root metadata '{}': {error}",
+            root.display()
+        ),
+    })?;
+    if !metadata.is_dir() {
         return Err("ERR_1016".to_string());
+    }
+
+    if let Err(error) = fs::read_dir(root) {
+        if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) {
+            return Err("ERR_1016".to_string());
+        }
+        return Err(format!(
+            "read transient scan root '{}': {error}",
+            root.display()
+        ));
     }
 
     Ok(())
 }
 
-pub fn transient_book_exists(path: &str) -> bool {
-    Path::new(path).exists()
+pub(crate) fn transient_book_exists(path: &str) -> Result<bool, String> {
+    Path::new(path)
+        .try_exists()
+        .map_err(|error| format!("check transient book existence '{path}': {error}"))
 }
 
-pub fn load_transient_book_file_metadata(path: &str) -> Option<TransientBookFileMetadata> {
-    let metadata = fs::metadata(path).ok()?;
-    Some(TransientBookFileMetadata {
+pub(crate) fn load_transient_book_file_metadata(
+    path: &str,
+) -> Result<TransientBookFileMetadata, String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("read transient book metadata '{path}': {error}"))?;
+    Ok(TransientBookFileMetadata {
         file_last_modified_unix_nanos: to_unix_nanos(newest_file_system_time(
             metadata.created().ok(),
             metadata.modified().ok(),
@@ -152,13 +228,17 @@ pub fn load_transient_book_file_metadata(path: &str) -> Option<TransientBookFile
     })
 }
 
-pub fn load_transient_book_media(path: &str) -> Option<Vec<u8>> {
-    fs::read(path).ok()
+pub(crate) fn load_transient_book_media(path: &str) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|error| format!("read transient book media '{path}': {error}"))
 }
 
-pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
-    if !transient_book_exists(path) {
-        return transient_analysis_error("ERROR", String::new(), "ERR_1018");
+pub(crate) fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, String> {
+    if !transient_book_exists(path)? {
+        return Ok(transient_analysis_error(
+            MediaStatus::Error,
+            String::new(),
+            "ERR_1018",
+        ));
     }
 
     let media_type = transient_book_media_type(path);
@@ -168,15 +248,21 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"))
         && media_type != "application/epub+zip"
     {
-        return transient_analysis_error("ERROR", media_type, "ERR_1032");
+        return Ok(transient_analysis_error(
+            MediaStatus::Error,
+            media_type,
+            "ERR_1032",
+        ));
     }
 
     let analysis_result = if media_type.starts_with("image/") {
         analyze_transient_media_file(path).map_err(|_| "ERR_1001")
     } else if media_type == "application/epub+zip" {
-        return epub::analyze_transient_epub(path).unwrap_or_else(|error_code| {
-            transient_analysis_error("ERROR", media_type, error_code)
-        });
+        return Ok(
+            epub::analyze_transient_epub(path).unwrap_or_else(|error_code| {
+                transient_analysis_error(MediaStatus::Error, media_type, error_code)
+            }),
+        );
     } else if media_type == "application/zip" {
         analyze_transient_media_file(path).map_err(|_| "ERR_1008")
     } else if matches!(
@@ -190,40 +276,50 @@ pub fn analyze_transient_book(path: &str) -> TransientBookAnalysis {
     } else if media_type == "application/pdf" {
         analyze_transient_media_file(path).map_err(|_| "ERR_1005")
     } else {
-        return transient_analysis_error("UNSUPPORTED", media_type, "ERR_1001");
+        return Ok(transient_analysis_error(
+            MediaStatus::Unsupported,
+            media_type,
+            "ERR_1001",
+        ));
     };
 
-    let (pages, files) = match analysis_result {
+    let analysis = match analysis_result {
         Ok(result) => result,
-        Err(error_code) => return transient_analysis_error("ERROR", media_type, error_code),
+        Err(error_code) => {
+            return Ok(transient_analysis_error(
+                MediaStatus::Error,
+                media_type,
+                error_code,
+            ));
+        }
     };
 
-    if pages.is_empty() {
-        return transient_analysis_error("ERROR", media_type, "ERR_1006");
+    if analysis.pages.is_empty() {
+        return Ok(transient_analysis_error(
+            MediaStatus::Error,
+            media_type,
+            "ERR_1006",
+        ));
     }
 
-    TransientBookAnalysis {
-        status: "READY".to_string(),
+    Ok(TransientBookAnalysis {
+        status: MediaStatus::Ready,
         media_type,
-        page_count: pages.len() as u32,
-        pages,
-        files,
+        page_count: analysis.pages.len() as u32,
+        pages: analysis.pages,
+        files: analysis.files,
         comment: String::new(),
         number: None,
         series_id: None,
-    }
+    })
 }
 
-fn analyze_transient_media_file(
-    path: &str,
-) -> Result<(Vec<TransientBookPage>, Vec<String>), String> {
+fn analyze_transient_media_file(path: &str) -> Result<TransientBookMediaAnalysis, String> {
     let analysis = MediaFileAnalyzer.analyze(Path::new(path), MediaAnalysisProfile::Transient)?;
     Ok(transient_pages_from_media_analysis(analysis))
 }
 
-fn transient_pages_from_media_analysis(
-    analysis: MediaFileAnalysis,
-) -> (Vec<TransientBookPage>, Vec<String>) {
+fn transient_pages_from_media_analysis(analysis: MediaFileAnalysis) -> TransientBookMediaAnalysis {
     let media_type = analysis.media_type;
     let pages = analysis
         .pages
@@ -232,7 +328,10 @@ fn transient_pages_from_media_analysis(
         .map(|(index, page)| transient_page_from_analyzed_media_page(index, page, &media_type))
         .collect();
 
-    (pages, analysis.files)
+    TransientBookMediaAnalysis {
+        pages,
+        files: analysis.files,
+    }
 }
 
 fn transient_page_from_analyzed_media_page(
@@ -259,12 +358,12 @@ fn transient_page_size_bytes(file_size: i64, media_type: &str) -> Option<u64> {
 }
 
 fn transient_analysis_error(
-    status: &str,
+    status: MediaStatus,
     media_type: String,
     comment: &str,
 ) -> TransientBookAnalysis {
     TransientBookAnalysis {
-        status: status.to_string(),
+        status,
         media_type,
         page_count: 0,
         pages: Vec::new(),
@@ -275,14 +374,14 @@ fn transient_analysis_error(
     }
 }
 
-pub fn transient_book_page_content(
+pub(crate) fn transient_book_page_content(
     path: &str,
     media_type: &str,
     pages: &[TransientBookPage],
     page_number: u32,
-) -> Option<(String, Vec<u8>)> {
+) -> Result<Option<TransientBookPageContent>, String> {
     if page_number == 0 {
-        return None;
+        return Ok(None);
     }
 
     let media_type = if media_type.is_empty() {
@@ -294,24 +393,45 @@ pub fn transient_book_page_content(
 
     if media_type.starts_with("image/") {
         if page_number != 1 {
-            return None;
+            return Ok(None);
         }
         let bytes = load_transient_book_media(path)?;
-        return Some((media_type, bytes));
+        return Ok(Some(TransientBookPageContent {
+            content_type: media_type,
+            bytes,
+        }));
     }
 
     let page = pages
         .iter()
         .find(|entry| entry.number == page_number)
-        .cloned()?;
+        .cloned();
+    let Some(page) = page else {
+        return Ok(None);
+    };
 
     if matches!(content_type, "application/zip" | "application/epub+zip") {
-        let file = fs::File::open(path).ok()?;
-        let mut archive = ZipArchive::new(file).ok()?;
-        let mut entry = archive.by_name(page.file_name.as_str()).ok()?;
+        let file = fs::File::open(path)
+            .map_err(|error| format!("open transient archive '{path}': {error}"))?;
+        let mut archive = ZipArchive::new(file)
+            .map_err(|error| format!("read transient archive '{path}': {error}"))?;
+        let mut entry = archive.by_name(page.file_name.as_str()).map_err(|error| {
+            format!(
+                "read transient archive entry '{}' from '{}': {error}",
+                page.file_name, path
+            )
+        })?;
         let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).ok()?;
-        return Some((page.media_type, bytes));
+        entry.read_to_end(&mut bytes).map_err(|error| {
+            format!(
+                "read transient archive entry '{}' bytes from '{}': {error}",
+                page.file_name, path
+            )
+        })?;
+        return Ok(Some(TransientBookPageContent {
+            content_type: page.media_type,
+            bytes,
+        }));
     }
 
     if matches!(
@@ -321,30 +441,37 @@ pub fn transient_book_page_content(
             | "application/x-rar-compressed; version=4"
             | "application/x-rar-compressed; version=5"
     ) {
-        let bytes = read_rar_entry_bytes(Path::new(path), page.file_name.as_str())
-            .ok()
-            .flatten()?;
-        return Some((page.media_type, bytes));
+        let bytes =
+            read_rar_entry_bytes(Path::new(path), page.file_name.as_str())?.ok_or_else(|| {
+                format!(
+                    "read transient rar entry '{}' from '{}': entry not found",
+                    page.file_name, path
+                )
+            })?;
+        return Ok(Some(TransientBookPageContent {
+            content_type: page.media_type,
+            bytes,
+        }));
     }
 
     if content_type == "application/pdf" {
         let bytes = pdf::render_pdf_page_image_bytes(path, page_number)?;
-        return Some(("image/jpeg".to_string(), bytes));
+        return Ok(Some(TransientBookPageContent {
+            content_type: "image/jpeg".to_string(),
+            bytes,
+        }));
     }
 
-    None
+    Ok(None)
 }
 
-pub fn list_transient_book_entries(path: &Path) -> Vec<Value> {
+pub(crate) fn list_transient_book_entries(
+    path: &Path,
+) -> Result<Vec<TransientBookScanEntry>, String> {
     let mut entries = Vec::new();
-    collect_transient_book_entries(path, &mut entries);
-    entries.sort_by(|left, right| {
-        left["path"]
-            .as_str()
-            .unwrap_or_default()
-            .cmp(right["path"].as_str().unwrap_or_default())
-    });
-    entries
+    collect_transient_book_entries(path, &mut entries)?;
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
 }
 
 fn to_unix_nanos(time: Option<SystemTime>) -> i128 {
@@ -364,15 +491,26 @@ fn newest_file_system_time(
     }
 }
 
-fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
-    let Ok(directory_entries) = fs::read_dir(path) else {
-        return;
-    };
+fn collect_transient_book_entries(
+    path: &Path,
+    entries: &mut Vec<TransientBookScanEntry>,
+) -> Result<(), String> {
+    let directory_entries = fs::read_dir(path)
+        .map_err(|error| format!("read transient directory '{}': {error}", path.display()))?;
 
-    for entry in directory_entries.filter_map(Result::ok) {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
+    for entry in directory_entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "read transient directory entry from '{}': {error}",
+                path.display()
+            )
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "read transient directory entry type '{}': {error}",
+                entry.path().display()
+            )
+        })?;
 
         let entry_path = entry.path();
         let is_hidden = entry_path
@@ -384,7 +522,7 @@ fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
         }
 
         if file_type.is_dir() {
-            collect_transient_book_entries(&entry_path, entries);
+            collect_transient_book_entries(&entry_path, entries)?;
             continue;
         }
 
@@ -400,16 +538,19 @@ fn collect_transient_book_entries(path: &Path, entries: &mut Vec<Value>) {
             continue;
         };
 
-        entries.push(json!({
-            "name": name,
-            "path": entry_path.to_string_lossy().to_string(),
-        }));
+        entries.push(TransientBookScanEntry {
+            path: entry_path.to_string_lossy().to_string(),
+            name,
+        });
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::BootstrappedBookFixture;
     use image::{ImageBuffer, Rgba};
     use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
     use std::fs::File;
@@ -448,6 +589,46 @@ mod tests {
             .expect("zip-as-epub page bytes should be written");
         zip.finish()
             .expect("zip-as-epub fixture should finish successfully");
+    }
+
+    fn write_epub_with_package_and_entries(
+        path: &Path,
+        package_document: &str,
+        entries: &[(&str, &[u8])],
+    ) {
+        let file = File::create(path).expect("epub fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+
+        zip.start_file("mimetype", options)
+            .expect("epub mimetype entry should be created");
+        zip.write_all(b"application/epub+zip")
+            .expect("epub mimetype bytes should be written");
+        zip.start_file("META-INF/container.xml", options)
+            .expect("epub container entry should be created");
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+        )
+        .expect("epub container bytes should be written");
+        zip.start_file("OEBPS/content.opf", options)
+            .expect("epub package entry should be created");
+        zip.write_all(package_document.as_bytes())
+            .expect("epub package bytes should be written");
+        for (entry_path, bytes) in entries {
+            zip.start_file(*entry_path, options)
+                .expect("epub extra entry should be created");
+            zip.write_all(bytes)
+                .expect("epub extra entry bytes should be written");
+        }
+
+        zip.finish()
+            .expect("epub fixture should finish successfully");
+    }
+
+    fn write_epub_with_package(path: &Path, package_document: &str) {
+        write_epub_with_package_and_entries(path, package_document, &[]);
     }
 
     fn write_single_page_pdf(path: &Path, width: i64, height: i64) {
@@ -492,12 +673,44 @@ mod tests {
         let path = unique_temp_path("single-image", "png");
         fs::write(&path, png_bytes(3, 5)).expect("transient image fixture should be written");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("transient image analysis should complete");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert_eq!(analysis.pages.len(), 1);
         assert_eq!(analysis.pages[0].width, Some(3));
         assert_eq!(analysis.pages[0].height, Some(5));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_error_for_unreadable_single_image() {
+        let path = unique_temp_path("unreadable-single-image", "png");
+        fs::create_dir(&path).expect("unreadable single image fixture should be a directory");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("unreadable transient image should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.comment, "ERR_1001");
+        assert!(analysis.pages.is_empty());
+
+        let _ = fs::remove_dir(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1001_for_invalid_single_image_bytes() {
+        let path = unique_temp_path("invalid-single-image", "png");
+        fs::write(&path, b"not-an-image").expect("invalid single image fixture should be written");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("invalid transient image should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.media_type, "image/png");
+        assert_eq!(analysis.comment, "ERR_1001");
+        assert!(analysis.pages.is_empty());
 
         let _ = fs::remove_file(path);
     }
@@ -517,12 +730,39 @@ mod tests {
         zip.finish()
             .expect("cbz fixture should finish successfully");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("transient cbz analysis should complete");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert_eq!(analysis.pages.len(), 1);
         assert_eq!(analysis.pages[0].width, Some(7));
         assert_eq!(analysis.pages[0].height, Some(11));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1008_for_invalid_cbz_page_image_bytes() {
+        let path = unique_temp_path("invalid-cbz-page-image", "cbz");
+        let file = File::create(&path).expect("cbz fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        zip.start_file("page-1.png", options)
+            .expect("cbz page entry should be created");
+        zip.write_all(b"not-an-image")
+            .expect("cbz invalid page bytes should be written");
+        zip.finish()
+            .expect("cbz fixture should finish successfully");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("invalid transient cbz should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.media_type, "application/zip");
+        assert_eq!(analysis.comment, "ERR_1008");
+        assert!(analysis.pages.is_empty());
 
         let _ = fs::remove_file(path);
     }
@@ -532,9 +772,10 @@ mod tests {
         let path = unique_temp_path("pdf-page-dimensions", "pdf");
         write_single_page_pdf(&path, 595, 842);
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("transient pdf analysis should complete");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert_eq!(analysis.pages.len(), 1);
         assert_eq!(analysis.pages[0].width, Some(3200));
         assert_eq!(analysis.pages[0].height, Some(4528));
@@ -547,9 +788,10 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../komga/src/test/resources/archives/rar4.rar");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("transient rar analysis should complete");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert_eq!(
             analysis.media_type,
             "application/x-rar-compressed; version=4"
@@ -573,9 +815,10 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../komga/src/test/resources/archives/rar4.rar");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("transient rar analysis should complete");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert!(
             !analysis.pages.is_empty(),
             "rar transient pages should not be empty"
@@ -590,9 +833,10 @@ mod tests {
     fn analyze_transient_book_returns_err_1018_for_missing_file() {
         let path = unique_temp_path("missing-file", "png");
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("missing transient book should produce an analysis result");
 
-        assert_eq!(analysis.status, "ERROR");
+        assert_eq!(analysis.status, MediaStatus::Error);
         assert_eq!(analysis.media_type, "");
         assert_eq!(analysis.comment, "ERR_1018");
         assert!(analysis.pages.is_empty());
@@ -600,17 +844,262 @@ mod tests {
     }
 
     #[test]
+    fn analyze_transient_book_propagates_existence_probe_errors() {
+        let parent_file = unique_temp_path("probe-parent-file", "tmp");
+        fs::write(&parent_file, b"not a directory").expect("parent file fixture should be written");
+        let path = parent_file.join("book.png");
+
+        let error = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect_err("filesystem probe error should fail transient analysis");
+
+        assert!(
+            error.contains("check transient book existence"),
+            "unexpected error: {error}"
+        );
+
+        let _ = fs::remove_file(parent_file);
+    }
+
+    #[test]
     fn analyze_transient_book_returns_err_1032_for_broken_epub() {
         let path = unique_temp_path("broken-epub", "epub");
         write_zip_as_epub(&path);
 
-        let analysis = analyze_transient_book(path.to_string_lossy().as_ref());
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("broken transient epub should produce an analysis result");
 
-        assert_eq!(analysis.status, "ERROR");
+        assert_eq!(analysis.status, MediaStatus::Error);
         assert_eq!(analysis.media_type, "application/zip");
         assert_eq!(analysis.comment, "ERR_1032");
         assert!(analysis.pages.is_empty());
         assert!(analysis.files.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1032_for_malformed_epub_package() {
+        let path = unique_temp_path("malformed-epub-package", "epub");
+        write_epub_with_package(
+            &path,
+            r#"<package><manifest><item id= href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="main"/></spine></package>"#,
+        );
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("malformed transient epub should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.media_type, "application/epub+zip");
+        assert_eq!(analysis.comment, "ERR_1032");
+        assert!(analysis.pages.is_empty());
+        assert!(analysis.files.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1032_for_malformed_epub_spine_resource() {
+        let path = unique_temp_path("malformed-epub-spine-resource", "epub");
+        write_epub_with_package_and_entries(
+            &path,
+            r#"<package><manifest><item id="main" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="image" href="cover.png" media-type="image/png"/></manifest><spine><itemref idref="main"/></spine></package>"#,
+            &[(
+                "OEBPS/chapter.xhtml",
+                br#"<html><body><img src="cover.png"></body"#,
+            )],
+        );
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("malformed transient epub spine resource should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.media_type, "application/epub+zip");
+        assert_eq!(analysis.comment, "ERR_1032");
+        assert!(analysis.pages.is_empty());
+        assert!(analysis.files.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_book_returns_err_1032_for_invalid_epub_image_spine_resource() {
+        let path = unique_temp_path("invalid-epub-image-spine-resource", "epub");
+        write_epub_with_package_and_entries(
+            &path,
+            r#"<package><manifest><item id="page" href="page.png" media-type="image/png"/></manifest><spine><itemref idref="page"/></spine></package>"#,
+            &[("OEBPS/page.png", b"not-an-image")],
+        );
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("invalid transient epub image resource should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert_eq!(analysis.media_type, "application/epub+zip");
+        assert_eq!(analysis.comment, "ERR_1032");
+        assert!(analysis.pages.is_empty());
+        assert!(analysis.files.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn infer_transient_series_and_number_propagates_series_lookup_errors() {
+        let fixture = BootstrappedBookFixture::open("transient-infer-series-query-error").await;
+        let path = unique_temp_path("infer-series-query-error", "cbz");
+        let file = File::create(&path).expect("cbz metadata fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        zip.start_file("ComicInfo.xml", options)
+            .expect("comicinfo entry should be created");
+        zip.write_all(b"<ComicInfo><Series>Series 1</Series><Number>7</Number></ComicInfo>")
+            .expect("comicinfo entry should be written");
+        zip.finish()
+            .expect("cbz metadata fixture should finish successfully");
+        sqlx::query("DROP TABLE SERIES_METADATA")
+            .execute(&fixture.pool)
+            .await
+            .expect("series metadata table should be dropped for corrupt schema fixture");
+
+        let error =
+            infer_transient_series_and_number(&fixture.pool, path.to_string_lossy().as_ref())
+                .await
+                .expect_err("series lookup query errors must not become an empty inference");
+
+        assert!(
+            error.contains("transient series exact match query failed"),
+            "unexpected inference error: {error}"
+        );
+
+        let _ = fs::remove_file(path);
+        fixture.close().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn infer_transient_series_and_number_propagates_metadata_source_errors() {
+        let root = unique_temp_path("infer-metadata-source-error-root", "tmp");
+        fs::create_dir(&root).expect("metadata source fixture root should be created");
+        let path = root.join("book.cbz");
+        std::os::unix::fs::symlink(&path, &path)
+            .expect("metadata source symlink loop should be created");
+        let pool = sqlx::SqlitePool::connect_lazy(":memory:")
+            .expect("lazy in-memory pool should not fail");
+
+        let error = infer_transient_series_and_number(&pool, path.to_string_lossy().as_ref())
+            .await
+            .expect_err("metadata source errors must not become empty inference");
+
+        assert!(
+            error.contains("open transient metadata archive"),
+            "unexpected metadata source error: {error}"
+        );
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(root);
+    }
+
+    #[tokio::test]
+    async fn infer_transient_series_and_number_propagates_epub_metadata_parse_errors() {
+        let path = unique_temp_path("infer-epub-metadata-parse-error", "epub");
+        write_epub_with_package(
+            &path,
+            r#"<package><metadata><dc:creator id= role="aut">Jane</dc:creator></metadata><manifest><item id="main" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest></package>"#,
+        );
+        let pool = sqlx::SqlitePool::connect_lazy(":memory:")
+            .expect("lazy in-memory pool should not fail");
+
+        let error = infer_transient_series_and_number(&pool, path.to_string_lossy().as_ref())
+            .await
+            .expect_err("EPUB provider metadata parse errors must not become empty inference");
+
+        assert!(
+            error.contains("EPUB package document"),
+            "unexpected metadata parse error: {error}"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn list_transient_book_entries_propagates_read_dir_errors() {
+        let path = unique_temp_path("list-root-file", "cbz");
+        fs::write(&path, b"not-a-directory").expect("file fixture should be written");
+
+        let error = list_transient_book_entries(&path)
+            .expect_err("read_dir errors must not become an empty transient scan");
+
+        assert!(
+            error.contains("read transient directory"),
+            "unexpected list error: {error}"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn validate_transient_scan_root_propagates_filesystem_probe_errors() {
+        let fixture = BootstrappedBookFixture::open("transient-scan-root-probe-error").await;
+        let path = unique_temp_path("scan-root-probe-loop", "tmp");
+        std::os::unix::fs::symlink(&path, &path).expect("scan root symlink loop should be created");
+
+        let error = validate_transient_scan_root(&fixture.pool, &path)
+            .await
+            .expect_err("scan root filesystem probe errors must not become ERR_1016");
+
+        assert_ne!(error, "ERR_1016");
+
+        let _ = fs::remove_file(path);
+        fixture.close().await;
+    }
+
+    #[test]
+    fn transient_book_page_content_propagates_image_read_errors() {
+        let path = unique_temp_path("image-page-read-error", "jpg");
+        fs::create_dir(&path).expect("image read error fixture should be a directory");
+
+        let error =
+            transient_book_page_content(path.to_string_lossy().as_ref(), "image/jpeg", &[], 1)
+                .expect_err("image read errors must not become a missing page");
+
+        assert!(
+            error.contains("read transient book media"),
+            "unexpected page content error: {error}"
+        );
+
+        let _ = fs::remove_dir(path);
+    }
+
+    #[test]
+    fn transient_book_page_content_propagates_missing_archive_entries() {
+        let path = unique_temp_path("missing-archive-entry", "cbz");
+        let file = File::create(&path).expect("cbz fixture should be created");
+        ZipWriter::new(file)
+            .finish()
+            .expect("empty cbz fixture should finish successfully");
+        let pages = vec![TransientBookPage {
+            number: 1,
+            file_name: "missing.jpg".to_string(),
+            media_type: "image/jpeg".to_string(),
+            width: None,
+            height: None,
+            size_bytes: None,
+        }];
+
+        let error = transient_book_page_content(
+            path.to_string_lossy().as_ref(),
+            "application/zip",
+            &pages,
+            1,
+        )
+        .expect_err("archive entry read errors must not become a missing page");
+
+        assert!(
+            error.contains("read transient archive entry"),
+            "unexpected page content error: {error}"
+        );
 
         let _ = fs::remove_file(path);
     }

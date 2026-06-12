@@ -11,7 +11,7 @@ use crate::state::DiscoveryState;
 
 use super::super::persisted::common_helpers::{decode_query_component, internal_error_response};
 
-pub async fn book_tags(
+pub(crate) async fn book_tags(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
@@ -44,8 +44,9 @@ pub async fn book_tags(
         )
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 

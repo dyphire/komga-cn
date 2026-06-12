@@ -43,6 +43,35 @@ async fn router_readlist_patch_preserves_unspecified_fields() {
 }
 
 #[tokio::test]
+async fn router_readlist_patch_rejects_malformed_json_before_merge() {
+    let ctx = TestFixture::new("router-readlist-patch-malformed-json").await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/readlists/readlist-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Broken ReadList","#))
+                .expect("readlist patch malformed-json request should build"),
+        )
+        .await
+        .expect("readlist patch malformed-json request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_bad_request_message(
+        &payload,
+        "Request body must be a JSON object",
+        "/api/v1/readlists/readlist-1",
+    );
+}
+
+#[tokio::test]
 async fn router_readlist_admin_routes_accept_basic_auth_like_kotlin_clients() {
     let ctx = TestFixture::new("router-readlist-admin-routes-basic-auth-compat").await;
     let authorization =
@@ -176,6 +205,35 @@ async fn router_readlist_create_rejects_invalid_requests_like_kotlin() {
             "fixture: {fixture_suffix}"
         );
     }
+}
+
+#[tokio::test]
+async fn router_readlist_create_rejects_malformed_json_before_field_validation() {
+    let ctx = TestFixture::new("router-readlist-create-malformed-json").await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Broken ReadList","#))
+                .expect("readlist create malformed-json request should build"),
+        )
+        .await
+        .expect("readlist create malformed-json request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_bad_request_message(
+        &payload,
+        "Request body must be a JSON object",
+        "/api/v1/readlists",
+    );
 }
 
 #[tokio::test]

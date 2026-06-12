@@ -38,12 +38,6 @@ impl BookSeriesRef {
     }
 }
 
-impl From<(String, String)> for BookSeriesRef {
-    fn from((book_id, series_id): (String, String)) -> Self {
-        Self { book_id, series_id }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LibraryTaskCommand {
     ScanLibrary {
@@ -209,40 +203,5 @@ pub fn emit_library_task_batch(command: LibraryTaskCommand) -> LibraryTaskBatch 
                 .into_queue_record_with_id(&library_id);
             LibraryTaskBatch::new(vec![record])
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PersistedTaskRowShape {
-    pub id: String,
-    pub priority: i32,
-    pub group: Option<String>,
-    pub class_name: String,
-    pub simple_type: String,
-    pub payload: String,
-    pub owner: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OpaqueTask {
-    pub runtime_simple_type: String,
-    pub persisted_row: PersistedTaskRowShape,
-}
-
-impl OpaqueTask {
-    pub fn into_queue_record(self) -> TaskQueueRecord {
-        let PersistedTaskRowShape {
-            id,
-            priority,
-            group,
-            payload,
-            owner,
-            ..
-        } = self.persisted_row;
-        let mut record = TaskQueueRecord::new(id, priority, group)
-            .with_simple_type(self.runtime_simple_type)
-            .with_payload(payload);
-        record.owner = owner;
-        record
     }
 }

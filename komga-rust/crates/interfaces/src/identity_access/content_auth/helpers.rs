@@ -1,21 +1,32 @@
 #![allow(clippy::result_large_err)]
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::*;
-pub(super) use crate::identity_access::auth::{
-    authentication_activity_headers_metadata_with_remote_addr,
-    authentication_activity_request_metadata, authentication_activity_write_input,
+use axum::Json;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::{
+    AuthOutcome, AuthUser, AuthUserRole, PersistedAuthenticationActivity, random_uuid_like, user_id,
 };
-use komga_application::identity_access::random_uuid_like;
+use serde_json::{Value, json};
+
+use crate::access_log::RequestConnectionInfo;
+use crate::discovery_auth::principal::principal_from_user;
+use crate::identity_access::auth::{
+    AuthenticationActivityApiKey, authentication_activity_headers_metadata_with_remote_addr,
+    authentication_activity_write_input, persisted_api_key_metadata, persisted_api_key_user,
+    persisted_basic_user, persisted_record_successful_authentication_activity, resolved_auth_user,
+};
+use crate::state::IdentityAccessState;
 
 pub(super) fn register_discovery_principal(
     auth_state: &crate::discovery_auth::state::DiscoveryAuthState,
-    payload: &serde_json::Value,
+    user: &AuthUser,
     token: &str,
 ) {
-    if let Some(principal) = principal_from_user_payload(payload) {
+    if let Some(principal) = principal_from_user(user) {
         auth_state.register_session_principal(token, principal);
     }
 }
@@ -94,7 +105,7 @@ pub(super) fn looks_like_kotlin_user_email(value: &str) -> bool {
     has_all_non_empty_segments && domain.contains('.')
 }
 
-pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<String>, Response> {
+pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<AuthUserRole>, Response> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
@@ -111,12 +122,9 @@ pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<String>, Re
         let Some(role) = value.as_str() else {
             return Err(bad_request("roles must be an array of strings"));
         };
-        if matches!(
-            role,
-            "ADMIN" | "FILE_DOWNLOAD" | "PAGE_STREAMING" | "KOBO_SYNC" | "KOREADER_SYNC"
-        ) {
-            roles.insert(role.to_string());
-        }
+        let role = AuthUserRole::from_persisted_name(role)
+            .ok_or_else(|| bad_request("roles contains an unknown role"))?;
+        roles.insert(role);
     }
     Ok(roles.into_iter().collect())
 }
@@ -266,58 +274,65 @@ pub(super) async fn authenticated_user(
     headers: &HeaderMap,
     connection_info: RequestConnectionInfo,
     app: &IdentityAccessState,
-) -> Option<AuthUser> {
+) -> Result<Option<AuthUser>, String> {
     let identity = &app.identity;
     let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
         headers,
         connection_info.remote_addr(),
     );
 
-    match persisted_api_key_user(identity, headers)
-        .await
-        .unwrap_or(AuthOutcome::Missing)
-    {
+    match persisted_api_key_user(identity, headers).await? {
         AuthOutcome::Valid(user) => {
-            let api_key_metadata = persisted_api_key_metadata(identity, headers).await;
-            let (api_key_id, api_key_comment) = api_key_metadata
-                .as_ref()
-                .map(|metadata| (Some(metadata.id()), Some(metadata.comment())))
-                .unwrap_or((None, None));
+            let api_key_metadata = persisted_api_key_metadata(identity, headers).await?;
             let _ = persisted_record_successful_authentication_activity(
                 identity,
                 &user,
                 authentication_activity_write_input(
                     &request_metadata,
                     "ApiKey",
-                    api_key_id,
-                    api_key_comment,
+                    AuthenticationActivityApiKey::from_persisted(api_key_metadata.as_ref()),
                 ),
             )
             .await;
-            return Some(*user);
+            crate::access_log::record_resolved_auth_user_id(Some(user_id(&user)));
+            return Ok(Some(*user));
         }
-        AuthOutcome::Invalid => return None,
+        AuthOutcome::Invalid => return Ok(None),
         AuthOutcome::Missing => {}
     }
 
-    if let Some(user) = resolved_auth_user(identity, headers) {
-        return Some(user);
+    if let Some(user) = resolved_auth_user(identity, headers)? {
+        return Ok(Some(user));
     }
 
-    match persisted_basic_user(identity, headers)
-        .await
-        .unwrap_or(AuthOutcome::Missing)
-    {
+    match persisted_basic_user(identity, headers).await? {
         AuthOutcome::Valid(user) => {
             let _ = persisted_record_successful_authentication_activity(
                 identity,
                 &user,
-                authentication_activity_write_input(&request_metadata, "Password", None, None),
+                authentication_activity_write_input(
+                    &request_metadata,
+                    "Password",
+                    AuthenticationActivityApiKey::none(),
+                ),
             )
             .await;
-            Some(*user)
+            crate::access_log::record_resolved_auth_user_id(Some(user_id(&user)));
+            Ok(Some(*user))
         }
-        AuthOutcome::Invalid | AuthOutcome::Missing => None,
+        AuthOutcome::Invalid | AuthOutcome::Missing => Ok(None),
+    }
+}
+
+pub(super) async fn required_authenticated_user(
+    headers: &HeaderMap,
+    connection_info: RequestConnectionInfo,
+    app: &IdentityAccessState,
+) -> Result<AuthUser, Response> {
+    match authenticated_user(headers, connection_info, app).await {
+        Ok(Some(user)) => Ok(user),
+        Ok(None) => Err(StatusCode::UNAUTHORIZED.into_response()),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
     }
 }
 
@@ -515,4 +530,20 @@ pub(super) fn query_bool(query: &str, key: &str) -> bool {
     query_value(query, key)
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn parse_roles_array_rejects_unknown_roles() {
+        let response = parse_roles_array(Some(&json!(["PAGE_STREAMING", "BROKEN"])))
+            .expect_err("unknown roles should return a bad request response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

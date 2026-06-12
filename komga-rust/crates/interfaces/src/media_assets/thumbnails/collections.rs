@@ -2,12 +2,34 @@ use super::shared::{
     load_collection_mosaic_bytes, parse_thumbnail_upload, response_from_thumbnail_bytes,
     response_from_thumbnail_jpeg_bytes, set_one_hour_private_cache_control, thumbnail_dimensions,
 };
-use super::*;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::Multipart;
+use serde_json::json;
+
+use crate::cache::asset_ok_response;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::MediaAssetsState;
-use axum::extract::State;
 
-pub async fn collection_thumbnail(
+use super::super::access_control::{
+    user_can_access_collection_media, visible_collection_series_ids_for_user,
+};
+use super::super::http_helpers::internal_error_response;
+
+async fn ensure_collection_exists(
+    app: &MediaAssetsState,
+    collection_id: &str,
+) -> Result<(), Response> {
+    match app.thumbnail_reader.collection_exists(collection_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(StatusCode::NOT_FOUND.into_response()),
+        Err(error) => Err(internal_error_response(error)),
+    }
+}
+
+pub(crate) async fn collection_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
@@ -20,16 +42,15 @@ pub async fn collection_thumbnail(
             Err(error) => return internal_error_response(error),
         };
 
-    if !app
-        .reader
-        .collection_exists(&collection_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
     }
 
-    match app.reader.collection_thumbnails(&collection_id).await {
+    match app
+        .thumbnail_reader
+        .collection_thumbnails(&collection_id)
+        .await
+    {
         Ok(rows) => {
             if let Some(thumbnail) = rows.first() {
                 let mut response =
@@ -52,7 +73,7 @@ pub async fn collection_thumbnail(
     }
 }
 
-pub async fn collection_thumbnails(
+pub(crate) async fn collection_thumbnails(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(collection_id): Path<String>,
@@ -63,23 +84,22 @@ pub async fn collection_thumbnails(
         Err(error) => return internal_error_response(error),
     }
 
-    if !app
-        .reader
-        .collection_exists(&collection_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
     }
 
-    match app.reader.collection_thumbnails(&collection_id).await {
+    match app
+        .thumbnail_reader
+        .collection_thumbnails(&collection_id)
+        .await
+    {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
                     json!({
                         "id": row.id,
                         "collectionId": row.collection_id,
-                        "type": row.thumbnail_type,
+                        "type": row.thumbnail_type.persisted_name(),
                         "selected": row.selected,
                         "mediaType": row.media_type,
                         "fileSize": row.file_size,
@@ -94,7 +114,7 @@ pub async fn collection_thumbnails(
     }
 }
 
-pub async fn collection_thumbnail_by_id(
+pub(crate) async fn collection_thumbnail_by_id(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
@@ -105,16 +125,15 @@ pub async fn collection_thumbnail_by_id(
         Err(error) => return internal_error_response(error),
     }
 
-    if !app
-        .reader
-        .collection_exists(&collection_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
     }
 
-    match app.reader.collection_thumbnails(&collection_id).await {
+    match app
+        .thumbnail_reader
+        .collection_thumbnails(&collection_id)
+        .await
+    {
         Ok(rows) => {
             if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
                 asset_ok_response(
@@ -131,27 +150,21 @@ pub async fn collection_thumbnail_by_id(
     }
 }
 
-pub async fn collection_thumbnail_upload(
+pub(crate) async fn collection_thumbnail_upload(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(collection_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    if !app
-        .reader
-        .collection_exists(&collection_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
     }
 
-    let (thumbnail_bytes, media_type, selected) =
-        match parse_thumbnail_upload(multipart, "collection").await {
-            Ok(parsed) => parsed,
-            Err(response) => return response,
-        };
-    let Some((width, height)) = thumbnail_dimensions(&thumbnail_bytes) else {
+    let upload = match parse_thumbnail_upload(multipart, "collection").await {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
@@ -159,18 +172,18 @@ pub async fn collection_thumbnail_upload(
         .thumbnails
         .insert_collection(
             &collection_id,
-            &thumbnail_bytes,
-            media_type.as_str(),
-            width,
-            height,
-            selected,
+            &upload.bytes,
+            upload.media_type.as_str(),
+            dimensions.width,
+            dimensions.height,
+            upload.selected,
         )
         .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
             "collectionId": thumbnail.collection_id,
-            "type": thumbnail.thumbnail_type,
+            "type": thumbnail.thumbnail_type.persisted_name(),
             "selected": thumbnail.selected,
             "mediaType": thumbnail.media_type,
             "fileSize": thumbnail.file_size,
@@ -182,18 +195,13 @@ pub async fn collection_thumbnail_upload(
     }
 }
 
-pub async fn collection_thumbnail_select(
+pub(crate) async fn collection_thumbnail_select(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    if !app
-        .reader
-        .collection_exists(&collection_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
     }
 
     match app.thumbnails.select_collection(&thumbnail_id).await {
@@ -202,7 +210,7 @@ pub async fn collection_thumbnail_select(
     }
 }
 
-pub async fn collection_thumbnail_delete(
+pub(crate) async fn collection_thumbnail_delete(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,

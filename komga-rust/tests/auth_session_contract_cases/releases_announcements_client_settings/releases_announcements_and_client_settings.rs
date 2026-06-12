@@ -103,6 +103,85 @@ async fn router_get_releases_returns_internal_error_for_non_array_payload() {
 }
 
 #[tokio::test]
+async fn router_get_releases_maps_success_payload_to_api_contract() {
+    let _guard = releases_env_lock()
+        .lock()
+        .expect("releases env lock should not be poisoned");
+    let previous = std::env::var("KOMGA_RUST_RELEASES_URL").ok();
+
+    let server = spawn_single_response_server(
+        200,
+        "application/json",
+        r#"[
+            {
+                "html_url": "https://example.com/release/2",
+                "tag_name": "v2.0.0",
+                "published_at": "2024-02-03T04:05:06Z",
+                "body": "Second",
+                "prerelease": true
+            },
+            {
+                "html_url": "https://example.com/release/1",
+                "tag_name": "v1.0.0",
+                "published_at": "2024-01-02T03:04:05Z",
+                "body": "First",
+                "prerelease": false
+            }
+        ]"#,
+    )
+    .await;
+    unsafe {
+        std::env::set_var("KOMGA_RUST_RELEASES_URL", server.url.clone());
+    }
+
+    let ctx = TestFixture::new("router-get-releases-success-contract").await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/releases")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("get releases success request should build"),
+        )
+        .await
+        .expect("get releases success request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!([
+            {
+                "version": "v2.0.0",
+                "releaseDate": "2024-02-03T04:05:06Z",
+                "url": "https://example.com/release/2",
+                "latest": true,
+                "preRelease": true,
+                "description": "Second"
+            },
+            {
+                "version": "v1.0.0",
+                "releaseDate": "2024-01-02T03:04:05Z",
+                "url": "https://example.com/release/1",
+                "latest": false,
+                "preRelease": false,
+                "description": "First"
+            }
+        ])
+    );
+
+    restore_env_var("KOMGA_RUST_RELEASES_URL", previous);
+    server
+        .join
+        .await
+        .expect("releases success mock server should finish");
+}
+
+#[tokio::test]
 async fn router_get_releases_returns_internal_error_for_non_success_status_with_valid_array_body() {
     let _guard = releases_env_lock()
         .lock()

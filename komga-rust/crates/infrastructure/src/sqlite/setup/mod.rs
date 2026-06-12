@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use sqlx::migrate::{Migration, MigrationType, Migrator};
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{SqlStr, SqliteConnection, SqlitePool};
+use sqlx::{Row, SqlStr, SqliteConnection, SqlitePool};
 
 mod embedded_migrations {
     include!(concat!(
@@ -17,9 +16,8 @@ mod schema_definitions;
 use embedded_migrations::{EmbeddedMigration, MAIN_EMBEDDED_MIGRATIONS, TASKS_EMBEDDED_MIGRATIONS};
 use schema_definitions::{
     LEGACY_MAIN_SCHEMA_V20200706141854, LEGACY_MAIN_SCHEMA_V20200706141854_VERSION,
-    PrefixSchemaInventory, READ_FIXTURE_SCHEMA_STATEMENTS, REQUIRED_MAIN_SCHEMA,
-    REQUIRED_TASKS_SCHEMA, SchemaInventoryObject, main_prefix_schema_inventories_json,
-    tasks_prefix_schema_inventories_json,
+    PrefixSchemaInventory, REQUIRED_MAIN_SCHEMA, REQUIRED_TASKS_SCHEMA, SchemaInventoryObject,
+    main_prefix_schema_inventories_json, tasks_prefix_schema_inventories_json,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -28,22 +26,20 @@ enum SchemaTarget {
     Tasks,
 }
 
-pub async fn open_in_memory_database() -> Result<SqlitePool, sqlx::Error> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await?;
-    bootstrap_read_model_pool(&pool).await?;
-    Ok(pool)
+struct ComparableSchemaInventoryObject {
+    object_type: String,
+    name: String,
+    table_name: String,
+    sql: String,
 }
 
-pub async fn open_in_memory_tasks_database() -> Result<SqlitePool, sqlx::Error> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await?;
-    bootstrap_tasks_pool(&pool).await?;
-    Ok(pool)
+impl ComparableSchemaInventoryObject {
+    fn matches_expected(&self, expected: &SchemaInventoryObject) -> bool {
+        self.object_type == expected.object_type
+            && self.name == expected.name
+            && self.table_name == expected.table_name
+            && self.sql == expected.sql
+    }
 }
 
 pub async fn bootstrap_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
@@ -57,46 +53,10 @@ pub async fn bootstrap_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await
 }
 
-pub async fn bootstrap_read_model_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let mut connection = pool.acquire().await?;
-    bootstrap_read_model_connection(connection.as_mut()).await
-}
-
 pub async fn bootstrap_tasks_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let mut connection = pool.acquire().await?;
     bootstrap_or_migrate_schema(
         connection.as_mut(),
-        tasks_migrator(),
-        REQUIRED_TASKS_SCHEMA,
-        SchemaTarget::Tasks,
-    )
-    .await
-}
-
-pub async fn bootstrap_connection(connection: &mut SqliteConnection) -> Result<(), sqlx::Error> {
-    bootstrap_or_migrate_schema(
-        connection,
-        main_migrator(),
-        REQUIRED_MAIN_SCHEMA,
-        SchemaTarget::Main,
-    )
-    .await
-}
-
-pub async fn bootstrap_read_model_connection(
-    connection: &mut SqliteConnection,
-) -> Result<(), sqlx::Error> {
-    for statement in READ_FIXTURE_SCHEMA_STATEMENTS {
-        sqlx::query(*statement).execute(&mut *connection).await?;
-    }
-    Ok(())
-}
-
-pub async fn bootstrap_tasks_connection(
-    connection: &mut SqliteConnection,
-) -> Result<(), sqlx::Error> {
-    bootstrap_or_migrate_schema(
-        connection,
         tasks_migrator(),
         REQUIRED_TASKS_SCHEMA,
         SchemaTarget::Tasks,
@@ -451,31 +411,18 @@ fn can_repair_historyless_schema_objects(
 }
 
 fn missing_schema_objects<'a>(
-    live_inventory: &[(String, String, String, String)],
+    live_inventory: &[ComparableSchemaInventoryObject],
     expected_inventory: &'a [SchemaInventoryObject],
 ) -> Option<Vec<&'a SchemaInventoryObject>> {
     let mut missing = Vec::new();
     let mut live_index = 0usize;
 
     for expected in expected_inventory {
-        let expected_row = (
-            expected.object_type.as_str(),
-            expected.name.as_str(),
-            expected.table_name.as_str(),
-            expected.sql.as_str(),
-        );
-
-        if let Some(live) = live_inventory.get(live_index) {
-            let live_row = (
-                live.0.as_str(),
-                live.1.as_str(),
-                live.2.as_str(),
-                live.3.as_str(),
-            );
-            if live_row == expected_row {
-                live_index += 1;
-                continue;
-            }
+        if let Some(live) = live_inventory.get(live_index)
+            && live.matches_expected(expected)
+        {
+            live_index += 1;
+            continue;
         }
 
         missing.push(expected);
@@ -489,25 +436,20 @@ fn missing_schema_objects<'a>(
 }
 
 fn schema_inventory_matches(
-    live_inventory: &[(String, String, String, String)],
+    live_inventory: &[ComparableSchemaInventoryObject],
     expected_inventory: &[SchemaInventoryObject],
 ) -> bool {
     live_inventory.len() == expected_inventory.len()
         && live_inventory
             .iter()
             .zip(expected_inventory.iter())
-            .all(|(live, expected)| {
-                live.0 == expected.object_type
-                    && live.1 == expected.name
-                    && live.2 == expected.table_name
-                    && live.3 == expected.sql
-            })
+            .all(|(live, expected)| live.matches_expected(expected))
 }
 
 async fn comparable_schema_inventory(
     connection: &mut SqliteConnection,
-) -> Result<Vec<(String, String, String, String)>, sqlx::Error> {
-    sqlx::query_as::<_, (String, String, String, String)>(
+) -> Result<Vec<ComparableSchemaInventoryObject>, sqlx::Error> {
+    sqlx::query(
         r#"SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
 FROM sqlite_master
 WHERE type IN ('table', 'index', 'trigger', 'view')
@@ -519,8 +461,14 @@ ORDER BY type, name"#,
     .await
     .map(|rows| {
         rows.into_iter()
-            .map(|(object_type, name, table_name, sql)| {
-                (object_type, name, table_name, normalize_schema_sql(&sql))
+            .map(|row| {
+                let sql = row.get::<String, _>("sql");
+                ComparableSchemaInventoryObject {
+                    object_type: row.get::<String, _>("type"),
+                    name: row.get::<String, _>("name"),
+                    table_name: row.get::<String, _>("tbl_name"),
+                    sql: normalize_schema_sql(&sql),
+                }
             })
             .collect()
     })

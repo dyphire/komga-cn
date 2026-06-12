@@ -2,11 +2,18 @@ use std::collections::BTreeSet;
 
 use crate::auth::runtime_identity_access::persisted_users;
 use komga_application::identity_access::{
-    AuthUser, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput, UpdateAuthUserResult,
+    AuthUser, AuthUserRole, CreateAuthUserInput, SharedLibrariesInput, UpdateAuthUserInput,
+    UpdateAuthUserResult, user_roles_from_persisted_names,
 };
 use sqlx::{Row, SqlitePool};
 
-pub async fn create_auth_user(
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UserSharingLabels {
+    allow: Vec<String>,
+    exclude: Vec<String>,
+}
+
+pub(super) async fn create_auth_user(
     pool: &SqlitePool,
     input: CreateAuthUserInput,
 ) -> Result<Option<AuthUser>, sqlx::Error> {
@@ -26,10 +33,10 @@ pub async fn create_auth_user(
         resolve_shared_libraries(&mut tx, input.shared_libraries.clone()).await?;
     let age = input.age_restriction.as_ref().map(|value| value.age);
     let allow_only = input.age_restriction.as_ref().map(|value| value.allow_only);
-    let (labels_allow, labels_exclude) = normalize_content_restriction_labels((
-        input.labels_allow.clone(),
-        input.labels_exclude.clone(),
-    ));
+    let labels = normalize_content_restriction_labels(UserSharingLabels {
+        allow: input.labels_allow.clone(),
+        exclude: input.labels_exclude.clone(),
+    });
 
     sqlx::query(
         r#"INSERT INTO USER (
@@ -53,7 +60,7 @@ pub async fn create_auth_user(
     for role in &input.roles {
         sqlx::query("INSERT OR IGNORE INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
             .bind(&input.user_id)
-            .bind(role)
+            .bind(role.persisted_name())
             .execute(&mut *tx)
             .await?;
     }
@@ -70,7 +77,7 @@ pub async fn create_auth_user(
         }
     }
 
-    for label in &labels_allow {
+    for label in &labels.allow {
         sqlx::query("INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
             .bind(label)
             .bind(true)
@@ -78,7 +85,7 @@ pub async fn create_auth_user(
             .execute(&mut *tx)
             .await?;
     }
-    for label in &labels_exclude {
+    for label in &labels.exclude {
         sqlx::query("INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)")
             .bind(label)
             .bind(false)
@@ -91,16 +98,14 @@ pub async fn create_auth_user(
 
     persisted_users(pool)
         .await
-        .and_then(|users| {
-            users
-                .into_iter()
-                .find(|candidate| candidate.id == input.user_id)
-        })
+        .map_err(sqlx::Error::Protocol)?
+        .into_iter()
+        .find(|candidate| candidate.id == input.user_id)
         .ok_or(sqlx::Error::RowNotFound)
         .map(Some)
 }
 
-pub async fn delete_auth_user(
+pub(super) async fn delete_auth_user(
     pool: &SqlitePool,
     target_user_id: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -166,7 +171,7 @@ pub async fn delete_auth_user(
     Ok(true)
 }
 
-pub async fn update_auth_user(
+pub(super) async fn update_auth_user(
     pool: &SqlitePool,
     target_user_id: &str,
     patch: UpdateAuthUserInput,
@@ -191,7 +196,7 @@ pub async fn update_auth_user(
 
     let current_roles = load_user_roles(&mut tx, target_user_id).await?;
     let current_shared_library_ids = load_user_shared_library_ids(&mut tx, target_user_id).await?;
-    let (current_labels_allow, current_labels_exclude) = normalize_content_restriction_labels(
+    let current_labels = normalize_content_restriction_labels(
         load_user_sharing_labels(&mut tx, target_user_id).await?,
     );
 
@@ -220,22 +225,21 @@ pub async fn update_auth_user(
         .as_ref()
         .map(|shared_libraries| shared_libraries.library_ids.clone())
         .unwrap_or_else(|| current_shared_library_ids.clone());
-    let (new_labels_allow, new_labels_exclude) = normalize_content_restriction_labels((
-        patch
+    let new_labels = normalize_content_restriction_labels(UserSharingLabels {
+        allow: patch
             .labels_allow
             .clone()
-            .unwrap_or_else(|| current_labels_allow.clone()),
-        patch
+            .unwrap_or_else(|| current_labels.allow.clone()),
+        exclude: patch
             .labels_exclude
             .clone()
-            .unwrap_or_else(|| current_labels_exclude.clone()),
-    ));
+            .unwrap_or_else(|| current_labels.exclude.clone()),
+    });
     let new_age_restriction = age_restriction.zip(age_restriction_allow_only);
     let expire_sessions = current_roles != new_roles
         || user_row.get::<bool, _>("SHARED_ALL_LIBRARIES") != shared_all_libraries
         || current_shared_library_ids != new_shared_library_ids
-        || current_labels_allow != new_labels_allow
-        || current_labels_exclude != new_labels_exclude
+        || current_labels != new_labels
         || current_age_restriction != new_age_restriction;
 
     sqlx::query(
@@ -259,7 +263,7 @@ pub async fn update_auth_user(
         for role in roles {
             sqlx::query("INSERT OR IGNORE INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
                 .bind(target_user_id)
-                .bind(role)
+                .bind(role.persisted_name())
                 .execute(&mut *tx)
                 .await?;
         }
@@ -287,7 +291,7 @@ pub async fn update_auth_user(
             .execute(&mut *tx)
             .await?;
 
-        for label in &new_labels_allow {
+        for label in &new_labels.allow {
             sqlx::query(
                 "INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)",
             )
@@ -297,7 +301,7 @@ pub async fn update_auth_user(
             .execute(&mut *tx)
             .await?;
         }
-        for label in &new_labels_exclude {
+        for label in &new_labels.exclude {
             sqlx::query(
                 "INSERT OR IGNORE INTO USER_SHARING (LABEL, ALLOW, USER_ID) VALUES (?, ?, ?)",
             )
@@ -316,15 +320,15 @@ pub async fn update_auth_user(
     })
 }
 
-fn normalize_content_restriction_labels(
-    (labels_allow, labels_exclude): (Vec<String>, Vec<String>),
-) -> (Vec<String>, Vec<String>) {
-    let labels_exclude = labels_exclude
+fn normalize_content_restriction_labels(labels: UserSharingLabels) -> UserSharingLabels {
+    let labels_exclude = labels
+        .exclude
         .into_iter()
         .map(|label| label.trim().to_lowercase())
         .filter(|label| !label.is_empty())
         .collect::<BTreeSet<_>>();
-    let labels_allow = labels_allow
+    let labels_allow = labels
+        .allow
         .into_iter()
         .map(|label| label.trim().to_lowercase())
         .filter(|label| !label.is_empty())
@@ -333,22 +337,25 @@ fn normalize_content_restriction_labels(
         .cloned()
         .collect::<Vec<_>>();
 
-    (labels_allow, labels_exclude.into_iter().collect())
+    UserSharingLabels {
+        allow: labels_allow,
+        exclude: labels_exclude.into_iter().collect(),
+    }
 }
 
 async fn load_user_roles(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     user_id: &str,
-) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query("SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE")
+) -> Result<Vec<AuthUserRole>, sqlx::Error> {
+    let rows = sqlx::query("SELECT ROLE FROM USER_ROLE WHERE USER_ID = ? ORDER BY ROLE")
         .bind(user_id)
         .fetch_all(&mut **tx)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| row.get::<String, _>("ROLE"))
-                .collect()
-        })
+        .await?;
+    let role_names = rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ROLE"))
+        .collect::<Vec<_>>();
+    Ok(user_roles_from_persisted_names(role_names))
 }
 
 async fn load_user_shared_library_ids(
@@ -397,7 +404,7 @@ async fn resolve_shared_libraries(
 async fn load_user_sharing_labels(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     user_id: &str,
-) -> Result<(Vec<String>, Vec<String>), sqlx::Error> {
+) -> Result<UserSharingLabels, sqlx::Error> {
     let rows =
         sqlx::query("SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY LABEL")
             .bind(user_id)
@@ -415,5 +422,5 @@ async fn load_user_sharing_labels(
         }
     }
 
-    Ok((allow, exclude))
+    Ok(UserSharingLabels { allow, exclude })
 }

@@ -1,4 +1,6 @@
-use super::*;
+use komga_application::task_processing::TaskProcessingError;
+
+use super::super::runtime_context::JobRuntime;
 use crate::search::index_lifecycle::SearchEntityType;
 
 pub(in crate::task_queue) async fn rebuild_index(

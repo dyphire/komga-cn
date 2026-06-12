@@ -6,7 +6,7 @@ use super::db_queries::{
 };
 use super::page_content::resolve_book_page_bytes;
 
-pub async fn persist_book_page_hashes_from_media_content(
+pub(crate) async fn persist_book_page_hashes_from_media_content(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<(), String> {
@@ -17,7 +17,7 @@ pub async fn persist_book_page_hashes_from_media_content(
 
     let mut hashes = Vec::<(i64, String)>::new();
     for page in pages {
-        let Some(bytes) = resolve_book_page_bytes(&media, &page, page.number).await else {
+        let Some(bytes) = resolve_book_page_bytes(&media, &page, page.number).await? else {
             continue;
         };
         let Some(persisted_page_number) = public_page_number_to_persisted(page.number) else {

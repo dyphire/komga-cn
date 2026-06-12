@@ -1,9 +1,5 @@
-use komga_domain::discovery::PageEnvelope;
-use serde_json::{Value, json};
-
-pub(crate) mod authors_queries;
-pub(crate) mod common_helpers;
-pub(crate) mod library_mappings;
-pub mod models;
-pub mod series_queries;
-use models::{PersistedAuthorEntry, PersistedSeriesSummary};
+pub(in crate::discovery) mod authors_queries;
+pub(in crate::discovery) mod common_helpers;
+pub(in crate::discovery) mod library_mappings;
+pub(in crate::discovery) mod models;
+pub(in crate::discovery) mod series_queries;

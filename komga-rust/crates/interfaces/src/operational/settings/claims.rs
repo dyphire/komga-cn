@@ -8,11 +8,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::operational::ClaimInitialAdminUserResult;
 
-use crate::identity_access::auth::{AuthUser, user_payload_json};
+use crate::identity_access::user_payload_json;
 use crate::state::OperationalApiState;
+use komga_application::identity_access::{AuthUser, AuthUserRole};
+
+async fn load_claim_status(app: &OperationalApiState) -> Result<bool, Response> {
+    app.claim
+        .load_claim_status()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
 
 pub(crate) async fn get_claim_status(State(app): State<OperationalApiState>) -> Response {
-    let is_claimed = app.claim.load_claim_status().await.unwrap_or(false);
+    let is_claimed = match load_claim_status(&app).await {
+        Ok(is_claimed) => is_claimed,
+        Err(response) => return response,
+    };
 
     Json(json!({ "isClaimed": is_claimed })).into_response()
 }
@@ -27,8 +38,10 @@ pub(crate) async fn post_claim(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    if app.claim.load_claim_status().await.unwrap_or(false) {
-        return claim_already_claimed_response();
+    match load_claim_status(&app).await {
+        Ok(true) => return claim_already_claimed_response(),
+        Ok(false) => {}
+        Err(response) => return response,
     }
 
     let hashed_password = match hash_bcrypt_password(password, DEFAULT_COST) {
@@ -53,10 +66,7 @@ pub(crate) async fn post_claim(
         id: created_user.id,
         email: created_user.email,
         password: String::new(),
-        roles: claim_user_roles()
-            .iter()
-            .map(|role| (*role).to_string())
-            .collect(),
+        roles: AuthUserRole::claim_roles().collect(),
         shared_all_libraries: true,
         shared_library_ids: Vec::new(),
         labels_allow: Vec::new(),
@@ -94,16 +104,6 @@ fn valid_claim_email(value: &str) -> bool {
         return false;
     };
     !domain_name.is_empty() && !tld.is_empty()
-}
-
-fn claim_user_roles() -> &'static [&'static str] {
-    &[
-        "ADMIN",
-        "FILE_DOWNLOAD",
-        "PAGE_STREAMING",
-        "KOBO_SYNC",
-        "KOREADER_SYNC",
-    ]
 }
 
 fn claim_already_claimed_response() -> Response {

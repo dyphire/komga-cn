@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use komga_application::operational::{PersistedServerSettings, ServerSettingsPort};
+use komga_application::operational::{
+    PersistedServerSettings, ServerSettingChange, ServerSettingsPort,
+};
 use sqlx::Row;
 
 use crate::context::SqlitePersistenceContext;
@@ -75,7 +77,7 @@ impl ServerSettingsPort for ServerSettingsStore {
             .map_err(|e| format!("load server settings: {e}"))
     }
 
-    async fn apply_changes(&self, changes: &[(String, Option<String>)]) -> Result<(), String> {
+    async fn apply_changes(&self, changes: &[ServerSettingChange]) -> Result<(), String> {
         if changes.is_empty() {
             return Ok(());
         }
@@ -84,8 +86,8 @@ impl ServerSettingsPort for ServerSettingsStore {
             .context()
             .await
             .map_err(|e| format!("server settings context: {e}"))?;
-        for (key, value) in changes {
-            match value {
+        for change in changes {
+            match &change.value {
                 Some(value) => {
                     sqlx::query(
                         r#"
@@ -95,11 +97,11 @@ impl ServerSettingsPort for ServerSettingsStore {
                         SET VALUE = excluded.VALUE
                     "#,
                     )
-                    .bind(key)
+                    .bind(&change.key)
                     .bind(value)
                     .execute(context.pool())
                     .await
-                    .map_err(|e| format!("apply server setting {key}: {e}"))?;
+                    .map_err(|e| format!("apply server setting {}: {e}", change.key))?;
                 }
                 None => {
                     sqlx::query(
@@ -108,10 +110,10 @@ impl ServerSettingsPort for ServerSettingsStore {
                         WHERE KEY = ?
                     "#,
                     )
-                    .bind(key)
+                    .bind(&change.key)
                     .execute(context.pool())
                     .await
-                    .map_err(|e| format!("delete server setting {key}: {e}"))?;
+                    .map_err(|e| format!("delete server setting {}: {e}", change.key))?;
                 }
             }
         }

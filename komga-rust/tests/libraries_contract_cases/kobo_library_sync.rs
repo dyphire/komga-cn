@@ -431,8 +431,8 @@ async fn router_kobo_library_sync_uses_kobo_port_when_host_omits_port() {
 }
 
 #[tokio::test]
-async fn router_kobo_library_sync_respects_age_restrictions() {
-    let ctx = TestFixture::builder("router-kobo-library-sync-age-restriction")
+async fn router_kobo_library_sync_respects_age_restrictions_above_u16() {
+    let ctx = TestFixture::builder("router-kobo-library-sync-large-age-restriction")
         .with_seed(|paths| async move {
             seed_router_age_exclude_user_with_roles(
                 &paths,
@@ -444,6 +444,17 @@ async fn router_kobo_library_sync_respects_age_restrictions() {
             )
             .await;
             seed_kobo_sync_api_key(&paths, "any-token", "kobo-age-user").await;
+
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("kobo large age-rating db should open");
+            sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
+                .bind(65_536_i64)
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("series age rating should update for kobo restriction");
+            pool.close().await;
         })
         .build()
         .await;

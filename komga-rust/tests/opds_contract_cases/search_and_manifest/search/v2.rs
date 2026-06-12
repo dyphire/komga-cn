@@ -16,8 +16,8 @@ async fn router_opds_v2_search_query_contract_covers_group_presence_and_order() 
         ),
         (
             "/opds/v2/search?query=1",
-            vec!["Series", "Books", "Read Lists"],
-            "multi-group search should preserve Kotlin group ordering",
+            vec!["Series", "Books", "Collections", "Read Lists"],
+            "multi-group search should preserve group ordering",
         ),
     ];
 
@@ -103,7 +103,7 @@ async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
 
     assert_eq!(
         group_titles,
-        vec!["Series", "Books", "Read Lists"],
+        vec!["Series", "Books", "Collections", "Read Lists"],
         "{payload}"
     );
 
@@ -111,6 +111,7 @@ async fn router_opds_v2_search_supports_fielded_query_candidate_lookup() {
     assert!(
         rendered.contains("/opds/v2/series/series-1")
             && rendered.contains("book-1/manifest")
+            && rendered.contains("/opds/v2/collections/collection-1")
             && rendered.contains("/opds/v2/readlists/readlist-1"),
         "OPDS v2 fielded search should include unified-search candidate matches: {payload}",
     );

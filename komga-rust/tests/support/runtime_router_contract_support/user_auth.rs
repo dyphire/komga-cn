@@ -1,8 +1,8 @@
+use crate::support::sqlite::connect_test_pool;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bcrypt::hash as hash_bcrypt_password;
-use komga_infrastructure::sqlite::connect_test_pool;
 use tower::util::ServiceExt;
 
 use super::RuntimeDbPaths;

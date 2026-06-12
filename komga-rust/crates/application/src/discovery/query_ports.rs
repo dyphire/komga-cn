@@ -23,6 +23,12 @@ pub struct PersistedAuthorEntry {
     pub role: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoredSearchHit {
+    pub score: f32,
+    pub id: String,
+}
+
 #[async_trait]
 pub trait CollectionSearchPort: Send + Sync {
     async fn search_collection_ids(&self, query: &str, limit: usize)
@@ -35,7 +41,7 @@ pub trait ReadlistSearchPort: Send + Sync {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, String>;
+    ) -> Result<Vec<ScoredSearchHit>, String>;
 }
 
 #[async_trait]

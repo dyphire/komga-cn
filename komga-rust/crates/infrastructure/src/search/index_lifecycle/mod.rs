@@ -58,6 +58,12 @@ fn retained_query_fields() -> &'static [SearchField] {
     RETAINED_QUERY_FIELDS
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SearchScoredHit {
+    pub(crate) score: f32,
+    pub(crate) id: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SearchField {
     Title,
@@ -310,7 +316,13 @@ pub struct SearchIndexLifecycle {
     fields: SearchFields,
 }
 
-pub struct SearchQueryLifecycle {
+pub(crate) struct SearchQueryLifecycle {
+    index: Index,
+    reader: IndexReader,
+    fields: SearchFields,
+}
+
+struct SearchQueryState {
     index: Index,
     reader: IndexReader,
     fields: SearchFields,
@@ -383,7 +395,7 @@ pub fn decide_startup_lifecycle(index_dir: &Path) -> Result<SearchStartupLifecyc
         Err(error) => return Err(error),
     }
 
-    if !index_dir.join("meta.json").exists() {
+    if !path_exists(index_dir.join("meta.json").as_path())? {
         return Ok(SearchStartupLifecycle::RebuildRequired);
     }
 
@@ -408,7 +420,7 @@ pub fn decide_startup_lifecycle(index_dir: &Path) -> Result<SearchStartupLifecyc
 }
 
 pub fn prepare_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
-    if index_dir.exists() {
+    if path_exists(index_dir)? {
         fs::remove_dir_all(index_dir)?;
     }
     fs::create_dir_all(index_dir)?;
@@ -417,7 +429,11 @@ pub fn prepare_for_rebuild(index_dir: &Path) -> Result<(), SearchError> {
 
 impl SearchIndexLifecycle {
     pub fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
-        let (index, reader, fields) = bootstrap_query_state(index_dir)?;
+        let SearchQueryState {
+            index,
+            reader,
+            fields,
+        } = bootstrap_query_state(index_dir)?;
         let writer = index.writer(50_000_000)?;
 
         Ok(Self {
@@ -500,22 +516,6 @@ impl SearchIndexLifecycle {
         Ok(())
     }
 
-    pub fn search_scored_ids(
-        &self,
-        query: &str,
-        entity_type: SearchEntityType,
-        limit: usize,
-    ) -> Result<Vec<(f32, String)>, SearchError> {
-        search_scored_ids(
-            &self.index,
-            &self.reader,
-            &self.fields,
-            query,
-            entity_type,
-            limit,
-        )
-    }
-
     pub fn search_ids(
         &self,
         query: &str,
@@ -534,8 +534,12 @@ impl SearchIndexLifecycle {
 }
 
 impl SearchQueryLifecycle {
-    pub fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
-        let (index, reader, fields) = bootstrap_existing_query_state(index_dir)?;
+    pub(crate) fn bootstrap(index_dir: &Path) -> Result<Self, SearchError> {
+        let SearchQueryState {
+            index,
+            reader,
+            fields,
+        } = bootstrap_existing_query_state(index_dir)?;
 
         Ok(Self {
             index,
@@ -544,12 +548,12 @@ impl SearchQueryLifecycle {
         })
     }
 
-    pub fn search_scored_ids(
+    pub(crate) fn search_scored_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, SearchError> {
+    ) -> Result<Vec<SearchScoredHit>, SearchError> {
         search_scored_ids(
             &self.index,
             &self.reader,
@@ -560,7 +564,7 @@ impl SearchQueryLifecycle {
         )
     }
 
-    pub fn search_ids(
+    pub(crate) fn search_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
@@ -577,9 +581,7 @@ impl SearchQueryLifecycle {
     }
 }
 
-fn bootstrap_query_state(
-    index_dir: &Path,
-) -> Result<(Index, IndexReader, SearchFields), SearchError> {
+fn bootstrap_query_state(index_dir: &Path) -> Result<SearchQueryState, SearchError> {
     prepare_index_directory(index_dir)?;
 
     let schema = build_schema();
@@ -591,12 +593,14 @@ fn bootstrap_query_state(
         .reader_builder()
         .reload_policy(ReloadPolicy::Manual)
         .try_into()?;
-    Ok((index, reader, fields))
+    Ok(SearchQueryState {
+        index,
+        reader,
+        fields,
+    })
 }
 
-fn bootstrap_existing_query_state(
-    index_dir: &Path,
-) -> Result<(Index, IndexReader, SearchFields), SearchError> {
+fn bootstrap_existing_query_state(index_dir: &Path) -> Result<SearchQueryState, SearchError> {
     let index = open_existing_runtime_index(index_dir)?;
     register_search_analyzer_profiles(&index);
     let fields = SearchFields::from_schema(&index.schema())?;
@@ -605,7 +609,11 @@ fn bootstrap_existing_query_state(
         .reader_builder()
         .reload_policy(ReloadPolicy::Manual)
         .try_into()?;
-    Ok((index, reader, fields))
+    Ok(SearchQueryState {
+        index,
+        reader,
+        fields,
+    })
 }
 
 fn search_scored_ids(
@@ -615,7 +623,7 @@ fn search_scored_ids(
     query: &str,
     entity_type: SearchEntityType,
     limit: usize,
-) -> Result<Vec<(f32, String)>, SearchError> {
+) -> Result<Vec<SearchScoredHit>, SearchError> {
     let searcher = reader.searcher();
     let parser = build_query_parser(index, fields, entity_type);
     let normalized_query = normalize_multilingual_width(query);
@@ -640,11 +648,14 @@ fn search_scored_ids(
             .get_first(fields.entity_id)
             .and_then(|value| value.as_str())
             .ok_or(SearchError::MissingStoredField("entity_id"))?;
-        ranked_ids.push((score, id.to_string()));
+        ranked_ids.push(SearchScoredHit {
+            score,
+            id: id.to_string(),
+        });
     }
 
-    ranked_ids.sort_by(|left, right| match right.0.total_cmp(&left.0) {
-        std::cmp::Ordering::Equal => left.1.cmp(&right.1),
+    ranked_ids.sort_by(|left, right| match right.score.total_cmp(&left.score) {
+        std::cmp::Ordering::Equal => left.id.cmp(&right.id),
         ordering => ordering,
     });
 
@@ -660,7 +671,7 @@ fn search_ids(
     limit: usize,
 ) -> Result<Vec<String>, SearchError> {
     search_scored_ids(index, reader, fields, query, entity_type, limit)
-        .map(|ranked_ids| ranked_ids.into_iter().map(|(_, id)| id).collect())
+        .map(|ranked_ids| ranked_ids.into_iter().map(|hit| hit.id).collect())
 }
 
 fn build_query_parser(
@@ -737,8 +748,12 @@ fn document_key(entity_type: SearchEntityType, id: &str) -> String {
     format!("{}:{id}", entity_type.as_str())
 }
 
+fn path_exists(path: &Path) -> Result<bool, SearchError> {
+    path.try_exists().map_err(SearchError::Io)
+}
+
 fn open_or_create_index(index_dir: &Path, schema: Schema) -> Result<Index, SearchError> {
-    if index_dir.join("meta.json").exists() {
+    if path_exists(index_dir.join("meta.json").as_path())? {
         let index = open_existing_index(index_dir)?;
 
         validate_existing_runtime_index(index_dir, &index).map_err(|error| {
@@ -757,7 +772,7 @@ fn open_or_create_index(index_dir: &Path, schema: Schema) -> Result<Index, Searc
 }
 
 fn open_existing_runtime_index(index_dir: &Path) -> Result<Index, SearchError> {
-    if !index_dir.exists() || !index_dir.join("meta.json").exists() {
+    if !path_exists(index_dir)? || !path_exists(index_dir.join("meta.json").as_path())? {
         return Err(SearchError::CorruptedIndexRequiresExplicitRebuild(
             index_dir.to_path_buf(),
             "search index does not exist yet".to_string(),

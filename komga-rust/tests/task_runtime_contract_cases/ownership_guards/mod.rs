@@ -21,23 +21,32 @@ mod empty_trash;
 mod main_db_guards;
 
 use metadata_refresh::{
-    write_router_epub_with_package_document, write_router_epub_with_package_document_and_entries,
+    write_router_cbz_with_single_page, write_router_epub_with_package_document,
+    write_router_epub_with_package_document_and_entries,
 };
-use std::sync::OnceLock;
-use tokio::sync::{Mutex, MutexGuard};
 
-fn runtime_sse_contract_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-async fn runtime_sse_contract_guard() -> MutexGuard<'static, ()> {
-    runtime_sse_contract_lock().lock().await
-}
+const METADATA_REFRESH_EMPTY_EPUB_PACKAGE: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">book-1</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="main" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="main"/>
+  </spine>
+</package>"##;
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-task").await;
+
+    write_router_epub_with_package_document(
+        ctx.paths(),
+        "books/book-1.epub",
+        METADATA_REFRESH_EMPTY_EPUB_PACKAGE,
+    );
 
     let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
@@ -136,6 +145,13 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
 async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     let ctx = TestFixture::new("runtime-refresh-series-metadata-oneshot-provider").await;
 
+    write_router_cbz_with_single_page(
+        ctx.paths(),
+        "books/oneshot-book.cbz",
+        "page-1.dat",
+        b"oneshot provider fixture",
+    );
+
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for oneshot series metadata fixture setup");
@@ -219,7 +235,8 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -250,6 +267,12 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_default_capabilities() {
     let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-defaults").await;
+
+    write_router_epub_with_package_document(
+        ctx.paths(),
+        "books/book-1.epub",
+        METADATA_REFRESH_EMPTY_EPUB_PACKAGE,
+    );
 
     let sidecar_dir = ctx.paths().config_dir.join("books");
     std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");

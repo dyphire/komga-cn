@@ -1,5 +1,7 @@
 #![allow(clippy::result_large_err)]
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -7,14 +9,21 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 
-use crate::identity_access::auth::{Admin, Authenticated, resolved_auth_user, user_id};
+use crate::identity_access::auth::{Admin, Authenticated, resolved_auth_user};
 use crate::state::OperationalApiState;
+use komga_application::identity_access::user_id;
+use komga_application::operational::{
+    ClientGlobalSetting, ClientGlobalSettings, ClientUserSetting, ClientUserSettings,
+};
 
 pub(crate) async fn get_client_settings_global(
     State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
-    let include_unauthorized_only = resolved_auth_user(&app.identity, &headers).is_none();
+    let include_unauthorized_only = match resolved_auth_user(&app.identity, &headers) {
+        Ok(user) => user.is_none(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
     let settings = match app
         .client_settings
         .load_client_settings_global(include_unauthorized_only)
@@ -23,7 +32,7 @@ pub(crate) async fn get_client_settings_global(
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    Json(settings).into_response()
+    Json(client_settings_global_payload(&settings)).into_response()
 }
 
 pub(crate) async fn get_client_settings_user(
@@ -38,7 +47,34 @@ pub(crate) async fn get_client_settings_user(
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    Json(settings).into_response()
+    Json(client_settings_user_payload(&settings)).into_response()
+}
+
+fn client_settings_global_payload(settings: &ClientGlobalSettings) -> Value {
+    let mut payload = serde_json::Map::new();
+    for (key, setting) in settings {
+        payload.insert(
+            key.clone(),
+            serde_json::json!({
+                "value": &setting.value,
+                "allowUnauthorized": setting.allow_unauthorized,
+            }),
+        );
+    }
+    Value::Object(payload)
+}
+
+fn client_settings_user_payload(settings: &ClientUserSettings) -> Value {
+    let mut payload = serde_json::Map::new();
+    for (key, setting) in settings {
+        payload.insert(
+            key.clone(),
+            serde_json::json!({
+                "value": &setting.value,
+            }),
+        );
+    }
+    Value::Object(payload)
 }
 
 pub(crate) async fn patch_client_settings_global(
@@ -121,9 +157,7 @@ pub(crate) async fn delete_client_settings_user(
     }
 }
 
-fn parse_client_settings_global_payload(
-    body: &[u8],
-) -> Result<Vec<(String, String, bool)>, Response> {
+fn parse_client_settings_global_payload(body: &[u8]) -> Result<ClientGlobalSettings, Response> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
         return Err(StatusCode::BAD_REQUEST.into_response());
     };
@@ -131,7 +165,7 @@ fn parse_client_settings_global_payload(
         return Err(StatusCode::BAD_REQUEST.into_response());
     };
 
-    let mut settings = Vec::with_capacity(object.len());
+    let mut settings = BTreeMap::new();
     for (key, item) in object {
         if !is_valid_client_settings_key(key) {
             return Err(StatusCode::BAD_REQUEST.into_response());
@@ -149,13 +183,19 @@ fn parse_client_settings_global_payload(
         else {
             return Err(StatusCode::BAD_REQUEST.into_response());
         };
-        settings.push((key.to_string(), value.to_string(), allow_unauthorized));
+        settings.insert(
+            key.to_string(),
+            ClientGlobalSetting {
+                value: value.to_string(),
+                allow_unauthorized,
+            },
+        );
     }
 
     Ok(settings)
 }
 
-fn parse_client_settings_user_payload(body: &[u8]) -> Result<Vec<(String, String)>, Response> {
+fn parse_client_settings_user_payload(body: &[u8]) -> Result<ClientUserSettings, Response> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
         return Err(StatusCode::BAD_REQUEST.into_response());
     };
@@ -163,7 +203,7 @@ fn parse_client_settings_user_payload(body: &[u8]) -> Result<Vec<(String, String
         return Err(StatusCode::BAD_REQUEST.into_response());
     };
 
-    let mut settings = Vec::with_capacity(object.len());
+    let mut settings = BTreeMap::new();
     for (key, item) in object {
         if !is_valid_client_settings_key(key) {
             return Err(StatusCode::BAD_REQUEST.into_response());
@@ -177,7 +217,12 @@ fn parse_client_settings_user_payload(body: &[u8]) -> Result<Vec<(String, String
         if value.trim().is_empty() {
             return Err(StatusCode::BAD_REQUEST.into_response());
         }
-        settings.push((key.to_string(), value.to_string()));
+        settings.insert(
+            key.to_string(),
+            ClientUserSetting {
+                value: value.to_string(),
+            },
+        );
     }
 
     Ok(settings)
@@ -264,9 +309,10 @@ fn is_valid_client_settings_following_segment(segment: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_client_settings_delete_keys, parse_client_settings_global_payload,
-        parse_client_settings_user_payload,
+        ClientGlobalSetting, parse_client_settings_delete_keys,
+        parse_client_settings_global_payload, parse_client_settings_user_payload,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn global_payload_preserves_non_blank_whitespace() {
@@ -277,7 +323,13 @@ mod tests {
 
         assert_eq!(
             settings,
-            vec![("appearance.mode".to_string(), "  dark  ".to_string(), true)]
+            BTreeMap::from([(
+                "appearance.mode".to_string(),
+                ClientGlobalSetting {
+                    value: "  dark  ".to_string(),
+                    allow_unauthorized: true,
+                },
+            )])
         );
     }
 
@@ -300,7 +352,13 @@ mod tests {
 
         assert_eq!(
             settings,
-            vec![("reader.1panel".to_string(), "spread".to_string(), false,)]
+            BTreeMap::from([(
+                "reader.1panel".to_string(),
+                ClientGlobalSetting {
+                    value: "spread".to_string(),
+                    allow_unauthorized: false,
+                },
+            )])
         );
     }
 

@@ -1,7 +1,7 @@
-use komga_application::operational::ServerSettingsPort;
-use komga_infrastructure::sqlite::connect_main_write_context;
-use komga_infrastructure::sqlite::connect_test_pool;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use crate::support::sqlite::connect_test_pool;
+use komga_application::operational::{ServerSettingChange, ServerSettingsPort};
+use komga_infrastructure::ServerSettingsStore;
+use komga_infrastructure::connect_main_write_context;
 
 mod support;
 
@@ -51,8 +51,8 @@ async fn server_settings_store_round_trips_through_context_backed_path() {
 
     store
         .apply_changes(&[
-            ("TASK_POOL_SIZE".to_string(), Some("4".to_string())),
-            ("KOBO_PORT".to_string(), None),
+            ServerSettingChange::set("TASK_POOL_SIZE", "4"),
+            ServerSettingChange::delete("KOBO_PORT"),
         ])
         .await
         .expect("settings changes should persist via context-backed path");

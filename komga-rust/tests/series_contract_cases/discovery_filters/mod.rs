@@ -177,6 +177,39 @@ async fn router_discovery_series_list_supports_library_id_in_runtime_owned_mode(
 }
 
 #[tokio::test]
+async fn router_discovery_series_list_rejects_out_of_range_age_rating() {
+    let ctx = TestFixture::new("router-discovery-series-list-age-rating-overflow").await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/series/list?page=0&size=20")
+                .header("x-auth-token", &auth_token)
+                .header("x-komga-runtime-search-ownership", "runtime-rust-owned")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "condition": {
+                            "type": "AgeRating",
+                            "operator": "is",
+                            "value": 70000
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("strict series/list age-rating overflow request should build"),
+        )
+        .await
+        .expect("strict series/list age-rating overflow request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn router_discovery_series_list_supports_tag_filter_in_runtime_owned_mode() {
     let ctx = TestFixture::new("router-discovery-series-list-strict-tag").await;
     let auth_token = ctx.login_admin().await;

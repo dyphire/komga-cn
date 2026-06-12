@@ -1,5 +1,7 @@
 use super::*;
 
+mod metadata_update;
+
 #[tokio::test]
 async fn router_discovery_series_detail_uses_persisted_title_sort_value() {
     let ctx = TestFixture::builder("router-discovery-series-detail-title-sort")

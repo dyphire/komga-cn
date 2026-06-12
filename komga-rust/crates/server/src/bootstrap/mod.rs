@@ -3,16 +3,17 @@ use std::time::Instant;
 use tokio::net::TcpListener;
 
 use crate::build_metadata::current_build_metadata;
-use komga_application::operational::StartupTimingState;
+use komga_application::operational::{ServerSettingsPort, StartupTimingState};
+use komga_application::runtime_sse::RuntimeSseEventStore;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::operational_access::load_server_settings;
-use komga_infrastructure::sqlite::write_models::server_settings::ServerSettingsStore;
+use komga_infrastructure::{ServerSettingsStore, bootstrap_pool, bootstrap_tasks_pool};
+use std::sync::Arc;
 
-pub mod admin_cli;
-pub mod noclaim_bootstrap;
+mod admin_cli;
+mod noclaim_bootstrap;
 
 const PRODUCT_NAME: &str = "komga-rust";
 const STARTUP_BANNER_TEMPLATE: &str =
@@ -23,7 +24,9 @@ pub(crate) async fn emit_startup_banner_and_runtime_event(config: &RuntimeConfig
     let build = current_build_metadata();
     let rendered_banner = render_startup_banner(build.version.as_str());
     let _ = crate::logging::emit_display(rendered_banner.as_str());
-    let task_runtime = crate::config::task_runtime_context(config).await;
+    let task_runtime =
+        crate::config::task_runtime_context(config, Arc::new(RuntimeSseEventStore::default()))
+            .await;
     let config_dir = config
         .config_dir
         .as_ref()
@@ -196,7 +199,7 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
         "Checking main sqlite schema gate",
     );
 
-    let main_pool = komga_infrastructure::sqlite::connect_read_pool(database_file)
+    let main_pool = komga_infrastructure::connect_read_pool(database_file)
         .await
         .map_err(|error| {
             schema_gate_failure(
@@ -206,16 +209,14 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
                 error,
             )
         })?;
-    komga_infrastructure::sqlite::setup::bootstrap_pool(&main_pool)
-        .await
-        .map_err(|error| {
-            schema_gate_failure(
-                "main",
-                database_file,
-                "main sqlite schema gate failed",
-                error,
-            )
-        })?;
+    bootstrap_pool(&main_pool).await.map_err(|error| {
+        schema_gate_failure(
+            "main",
+            database_file,
+            "main sqlite schema gate failed",
+            error,
+        )
+    })?;
 
     tracing::info!(
         event = "startup_schema_gate",
@@ -237,7 +238,7 @@ async fn validate_tasks_startup_schema_gate(config: &RuntimeConfig) -> std::io::
         "Checking tasks sqlite schema gate",
     );
 
-    let tasks_pool = komga_infrastructure::sqlite::connect_read_pool(&config.tasks_db_file)
+    let tasks_pool = komga_infrastructure::connect_read_pool(&config.tasks_db_file)
         .await
         .map_err(|error| {
             schema_gate_failure(
@@ -247,16 +248,14 @@ async fn validate_tasks_startup_schema_gate(config: &RuntimeConfig) -> std::io::
                 error,
             )
         })?;
-    komga_infrastructure::sqlite::setup::bootstrap_tasks_pool(&tasks_pool)
-        .await
-        .map_err(|error| {
-            schema_gate_failure(
-                "tasks",
-                &config.tasks_db_file,
-                "tasks sqlite schema gate failed",
-                error,
-            )
-        })?;
+    bootstrap_tasks_pool(&tasks_pool).await.map_err(|error| {
+        schema_gate_failure(
+            "tasks",
+            &config.tasks_db_file,
+            "tasks sqlite schema gate failed",
+            error,
+        )
+    })?;
 
     tracing::info!(
         event = "startup_schema_gate",
@@ -302,39 +301,16 @@ async fn load_runtime_database_settings(
     config: &RuntimeConfig,
 ) -> std::io::Result<RuntimeDatabaseSettings> {
     let store = ServerSettingsStore::new(config.database_file.clone());
-    let settings = load_server_settings(&store)
+    let settings = store
+        .load_settings()
         .await
         .map_err(|error| std::io::Error::other(format!("load server settings: {error}")))?;
-
-    if let Some(server_context_path) = settings.server_context_path.as_deref()
-        && !server_context_path.is_empty()
-        && !is_valid_persisted_server_context_path(server_context_path)
-    {
-        tracing::warn!(
-            event = "startup_config",
-            setting = "SERVER_CONTEXT_PATH",
-            value = server_context_path,
-            outcome = "ignored",
-            "Ignoring invalid persisted server context path",
-        );
-    }
 
     Ok(RuntimeDatabaseSettings {
         server_port: settings.server_port,
         server_context_path: settings.server_context_path,
         task_pool_size: Some(settings.task_pool_size as usize),
     })
-}
-
-fn is_valid_persisted_server_context_path(value: &str) -> bool {
-    if value.ends_with('/') {
-        return false;
-    }
-
-    value
-        .chars()
-        .all(|ch| ch == '/' || ch == '-' || ch == '_' || ch.is_ascii_alphanumeric())
-        && value.starts_with('/')
 }
 
 fn render_startup_banner(version: &str) -> String {

@@ -1,17 +1,18 @@
 use bcrypt::{DEFAULT_COST, hash};
-use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use komga_application::identity_access::AuthUserRole;
 use komga_config::env_config::RuntimeConfig;
+use komga_infrastructure::{
+    InitialBootstrapUserWriteModel, load_persisted_user_count, persist_initial_bootstrap_users,
+};
 
-pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
+pub(super) async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
     if !spring_profile_enabled("noclaim") || spring_profile_enabled("test") {
         return;
     }
 
-    let pool = match komga_infrastructure::sqlite::connect_read_pool(config.database_file.as_path())
-        .await
-    {
+    let pool = match komga_infrastructure::connect_read_pool(config.database_file.as_path()).await {
         Ok(pool) => pool,
         Err(error) => {
             eprintln!("failed to open database for noclaim bootstrap: {error}");
@@ -19,8 +20,7 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         }
     };
 
-    let existing_users =
-        komga_infrastructure::sqlite::write_models::claims::load_persisted_user_count(&pool).await;
+    let existing_users = load_persisted_user_count(&pool).await;
 
     let existing_users = match existing_users {
         Ok(count) => count,
@@ -39,31 +39,19 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
             InitialUserBootstrapSpec {
                 email: "admin@example.org",
                 password: "admin".to_string(),
-                roles: vec![
-                    "ADMIN",
-                    "FILE_DOWNLOAD",
-                    "PAGE_STREAMING",
-                    "KOBO_SYNC",
-                    "KOREADER_SYNC",
-                ],
+                roles: AuthUserRole::claim_roles().collect(),
             },
             InitialUserBootstrapSpec {
                 email: "user@example.org",
                 password: "user".to_string(),
-                roles: vec!["FILE_DOWNLOAD", "PAGE_STREAMING"],
+                roles: vec![AuthUserRole::FileDownload, AuthUserRole::PageStreaming],
             },
         ]
     } else {
         vec![InitialUserBootstrapSpec {
             email: "admin@example.org",
             password: generate_alphanumeric_secret(12),
-            roles: vec![
-                "ADMIN",
-                "FILE_DOWNLOAD",
-                "PAGE_STREAMING",
-                "KOBO_SYNC",
-                "KOREADER_SYNC",
-            ],
+            roles: AuthUserRole::claim_roles().collect(),
         }]
     };
 
@@ -81,34 +69,30 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
             }
         };
 
-        users_to_persist.push(
-            komga_infrastructure::sqlite::write_models::bootstrap_users::InitialBootstrapUserWriteModel {
-                id: generate_startup_user_id(user.email),
-                email: user.email.to_string(),
-                hashed_password,
-                roles: user.roles.iter().map(|role| (*role).to_string()).collect(),
-            },
-        );
+        users_to_persist.push(InitialBootstrapUserWriteModel {
+            id: generate_startup_user_id(user.email),
+            email: user.email.to_string(),
+            hashed_password,
+            roles: user
+                .roles
+                .iter()
+                .copied()
+                .map(AuthUserRole::persisted_name)
+                .map(str::to_string)
+                .collect(),
+        });
     }
 
-    let write_pool = match komga_infrastructure::sqlite::connect_write_pool(
-        config.database_file.as_path(),
-    )
-    .await
-    {
-        Ok(pool) => pool,
-        Err(error) => {
-            eprintln!("failed to open write database for noclaim bootstrap: {error}");
-            return;
-        }
-    };
+    let write_pool =
+        match komga_infrastructure::connect_write_pool(config.database_file.as_path()).await {
+            Ok(pool) => pool,
+            Err(error) => {
+                eprintln!("failed to open write database for noclaim bootstrap: {error}");
+                return;
+            }
+        };
 
-    if let Err(error) = komga_infrastructure::sqlite::write_models::bootstrap_users::persist_initial_bootstrap_users(
-        &write_pool,
-        &users_to_persist,
-    )
-    .await
-    {
+    if let Err(error) = persist_initial_bootstrap_users(&write_pool, &users_to_persist).await {
         eprintln!("failed to persist noclaim bootstrap users: {error}");
         return;
     }
@@ -124,7 +108,7 @@ pub async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
 struct InitialUserBootstrapSpec {
     email: &'static str,
     password: String,
-    roles: Vec<&'static str>,
+    roles: Vec<AuthUserRole>,
 }
 
 fn spring_profile_enabled(profile: &str) -> bool {
@@ -151,23 +135,19 @@ fn generate_startup_user_id(seed: &str) -> String {
 fn generate_alphanumeric_secret(length: usize) -> String {
     const ALPHANUM: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut bytes = vec![0u8; length.max(1)];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom")
-        && file.read_exact(&mut bytes).is_ok()
-    {
-        return bytes
-            .into_iter()
-            .map(|value| ALPHANUM[(value as usize) % ALPHANUM.len()] as char)
-            .collect();
-    }
-
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_nanos())
-        .unwrap_or_default();
-    (0..length.max(1))
-        .map(|index| {
-            let mixed = seed.wrapping_add(index as u128 * 7919);
-            ALPHANUM[(mixed as usize) % ALPHANUM.len()] as char
-        })
+    getrandom::fill(&mut bytes).expect("system random source should be available");
+    bytes
+        .into_iter()
+        .map(|value| ALPHANUM[(value as usize) % ALPHANUM.len()] as char)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_alphanumeric_secret_uses_requested_length() {
+        assert_eq!(generate_alphanumeric_secret(12).len(), 12);
+    }
 }

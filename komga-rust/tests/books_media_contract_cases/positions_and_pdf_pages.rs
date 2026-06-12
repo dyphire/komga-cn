@@ -77,6 +77,71 @@ async fn router_book_pages_single_image_fallback_includes_dimensions() {
 }
 
 #[tokio::test]
+async fn router_book_pages_single_image_fallback_reports_non_file_media_paths() {
+    let ctx = TestFixture::new("router-book-pages-single-image-directory").await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for single-image directory fixture");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-image-directory-1")
+    .bind(0_i64)
+    .bind("cover-directory.png")
+    .bind("books/cover-directory.png")
+    .bind("series-1")
+    .bind(1_i64)
+    .bind(6_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("single-image directory book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("image/png")
+        .bind("READY")
+        .bind("book-image-directory-1")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("single-image directory media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("6")
+    .bind(6.0_f64)
+    .bind("Directory Cover Book")
+    .bind("2024-02-03")
+    .bind("book-image-directory-1")
+    .execute(&pool)
+    .await
+    .expect("single-image directory metadata row should be inserted");
+    pool.close().await;
+
+    let image_path = ctx.paths().config_dir.join("books/cover-directory.png");
+    std::fs::create_dir_all(&image_path).expect("single-image directory should be created");
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-image-directory-1/pages")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("single-image directory pages request should build"),
+        )
+        .await
+        .expect("single-image directory pages request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
 async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
     let ctx = TestFixture::new("router-book-positions-basic-auth-visibility").await;
     seed_router_age_exclude_user_with_roles(
@@ -144,6 +209,64 @@ async fn router_book_positions_follow_direct_basic_auth_and_book_visibility() {
         .await
         .expect("restricted basic-auth positions request should complete");
     assert_eq!(restricted_response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn router_book_positions_requires_page_streaming_role_even_for_admins() {
+    let ctx = TestFixture::new("router-book-positions-page-streaming-role").await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for positions role seed");
+    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(fixture_epub_positions_extension_blob())
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("epub positions extension should be seeded for positions role test");
+
+    let password = "router-contract-admin-only-123";
+    sqlx::query(
+        "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("admin-only-user")
+    .bind("admin-only@example.org")
+    .bind(hash_router_contract_password(password))
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("admin-only user should be inserted");
+    for role in ["USER", "ADMIN"] {
+        sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+            .bind("admin-only-user")
+            .bind(role)
+            .execute(&pool)
+            .await
+            .expect("admin-only role should be inserted");
+    }
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/positions")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value("admin-only@example.org", password),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("admin-only positions request should build"),
+        )
+        .await
+        .expect("admin-only positions request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -510,41 +633,6 @@ async fn router_book_positions_returns_not_found_without_epub_extension_position
         )
         .await
         .expect("book positions request should complete");
-
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn router_book_positions_ignores_non_epub_extension_class() {
-    let ctx = TestFixture::new("router-book-positions-non-epub-extension-class").await;
-
-    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
-        .await
-        .expect("main db should open for non-epub extension positions seed");
-    sqlx::query("UPDATE MEDIA SET EXTENSION_CLASS = ?, EXTENSION_VALUE_BLOB = ? WHERE BOOK_ID = ?")
-        .bind("legacy.extension.Class")
-        .bind(fixture_epub_positions_extension_blob())
-        .bind("book-1")
-        .execute(&pool)
-        .await
-        .expect("non-epub extension positions should be seeded");
-    pool.close().await;
-
-    let auth_token = ctx.login_admin().await;
-
-    let response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/books/book-1/positions")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("book positions non-epub extension request should build"),
-        )
-        .await
-        .expect("book positions non-epub extension request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::models::{BookRow, BookSortMode};
 
-pub fn sort_books(
+pub(super) fn sort_books(
     books: &mut [BookRow],
     sort_modes: &[BookSortMode],
     relevance_ranks: &HashMap<String, usize>,
@@ -49,8 +49,14 @@ pub fn sort_books(
                 BookSortMode::FileHashDesc => right.file_hash.cmp(&left.file_hash),
                 BookSortMode::UrlAsc => left.url.cmp(&right.url),
                 BookSortMode::UrlDesc => right.url.cmp(&left.url),
-                BookSortMode::MediaStatusAsc => left.media_status.cmp(&right.media_status),
-                BookSortMode::MediaStatusDesc => right.media_status.cmp(&left.media_status),
+                BookSortMode::MediaStatusAsc => left
+                    .media_status
+                    .persisted_name()
+                    .cmp(right.media_status.persisted_name()),
+                BookSortMode::MediaStatusDesc => right
+                    .media_status
+                    .persisted_name()
+                    .cmp(left.media_status.persisted_name()),
                 BookSortMode::MediaCommentAsc => left.media_comment.cmp(&right.media_comment),
                 BookSortMode::MediaCommentDesc => right.media_comment.cmp(&left.media_comment),
                 BookSortMode::MediaTypeAsc => left.media_type.cmp(&right.media_type),

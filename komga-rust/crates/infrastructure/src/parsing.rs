@@ -1,10 +1,26 @@
 use komga_application::discovery::{BookMetadataAuthorReadModel, BookMetadataLinkReadModel};
+use komga_domain::media_assets::ThumbnailType;
 
-pub(crate) fn parse_csv_values(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.to_string())
+pub(crate) fn parse_sqlite_group_concat_values(raw: &str) -> Vec<String> {
+    const SEPARATOR: char = '\u{1e}';
+
+    if raw.trim().is_empty() {
+        return vec![];
+    }
+
+    raw.split(SEPARATOR)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
         .collect()
+}
+
+pub(crate) fn clamp_kotlin_int_u32(value: i64) -> u32 {
+    value.clamp(0, i64::from(i32::MAX)) as u32
+}
+
+pub(crate) fn parse_thumbnail_type(value: &str) -> ThumbnailType {
+    ThumbnailType::parse(value).expect("persisted thumbnail type should use a known value")
 }
 
 pub(crate) fn parse_metadata_authors(raw: &str) -> Vec<BookMetadataAuthorReadModel> {

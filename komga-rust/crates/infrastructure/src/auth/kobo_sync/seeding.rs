@@ -1,6 +1,8 @@
 use komga_application::identity_access::{AuthUser, KoboSyncAccessPolicy, now_sync_marker};
 use sqlx::{Row, Sqlite};
 
+use crate::parsing::{clamp_kotlin_int_u32, parse_sqlite_group_concat_values};
+
 #[derive(Clone)]
 struct SyncPointBookSeedRow {
     book_id: String,
@@ -13,7 +15,7 @@ struct SyncPointBookSeedRow {
     read_progress_last_modified_date: Option<String>,
     thumbnail_id: Option<String>,
     library_id: String,
-    age_rating: Option<u16>,
+    age_rating: Option<u32>,
     sharing_labels: Vec<String>,
 }
 
@@ -21,7 +23,7 @@ struct SyncPointBookSeedRow {
 struct OnDeckSeedRow {
     book_id: String,
     library_id: String,
-    age_rating: Option<u16>,
+    age_rating: Option<u32>,
     sharing_labels: Vec<String>,
     most_recent_read_date: Option<String>,
 }
@@ -58,9 +60,10 @@ pub(super) async fn seed_sync_point_books(
             sm.AGE_RATING AS AGE_RATING,
             COALESCE(
                 (
-                    SELECT GROUP_CONCAT(DISTINCT sms.LABEL)
-                    FROM SERIES_METADATA_SHARING sms
-                    WHERE sms.SERIES_ID = b.SERIES_ID
+                    SELECT GROUP_CONCAT(LABEL, char(30))
+                    FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                          FROM SERIES_METADATA_SHARING sms
+                          WHERE sms.SERIES_ID = b.SERIES_ID)
                 ),
                 ''
             ) AS SHARING_LABELS
@@ -95,7 +98,7 @@ pub(super) async fn seed_sync_point_books(
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: row
                 .get::<Option<i64>, _>("AGE_RATING")
-                .and_then(|value| u16::try_from(value).ok()),
+                .map(clamp_kotlin_int_u32),
             sharing_labels: sharing_labels_from_group_concat(
                 row.get::<String, _>("SHARING_LABELS").as_str(),
             ),
@@ -157,9 +160,10 @@ pub(super) async fn seed_sync_point_ondeck(
             sm.AGE_RATING AS AGE_RATING,
             COALESCE(
                 (
-                    SELECT GROUP_CONCAT(DISTINCT sms.LABEL)
-                    FROM SERIES_METADATA_SHARING sms
-                    WHERE sms.SERIES_ID = b.SERIES_ID
+                    SELECT GROUP_CONCAT(LABEL, char(30))
+                    FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                          FROM SERIES_METADATA_SHARING sms
+                          WHERE sms.SERIES_ID = b.SERIES_ID)
                 ),
                 ''
             ) AS SHARING_LABELS,
@@ -207,7 +211,7 @@ pub(super) async fn seed_sync_point_ondeck(
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: row
                 .get::<Option<i64>, _>("AGE_RATING")
-                .and_then(|value| u16::try_from(value).ok()),
+                .map(clamp_kotlin_int_u32),
             sharing_labels: sharing_labels_from_group_concat(
                 row.get::<String, _>("SHARING_LABELS").as_str(),
             ),
@@ -264,10 +268,5 @@ pub(super) async fn seed_sync_point_ondeck(
 }
 
 fn sharing_labels_from_group_concat(labels: &str) -> Vec<String> {
-    labels
-        .split(',')
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .map(str::to_string)
-        .collect()
+    parse_sqlite_group_concat_values(labels)
 }

@@ -1,5 +1,7 @@
 use super::KoboSyncAccessPolicy;
-use crate::identity_access::{AuthUser, AuthUserAgeRestriction};
+use crate::identity_access::{
+    AuthUser, AuthUserAgeRestriction, AuthUserAgeRestrictionKind, AuthUserRole,
+};
 
 #[test]
 fn sync_access_denies_books_outside_shared_libraries() {
@@ -16,7 +18,7 @@ fn sync_access_allows_admin_outside_shared_libraries() {
     let mut user = unrestricted_user();
     user.shared_all_libraries = false;
     user.shared_library_ids = Vec::new();
-    user.roles = vec!["ADMIN".to_string()];
+    user.roles = vec![AuthUserRole::Admin];
     let policy = KoboSyncAccessPolicy::new(&user);
 
     assert!(policy.can_access_book("lib-a", None, &[]));
@@ -27,7 +29,7 @@ fn sync_access_uses_allow_age_or_allow_label_rules() {
     let mut user = unrestricted_user();
     user.age_restriction = Some(AuthUserAgeRestriction {
         age: 12,
-        restriction: "ALLOW_ONLY".to_string(),
+        restriction: AuthUserAgeRestrictionKind::AllowOnly,
     });
     user.labels_allow = vec!["kids".to_string()];
     let policy = KoboSyncAccessPolicy::new(&user);
@@ -42,7 +44,7 @@ fn sync_access_applies_exclude_age_rule() {
     let mut user = unrestricted_user();
     user.age_restriction = Some(AuthUserAgeRestriction {
         age: 18,
-        restriction: "EXCLUDE".to_string(),
+        restriction: AuthUserAgeRestrictionKind::Exclude,
     });
     let policy = KoboSyncAccessPolicy::new(&user);
 
@@ -65,7 +67,7 @@ fn unrestricted_user() -> AuthUser {
         id: "user-1".to_string(),
         email: "user@example.org".to_string(),
         password: String::new(),
-        roles: vec!["USER".to_string()],
+        roles: Vec::new(),
         shared_all_libraries: true,
         shared_library_ids: Vec::new(),
         age_restriction: None,

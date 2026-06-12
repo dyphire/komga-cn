@@ -12,7 +12,7 @@ pub(crate) struct MediaAssetResponse {
     etag: Option<String>,
     last_modified: Option<String>,
     content_disposition: Option<String>,
-    headers: Vec<(HeaderName, HeaderValue)>,
+    headers: Vec<MediaAssetHeader>,
 }
 
 impl MediaAssetResponse {
@@ -43,7 +43,7 @@ impl MediaAssetResponse {
     }
 
     pub(crate) fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
-        self.headers.push((name, value));
+        self.headers.push(MediaAssetHeader { name, value });
         self
     }
 
@@ -91,17 +91,22 @@ impl MediaAssetResponse {
 fn not_modified_response(
     etag: Option<&str>,
     last_modified: Option<&str>,
-    headers: Vec<(HeaderName, HeaderValue)>,
+    headers: Vec<MediaAssetHeader>,
 ) -> Response {
     let mut response = asset_not_modified_response(etag, last_modified);
     insert_headers(&mut response, headers);
     response
 }
 
-fn insert_headers(response: &mut Response, headers: Vec<(HeaderName, HeaderValue)>) {
-    for (name, value) in headers {
-        response.headers_mut().insert(name, value);
+fn insert_headers(response: &mut Response, headers: Vec<MediaAssetHeader>) {
+    for header in headers {
+        response.headers_mut().insert(header.name, header.value);
     }
+}
+
+struct MediaAssetHeader {
+    name: HeaderName,
+    value: HeaderValue,
 }
 
 #[cfg(test)]

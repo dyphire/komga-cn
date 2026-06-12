@@ -1,5 +1,3 @@
-use super::*;
-
 mod payload;
 
-pub(crate) use payload::series_page_payload;
+pub(in crate::discovery) use payload::series_page_payload;

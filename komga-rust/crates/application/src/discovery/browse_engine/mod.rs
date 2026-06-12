@@ -1,18 +1,22 @@
-pub mod book_condition;
-pub mod book_sort;
-pub mod helpers;
-pub mod models;
-pub mod series_condition;
-pub mod series_sort;
-pub mod text_matching;
+mod book_condition;
+mod book_sort;
+mod helpers;
+mod models;
+mod series_condition;
+mod series_sort;
+mod text_matching;
 
 use std::collections::BTreeSet;
 
 use komga_domain::discovery::{
-    BookCondition, BookValueCondition, SeriesCondition, SeriesValueCondition,
+    AgeRestrictionKind, BookCondition, BookValueCondition, SeriesCondition, SeriesValueCondition,
 };
 
-use models::*;
+pub use models::{
+    AuthorEntry, BookBrowseQuery, BookEvaluationContext, BookPosterRow, BookRow, BookSortMode,
+    BrowseContext, PageEnvelope, ReadProgressRow, SeriesBrowseQuery, SeriesEvaluationContext,
+    SeriesReadProgressCounts, SeriesRow, SeriesSortMode, WebLinkEntry,
+};
 
 pub fn filter_and_paginate_books(
     mut rows: Vec<BookRow>,
@@ -28,7 +32,7 @@ pub fn filter_and_paginate_books(
         && let (Some(age), Some(AgeRestrictionKind::Exclude)) =
             (restrictions.age, restrictions.age_restriction)
     {
-        rows.retain(|row| row.age_rating.map(|r| r < age).unwrap_or(true));
+        rows.retain(|row| row.age_rating.map(|r| r < u32::from(age)).unwrap_or(true));
     }
 
     if let Some(condition) = query.condition.as_ref() {
@@ -59,7 +63,7 @@ pub fn filter_and_paginate_series(
         if let (Some(age), Some(AgeRestrictionKind::Exclude)) =
             (restrictions.age, restrictions.age_restriction)
         {
-            rows.retain(|row| row.age_rating.map(|r| r < age).unwrap_or(true));
+            rows.retain(|row| row.age_rating.map(|r| r < u32::from(age)).unwrap_or(true));
         }
         if !restrictions.labels_allow.is_empty() {
             let allowed = &restrictions.labels_allow;

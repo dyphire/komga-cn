@@ -10,7 +10,8 @@ async fn scanner_persists_hash_book_tasks_with_kotlin_task_shape() {
     let scheduler = scheduler_for_config(&fixture.config).await;
     scheduler
         .enqueue(TaskQueueRecord::new("HashBook_book-1", 0, None).with_simple_type("HashBook"))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
@@ -46,7 +47,8 @@ async fn scanner_persists_refresh_book_metadata_tasks_with_kotlin_task_shape() {
             )
             .with_simple_type("RefreshBookMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
@@ -91,7 +93,8 @@ async fn scanner_persists_find_duplicate_pages_to_delete_tasks_with_kotlin_task_
             TaskQueueRecord::new("FindDuplicatePagesToDelete_library-1", 85, None)
                 .with_simple_type("FindDuplicatePagesToDelete"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),
@@ -124,7 +127,8 @@ async fn scanner_persists_find_books_with_missing_page_hash_tasks_with_kotlin_ta
             TaskQueueRecord::new("FindBooksWithMissingPageHash_library-1", 0, None)
                 .with_simple_type("FindBooksWithMissingPageHash"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     assert_persisted_task_shape(
         fixture.paths.tasks_db.as_path(),

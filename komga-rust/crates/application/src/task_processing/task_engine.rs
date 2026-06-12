@@ -33,13 +33,13 @@ pub trait TaskQueue: Send + Sync {
         urgency: SubmitUrgency,
     ) -> Result<(), String>;
 
-    async fn status(&self) -> QueueStatus;
+    async fn status(&self) -> Result<QueueStatus, String>;
 }
 
 /// Administrative operations for startup and settings endpoints.
 #[async_trait::async_trait]
 pub trait TaskQueueAdmin: TaskQueue {
-    async fn clear_unowned_tasks(&self) -> usize;
+    async fn clear_unowned_tasks(&self) -> Result<usize, String>;
 
     async fn apply_pool_size(&self, value: usize) -> Result<(), String>;
 

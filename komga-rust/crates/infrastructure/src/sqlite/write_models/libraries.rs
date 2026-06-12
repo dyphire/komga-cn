@@ -1,43 +1,60 @@
+use std::fs;
+use std::io::ErrorKind;
+
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
+use crate::filesystem::media_analysis::expected_extension_for_media_type;
 use crate::persisted_paths::resolve_stored_path;
+use crate::resolve_library_item_path;
 use crate::sql::content_libraries::DELETE_LIBRARY_DEPENDENCY_SQL;
 
 #[derive(Clone, Debug)]
-pub struct PersistedLibraryWriteModel {
-    pub id: String,
-    pub name: String,
-    pub root: String,
-    pub import_comicinfo_book: bool,
-    pub import_comicinfo_series: bool,
-    pub import_comicinfo_collection: bool,
-    pub import_comicinfo_readlist: bool,
-    pub import_comicinfo_series_append_volume: bool,
-    pub import_epub_book: bool,
-    pub import_epub_series: bool,
-    pub import_mylar_series: bool,
-    pub import_local_artwork: bool,
-    pub import_barcode_isbn: bool,
-    pub scan_force_modified_time: bool,
-    pub scan_interval: String,
-    pub scan_on_startup: bool,
-    pub scan_cbx: bool,
-    pub scan_pdf: bool,
-    pub scan_epub: bool,
-    pub scan_directory_exclusions: Vec<String>,
-    pub repair_extensions: bool,
-    pub convert_to_cbz: bool,
-    pub empty_trash_after_scan: bool,
-    pub series_cover: String,
-    pub hash_files: bool,
-    pub hash_pages: bool,
-    pub hash_koreader: bool,
-    pub analyze_dimensions: bool,
-    pub oneshots_directory: Option<String>,
-    pub unavailable: bool,
+pub(crate) struct PersistedLibraryWriteModel {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) root: String,
+    pub(crate) import_comicinfo_book: bool,
+    pub(crate) import_comicinfo_series: bool,
+    pub(crate) import_comicinfo_collection: bool,
+    pub(crate) import_comicinfo_readlist: bool,
+    pub(crate) import_comicinfo_series_append_volume: bool,
+    pub(crate) import_epub_book: bool,
+    pub(crate) import_epub_series: bool,
+    pub(crate) import_mylar_series: bool,
+    pub(crate) import_local_artwork: bool,
+    pub(crate) import_barcode_isbn: bool,
+    pub(crate) scan_force_modified_time: bool,
+    pub(crate) scan_interval: String,
+    pub(crate) scan_on_startup: bool,
+    pub(crate) scan_cbx: bool,
+    pub(crate) scan_pdf: bool,
+    pub(crate) scan_epub: bool,
+    pub(crate) scan_directory_exclusions: Vec<String>,
+    pub(crate) repair_extensions: bool,
+    pub(crate) convert_to_cbz: bool,
+    pub(crate) empty_trash_after_scan: bool,
+    pub(crate) series_cover: String,
+    pub(crate) hash_files: bool,
+    pub(crate) hash_pages: bool,
+    pub(crate) hash_koreader: bool,
+    pub(crate) analyze_dimensions: bool,
+    pub(crate) oneshots_directory: Option<String>,
+    pub(crate) unavailable: bool,
 }
 
-pub async fn persist_library_create(
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedLibraryBookSeriesRecord {
+    pub(crate) book_id: String,
+    pub(crate) series_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PersistedLibrarySeriesAndBookIds {
+    pub(crate) series_ids: Vec<String>,
+    pub(crate) books: Vec<PersistedLibraryBookSeriesRecord>,
+}
+
+pub(crate) async fn persist_library_create(
     pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), sqlx::Error> {
@@ -48,7 +65,7 @@ pub async fn persist_library_create(
     Ok(())
 }
 
-pub async fn persist_library_update(
+pub(crate) async fn persist_library_update(
     pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<bool, sqlx::Error> {
@@ -63,7 +80,7 @@ pub async fn persist_library_update(
     Ok(true)
 }
 
-pub async fn delete_persisted_library(
+pub(crate) async fn delete_persisted_library(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -101,7 +118,7 @@ pub async fn delete_persisted_library(
     Ok(true)
 }
 
-pub async fn load_persisted_library_write_model(
+pub(crate) async fn load_persisted_library_write_model(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<PersistedLibraryWriteModel>, sqlx::Error> {
@@ -164,15 +181,24 @@ pub async fn load_persisted_library_write_model(
     Ok(Some(library))
 }
 
-pub async fn validate_library_before_persist(
+pub(crate) async fn validate_library_before_persist(
     pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
 ) -> Result<(), String> {
     let root_path = resolve_stored_path(&library.root);
-    if !root_path.exists() {
-        return Err("library root does not exist".to_string());
-    }
-    if !root_path.is_dir() {
+    let root_metadata = match fs::metadata(&root_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err("library root does not exist".to_string());
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect library root '{}': {error}",
+                root_path.display()
+            ));
+        }
+    };
+    if !root_metadata.is_dir() {
         return Err("library root must be a directory".to_string());
     }
 
@@ -205,7 +231,7 @@ pub async fn validate_library_before_persist(
     Ok(())
 }
 
-pub async fn library_book_ids_with_empty_hash(
+pub(crate) async fn library_book_ids_with_empty_hash(
     pool: &SqlitePool,
     library_id: &str,
     koreader: bool,
@@ -236,7 +262,49 @@ pub async fn library_book_ids_with_empty_hash(
         .collect::<Vec<_>>())
 }
 
-pub async fn library_book_ids(
+pub(crate) async fn library_books_with_mismatched_extensions(
+    pool: &SqlitePool,
+    library_id: &str,
+) -> Result<Vec<PersistedLibraryBookSeriesRecord>, String> {
+    let rows = sqlx::query(
+        r#"SELECT b.ID AS BOOK_ID,
+                  b.SERIES_ID AS SERIES_ID,
+                  b.URL AS BOOK_URL,
+                  l.ROOT AS LIBRARY_ROOT,
+                  m.MEDIA_TYPE AS MEDIA_TYPE
+           FROM BOOK b
+           JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+           JOIN MEDIA m ON m.BOOK_ID = b.ID
+           WHERE b.LIBRARY_ID = ?
+           AND b.DELETED_DATE IS NULL"#,
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("query books with mismatched extensions: {error}"))?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let media_type = row.get::<String, _>("MEDIA_TYPE");
+            let expected_extension = expected_extension_for_media_type(&media_type)?;
+            let book_url = row.get::<String, _>("BOOK_URL");
+            let library_root = row.get::<String, _>("LIBRARY_ROOT");
+            let current_extension = resolve_library_item_path(&library_root, &book_url)
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default();
+
+            (current_extension != expected_extension).then(|| PersistedLibraryBookSeriesRecord {
+                book_id: row.get::<String, _>("BOOK_ID"),
+                series_id: row.get::<String, _>("SERIES_ID"),
+            })
+        })
+        .collect())
+}
+
+pub(crate) async fn library_book_ids(
     pool: &SqlitePool,
     library_id: &str,
 ) -> Result<Option<Vec<String>>, sqlx::Error> {
@@ -261,10 +329,10 @@ pub async fn library_book_ids(
     ))
 }
 
-pub async fn library_series_and_book_ids(
+pub(crate) async fn library_series_and_book_ids(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, sqlx::Error> {
+) -> Result<Option<PersistedLibrarySeriesAndBookIds>, sqlx::Error> {
     let Some(_) = load_persisted_library_write_model(pool, library_id).await? else {
         return Ok(None);
     };
@@ -288,21 +356,19 @@ pub async fn library_series_and_book_ids(
     .fetch_all(pool)
     .await?;
 
-    Ok(Some((
-        series_rows
+    Ok(Some(PersistedLibrarySeriesAndBookIds {
+        series_ids: series_rows
             .into_iter()
             .map(|row| row.get::<String, _>("ID"))
             .collect(),
-        book_rows
+        books: book_rows
             .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("ID"),
-                    row.get::<String, _>("SERIES_ID"),
-                )
+            .map(|row| PersistedLibraryBookSeriesRecord {
+                book_id: row.get::<String, _>("ID"),
+                series_id: row.get::<String, _>("SERIES_ID"),
             })
             .collect(),
-    )))
+    }))
 }
 
 async fn insert_library_row(
@@ -509,4 +575,82 @@ fn normalize_library_root(root: &str) -> String {
         .replace('\\', "/")
         .trim_end_matches('/')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::{PersistedLibraryWriteModel, validate_library_before_persist};
+
+    #[tokio::test]
+    async fn validate_library_propagates_root_metadata_errors() {
+        let root = unique_temp_dir("library-root-metadata-error");
+        fs::create_dir_all(&root).expect("library validation fixture root should exist");
+        fs::write(root.join("blocked"), b"not a directory")
+            .expect("blocking root component should be written");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("test sqlite pool should open");
+
+        let error = validate_library_before_persist(
+            &pool,
+            &library_write_model(root.join("blocked/library").as_path()),
+        )
+        .await
+        .expect_err("library root metadata errors should be propagated");
+
+        assert!(error.contains("failed to inspect library root"));
+
+        pool.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn unique_temp_dir(case_id: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("komga-rust-library-validation-{case_id}-{nanos}"))
+    }
+
+    fn library_write_model(root: &Path) -> PersistedLibraryWriteModel {
+        PersistedLibraryWriteModel {
+            id: "library-1".to_string(),
+            name: "Library 1".to_string(),
+            root: root.to_string_lossy().to_string(),
+            import_comicinfo_book: false,
+            import_comicinfo_series: false,
+            import_comicinfo_collection: false,
+            import_comicinfo_readlist: false,
+            import_comicinfo_series_append_volume: false,
+            import_epub_book: false,
+            import_epub_series: false,
+            import_mylar_series: false,
+            import_local_artwork: false,
+            import_barcode_isbn: false,
+            scan_force_modified_time: false,
+            scan_interval: "DISABLED".to_string(),
+            scan_on_startup: false,
+            scan_cbx: true,
+            scan_pdf: true,
+            scan_epub: true,
+            scan_directory_exclusions: Vec::new(),
+            repair_extensions: false,
+            convert_to_cbz: false,
+            empty_trash_after_scan: false,
+            series_cover: "FIRST".to_string(),
+            hash_files: false,
+            hash_pages: false,
+            hash_koreader: false,
+            analyze_dimensions: false,
+            oneshots_directory: None,
+            unavailable: false,
+        }
+    }
 }

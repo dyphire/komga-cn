@@ -1,39 +1,41 @@
 use axum::http::HeaderMap;
 use komga_application::identity_access::{
-    AuthOutcome, AuthUser, PersistedApiKey, PersistedApiKeyMetadata,
-    PersistedAuthenticationActivity,
+    AuthOutcome, AuthUser, AuthenticationActivityApiKey, BasicAuthCredentials, PersistedApiKey,
+    PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
 
 use crate::state::{AuthenticationActivityWriteInput, IdentityState};
 
-pub async fn persisted_api_key_comment_exists(
+pub(crate) async fn persisted_api_key_comment_exists(
     identity: &IdentityState,
     user_id: &str,
     comment: &str,
-) -> Option<bool> {
+) -> Result<bool, String> {
     identity
         .user_admin()
         .persisted_api_key_comment_exists(user_id, comment)
         .await
 }
 
-pub async fn persisted_api_key_metadata(
+pub(crate) async fn persisted_api_key_metadata(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Option<PersistedApiKeyMetadata> {
-    let api_key = api_key_header_value(headers)?;
+) -> Result<Option<PersistedApiKeyMetadata>, String> {
+    let Some(api_key) = api_key_header_value(headers) else {
+        return Ok(None);
+    };
     identity
         .authentication()
         .api_key_metadata_by_token(&api_key)
         .await
 }
 
-pub async fn persisted_api_key_user(
+pub(crate) async fn persisted_api_key_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Option<AuthOutcome> {
+) -> Result<AuthOutcome, String> {
     let Some(api_key) = api_key_header_value(headers) else {
-        return Some(AuthOutcome::Missing);
+        return Ok(AuthOutcome::Missing);
     };
     identity
         .authentication()
@@ -41,105 +43,69 @@ pub async fn persisted_api_key_user(
         .await
 }
 
-pub async fn persisted_api_key_user_by_token(
+pub(crate) async fn persisted_api_key_user_by_token(
     identity: &IdentityState,
     api_key: &str,
-) -> Option<AuthOutcome> {
+) -> Result<AuthOutcome, String> {
     identity
         .authentication()
         .authenticate_api_key(api_key)
         .await
 }
 
-pub async fn persisted_basic_user(
+pub(crate) async fn persisted_basic_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Option<AuthOutcome> {
-    let Some((username, password)) = basic_credentials(headers) else {
-        return Some(AuthOutcome::Missing);
+) -> Result<AuthOutcome, String> {
+    let Some(credentials) = basic_credentials(headers) else {
+        return Ok(AuthOutcome::Missing);
     };
     identity
         .authentication()
-        .authenticate_basic(&username, &password)
+        .authenticate_basic(&credentials.username, &credentials.password)
         .await
 }
 
-pub async fn persisted_cleanup_authentication_activity(identity: &IdentityState) -> Option<u64> {
-    identity
-        .auth_activity()
-        .persisted_cleanup_authentication_activity()
-        .await
-}
-
-pub async fn persisted_create_api_key(
+pub(crate) async fn persisted_create_api_key(
     identity: &IdentityState,
     user_id: &str,
     comment: &str,
-) -> Option<PersistedApiKey> {
+) -> Result<PersistedApiKey, String> {
     identity
         .user_admin()
         .persisted_create_api_key(user_id, comment)
         .await
 }
 
-pub async fn persisted_delete_api_key_by_id(
+pub(crate) async fn persisted_delete_api_key_by_id(
     identity: &IdentityState,
     user_id: &str,
     api_key_id: &str,
-) -> Option<bool> {
+) -> Result<bool, String> {
     identity
         .user_admin()
         .persisted_delete_api_key_by_id(user_id, api_key_id)
         .await
 }
 
-pub async fn persisted_latest_authentication_activity_by_user_and_api_key(
+pub(crate) async fn persisted_list_api_keys(
     identity: &IdentityState,
     user_id: &str,
-    api_key_id: &str,
-) -> Option<PersistedAuthenticationActivity> {
-    identity
-        .auth_activity()
-        .persisted_latest_authentication_activity_by_user_and_api_key(user_id, api_key_id)
-        .await
-}
-
-pub async fn persisted_list_api_keys(
-    identity: &IdentityState,
-    user_id: &str,
-) -> Option<Vec<PersistedApiKey>> {
+) -> Result<Vec<PersistedApiKey>, String> {
     identity.user_admin().persisted_list_api_keys(user_id).await
 }
 
-pub async fn persisted_list_authentication_activity(
+pub(crate) async fn persisted_list_authentication_activity(
     identity: &IdentityState,
     user_id: Option<&str>,
-) -> Option<Vec<PersistedAuthenticationActivity>> {
+) -> Result<Vec<PersistedAuthenticationActivity>, String> {
     identity
         .auth_activity()
         .persisted_list_authentication_activity(user_id)
         .await
 }
 
-pub async fn persisted_record_failed_authentication_activity(
-    identity: &IdentityState,
-    email: Option<&str>,
-    input: AuthenticationActivityWriteInput,
-    error: &str,
-) -> Option<()> {
-    identity
-        .auth_activity()
-        .persisted_record_failed_authentication_activity(
-            email,
-            &input.source,
-            error,
-            input.ip.as_deref(),
-            input.user_agent.as_deref(),
-        )
-        .await
-}
-
-pub async fn persisted_record_successful_authentication_activity(
+pub(crate) async fn persisted_record_successful_authentication_activity(
     identity: &IdentityState,
     user: &AuthUser,
     input: AuthenticationActivityWriteInput,
@@ -149,30 +115,32 @@ pub async fn persisted_record_successful_authentication_activity(
         .persisted_record_successful_authentication_activity(
             user,
             &input.source,
-            input.api_key_id.as_deref(),
-            input.api_key_comment.as_deref(),
+            AuthenticationActivityApiKey {
+                id: input.api_key_id.as_deref(),
+                comment: input.api_key_comment.as_deref(),
+            },
             input.ip.as_deref(),
             input.user_agent.as_deref(),
         )
         .await
 }
 
-pub async fn persisted_update_password_by_user_id(
+pub(crate) async fn persisted_update_password_by_user_id(
     identity: &IdentityState,
     user_id: &str,
     password: &str,
-) -> Option<bool> {
+) -> Result<bool, String> {
     identity
         .user_admin()
         .persisted_update_password_by_user_id(user_id, password)
         .await
 }
 
-pub async fn persisted_users(identity: &IdentityState) -> Option<Vec<AuthUser>> {
+pub(crate) async fn persisted_users(identity: &IdentityState) -> Result<Vec<AuthUser>, String> {
     identity.user_admin().persisted_users().await
 }
 
-fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
+pub(crate) fn basic_credentials(headers: &HeaderMap) -> Option<BasicAuthCredentials> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     let value = headers
@@ -186,12 +154,10 @@ fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
     let encoded = value.strip_prefix("Basic ")?;
     let decoded = STANDARD.decode(encoded).ok()?;
     let credentials = String::from_utf8(decoded).ok()?;
-    credentials
-        .split_once(':')
-        .map(|(username, password)| (username.to_string(), password.to_string()))
+    BasicAuthCredentials::parse_basic_payload(&credentials)
 }
 
-fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn api_key_header_value(headers: &HeaderMap) -> Option<String> {
     let value = headers
         .get("x-api-key")
         .and_then(|value| value.to_str().ok())?;

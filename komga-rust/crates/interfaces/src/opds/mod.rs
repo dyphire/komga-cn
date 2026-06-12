@@ -1,19 +1,15 @@
 use axum::extract::State;
 
-use axum::Json;
 use axum::extract::{Path as AxumPath, Query};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
 
-use crate::identity_access::auth::{user_has_role, user_is_admin};
-use crate::media_assets;
+use crate::book_page_query::BookPageQuery;
 use crate::media_responses::OpdsBookMediaResponses;
-use crate::request_urls::app_absolute_url;
+use crate::opds_auth::{OpdsV1Authenticated, OpdsV2Authenticated, opds_auth};
 use crate::state::OpdsState;
+use komga_application::identity_access::{AuthUserRole, user_has_role, user_is_admin};
 
-mod auth_extractors;
-mod auth_payload;
 mod feed_endpoints;
 mod feeds;
 mod manifest;
@@ -23,14 +19,19 @@ mod v1;
 mod v2;
 mod xml_renderer;
 
-pub(crate) use self::auth_extractors::{OpdsV1Authenticated, OpdsV2Authenticated};
-use self::feed_endpoints::*;
-use self::feeds::*;
-use self::persisted::*;
+use self::feeds::percent_decode;
 
-pub(crate) use self::auth_payload::{opds_auth, opds_catalog_unauthorized_response};
 pub(crate) use self::manifest::{opds_manifest, opds_manifest_with_profile};
 pub(crate) use self::v2::{opds_catalog, opds_v2_libraries};
+
+fn opds_book_media_responses(app: &OpdsState) -> OpdsBookMediaResponses<'_> {
+    OpdsBookMediaResponses::new(
+        app.book_media_reader.as_ref(),
+        app.book_media_content.as_ref(),
+        app.book_id_resolver.as_ref(),
+        app.server_settings.as_ref(),
+    )
+}
 
 pub(crate) async fn opds_manifest_route(
     State(app): State<OpdsState>,
@@ -195,11 +196,11 @@ pub(crate) async fn opds_v1_book_file_route(
     OpdsV1Authenticated(user): OpdsV1Authenticated,
     AxumPath((book_id, _file_name)): AxumPath<(String, String)>,
 ) -> Response {
-    if !user_is_admin(&user) && !user_has_role(&user, "FILE_DOWNLOAD") {
+    if !user_is_admin(&user) && !user_has_role(&user, AuthUserRole::FileDownload) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_file(&user, &book_id)
         .await
 }
@@ -210,7 +211,7 @@ pub(crate) async fn opds_v1_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_thumbnail_opds(&headers, &book_id, &user)
         .await
 }
@@ -221,7 +222,7 @@ pub(crate) async fn opds_v1_book_thumbnail_small_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_thumbnail_opds_small_default(&headers, &book_id, &user)
         .await
 }
@@ -231,11 +232,11 @@ pub(crate) async fn opds_v2_book_file_route(
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    if !user_is_admin(&user) && !user_has_role(&user, "FILE_DOWNLOAD") {
+    if !user_is_admin(&user) && !user_has_role(&user, AuthUserRole::FileDownload) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_file(&user, &book_id)
         .await
 }
@@ -245,11 +246,11 @@ pub(crate) async fn opds_v2_book_file_with_suffix_route(
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     AxumPath((book_id, _file_name)): AxumPath<(String, String)>,
 ) -> Response {
-    if !user_is_admin(&user) && !user_has_role(&user, "FILE_DOWNLOAD") {
+    if !user_is_admin(&user) && !user_has_role(&user, AuthUserRole::FileDownload) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_file(&user, &book_id)
         .await
 }
@@ -258,18 +259,16 @@ pub(crate) async fn opds_v2_book_page_route(
     State(app): State<OpdsState>,
     OpdsV2Authenticated(user): OpdsV2Authenticated,
     headers: HeaderMap,
-    Query(mut query): Query<media_assets::handlers::BookPageQuery>,
+    Query(query): Query<BookPageQuery>,
     AxumPath((book_id, page_number)): AxumPath<(String, u32)>,
 ) -> Response {
-    query.zero_based = false;
-    query.content_negotiation = false;
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_page(
             &user,
             &headers,
             &book_id,
             page_number,
-            query.into_response_options(),
+            query.into_opds_v2_response_options(),
         )
         .await
 }
@@ -280,7 +279,7 @@ pub(crate) async fn opds_v2_book_page_raw_route(
     headers: HeaderMap,
     AxumPath((book_id, page_number)): AxumPath<(String, i32)>,
 ) -> Response {
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_page_raw(&user, &headers, &book_id, page_number)
         .await
 }
@@ -291,7 +290,7 @@ pub(crate) async fn opds_v2_book_thumbnail_route(
     headers: HeaderMap,
     AxumPath(book_id): AxumPath<String>,
 ) -> Response {
-    OpdsBookMediaResponses::new(&app)
+    opds_book_media_responses(&app)
         .book_thumbnail_opds(&headers, &book_id, &user)
         .await
 }

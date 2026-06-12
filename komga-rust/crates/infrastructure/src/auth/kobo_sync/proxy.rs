@@ -1,60 +1,69 @@
-use komga_application::identity_access::{
-    KoboStoreSyncMergeResult, decode_or_passthrough_sync_token,
-};
+use komga_application::identity_access::{KoboProxyHeader, KoboProxyRequest, KoboProxyResponse};
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
 
-pub(super) async fn proxy_kobo_store_library_sync(
-    forwarded_headers: &[(String, String)],
-    query: Option<&str>,
-    raw_sync_token: &str,
-) -> Result<KoboStoreSyncMergeResult, ()> {
-    let base_url = std::env::var("KOMGA_RUST_KOBO_PROXY_URL")
-        .unwrap_or_else(|_| "https://storeapi.kobo.com".to_string());
-    let mut target = format!("{}/v1/library/sync", base_url.trim_end_matches('/'));
-    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) {
+pub(super) async fn execute_kobo_proxy_request(
+    base_url: &str,
+    request: KoboProxyRequest,
+) -> Result<KoboProxyResponse, String> {
+    let mut target = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        request.path.trim_start_matches('/')
+    );
+    if let Some(query) = request.query.as_deref() {
         target.push('?');
         target.push_str(query);
     }
 
-    let client = reqwest::Client::builder().build().map_err(|_| ())?;
-    let mut request = client.get(target);
-    for (name, value) in forwarded_headers {
-        let lower = name.to_ascii_lowercase();
-        if lower == "host" || lower == "content-length" || lower == "x-kobo-synctoken" {
-            continue;
-        }
-        let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
-            continue;
-        };
-        let Ok(header_value) = HeaderValue::from_str(value) else {
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let request_method = reqwest::Method::from_bytes(request.method.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut builder = client.request(request_method, target);
+
+    for header in request.headers {
+        let Ok(header_name) = HeaderName::from_bytes(header.name.as_bytes()) else {
             continue;
         };
-        request = request.header(header_name, header_value);
-    }
-    request = request.header("x-kobo-synctoken", raw_sync_token);
-
-    let response = request.send().await.map_err(|_| ())?;
-    if !response.status().is_success() {
-        return Err(());
+        let Ok(header_value) = HeaderValue::from_str(&header.value) else {
+            continue;
+        };
+        builder = builder.header(header_name, header_value);
     }
 
-    let headers = response.headers().clone();
-    let body = response.json::<Value>().await.map_err(|_| ())?;
-    let events = body.as_array().cloned().unwrap_or_default();
-    let should_continue = headers
-        .get("x-kobo-sync")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .is_some_and(|value| value.eq_ignore_ascii_case("continue"));
-    let raw_sync_token = headers
-        .get("x-kobo-synctoken")
-        .and_then(|value| value.to_str().ok())
-        .and_then(decode_or_passthrough_sync_token);
+    if let Some(body) = request.body {
+        builder = builder.body(body);
+    }
 
-    Ok(KoboStoreSyncMergeResult {
-        events,
-        raw_sync_token,
-        should_continue,
+    let response = builder.send().await.map_err(|error| error.to_string())?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.as_str().to_ascii_lowercase().starts_with("x-kobo-"))
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| KoboProxyHeader::new(name.as_str(), value))
+        })
+        .collect::<Vec<_>>();
+    let response_bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    if response_bytes.is_empty() || !(200..=299).contains(&status) {
+        return Ok(KoboProxyResponse {
+            status,
+            headers,
+            body: None,
+        });
+    }
+
+    let body =
+        serde_json::from_slice::<Value>(&response_bytes).map_err(|error| error.to_string())?;
+    Ok(KoboProxyResponse {
+        status,
+        headers,
+        body: Some(body),
     })
 }

@@ -1,6 +1,10 @@
-use super::*;
-use komga_application::task_processing::{SeriesPayload, TaskKind, TaskRequest};
 use std::collections::BTreeSet;
+
+use komga_application::task_processing::{
+    SeriesPayload, TaskExecutionOutcome, TaskKind, TaskProcessingError, TaskRequest,
+};
+
+use super::super::runtime_context::JobRuntime;
 
 pub(in crate::task_queue) async fn execute_refresh_book_metadata(
     runtime: &JobRuntime<'_>,

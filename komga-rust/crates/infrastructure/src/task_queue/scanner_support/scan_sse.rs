@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 
 use super::scan_models::PersistScannedLibraryOutcome;
 
@@ -105,48 +104,45 @@ pub(super) fn record_book_runtime_sse_event(
 }
 
 pub(super) fn emit_scanned_library_runtime_sse_events(
+    runtime_events: &dyn RuntimeSseEventSink,
     library_id: &str,
     outcome: &PersistScannedLibraryOutcome,
 ) {
     if outcome.library_changed {
-        register_runtime_sse_event(
-            "LibraryChanged",
-            json!({ "libraryId": library_id }),
-            false,
-            None,
-        );
+        runtime_events.register(RuntimeSseEvent::LibraryChanged {
+            library_id: library_id.to_string(),
+        });
     }
 
     for event in &outcome.runtime_events {
         match event {
             RuntimeSseRecord::Series(event) => {
-                register_runtime_sse_event(
-                    match event.kind {
-                        RuntimeSseMutationKind::Added => "SeriesAdded",
-                        RuntimeSseMutationKind::Changed => "SeriesChanged",
+                let event = match event.kind {
+                    RuntimeSseMutationKind::Added => RuntimeSseEvent::SeriesAdded {
+                        series_id: event.series_id.clone(),
+                        library_id: event.library_id.clone(),
                     },
-                    json!({
-                        "seriesId": event.series_id,
-                        "libraryId": event.library_id,
-                    }),
-                    false,
-                    None,
-                );
+                    RuntimeSseMutationKind::Changed => RuntimeSseEvent::SeriesChanged {
+                        series_id: event.series_id.clone(),
+                        library_id: event.library_id.clone(),
+                    },
+                };
+                runtime_events.register(event);
             }
             RuntimeSseRecord::Book(event) => {
-                register_runtime_sse_event(
-                    match event.kind {
-                        RuntimeSseMutationKind::Added => "BookAdded",
-                        RuntimeSseMutationKind::Changed => "BookChanged",
+                let event = match event.kind {
+                    RuntimeSseMutationKind::Added => RuntimeSseEvent::BookAdded {
+                        book_id: event.book_id.clone(),
+                        series_id: event.series_id.clone(),
+                        library_id: event.library_id.clone(),
                     },
-                    json!({
-                        "bookId": event.book_id,
-                        "seriesId": event.series_id,
-                        "libraryId": event.library_id,
-                    }),
-                    false,
-                    None,
-                );
+                    RuntimeSseMutationKind::Changed => RuntimeSseEvent::BookChanged {
+                        book_id: event.book_id.clone(),
+                        series_id: event.series_id.clone(),
+                        library_id: event.library_id.clone(),
+                    },
+                };
+                runtime_events.register(event);
             }
         }
     }

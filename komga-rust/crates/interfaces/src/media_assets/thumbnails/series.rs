@@ -2,26 +2,43 @@ use super::shared::{
     load_series_thumbnail, parse_thumbnail_upload, response_from_thumbnail_bytes,
     thumbnail_dimensions,
 };
-use super::*;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::Multipart;
+use serde_json::json;
+
+use crate::cache::asset_ok_response;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::MediaAssetsState;
-use axum::extract::State;
+use komga_application::discovery::resolve_persisted_series_id;
+use komga_application::media_assets::ThumbnailType;
 
-pub async fn series_thumbnail(
+use super::super::access_control::{
+    user_can_access_series_media, user_has_unrestricted_all_libraries,
+};
+use super::super::http_helpers::internal_error_response;
+
+async fn ensure_series_exists(app: &MediaAssetsState, series_id: &str) -> Result<(), Response> {
+    match app.thumbnail_reader.series_exists(series_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(StatusCode::NOT_FOUND.into_response()),
+        Err(error) => Err(internal_error_response(error)),
+    }
+}
+
+pub(crate) async fn series_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
 
-    if !app
-        .reader
-        .series_exists(&resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+        return response;
     }
 
     match user_can_access_series_media(&app, &resolved_series_id, &user).await {
@@ -45,19 +62,15 @@ pub async fn series_thumbnail(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn series_thumbnails(
+pub(crate) async fn series_thumbnails(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    if !app
-        .reader
-        .series_exists(&resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+        return response;
     }
     match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
@@ -65,14 +78,18 @@ pub async fn series_thumbnails(
         Err(error) => return internal_error_response(error),
     }
 
-    match app.reader.series_thumbnails(&resolved_series_id).await {
+    match app
+        .thumbnail_reader
+        .series_thumbnails(&resolved_series_id)
+        .await
+    {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
                     json!({
                         "id": row.id,
                         "seriesId": row.series_id,
-                        "type": row.thumbnail_type,
+                        "type": row.thumbnail_type.persisted_name(),
                         "selected": row.selected,
                         "mediaType": row.media_type,
                         "fileSize": row.file_size,
@@ -87,23 +104,17 @@ pub async fn series_thumbnails(
     }
 }
 
-pub async fn series_thumbnail_by_id(
+pub(crate) async fn series_thumbnail_by_id(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let unrestricted_all_libraries = user_shared_all_libraries(&user)
-        && principal_from_user_payload(&user_payload_json(&user))
-            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    let unrestricted_all_libraries = user_has_unrestricted_all_libraries(&user);
     if !unrestricted_all_libraries {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NOT_FOUND.into_response();
+        if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+            return response;
         }
 
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
@@ -113,7 +124,11 @@ pub async fn series_thumbnail_by_id(
         }
     }
 
-    match app.reader.series_thumbnail_by_id(&thumbnail_id).await {
+    match app
+        .thumbnail_reader
+        .series_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
         Ok(Some(thumbnail)) => asset_ok_response(
             thumbnail.media_type.as_str(),
             thumbnail.thumbnail,
@@ -125,34 +140,33 @@ pub async fn series_thumbnail_by_id(
     }
 }
 
-pub async fn series_thumbnail_upload(
+pub(crate) async fn series_thumbnail_upload(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path(series_id): Path<String>,
     multipart: Multipart,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    if !app
-        .reader
-        .series_exists(&resolved_series_id)
-        .await
-        .unwrap_or(false)
-    {
-        return StatusCode::NOT_FOUND.into_response();
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+        return response;
     }
-    match app.reader.series_oneshot(&resolved_series_id).await {
+    match app
+        .thumbnail_reader
+        .series_oneshot(&resolved_series_id)
+        .await
+    {
         Ok(Some(true)) => return StatusCode::BAD_REQUEST.into_response(),
         Ok(Some(false)) => {}
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     }
 
-    let (thumbnail_bytes, media_type, selected) =
-        match parse_thumbnail_upload(multipart, "series").await {
-            Ok(parsed) => parsed,
-            Err(response) => return response,
-        };
-    let Some((width, height)) = thumbnail_dimensions(&thumbnail_bytes) else {
+    let upload = match parse_thumbnail_upload(multipart, "series").await {
+        Ok(parsed) => parsed,
+        Err(response) => return response,
+    };
+    let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     };
 
@@ -160,18 +174,18 @@ pub async fn series_thumbnail_upload(
         .thumbnails
         .insert_series(
             &resolved_series_id,
-            &thumbnail_bytes,
-            media_type.as_str(),
-            width,
-            height,
-            selected,
+            &upload.bytes,
+            upload.media_type.as_str(),
+            dimensions.width,
+            dimensions.height,
+            upload.selected,
         )
         .await
     {
         Ok(thumbnail) => Json(json!({
             "id": thumbnail.id,
             "seriesId": thumbnail.series_id,
-            "type": thumbnail.thumbnail_type,
+            "type": thumbnail.thumbnail_type.persisted_name(),
             "selected": thumbnail.selected,
             "mediaType": thumbnail.media_type,
             "fileSize": thumbnail.file_size,
@@ -183,12 +197,13 @@ pub async fn series_thumbnail_upload(
     }
 }
 
-pub async fn series_thumbnail_select(
+pub(crate) async fn series_thumbnail_select(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     match app
         .thumbnails
         .select_series(&resolved_series_id, &thumbnail_id)
@@ -200,20 +215,25 @@ pub async fn series_thumbnail_select(
     }
 }
 
-pub async fn series_thumbnail_delete(
+pub(crate) async fn series_thumbnail_delete(
     State(app): State<MediaAssetsState>,
     _: Admin,
     Path((series_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let thumbnail = match app.reader.series_thumbnails(&resolved_series_id).await {
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    let thumbnail = match app
+        .thumbnail_reader
+        .series_thumbnails(&resolved_series_id)
+        .await
+    {
         Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
         Err(error) => return internal_error_response(error),
     };
     let Some(thumbnail) = thumbnail else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if thumbnail.thumbnail_type != "USER_UPLOADED" {
+    if thumbnail.thumbnail_type != ThumbnailType::UserUploaded {
         return StatusCode::BAD_REQUEST.into_response();
     }
 

@@ -1,18 +1,27 @@
-use super::*;
-use crate::state::IdentityAccessState;
-use axum::extract::State;
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use komga_oauth::{AuthorizationSession, OAuthClientConfig};
 use serde::Deserialize;
 
+use crate::access_log::RequestConnectionInfo;
+use crate::identity_access::auth::{
+    AuthenticationActivityApiKey, authentication_activity_headers_metadata_with_remote_addr,
+    authentication_activity_write_input, persisted_record_successful_authentication_activity,
+    session_token_for_user_with_runtime_key,
+};
+use crate::request_urls::{request_base_url, request_context_path};
+use crate::state::IdentityAccessState;
+
 #[derive(Deserialize, Default)]
-pub struct OAuth2CallbackQuery {
+pub(crate) struct OAuth2CallbackQuery {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
 }
 
-pub async fn oauth2_authorization(
+pub(crate) async fn oauth2_authorization(
     State(app): State<IdentityAccessState>,
     Path(registration_id): Path<String>,
     headers: HeaderMap,
@@ -74,7 +83,7 @@ pub async fn oauth2_authorization(
     response
 }
 
-pub async fn oauth2_login_code(
+pub(crate) async fn oauth2_login_code(
     State(app): State<IdentityAccessState>,
     Extension(connection_info): Extension<RequestConnectionInfo>,
     Path(registration_id): Path<String>,
@@ -252,8 +261,7 @@ pub async fn oauth2_login_code(
                 connection_info.remote_addr(),
             ),
             source.as_str(),
-            None,
-            None,
+            AuthenticationActivityApiKey::none(),
         ),
     )
     .await;
@@ -356,8 +364,7 @@ async fn oauth2_login_error_response(
             connection_info.remote_addr(),
         ),
         source.as_str(),
-        None,
-        None,
+        AuthenticationActivityApiKey::none(),
     );
     let _ = app
         .identity

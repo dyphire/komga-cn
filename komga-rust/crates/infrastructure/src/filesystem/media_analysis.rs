@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
+use komga_domain::discovery::MediaStatus;
 use lopdf::{Document as PdfDocument, Object};
 
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entries_bytes};
@@ -10,7 +11,7 @@ const IMAGE_DIMENSIONS_READ_CHUNK_BYTES: usize = 16 * 1024;
 const IMAGE_DIMENSIONS_MAX_READ_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MediaAnalysisProfile {
+pub(crate) enum MediaAnalysisProfile {
     PersistedBook { include_dimensions: bool },
     Transient,
 }
@@ -70,39 +71,53 @@ impl MediaAnalysisProfile {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnalyzedMediaPage {
-    pub file_name: String,
-    pub media_type: String,
-    pub width: Option<i64>,
-    pub height: Option<i64>,
-    pub file_size: i64,
+pub(crate) struct AnalyzedMediaPage {
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) width: Option<i64>,
+    pub(crate) height: Option<i64>,
+    pub(crate) file_size: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MediaFileAnalysis {
-    pub status: String,
-    pub media_type: String,
-    pub pages: Vec<AnalyzedMediaPage>,
-    pub files: Vec<String>,
+pub(crate) struct MediaFileAnalysis {
+    pub(crate) status: MediaStatus,
+    pub(crate) media_type: String,
+    pub(crate) pages: Vec<AnalyzedMediaPage>,
+    pub(crate) files: Vec<String>,
 }
 
-pub struct MediaFileAnalyzer;
+pub(crate) struct MediaFileAnalyzer;
+
+struct AnalyzedMediaFileContents {
+    pages: Vec<AnalyzedMediaPage>,
+    files: Vec<String>,
+}
 
 impl MediaFileAnalyzer {
-    pub fn analyze(
+    pub(crate) fn analyze(
         &self,
         file_path: &Path,
         profile: MediaAnalysisProfile,
     ) -> Result<MediaFileAnalysis, String> {
         let media_type = profile.media_type_from_path(file_path);
 
-        if !file_path.exists() {
-            return Ok(MediaFileAnalysis {
-                status: "ERROR".to_string(),
-                media_type,
-                pages: Vec::new(),
-                files: Vec::new(),
-            });
+        match file_path.try_exists() {
+            Ok(true) => {}
+            Ok(false) => {
+                return Ok(MediaFileAnalysis {
+                    status: MediaStatus::Error,
+                    media_type,
+                    pages: Vec::new(),
+                    files: Vec::new(),
+                });
+            }
+            Err(error) => {
+                return Err(format!(
+                    "check media file existence '{}': {error}",
+                    file_path.display()
+                ));
+            }
         }
 
         let result = match media_type.as_str() {
@@ -122,7 +137,7 @@ impl MediaFileAnalyzer {
             "application/pdf" => analyze_pdf_media_pages(file_path, profile),
             _ => {
                 return Ok(MediaFileAnalysis {
-                    status: "UNSUPPORTED".to_string(),
+                    status: MediaStatus::Unsupported,
                     media_type,
                     pages: Vec::new(),
                     files: Vec::new(),
@@ -130,11 +145,11 @@ impl MediaFileAnalyzer {
             }
         };
 
-        let (pages, files) = match result {
+        let contents = match result {
             Ok(result) => result,
             Err(_) if profile.records_analysis_error() => {
                 return Ok(MediaFileAnalysis {
-                    status: "ERROR".to_string(),
+                    status: MediaStatus::Error,
                     media_type,
                     pages: Vec::new(),
                     files: Vec::new(),
@@ -142,17 +157,21 @@ impl MediaFileAnalyzer {
             }
             Err(error) => return Err(error),
         };
-        let status = if pages.is_empty() { "ERROR" } else { "READY" }.to_string();
+        let status = if contents.pages.is_empty() {
+            MediaStatus::Error
+        } else {
+            MediaStatus::Ready
+        };
         Ok(MediaFileAnalysis {
             status,
             media_type,
-            pages,
-            files,
+            pages: contents.pages,
+            files: contents.files,
         })
     }
 }
 
-pub fn transient_media_type_from_path(path: &Path) -> Option<String> {
+pub(crate) fn transient_media_type_from_path(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_str()?;
     let media_type = transient_media_type_from_file_name(file_name);
     match media_type {
@@ -171,7 +190,7 @@ fn persisted_media_type_from_path(path: &Path) -> Option<String> {
     }
 }
 
-pub fn media_type_from_entry_name(file_name: &str) -> String {
+pub(crate) fn media_type_from_entry_name(file_name: &str) -> String {
     match extension(file_name).as_deref() {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("png") => "image/png",
@@ -186,7 +205,7 @@ pub fn media_type_from_entry_name(file_name: &str) -> String {
     .to_string()
 }
 
-pub fn is_supported_page_image_file_name(file_name: &str) -> bool {
+pub(crate) fn is_supported_page_image_file_name(file_name: &str) -> bool {
     matches!(
         extension(file_name).as_deref(),
         Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "bmp")
@@ -205,7 +224,7 @@ fn is_epub_page_resource_file_name(file_name: &str) -> bool {
         })
 }
 
-pub fn expected_extension_for_media_type(media_type: &str) -> Option<&'static str> {
+pub(crate) fn expected_extension_for_media_type(media_type: &str) -> Option<&'static str> {
     match media_type {
         "application/vnd.comicbook-rar"
         | "application/x-rar-compressed"
@@ -218,7 +237,7 @@ pub fn expected_extension_for_media_type(media_type: &str) -> Option<&'static st
     }
 }
 
-pub fn is_rar_media_type(media_type: &str) -> bool {
+pub(crate) fn is_rar_media_type(media_type: &str) -> bool {
     matches!(
         media_type,
         "application/x-rar-compressed; version=4" | "application/x-rar-compressed; version=5"
@@ -264,21 +283,39 @@ fn extension(file_name: &str) -> Option<String> {
         .map(|value| value.to_ascii_lowercase())
 }
 
-fn image_dimensions_from_bytes_i64(bytes: &[u8]) -> Option<(i64, i64)> {
-    let (width, height) = image::ImageReader::new(Cursor::new(bytes))
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MediaDimensions {
+    width: i64,
+    height: i64,
+}
+
+fn image_dimensions_from_bytes_i64(bytes: &[u8]) -> Option<MediaDimensions> {
+    let dimensions = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?
         .into_dimensions()
         .ok()?;
-    Some((i64::from(width), i64::from(height)))
+    Some(MediaDimensions {
+        width: i64::from(dimensions.0),
+        height: i64::from(dimensions.1),
+    })
 }
 
-pub fn image_dimensions_from_bytes_u32(bytes: &[u8]) -> Option<(u32, u32)> {
-    let (width, height) = image_dimensions_from_bytes_i64(bytes)?;
-    Some((width.try_into().ok()?, height.try_into().ok()?))
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ImageDimensions {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
-fn image_dimensions_from_reader(reader: &mut dyn Read) -> std::io::Result<Option<(i64, i64)>> {
+pub(crate) fn image_dimensions_from_bytes_u32(bytes: &[u8]) -> Option<ImageDimensions> {
+    let dimensions = image_dimensions_from_bytes_i64(bytes)?;
+    Some(ImageDimensions {
+        width: dimensions.width.try_into().ok()?,
+        height: dimensions.height.try_into().ok()?,
+    })
+}
+
+fn image_dimensions_from_reader(reader: &mut dyn Read) -> std::io::Result<Option<MediaDimensions>> {
     let mut bytes = Vec::with_capacity(IMAGE_DIMENSIONS_INITIAL_READ_BYTES);
     let mut next_read_size = IMAGE_DIMENSIONS_INITIAL_READ_BYTES;
     let mut buffer = [0; 4096];
@@ -314,7 +351,7 @@ fn image_dimensions_from_reader(reader: &mut dyn Read) -> std::io::Result<Option
     }
 }
 
-fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(i64, i64)> {
+fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<MediaDimensions> {
     let object_id = *document.get_pages().get(&page_number)?;
     let page = document.get_dictionary(object_id).ok()?;
     let media_box = page.get(b"MediaBox").ok()?.as_array().ok()?;
@@ -332,41 +369,45 @@ fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<(i64,
         return None;
     }
 
-    Some((width as i64, height as i64))
+    Some(MediaDimensions {
+        width: width as i64,
+        height: height as i64,
+    })
 }
 
-fn analyze_single_image(file_path: &Path) -> Result<(Vec<AnalyzedMediaPage>, Vec<String>), String> {
+fn analyze_single_image(file_path: &Path) -> Result<AnalyzedMediaFileContents, String> {
     let file_name = file_path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_string();
-    let size_bytes = std::fs::metadata(file_path)
-        .ok()
-        .and_then(|metadata| i64::try_from(metadata.len()).ok())
-        .unwrap_or(0);
-    let dimensions = std::fs::read(file_path)
-        .ok()
-        .and_then(|bytes| image_dimensions_from_bytes_i64(&bytes));
-    let (width, height) = split_dimensions(dimensions);
+    let metadata = std::fs::metadata(file_path)
+        .map_err(|error| format!("read image metadata '{}': {error}", file_path.display()))?;
+    let size_bytes = i64::try_from(metadata.len())
+        .map_err(|_| format!("image file too large '{}'", file_path.display()))?;
+    let bytes = std::fs::read(file_path)
+        .map_err(|error| format!("read image bytes '{}': {error}", file_path.display()))?;
+    let dimensions = image_dimensions_from_bytes_i64(&bytes)
+        .ok_or_else(|| format!("decode image dimensions '{}'", file_path.display()))?;
+    let dimensions = analyzed_media_page_dimensions(Some(dimensions));
 
-    Ok((
-        vec![AnalyzedMediaPage {
+    Ok(AnalyzedMediaFileContents {
+        pages: vec![AnalyzedMediaPage {
             file_name: file_name.clone(),
             media_type: media_type_from_entry_name(&file_name),
-            width,
-            height,
+            width: dimensions.width,
+            height: dimensions.height,
             file_size: size_bytes,
         }],
-        vec![file_name],
-    ))
+        files: vec![file_name],
+    })
 }
 
 fn analyze_zip_media_pages(
     file_path: &Path,
     include_epub_resources: bool,
     profile: MediaAnalysisProfile,
-) -> Result<(Vec<AnalyzedMediaPage>, Vec<String>), String> {
+) -> Result<AnalyzedMediaFileContents, String> {
     let file = std::fs::File::open(file_path)
         .map_err(|error| format!("open zip file '{}': {error}", file_path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
@@ -403,29 +444,34 @@ fn analyze_zip_media_pages(
 
         let media_type = media_type_from_entry_name(&file_name);
         let dimensions = if profile.include_dimensions() && media_type.starts_with("image/") {
-            image_dimensions_from_reader(&mut entry)
-                .map_err(|error| format!("read zip entry dimensions for '{file_name}': {error}"))?
+            Some(
+                image_dimensions_from_reader(&mut entry)
+                    .map_err(|error| {
+                        format!("read zip entry dimensions for '{file_name}': {error}")
+                    })?
+                    .ok_or_else(|| format!("decode zip entry dimensions for '{file_name}'"))?,
+            )
         } else {
             None
         };
-        let (width, height) = split_dimensions(dimensions);
+        let dimensions = analyzed_media_page_dimensions(dimensions);
         pages.push(AnalyzedMediaPage {
             media_type,
             file_name,
-            width,
-            height,
+            width: dimensions.width,
+            height: dimensions.height,
             file_size: i64::try_from(entry.size()).unwrap_or(i64::MAX),
         });
     }
 
     files.sort();
-    Ok((pages, files))
+    Ok(AnalyzedMediaFileContents { pages, files })
 }
 
 fn analyze_rar_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
-) -> Result<(Vec<AnalyzedMediaPage>, Vec<String>), String> {
+) -> Result<AnalyzedMediaFileContents, String> {
     let entries = list_rar_entries(file_path).map_err(|_| "read rar entries failed".to_string())?;
     let mut files = entries
         .iter()
@@ -434,17 +480,20 @@ fn analyze_rar_media_pages(
     files.sort();
 
     let pages = if profile.include_dimensions() {
-        read_rar_entries_bytes(file_path)?
-            .into_iter()
-            .filter(|entry| profile.includes_page_file_name(&entry.file_name))
-            .map(|entry| {
-                analyzed_rar_media_page(
-                    entry.file_name,
-                    entry.unpacked_size,
-                    image_dimensions_from_bytes_i64(&entry.bytes),
-                )
-            })
-            .collect::<Vec<_>>()
+        let mut pages = Vec::new();
+        for entry in read_rar_entries_bytes(file_path)? {
+            if !profile.includes_page_file_name(&entry.file_name) {
+                continue;
+            }
+            let dimensions = image_dimensions_from_bytes_i64(&entry.bytes)
+                .ok_or_else(|| format!("decode rar entry dimensions for '{}'", entry.file_name))?;
+            pages.push(analyzed_rar_media_page(
+                entry.file_name,
+                entry.unpacked_size,
+                Some(dimensions),
+            ));
+        }
+        pages
     } else {
         entries
             .into_iter()
@@ -453,13 +502,13 @@ fn analyze_rar_media_pages(
             .collect::<Vec<_>>()
     };
 
-    Ok((pages, files))
+    Ok(AnalyzedMediaFileContents { pages, files })
 }
 
 fn analyze_pdf_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
-) -> Result<(Vec<AnalyzedMediaPage>, Vec<String>), String> {
+) -> Result<AnalyzedMediaFileContents, String> {
     let document = PdfDocument::load(file_path)
         .map_err(|error| format!("load pdf '{}': {error}", file_path.display()))?;
     let page_count = document.get_pages().len();
@@ -476,13 +525,13 @@ fn analyze_pdf_media_pages(
                         dimensions
                     }
                 });
-            let (width, height) = split_dimensions(dimensions);
+            let dimensions = analyzed_media_page_dimensions(dimensions);
 
             AnalyzedMediaPage {
                 file_name: profile.pdf_page_file_name(index),
                 media_type: profile.pdf_page_media_type().to_string(),
-                width,
-                height,
+                width: dimensions.width,
+                height: dimensions.height,
                 file_size: 0,
             }
         })
@@ -492,28 +541,41 @@ fn analyze_pdf_media_pages(
         .and_then(|value| value.to_str())
         .map(|value| vec![value.to_string()])
         .unwrap_or_default();
-    Ok((pages, files))
+    Ok(AnalyzedMediaFileContents { pages, files })
 }
 
 fn analyzed_rar_media_page(
     file_name: String,
     unpacked_size: u64,
-    dimensions: Option<(i64, i64)>,
+    dimensions: Option<MediaDimensions>,
 ) -> AnalyzedMediaPage {
-    let (width, height) = split_dimensions(dimensions);
+    let dimensions = analyzed_media_page_dimensions(dimensions);
     AnalyzedMediaPage {
         media_type: media_type_from_entry_name(&file_name),
         file_name,
-        width,
-        height,
+        width: dimensions.width,
+        height: dimensions.height,
         file_size: unpacked_size.try_into().unwrap_or(i64::MAX),
     }
 }
 
-fn split_dimensions(dimensions: Option<(i64, i64)>) -> (Option<i64>, Option<i64>) {
+struct AnalyzedMediaPageDimensions {
+    width: Option<i64>,
+    height: Option<i64>,
+}
+
+fn analyzed_media_page_dimensions(
+    dimensions: Option<MediaDimensions>,
+) -> AnalyzedMediaPageDimensions {
     dimensions
-        .map(|(width, height)| (Some(width), Some(height)))
-        .unwrap_or((None, None))
+        .map(|dimensions| AnalyzedMediaPageDimensions {
+            width: Some(dimensions.width),
+            height: Some(dimensions.height),
+        })
+        .unwrap_or(AnalyzedMediaPageDimensions {
+            width: None,
+            height: None,
+        })
 }
 
 fn pdf_numeric_value(object: &Object) -> Option<f64> {
@@ -524,16 +586,17 @@ fn pdf_numeric_value(object: &Object) -> Option<f64> {
     }
 }
 
-fn scale_pdf_page_dimensions((width, height): (i64, i64)) -> (i64, i64) {
-    let min_edge = width.min(height) as f64;
+fn scale_pdf_page_dimensions(dimensions: MediaDimensions) -> MediaDimensions {
+    let min_edge = dimensions.width.min(dimensions.height) as f64;
     if min_edge <= 0.0 {
-        return (width, height);
+        return dimensions;
     }
 
     let scale = 3200.0 / min_edge;
-    let scaled_width = ((width as f64) * scale).round().max(1.0) as i64;
-    let scaled_height = ((height as f64) * scale).round().max(1.0) as i64;
-    (scaled_width, scaled_height)
+    MediaDimensions {
+        width: ((dimensions.width as f64) * scale).round().max(1.0) as i64,
+        height: ((dimensions.height as f64) * scale).round().max(1.0) as i64,
+    }
 }
 
 fn detect_epub_media_type(path: &Path) -> &'static str {
@@ -559,12 +622,13 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use image::{ImageBuffer, Rgba};
+    use komga_domain::discovery::MediaStatus;
     use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
     use super::{
-        MediaAnalysisProfile, MediaFileAnalyzer, image_dimensions_from_bytes_i64,
+        MediaAnalysisProfile, MediaDimensions, MediaFileAnalyzer, image_dimensions_from_bytes_i64,
         image_dimensions_from_reader, is_rar_media_type, persisted_media_type_from_path,
         transient_media_type_from_path,
     };
@@ -702,11 +766,11 @@ mod tests {
             )
             .expect("pdf should analyze");
 
-        assert_eq!(image_analysis.status.as_str(), "READY");
+        assert_eq!(image_analysis.status, MediaStatus::Ready);
         assert_eq!(image_analysis.media_type.as_str(), "image/png");
         assert_eq!(image_analysis.pages[0].width, Some(3));
         assert_eq!(image_analysis.pages[0].height, Some(5));
-        assert_eq!(pdf_analysis.status.as_str(), "READY");
+        assert_eq!(pdf_analysis.status, MediaStatus::Ready);
         assert_eq!(pdf_analysis.media_type.as_str(), "application/pdf");
         assert_eq!(pdf_analysis.pages[0].width, Some(595));
         assert_eq!(pdf_analysis.pages[0].height, Some(842));
@@ -719,7 +783,10 @@ mod tests {
     fn image_dimensions_from_bytes_reads_header_without_decoding_full_image() {
         assert_eq!(
             image_dimensions_from_bytes_i64(&minimal_png_bytes()),
-            Some((32, 16)),
+            Some(MediaDimensions {
+                width: 32,
+                height: 16,
+            }),
         );
     }
 
@@ -731,7 +798,10 @@ mod tests {
 
         assert_eq!(
             image_dimensions_from_reader(&mut reader).expect("dimension read should succeed"),
-            Some((32, 16)),
+            Some(MediaDimensions {
+                width: 32,
+                height: 16,
+            }),
         );
         assert!(
             reader.bytes_read() < reader.total_len(),
@@ -753,11 +823,34 @@ mod tests {
             )
             .expect("persisted invalid pdf analysis should record media error");
 
-        assert_eq!(analysis.status, "ERROR");
+        assert_eq!(analysis.status, MediaStatus::Error);
         assert_eq!(analysis.media_type, "application/pdf");
         assert!(analysis.pages.is_empty());
 
         let _ = fs::remove_file(fixture_path);
+    }
+
+    #[test]
+    fn persisted_analysis_reports_filesystem_probe_errors_before_missing_file_status() {
+        let parent_file = unique_temp_path("probe-parent-file", "tmp");
+        fs::write(&parent_file, b"not a directory").expect("parent file fixture should be written");
+        let media_path = parent_file.join("book.cbz");
+
+        let error = MediaFileAnalyzer
+            .analyze(
+                &media_path,
+                MediaAnalysisProfile::PersistedBook {
+                    include_dimensions: false,
+                },
+            )
+            .expect_err("filesystem probe error should fail analysis");
+
+        assert!(
+            error.contains("check media file existence"),
+            "unexpected error: {error}"
+        );
+
+        let _ = fs::remove_file(parent_file);
     }
 
     #[test]
@@ -791,7 +884,7 @@ mod tests {
             )
             .expect("rar4 fixture analysis should succeed");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert_eq!(
             analysis.media_type,
             "application/x-rar-compressed; version=4"
@@ -813,7 +906,7 @@ mod tests {
             )
             .expect("rar4 fixture analysis should succeed");
 
-        assert_eq!(analysis.status, "READY");
+        assert_eq!(analysis.status, MediaStatus::Ready);
         assert!(
             analysis
                 .pages

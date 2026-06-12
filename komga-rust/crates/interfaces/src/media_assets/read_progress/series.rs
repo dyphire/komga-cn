@@ -1,14 +1,46 @@
-use super::*;
-use crate::identity_access::auth::Authenticated;
-use crate::state::MediaAssetsState;
-use axum::extract::State;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use komga_application::discovery::resolve_persisted_series_id;
+use komga_application::identity_access::user_id;
+use serde_json::{Value, json};
 
-pub async fn series_read_progress_post(
+use crate::identity_access::auth::Authenticated;
+use crate::media_assets::access_control::{
+    user_can_access_series_media, user_has_unrestricted_all_libraries,
+};
+use crate::media_assets::http_helpers::internal_error_response;
+use crate::state::MediaAssetsState;
+
+fn series_tachiyomi_progress_payload(
+    progress: komga_application::media_assets::SeriesTachiyomiProgress,
+) -> Value {
+    json!({
+        "booksCount": progress.books_count,
+        "booksReadCount": progress.books_read_count,
+        "booksUnreadCount": progress.books_unread_count,
+        "booksInProgressCount": progress.books_in_progress_count,
+        "lastReadContinuousNumberSort": progress.last_read_continuous_number_sort,
+        "maxNumberSort": progress.max_number_sort,
+    })
+}
+
+async fn series_exists(app: &MediaAssetsState, series_id: &str) -> Result<bool, Response> {
+    app.read_progress_reader
+        .series_exists(series_id)
+        .await
+        .map_err(internal_error_response)
+}
+
+pub(crate) async fn series_read_progress_post(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
         Ok(false) => return StatusCode::FORBIDDEN.into_response(),
@@ -26,32 +58,25 @@ pub async fn series_read_progress_post(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn series_read_progress_delete(
+pub(crate) async fn series_read_progress_delete(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let unrestricted_all_libraries = user_shared_all_libraries(&user)
-        && principal_from_user_payload(&user_payload_json(&user))
-            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    let unrestricted_all_libraries = user_has_unrestricted_all_libraries(&user);
     if unrestricted_all_libraries {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NO_CONTENT.into_response();
+        match series_exists(&app, &resolved_series_id).await {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::NO_CONTENT.into_response(),
+            Err(response) => return response,
         }
     } else {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NOT_FOUND.into_response();
+        match series_exists(&app, &resolved_series_id).await {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+            Err(response) => return response,
         }
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
@@ -71,23 +96,19 @@ pub async fn series_read_progress_delete(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn series_tachiyomi_read_progress_get(
+pub(crate) async fn series_tachiyomi_read_progress_get(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
 ) -> Response {
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let unrestricted_all_libraries = user_shared_all_libraries(&user)
-        && principal_from_user_payload(&user_payload_json(&user))
-            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    let unrestricted_all_libraries = user_has_unrestricted_all_libraries(&user);
     if !unrestricted_all_libraries {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NOT_FOUND.into_response();
+        match series_exists(&app, &resolved_series_id).await {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+            Err(response) => return response,
         }
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
@@ -97,17 +118,16 @@ pub async fn series_tachiyomi_read_progress_get(
     }
 
     match app
-        .reader
+        .read_progress_service
         .series_tachiyomi_progress(&resolved_series_id, user_id(&user))
         .await
     {
-        Ok(Some(payload)) => Json(payload).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(progress) => Json(series_tachiyomi_progress_payload(progress)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
 
-pub async fn series_tachiyomi_read_progress_put(
+pub(crate) async fn series_tachiyomi_read_progress_put(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(series_id): Path<String>,
@@ -131,27 +151,20 @@ pub async fn series_tachiyomi_read_progress_put(
             .into_response();
     };
 
-    let resolved_series_id = resolve_series_id_for_persisted(&app, &series_id).await;
-    let unrestricted_all_libraries = user_shared_all_libraries(&user)
-        && principal_from_user_payload(&user_payload_json(&user))
-            .is_none_or(|principal| !principal.restrictions.is_restricted());
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    let unrestricted_all_libraries = user_has_unrestricted_all_libraries(&user);
     if unrestricted_all_libraries {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NO_CONTENT.into_response();
+        match series_exists(&app, &resolved_series_id).await {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::NO_CONTENT.into_response(),
+            Err(response) => return response,
         }
     } else {
-        if !app
-            .reader
-            .series_exists(&resolved_series_id)
-            .await
-            .unwrap_or(false)
-        {
-            return StatusCode::NOT_FOUND.into_response();
+        match series_exists(&app, &resolved_series_id).await {
+            Ok(true) => {}
+            Ok(false) => return StatusCode::NOT_FOUND.into_response(),
+            Err(response) => return response,
         }
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}

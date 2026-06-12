@@ -3,10 +3,15 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde_json::{Value, json};
 
-use crate::identity_access::auth::{Admin, Authenticated, user_id};
+use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::OperationalApiState;
+use komga_application::identity_access::user_id;
+use komga_application::operational::{
+    HistoryEvent, HistoryPage, HistorySort, HistorySortDirection, HistorySortProperty,
+    HistorySortSelection,
+};
 
 use super::{query_value, query_values};
 
@@ -29,14 +34,98 @@ pub(crate) async fn get_history(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(20);
-    let sorts = query_values(query, "sort");
+    let sort = history_sort_selection(query_values(query, "sort"));
 
-    let page_data = match app.history.load_history_page(page, size, sorts).await {
+    let page_data = match app.history.load_history_page(page, size, sort).await {
         Ok(page_data) => page_data,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(page_data).into_response()
+    Json(history_page_payload(&page_data)).into_response()
+}
+
+fn history_page_payload(page: &HistoryPage) -> Value {
+    let content = page
+        .content
+        .iter()
+        .map(history_event_payload)
+        .collect::<Vec<_>>();
+    let sort = history_sort_payload(page.sorted);
+    let number_of_elements = page.number_of_elements();
+
+    json!({
+        "content": content,
+        "pageable": {
+            "pageNumber": page.page,
+            "pageSize": page.size,
+            "sort": sort.clone(),
+            "offset": page.offset(),
+            "paged": true,
+            "unpaged": false,
+        },
+        "last": page.total_pages == 0 || page.page + 1 >= page.total_pages,
+        "totalElements": page.total_elements,
+        "totalPages": page.total_pages,
+        "first": page.page == 0,
+        "size": page.size,
+        "number": page.page,
+        "sort": sort,
+        "numberOfElements": number_of_elements,
+        "empty": number_of_elements == 0,
+    })
+}
+
+fn history_event_payload(event: &HistoryEvent) -> Value {
+    json!({
+        "id": &event.id,
+        "type": &event.event_type,
+        "bookId": &event.book_id,
+        "seriesId": &event.series_id,
+        "timestamp": &event.timestamp,
+        "properties": &event.properties,
+    })
+}
+
+fn history_sort_payload(sorted: bool) -> Value {
+    json!({
+        "empty": !sorted,
+        "sorted": sorted,
+        "unsorted": !sorted,
+    })
+}
+
+fn history_sort_selection(raw_sorts: Vec<String>) -> HistorySortSelection {
+    if raw_sorts.is_empty() {
+        return HistorySortSelection::default_timestamp_desc();
+    }
+
+    let sorts = raw_sorts
+        .iter()
+        .filter_map(|sort| parse_history_sort(sort))
+        .collect();
+    HistorySortSelection::from_requested_sorts(sorts)
+}
+
+fn parse_history_sort(sort: &str) -> Option<HistorySort> {
+    let (property, direction) = sort
+        .split_once(',')
+        .map(|(property, direction)| (property.trim(), direction.trim()))
+        .unwrap_or_else(|| (sort.trim(), "asc"));
+
+    Some(HistorySort {
+        property: match property {
+            "type" => HistorySortProperty::Type,
+            "bookId" => HistorySortProperty::BookId,
+            "seriesId" => HistorySortProperty::SeriesId,
+            "timestamp" => HistorySortProperty::Timestamp,
+            _ => return None,
+        },
+        direction: if direction.eq_ignore_ascii_case("desc") {
+            HistorySortDirection::Desc
+        } else {
+            HistorySortDirection::Asc
+        },
+    })
 }
 
 pub(crate) async fn delete_syncpoints_me(
@@ -100,7 +189,16 @@ pub(crate) async fn get_oauth2_providers(State(app): State<OperationalApiState>)
 }
 
 pub(crate) async fn delete_tasks(State(app): State<OperationalApiState>, _: Admin) -> Response {
-    let deleted = app.task_queue.queue.clear_unowned_tasks().await;
+    let deleted = match app.task_queue.queue.clear_unowned_tasks().await {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": format!("failed to delete tasks: {error}") })),
+            )
+                .into_response();
+        }
+    };
 
     Json(json!(deleted)).into_response()
 }

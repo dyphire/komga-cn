@@ -15,7 +15,8 @@ async fn isolated_runtime_keeps_search_index_external_owned() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     let processed = scheduler
         .process_available(&runtime.job())
         .await
@@ -44,7 +45,8 @@ async fn runtime_executes_legacy_upgrade_index_task_as_compatibility_noop() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("UpgradeIndex", 1_000, None))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 
     let processed = scheduler
         .process_available(&runtime.job())
@@ -133,6 +135,20 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     .execute(&pool)
     .await
     .expect("oneshot media row should be inserted");
+    sqlx::query(
+        r#"
+        UPDATE LIBRARY
+        SET IMPORT_COMICINFO_SERIES = 0,
+            IMPORT_COMICINFO_COLLECTION = 0,
+            IMPORT_EPUB_SERIES = 0,
+            IMPORT_MYLAR_SERIES = 0
+        WHERE ID = ?
+        "#,
+    )
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("series provider flags should be disabled for oneshot index sync fixture");
     pool.close().await;
 
     let config = ctx.config().clone();
@@ -140,7 +156,8 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -172,7 +189,8 @@ async fn runtime_incremental_index_sync_contract_covers_entity_lifecycle_and_met
             )
             .with_simple_type("RefreshSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -382,7 +400,8 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -427,7 +446,18 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         .await
         .expect("existing readlists should be cleared before readlist search sync test");
     sqlx::query(
-        "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_COMICINFO_READLIST = 1 WHERE ID = ?",
+        r#"
+        UPDATE LIBRARY
+        SET IMPORT_COMICINFO_BOOK = 0,
+            IMPORT_COMICINFO_READLIST = 1,
+            IMPORT_EPUB_BOOK = 0,
+            IMPORT_BARCODE_ISBN = 0,
+            IMPORT_COMICINFO_SERIES = 0,
+            IMPORT_COMICINFO_COLLECTION = 0,
+            IMPORT_EPUB_SERIES = 0,
+            IMPORT_MYLAR_SERIES = 0
+        WHERE ID = ?
+        "#,
     )
     .bind("library-1")
     .execute(&pool)
@@ -463,7 +493,8 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
                 .to_string(),
             ),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -496,7 +527,8 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(TaskQueueRecord::new("RebuildIndex", 1_000, None))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -546,7 +578,8 @@ async fn runtime_rebuild_index_payload_can_scope_rebuild_to_selected_entities() 
                 .to_string(),
             ),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await

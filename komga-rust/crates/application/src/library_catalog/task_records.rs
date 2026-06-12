@@ -2,7 +2,7 @@ use crate::task_processing::{
     BookSeriesRef, LibraryTaskCommand, TaskQueueRecord, TaskSchedule, emit_library_task_batch,
 };
 
-use super::LibraryRecord;
+use super::{LibraryBookSeriesRecord, LibraryRecord};
 
 pub(super) fn manual_scan_library_task_record(
     library_id: &str,
@@ -44,20 +44,22 @@ pub(super) fn library_should_rescan(previous: &LibraryRecord, next: &LibraryReco
         || previous.scan_directory_exclusions != next.scan_directory_exclusions
 }
 
-pub(super) fn analyze_library_task_records(books: Vec<(String, String)>) -> Vec<TaskQueueRecord> {
+pub(super) fn analyze_library_task_records(
+    books: Vec<LibraryBookSeriesRecord>,
+) -> Vec<TaskQueueRecord> {
     emit_library_task_batch(LibraryTaskCommand::AnalyzeBooks {
-        books: books.into_iter().map(BookSeriesRef::from).collect(),
+        books: task_book_series_refs(books),
     })
     .into_queue_records()
 }
 
 pub(super) fn metadata_refresh_task_records(
     series_ids: Vec<String>,
-    books: Vec<(String, String)>,
+    books: Vec<LibraryBookSeriesRecord>,
 ) -> Vec<TaskQueueRecord> {
     emit_library_task_batch(LibraryTaskCommand::RefreshMetadata {
         series_ids,
-        books: books.into_iter().map(BookSeriesRef::from).collect(),
+        books: task_book_series_refs(books),
     })
     .into_queue_records()
 }
@@ -67,4 +69,11 @@ pub(super) fn empty_trash_task_records(library_id: &str) -> Vec<TaskQueueRecord>
         library_id: library_id.to_string(),
     })
     .into_queue_records()
+}
+
+fn task_book_series_refs(books: Vec<LibraryBookSeriesRecord>) -> Vec<BookSeriesRef> {
+    books
+        .into_iter()
+        .map(|book| BookSeriesRef::new(book.book_id, book.series_id))
+        .collect()
 }

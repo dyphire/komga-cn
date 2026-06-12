@@ -1,6 +1,5 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::sqlite::connect_test_pool;
 use sqlx::Row;
 
 #[test]
@@ -23,10 +22,8 @@ fn startup_search_lifecycle_existing_runtime_index_skips_startup_task_contract()
     let config = runtime_config_for_logging_contract("komga-runtime-startup-search-existing-index");
     let lucene_dir = config.lucene_data_directory.clone();
     fs::create_dir_all(&lucene_dir).expect("lucene directory should be created");
-    komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle::bootstrap(
-        lucene_dir.as_path(),
-    )
-    .expect("runtime index bootstrap should create an existing index");
+    komga_infrastructure::SearchIndexLifecycle::bootstrap(lucene_dir.as_path())
+        .expect("runtime index bootstrap should create an existing index");
 
     let queued_rebuild_tasks = build_runtime_without_workers_and_count_rebuild_tasks(&config);
 

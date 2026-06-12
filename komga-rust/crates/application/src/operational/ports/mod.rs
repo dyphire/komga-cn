@@ -10,13 +10,22 @@ mod transient_book_port;
 
 pub use announcement_port::AnnouncementPort;
 pub use claim_port::{ClaimInitialAdminUserResult, ClaimPort, CreatedClaimedUser};
-pub use client_settings_port::ClientSettingsPort;
-pub use filesystem_browse_port::FilesystemBrowsePort;
+pub use client_settings_port::{
+    ClientGlobalSetting, ClientGlobalSettings, ClientSettingsPort, ClientUserSetting,
+    ClientUserSettings,
+};
+pub use filesystem_browse_port::{
+    FilesystemBrowseError, FilesystemBrowsePort, FilesystemBrowseRequest,
+    FilesystemDirectoryListing, FilesystemEntry, FilesystemEntryType,
+};
 pub use font_port::FontPort;
-pub use history_port::HistoryPort;
+pub use history_port::{
+    HistoryEvent, HistoryPage, HistoryPort, HistorySort, HistorySortDirection, HistorySortProperty,
+    HistorySortSelection,
+};
 pub use page_hash_port::PageHashPort;
 pub use syncpoint_port::SyncpointPort;
 pub use transient_book_port::{
-    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPort,
-    TransientBookScanEntry,
+    TransientBookAnalysis, TransientBookFileMetadata, TransientBookPage, TransientBookPageContent,
+    TransientBookPort, TransientBookScanEntry, TransientBookSeriesInference,
 };

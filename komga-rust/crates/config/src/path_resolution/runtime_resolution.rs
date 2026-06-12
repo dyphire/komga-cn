@@ -1,4 +1,23 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use config::Config as LayeredConfig;
+
+use super::super::cli_args::{
+    CONFIG_DIR_ENV, MODE_ENV, PLATFORM_PROFILE_ENV, RUNTIME_PROFILE_ENV, RuntimeCli,
+    SPRING_PROFILES_ACTIVE_ENV,
+};
+use super::super::env_config::{
+    AdminActionConfig, DEFAULT_SESSION_MAX_INACTIVE_SECONDS, RuntimeConfig,
+};
+use super::super::error::ConfigError;
+use super::super::profile::{DEFAULT_CONFIG_DIR, PlatformProfile, RuntimeMode, RuntimeProfile};
+use super::startup::{
+    StartupNetworkConfig, build_layered_config, default_home_config_dir, expand_path_placeholders,
+    path_to_string, preferred_string, read_string, resolve_bind_address_and_context_path,
+    resolve_derived_runtime_paths, resolve_oauth2_clients_for_startup_slice,
+    resolve_writer_ownership_policy_for_startup_slice,
+};
 
 fn active_profiles_contain_demo(layered: &LayeredConfig, env: &BTreeMap<String, String>) -> bool {
     env.get(SPRING_PROFILES_ACTIVE_ENV)
@@ -20,15 +39,19 @@ fn parse_bool(value: &str) -> Result<bool, ConfigError> {
     }
 }
 
-fn read_bool(layered: &LayeredConfig, keys: &[&str]) -> Option<bool> {
-    keys.iter().find_map(|key| {
-        layered.get_bool(key).ok().or_else(|| {
-            layered
-                .get_string(key)
-                .ok()
-                .and_then(|value| parse_bool(&value).ok())
-        })
-    })
+fn read_bool(layered: &LayeredConfig, keys: &[&str]) -> Result<Option<bool>, ConfigError> {
+    for key in keys {
+        match layered.get_bool(key) {
+            Ok(value) => return Ok(Some(value)),
+            Err(config::ConfigError::NotFound(_)) => {}
+            Err(_) => match layered.get_string(key) {
+                Ok(value) => return parse_bool(&value).map(Some),
+                Err(config::ConfigError::NotFound(_)) => {}
+                Err(_) => return Err(ConfigError::InvalidBoolean((*key).to_string())),
+            },
+        }
+    }
+    Ok(None)
 }
 
 fn read_positive_u64(layered: &LayeredConfig, keys: &[&str]) -> Option<u64> {
@@ -55,13 +78,11 @@ fn resolve_config_bool(
     keys: &[&str],
     default: bool,
 ) -> Result<bool, ConfigError> {
-    Ok(env
-        .get(env_key)
-        .map(String::as_str)
-        .map(parse_bool)
-        .transpose()?
-        .or_else(|| read_bool(layered, keys))
-        .unwrap_or(default))
+    if let Some(value) = env.get(env_key) {
+        return parse_bool(value);
+    }
+
+    Ok(read_bool(layered, keys)?.unwrap_or(default))
 }
 
 fn resolve_oidc_email_verification(
@@ -217,8 +238,10 @@ pub(crate) fn resolve_with_env(
         platform_profile,
     } = resolve_config_inputs(cli, env)?;
 
-    let (bind_address, server_context_path) =
-        resolve_bind_address_and_context_path(cli, env, &layered)?;
+    let StartupNetworkConfig {
+        bind_address,
+        server_context_path,
+    } = resolve_bind_address_and_context_path(cli, env, &layered)?;
 
     let derived_paths =
         resolve_derived_runtime_paths(cli, env, &layered, &resolved_config_dir, platform_profile);
@@ -277,4 +300,63 @@ pub(crate) fn resolve_admin_action_with_env(
     Ok(AdminActionConfig {
         database_file: derived_paths.database_file,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::cli_args::RuntimeCli;
+    use crate::error::ConfigError;
+
+    use super::resolve_with_env;
+
+    struct TempConfigDir(PathBuf);
+
+    impl TempConfigDir {
+        fn new(case: &str) -> Self {
+            let path = unique_config_dir(case);
+            fs::create_dir_all(&path).expect("config dir should be created");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempConfigDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn unique_config_dir(case: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "komga-runtime-config-{case}-{nanos}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn rejects_invalid_boolean_from_application_config() {
+        let config_dir = TempConfigDir::new("invalid-bool");
+        fs::write(
+            config_dir.0.join("application.yml"),
+            "komga:\n  oidc-email-verification: maybe\n",
+        )
+        .expect("application config should be written");
+
+        let cli = RuntimeCli {
+            config_dir: Some(config_dir.0.clone()),
+            ..RuntimeCli::default()
+        };
+        let error = resolve_with_env(&cli, &BTreeMap::new())
+            .expect_err("invalid config boolean should fail startup config resolution");
+
+        assert!(matches!(error, ConfigError::InvalidBoolean(value) if value == "maybe"));
+    }
 }

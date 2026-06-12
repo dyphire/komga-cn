@@ -3,17 +3,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use super::AnnouncementPort;
 
 #[async_trait]
 pub trait RemoteFeedPort: Send + Sync {
-    async fn load_announcements_feed_bytes(&self) -> Result<Vec<u8>, String>;
-    async fn load_releases_bytes(&self) -> Result<Vec<u8>, String>;
+    async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String>;
+    async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String>;
 }
 
 const CACHE_TTL_SECONDS: u64 = 60 * 60;
@@ -21,20 +18,52 @@ const CACHE_TTL_SECONDS: u64 = 60 * 60;
 pub struct RemoteFeedService {
     feeds: Arc<dyn RemoteFeedPort>,
     announcements: Arc<dyn AnnouncementPort>,
-    announcements_cache: Arc<Mutex<Option<RemoteFeedCacheEntry>>>,
-    releases_cache: Arc<Mutex<Option<RemoteFeedCacheEntry>>>,
+    announcements_cache: Arc<Mutex<Option<RemoteFeedCacheEntry<RemoteAnnouncementsFeed>>>>,
+    releases_cache: Arc<Mutex<Option<RemoteFeedCacheEntry<Vec<RemoteRelease>>>>>,
 }
 
 #[derive(Clone)]
-struct RemoteFeedCacheEntry {
+struct RemoteFeedCacheEntry<T> {
     fetched_at_epoch_seconds: u64,
-    payload: Value,
+    payload: T,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SaveAnnouncementsReadError {
-    InvalidPayload(String),
-    Persist(String),
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteAnnouncementsFeed {
+    pub version: String,
+    pub title: String,
+    pub home_page_url: Option<String>,
+    pub description: Option<String>,
+    pub items: Vec<RemoteAnnouncementItem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteAnnouncementItem {
+    pub id: String,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub content_html: Option<String>,
+    pub date_modified: Option<OffsetDateTime>,
+    pub author: Option<RemoteAnnouncementAuthor>,
+    pub tags: BTreeSet<String>,
+    pub read: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteAnnouncementAuthor {
+    pub name: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteRelease {
+    pub version: String,
+    pub release_date: OffsetDateTime,
+    pub url: String,
+    pub latest: bool,
+    pub pre_release: bool,
+    pub description: String,
 }
 
 impl RemoteFeedService {
@@ -47,20 +76,21 @@ impl RemoteFeedService {
         }
     }
 
-    pub async fn save_announcements_read_from_body(
+    pub async fn save_announcements_read(
         &self,
         user_id: &str,
-        body: &[u8],
-    ) -> Result<(), SaveAnnouncementsReadError> {
-        let ids =
-            parse_announcement_ids(body).map_err(SaveAnnouncementsReadError::InvalidPayload)?;
+        ids: &[String],
+    ) -> Result<(), String> {
+        let ids = deduplicate_announcement_ids(ids);
         self.announcements
             .save_announcements_read(user_id, &ids)
             .await
-            .map_err(SaveAnnouncementsReadError::Persist)
     }
 
-    pub async fn announcements_for_user(&self, user_id: &str) -> Result<Option<Value>, String> {
+    pub async fn announcements_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<RemoteAnnouncementsFeed>, String> {
         let feed = match self.load_cached_announcements_feed().await? {
             Some(feed) => feed,
             None => return Ok(None),
@@ -72,11 +102,13 @@ impl RemoteFeedService {
         Ok(Some(apply_announcement_read_projection(feed, &read_ids)))
     }
 
-    pub async fn releases(&self) -> Result<Value, String> {
+    pub async fn releases(&self) -> Result<Vec<RemoteRelease>, String> {
         self.load_cached_releases().await
     }
 
-    async fn load_cached_announcements_feed(&self) -> Result<Option<Value>, String> {
+    async fn load_cached_announcements_feed(
+        &self,
+    ) -> Result<Option<RemoteAnnouncementsFeed>, String> {
         let now = now_epoch_seconds();
         {
             let mut cache = self
@@ -90,22 +122,14 @@ impl RemoteFeedService {
             }
         }
 
-        let bytes = self.feeds.load_announcements_feed_bytes().await?;
-        if bytes.is_empty() {
+        let Some(feed) = self.feeds.load_announcements_feed().await? else {
             return Ok(None);
-        }
-        let payload = serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())?;
-        if payload.is_null() {
-            return Ok(None);
-        }
-        let dto = serde_json::from_value::<AnnouncementsFeedDto>(payload)
-            .map_err(|error| error.to_string())?;
-        let payload = serde_json::to_value(dto).map_err(|error| error.to_string())?;
-        self.store_announcements_cache(now, payload.clone());
-        Ok(Some(payload))
+        };
+        self.store_announcements_cache(now, feed.clone());
+        Ok(Some(feed))
     }
 
-    async fn load_cached_releases(&self) -> Result<Value, String> {
+    async fn load_cached_releases(&self) -> Result<Vec<RemoteRelease>, String> {
         let now = now_epoch_seconds();
         {
             let mut cache = self
@@ -119,15 +143,12 @@ impl RemoteFeedService {
             }
         }
 
-        let bytes = self.feeds.load_releases_bytes().await?;
-        let upstream = serde_json::from_slice::<Vec<GithubReleaseUpstreamDto>>(&bytes)
-            .map_err(|error| error.to_string())?;
-        let payload = map_github_releases(upstream);
-        self.store_releases_cache(now, payload.clone());
-        Ok(payload)
+        let releases = self.feeds.load_releases().await?;
+        self.store_releases_cache(now, releases.clone());
+        Ok(releases)
     }
 
-    fn store_announcements_cache(&self, now: u64, payload: Value) {
+    fn store_announcements_cache(&self, now: u64, payload: RemoteAnnouncementsFeed) {
         let entry = RemoteFeedCacheEntry {
             fetched_at_epoch_seconds: now,
             payload,
@@ -138,7 +159,7 @@ impl RemoteFeedService {
             .expect("announcements cache lock should not be poisoned") = Some(entry);
     }
 
-    fn store_releases_cache(&self, now: u64, payload: Value) {
+    fn store_releases_cache(&self, now: u64, payload: Vec<RemoteRelease>) {
         let entry = RemoteFeedCacheEntry {
             fetched_at_epoch_seconds: now,
             payload,
@@ -150,181 +171,41 @@ impl RemoteFeedService {
     }
 }
 
-fn parse_announcement_ids(body: &[u8]) -> Result<Vec<String>, String> {
-    let payload = serde_json::from_slice::<Value>(body).map_err(|error| error.to_string())?;
-    let announcement_ids = payload
-        .as_array()
-        .ok_or_else(|| "announcement ids must be a JSON array".to_string())?;
-
-    let mut ids = Vec::with_capacity(announcement_ids.len());
+fn deduplicate_announcement_ids(ids: &[String]) -> Vec<String> {
+    let mut deduplicated = Vec::with_capacity(ids.len());
     let mut seen = BTreeSet::new();
-    for id in announcement_ids {
-        let id = id
-            .as_str()
-            .ok_or_else(|| "announcement ids must be strings".to_string())?
-            .to_string();
+    for id in ids {
         if seen.insert(id.clone()) {
-            ids.push(id);
+            deduplicated.push(id.clone());
         }
     }
 
-    Ok(ids)
+    deduplicated
 }
 
-fn load_remote_cache_entry_on_access(
-    cache: &mut Option<RemoteFeedCacheEntry>,
+fn load_remote_cache_entry_on_access<T: Clone>(
+    cache: &mut Option<RemoteFeedCacheEntry<T>>,
     now_epoch_seconds: u64,
     ttl_seconds: u64,
-) -> Option<Value> {
-    let cached = cache.as_mut()?;
+) -> Option<T> {
+    let cached = cache.as_ref()?;
     if now_epoch_seconds.saturating_sub(cached.fetched_at_epoch_seconds) >= ttl_seconds {
         return None;
     }
-    cached.fetched_at_epoch_seconds = now_epoch_seconds;
     Some(cached.payload.clone())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnnouncementsFeedDto {
-    version: String,
-    title: String,
-    #[serde(rename = "home_page_url")]
-    home_page_url: Option<String>,
-    description: Option<String>,
-    #[serde(default)]
-    items: Vec<AnnouncementItemDto>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnnouncementItemDto {
-    id: String,
-    url: Option<String>,
-    title: Option<String>,
-    summary: Option<String>,
-    #[serde(rename = "content_html")]
-    content_html: Option<String>,
-    #[serde(default)]
-    #[serde(with = "optional_rfc3339")]
-    #[serde(rename = "date_modified")]
-    date_modified: Option<OffsetDateTime>,
-    author: Option<AnnouncementAuthorDto>,
-    #[serde(default)]
-    tags: BTreeSet<String>,
-    #[serde(rename = "_komga")]
-    komga_extension: Option<AnnouncementKomgaExtensionDto>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnnouncementAuthorDto {
-    name: Option<String>,
-    url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnnouncementKomgaExtensionDto {
-    read: bool,
-}
-
-mod optional_rfc3339 {
-    use super::{OffsetDateTime, Rfc3339};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(value: &Option<OffsetDateTime>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match value {
-            Some(value) => serializer
-                .serialize_some(&value.format(&Rfc3339).map_err(serde::ser::Error::custom)?),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<OffsetDateTime>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Option::<String>::deserialize(deserializer)?;
-        value
-            .map(|value| OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom))
-            .transpose()
-    }
-}
-
-fn map_github_releases(upstream: Vec<GithubReleaseUpstreamDto>) -> Value {
-    Value::Array(
-        upstream
-            .iter()
-            .enumerate()
-            .map(|(index, release)| {
-                let release_date = release
-                    .published_at
-                    .format(&Rfc3339)
-                    .expect("release published_at should format as rfc3339");
-                json!({
-                    "version": release.tag_name,
-                    "releaseDate": release_date,
-                    "url": release.html_url,
-                    "latest": index == 0,
-                    "preRelease": release.prerelease,
-                    "description": release.body,
-                })
-            })
-            .collect(),
-    )
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct GithubReleaseUpstreamDto {
-    html_url: String,
-    tag_name: String,
-    #[serde(with = "required_rfc3339")]
-    published_at: OffsetDateTime,
-    body: String,
-    prerelease: bool,
-}
-
-mod required_rfc3339 {
-    use super::{OffsetDateTime, Rfc3339};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&value.format(&Rfc3339).map_err(serde::ser::Error::custom)?)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
-    }
-}
-
-fn apply_announcement_read_projection(feed: Value, read_ids: &[String]) -> Value {
-    let mut projected = feed;
+fn apply_announcement_read_projection(
+    mut feed: RemoteAnnouncementsFeed,
+    read_ids: &[String],
+) -> RemoteAnnouncementsFeed {
     let read_set = read_ids.iter().cloned().collect::<BTreeSet<_>>();
 
-    if let Some(items) = projected
-        .as_object_mut()
-        .and_then(|object| object.get_mut("items"))
-        .and_then(Value::as_array_mut)
-    {
-        for item in items {
-            let read = item
-                .get("id")
-                .and_then(Value::as_str)
-                .is_some_and(|id| read_set.contains(id));
-            if let Some(object) = item.as_object_mut() {
-                object.insert("_komga".to_string(), json!({ "read": read }));
-            }
-        }
+    for item in &mut feed.items {
+        item.read = read_set.contains(&item.id);
     }
 
-    projected
+    feed
 }
 
 fn now_epoch_seconds() -> u64 {
@@ -339,19 +220,19 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
-    use serde_json::json;
+    use time::format_description::well_known::Rfc3339;
 
     use super::*;
 
     struct StubRemoteFeedPort {
-        announcements: Mutex<Result<Vec<u8>, String>>,
-        releases: Mutex<Result<Vec<u8>, String>>,
+        announcements: Mutex<Result<Option<RemoteAnnouncementsFeed>, String>>,
+        releases: Mutex<Result<Vec<RemoteRelease>, String>>,
     }
 
     impl Default for StubRemoteFeedPort {
         fn default() -> Self {
             Self {
-                announcements: Mutex::new(Ok(Vec::new())),
+                announcements: Mutex::new(Ok(None)),
                 releases: Mutex::new(Ok(Vec::new())),
             }
         }
@@ -359,14 +240,14 @@ mod tests {
 
     #[async_trait]
     impl RemoteFeedPort for StubRemoteFeedPort {
-        async fn load_announcements_feed_bytes(&self) -> Result<Vec<u8>, String> {
+        async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String> {
             self.announcements
                 .lock()
                 .expect("announcements stub should not be poisoned")
                 .clone()
         }
 
-        async fn load_releases_bytes(&self) -> Result<Vec<u8>, String> {
+        async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String> {
             self.releases
                 .lock()
                 .expect("releases stub should not be poisoned")
@@ -404,28 +285,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn announcements_for_user_projects_read_state_and_strips_unknown_fields() {
+    async fn announcements_for_user_projects_read_state_to_typed_feed() {
         let feeds = Arc::new(StubRemoteFeedPort {
-            announcements: Mutex::new(Ok(serde_json::to_vec(&json!({
-                "version": "https://jsonfeed.org/version/1.1",
-                "title": "Komga News",
-                "home_page_url": "https://komga.org",
-                "unknown": "removed",
-                "items": [
-                    {
-                        "id": "announcement-1",
-                        "url": "https://komga.org/1",
-                        "title": "One",
-                        "date_modified": "2024-01-01T00:00:00Z",
-                        "unknown": "removed"
+            announcements: Mutex::new(Ok(Some(RemoteAnnouncementsFeed {
+                version: "https://jsonfeed.org/version/1.1".to_string(),
+                title: "Komga News".to_string(),
+                home_page_url: Some("https://komga.org".to_string()),
+                description: None,
+                items: vec![
+                    RemoteAnnouncementItem {
+                        id: "announcement-1".to_string(),
+                        url: Some("https://komga.org/1".to_string()),
+                        title: Some("One".to_string()),
+                        summary: None,
+                        content_html: None,
+                        date_modified: Some(
+                            OffsetDateTime::parse("2024-01-01T00:00:00Z", &Rfc3339)
+                                .expect("fixture date should parse"),
+                        ),
+                        author: None,
+                        tags: BTreeSet::new(),
+                        read: false,
                     },
-                    {
-                        "id": "announcement-2",
-                        "title": "Two"
-                    }
-                ]
-            }))
-            .expect("feed json should serialize"))),
+                    RemoteAnnouncementItem {
+                        id: "announcement-2".to_string(),
+                        url: None,
+                        title: Some("Two".to_string()),
+                        summary: None,
+                        content_html: None,
+                        date_modified: None,
+                        author: None,
+                        tags: BTreeSet::new(),
+                        read: false,
+                    },
+                ],
+            }))),
             releases: Mutex::new(Ok(Vec::new())),
         });
         let announcements = Arc::new(StubAnnouncementPort::default());
@@ -435,17 +329,18 @@ mod tests {
             .expect("read ids stub should not be poisoned") = vec!["announcement-2".to_string()];
         let service = RemoteFeedService::new(feeds, announcements);
 
-        let payload = service
+        let feed = service
             .announcements_for_user("user-1")
             .await
             .expect("announcements should load")
             .expect("announcements feed should exist");
 
-        assert_eq!(payload["title"], "Komga News");
-        assert!(payload.get("unknown").is_none());
-        assert!(payload["items"][0].get("unknown").is_none());
-        assert_eq!(payload["items"][0]["_komga"]["read"], false);
-        assert_eq!(payload["items"][1]["_komga"]["read"], true);
+        assert_eq!(feed.title, "Komga News");
+        assert_eq!(feed.items[0].id, "announcement-1");
+        assert_eq!(feed.items[0].title.as_deref(), Some("One"));
+        assert!(!feed.items[0].read);
+        assert_eq!(feed.items[1].id, "announcement-2");
+        assert!(feed.items[1].read);
     }
 
     #[tokio::test]
@@ -455,12 +350,16 @@ mod tests {
         let service = RemoteFeedService::new(feeds, announcements.clone());
 
         service
-            .save_announcements_read_from_body(
+            .save_announcements_read(
                 "user-1",
-                br#"["announcement-1","announcement-1","announcement-2"]"#,
+                &[
+                    "announcement-1".to_string(),
+                    "announcement-1".to_string(),
+                    "announcement-2".to_string(),
+                ],
             )
             .await
-            .expect("announcement ids should parse");
+            .expect("announcement ids should persist");
 
         assert_eq!(
             announcements
@@ -473,41 +372,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn releases_maps_github_payload_once_at_service_boundary() {
+    async fn releases_returns_typed_records() {
         let feeds = Arc::new(StubRemoteFeedPort {
-            announcements: Mutex::new(Ok(Vec::new())),
-            releases: Mutex::new(Ok(br#"[{
-                    "html_url": "https://github.test/releases/v1",
-                    "tag_name": "v1.0.0",
-                    "published_at": "2024-01-02T03:04:05Z",
-                    "body": "Release notes",
-                    "prerelease": false
-                }]"#
-            .to_vec())),
+            announcements: Mutex::new(Ok(None)),
+            releases: Mutex::new(Ok(vec![RemoteRelease {
+                version: "v1.0.0".to_string(),
+                release_date: OffsetDateTime::parse("2024-01-02T03:04:05Z", &Rfc3339)
+                    .expect("release date should parse"),
+                url: "https://github.test/releases/v1".to_string(),
+                latest: true,
+                pre_release: false,
+                description: "Release notes".to_string(),
+            }])),
         });
         let announcements = Arc::new(StubAnnouncementPort::default());
         let service = RemoteFeedService::new(feeds, announcements);
 
-        let payload = service.releases().await.expect("releases should load");
+        let releases = service.releases().await.expect("releases should load");
 
-        assert_eq!(payload[0]["version"], "v1.0.0");
-        assert_eq!(payload[0]["latest"], true);
-        assert_eq!(payload[0]["preRelease"], false);
-        assert_eq!(payload[0]["releaseDate"], "2024-01-02T03:04:05Z");
+        assert_eq!(releases[0].version, "v1.0.0");
+        assert!(releases[0].latest);
+        assert!(!releases[0].pre_release);
+        assert_eq!(
+            releases[0]
+                .release_date
+                .format(&Rfc3339)
+                .expect("release date should format"),
+            "2024-01-02T03:04:05Z"
+        );
     }
 
-    #[tokio::test]
-    async fn releases_rejects_null_payload() {
-        let feeds = Arc::new(StubRemoteFeedPort {
-            announcements: Mutex::new(Ok(Vec::new())),
-            releases: Mutex::new(Ok(b"null".to_vec())),
+    #[test]
+    fn remote_feed_cache_access_does_not_extend_fetch_ttl() {
+        let mut cache = Some(RemoteFeedCacheEntry {
+            fetched_at_epoch_seconds: 100,
+            payload: "cached".to_string(),
         });
-        let announcements = Arc::new(StubAnnouncementPort::default());
-        let service = RemoteFeedService::new(feeds, announcements);
 
-        service
-            .releases()
-            .await
-            .expect_err("null releases payload should be rejected");
+        assert_eq!(
+            load_remote_cache_entry_on_access(
+                &mut cache,
+                100 + CACHE_TTL_SECONDS - 1,
+                CACHE_TTL_SECONDS
+            ),
+            Some("cached".to_string())
+        );
+
+        assert_eq!(
+            load_remote_cache_entry_on_access(
+                &mut cache,
+                100 + CACHE_TTL_SECONDS,
+                CACHE_TTL_SECONDS
+            ),
+            None
+        );
+        assert_eq!(
+            cache
+                .as_ref()
+                .expect("cache entry should remain available for refresh decision")
+                .fetched_at_epoch_seconds,
+            100
+        );
     }
 }

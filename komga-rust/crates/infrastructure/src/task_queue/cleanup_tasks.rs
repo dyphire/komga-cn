@@ -1,7 +1,9 @@
+use komga_application::task_processing::{CleanupEmptySetsPolicy, TaskProcessingError};
 use komga_domain::discovery::compare_book_names;
-use sqlx::{Row, Sqlite, SqlitePool};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
-use super::*;
+use super::runtime_context::JobRuntime;
 use crate::sql::task_queue::{EMPTY_TRASH_BOOK_DEPENDENCY_SQL, EMPTY_TRASH_SERIES_DEPENDENCY_SQL};
 
 pub(super) async fn empty_trash(
@@ -24,18 +26,18 @@ pub(super) async fn cleanup_empty_sets(
         return Ok(());
     }
 
-    cleanup_empty_sets_rows(runtime.database().write_pool())
-        .await
-        .map_err(TaskProcessingError::runtime)
+    cleanup_empty_sets_rows(
+        runtime.database().write_pool(),
+        runtime.cleanup_empty_sets_policy(),
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)
 }
 
-#[derive(Clone, Debug)]
-struct PersistedCleanupEmptySetsFlags {
-    delete_collections: bool,
-    delete_readlists: bool,
-}
-
-pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> Result<(), String> {
+pub(in crate::task_queue) async fn empty_trash_rows(
+    pool: &SqlitePool,
+    library_id: &str,
+) -> Result<(), String> {
     let mut tx = pool
         .begin()
         .await
@@ -135,7 +137,7 @@ pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> Result<(),
 }
 
 async fn load_empty_trash_affected_series_ids(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Sqlite>,
     library_id: &str,
 ) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
@@ -159,7 +161,7 @@ async fn load_empty_trash_affected_series_ids(
 }
 
 async fn resort_empty_trash_affected_series(
-    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Sqlite>,
     series_ids: &[String],
 ) -> Result<(), String> {
     for series_id in series_ids {
@@ -185,8 +187,14 @@ async fn resort_empty_trash_affected_series(
             r#"
             SELECT b.ID AS BOOK_ID,
                    b.NAME AS BOOK_NAME,
-                   b.NUMBER AS BOOK_NUMBER
+                   b.NUMBER AS BOOK_NUMBER,
+                   bm.BOOK_ID AS BOOK_METADATA_BOOK_ID,
+                   bm.NUMBER AS METADATA_NUMBER,
+                   bm.NUMBER_SORT AS METADATA_NUMBER_SORT,
+                   bm.NUMBER_LOCK AS METADATA_NUMBER_LOCK,
+                   bm.NUMBER_SORT_LOCK AS METADATA_NUMBER_SORT_LOCK
             FROM BOOK b
+            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
             WHERE b.SERIES_ID = ?
               AND b.DELETED_DATE IS NULL
             ORDER BY b.ID ASC
@@ -199,12 +207,16 @@ async fn resort_empty_trash_affected_series(
 
         let mut books = book_rows
             .into_iter()
-            .map(|row| EmptyTrashSortableBook {
-                id: row.get::<String, _>("BOOK_ID"),
-                name: row.get::<String, _>("BOOK_NAME"),
-                number: row.get::<i64, _>("BOOK_NUMBER"),
+            .map(|row| {
+                let id = row.get::<String, _>("BOOK_ID");
+                Ok(EmptyTrashSortableBook {
+                    metadata: empty_trash_book_metadata(&row, &id)?,
+                    id,
+                    name: row.get::<String, _>("BOOK_NAME"),
+                    number: row.get::<i64, _>("BOOK_NUMBER"),
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, String>>()?;
         books.sort_by(|left, right| {
             compare_book_names(&left.name, &right.name).then_with(|| left.id.cmp(&right.id))
         });
@@ -228,21 +240,34 @@ async fn resort_empty_trash_affected_series(
                 .map_err(|error| format!("update book order '{}': {error}", book.id))?;
             }
 
-            sqlx::query(
-                r#"
-                UPDATE BOOK_METADATA
-                SET NUMBER = CASE WHEN NUMBER_LOCK = 0 THEN ? ELSE NUMBER END,
-                    NUMBER_SORT = CASE WHEN NUMBER_SORT_LOCK = 0 THEN ? ELSE NUMBER_SORT END,
-                    LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE BOOK_ID = ?
-                "#,
-            )
-            .bind(new_number.to_string())
-            .bind(new_number as f64)
-            .bind(&book.id)
-            .execute(&mut **tx)
-            .await
-            .map_err(|error| format!("update book metadata order '{}': {error}", book.id))?;
+            if let Some(metadata) = &book.metadata {
+                let metadata_number = if metadata.number_lock {
+                    metadata.number.clone()
+                } else {
+                    Some(new_number.to_string())
+                };
+                let metadata_number_sort = if metadata.number_sort_lock {
+                    metadata.number_sort
+                } else {
+                    Some(new_number as f64)
+                };
+
+                sqlx::query(
+                    r#"
+                    UPDATE BOOK_METADATA
+                    SET NUMBER = ?,
+                        NUMBER_SORT = ?,
+                        LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                    WHERE BOOK_ID = ?
+                    "#,
+                )
+                .bind(metadata_number)
+                .bind(metadata_number_sort)
+                .bind(&book.id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|error| format!("update book metadata order '{}': {error}", book.id))?;
+            }
         }
     }
 
@@ -253,17 +278,59 @@ struct EmptyTrashSortableBook {
     id: String,
     name: String,
     number: i64,
+    metadata: Option<EmptyTrashBookMetadata>,
 }
 
-pub async fn cleanup_empty_sets_rows(pool: &SqlitePool) -> Result<(), String> {
-    let flags = load_cleanup_empty_sets_flags_from_pool(pool).await?;
+struct EmptyTrashBookMetadata {
+    number: Option<String>,
+    number_sort: Option<f64>,
+    number_lock: bool,
+    number_sort_lock: bool,
+}
+
+fn empty_trash_book_metadata(
+    row: &SqliteRow,
+    book_id: &str,
+) -> Result<Option<EmptyTrashBookMetadata>, String> {
+    let metadata_exists = row
+        .try_get::<Option<String>, _>("BOOK_METADATA_BOOK_ID")
+        .map_err(|error| {
+            format!("persisted BOOK_METADATA row marker could not be read for '{book_id}': {error}")
+        })?
+        .is_some();
+    if !metadata_exists {
+        return Ok(None);
+    }
+
+    Ok(Some(EmptyTrashBookMetadata {
+        number: row
+            .try_get::<Option<String>, _>("METADATA_NUMBER")
+            .map_err(|error| {
+                format!("persisted BOOK_METADATA.NUMBER could not be read for '{book_id}': {error}")
+            })?,
+        number_sort: row
+            .try_get::<Option<f64>, _>("METADATA_NUMBER_SORT")
+            .map_err(|error| {
+                format!(
+                    "persisted BOOK_METADATA.NUMBER_SORT could not be read for '{book_id}': {error}"
+                )
+            })?,
+        number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
+        number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
+    }))
+}
+
+pub(in crate::task_queue) async fn cleanup_empty_sets_rows(
+    pool: &SqlitePool,
+    policy: CleanupEmptySetsPolicy,
+) -> Result<(), String> {
     let mut tx = pool
         .begin()
         .await
         .map_err(|error| format!("failed to start cleanup-empty-sets transaction: {error}"))?;
 
     let mut deletes = Vec::<&str>::new();
-    if flags.delete_collections {
+    if policy.delete_empty_collections {
         deletes.push(
             "DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID IN (SELECT ID FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES))",
         );
@@ -271,7 +338,7 @@ pub async fn cleanup_empty_sets_rows(pool: &SqlitePool) -> Result<(), String> {
             "DELETE FROM COLLECTION WHERE ID NOT IN (SELECT COLLECTION_ID FROM COLLECTION_SERIES)",
         );
     }
-    if flags.delete_readlists {
+    if policy.delete_empty_read_lists {
         deletes.push(
             "DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID IN (SELECT ID FROM READLIST WHERE ID NOT IN (SELECT READLIST_ID FROM READLIST_BOOK))",
         );
@@ -291,40 +358,4 @@ pub async fn cleanup_empty_sets_rows(pool: &SqlitePool) -> Result<(), String> {
         .map_err(|error| format!("failed to commit cleanup-empty-sets transaction: {error}"))?;
 
     Ok(())
-}
-
-async fn load_cleanup_empty_sets_flags_from_pool(
-    pool: &SqlitePool,
-) -> Result<PersistedCleanupEmptySetsFlags, String> {
-    let rows = sqlx::query(
-        r#"
-        SELECT KEY, VALUE
-        FROM SERVER_SETTINGS
-        WHERE KEY IN ('DELETE_EMPTY_COLLECTIONS', 'DELETE_EMPTY_READLISTS')
-        "#,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|error| {
-        format!("failed to load cleanup-empty-sets flags from server settings: {error}")
-    })?;
-
-    let mut delete_collections = false;
-    let mut delete_readlists = false;
-
-    for row in rows {
-        let key = row.get::<String, _>("KEY");
-        let value = row.get::<Option<String>, _>("VALUE").unwrap_or_default();
-        let enabled = value.trim().eq_ignore_ascii_case("true");
-        match key.as_str() {
-            "DELETE_EMPTY_COLLECTIONS" => delete_collections = enabled,
-            "DELETE_EMPTY_READLISTS" => delete_readlists = enabled,
-            _ => {}
-        }
-    }
-
-    Ok(PersistedCleanupEmptySetsFlags {
-        delete_collections,
-        delete_readlists,
-    })
 }

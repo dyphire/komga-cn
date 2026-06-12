@@ -1,18 +1,18 @@
 use async_trait::async_trait;
-use serde_json::Value;
 
 use super::super::device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceThumbnailBinary {
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[async_trait]
 pub trait DeviceSyncPort: Send + Sync {
     async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String>;
-
-    async fn load_book_last_epub_position_locator(
-        &self,
-        book_id: &str,
-    ) -> Result<Option<Value>, String>;
 
     async fn load_kobo_metadata_record(
         &self,
@@ -33,7 +33,7 @@ pub trait DeviceSyncPort: Send + Sync {
     async fn load_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<(String, Vec<u8>)>, String>;
+    ) -> Result<Option<DeviceThumbnailBinary>, String>;
 
     async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, String>;
 }

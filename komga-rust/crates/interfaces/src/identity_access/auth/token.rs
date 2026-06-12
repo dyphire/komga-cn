@@ -4,7 +4,10 @@ use komga_application::identity_access::AuthUser;
 
 use crate::state::IdentityState;
 
-pub fn auth_token_user(identity: &IdentityState, headers: &HeaderMap) -> Option<AuthUser> {
+pub(crate) fn auth_token_user(
+    identity: &IdentityState,
+    headers: &HeaderMap,
+) -> Result<Option<AuthUser>, String> {
     let session_token = session_token_from_headers(headers);
     let remember_me_token = remember_me_token_from_headers(headers);
     identity
@@ -12,31 +15,31 @@ pub fn auth_token_user(identity: &IdentityState, headers: &HeaderMap) -> Option<
         .resolve_session_user(session_token.as_deref(), remember_me_token.as_deref())
 }
 
-pub fn resolved_token(headers: &HeaderMap) -> String {
+pub(crate) fn resolved_token(headers: &HeaderMap) -> String {
     session_token_from_headers(headers).unwrap_or_default()
 }
 
-pub fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     x_auth_token(headers).or_else(|| session_cookie_token(headers))
 }
 
-pub fn empty_auth_token_supplied(headers: &HeaderMap) -> bool {
+pub(crate) fn empty_auth_token_supplied(headers: &HeaderMap) -> bool {
     headers
         .get("X-Auth-Token")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.trim().is_empty())
 }
 
-pub fn remember_me_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn remember_me_token_from_headers(headers: &HeaderMap) -> Option<String> {
     remember_me_cookie_token(headers)
 }
 
-pub fn remember_me_requested(uri: &Uri) -> bool {
+pub(crate) fn remember_me_requested(uri: &Uri) -> bool {
     uri.query()
         .is_some_and(|query| query.split('&').any(|pair| pair == "remember-me=true"))
 }
 
-pub fn session_token_for_user_with_runtime_key(
+pub(crate) fn session_token_for_user_with_runtime_key(
     identity: &IdentityState,
     user: &AuthUser,
     runtime_key: &str,
@@ -44,16 +47,6 @@ pub fn session_token_for_user_with_runtime_key(
     identity
         .session_lifecycle()
         .session_token_for_user(user, runtime_key)
-}
-
-pub fn remember_me_token_for_user_with_runtime_key(
-    identity: &IdentityState,
-    user: &AuthUser,
-    runtime_key: &str,
-) -> Option<String> {
-    identity
-        .session_lifecycle()
-        .remember_me_token_for_user(user, runtime_key)
 }
 
 fn x_auth_token(headers: &HeaderMap) -> Option<String> {

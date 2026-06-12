@@ -1,60 +1,38 @@
-use super::archive_utils::{build_stored_zip_archive, metadata_updated_unix_seconds};
+use std::collections::HashMap;
+use std::fs;
+use std::io::{ErrorKind, Read};
+use std::path::PathBuf;
+
+use komga_application::task_processing::{HashedPageToDeletePayload, TaskProcessingError};
+use komga_domain::discovery::MediaStatus;
+use zip::ZipArchive;
+
+use super::super::index_tasks;
+use super::super::runtime_context::JobRuntime;
+use super::archive_utils::{
+    StoredArchiveEntry, build_stored_zip_archive, metadata_updated_unix_seconds,
+};
 use super::media_analysis::{is_supported_page_image_file_name, media_type_from_entry_name};
 use super::media_queries::{
     PersistedHashedPageToDelete, load_book_archive_source as load_persisted_book_archive_source,
     load_book_hashed_pages as load_persisted_book_hashed_pages,
 };
 use super::media_updates::{persist_duplicate_page_deleted_events, persist_removed_hashed_pages};
-use super::*;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(in crate::task_queue) struct RemoveHashedPagesPayload {
-    pub(in crate::task_queue) book_id: String,
-    pub(in crate::task_queue) pages: Vec<HashedPageToDelete>,
-    pub(in crate::task_queue) priority: i32,
-    pub(in crate::task_queue) group_id: Option<String>,
-    pub(in crate::task_queue) unique_id: String,
-}
-
-impl RemoveHashedPagesPayload {
-    pub(in crate::task_queue) fn new(
-        book_id: String,
-        pages: Vec<HashedPageToDelete>,
-        priority: i32,
-    ) -> Self {
-        let unique_id = remove_hashed_pages_task_id(book_id.as_str());
-        Self {
-            book_id,
-            pages,
-            priority,
-            group_id: None,
-            unique_id,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(in crate::task_queue) struct HashedPageToDelete {
-    pub(in crate::task_queue) file_hash: String,
-    pub(in crate::task_queue) file_size: i64,
-    pub(in crate::task_queue) file_name: String,
-    pub(in crate::task_queue) media_type: String,
-    pub(in crate::task_queue) page_number: i64,
-}
+pub(in crate::task_queue) type HashedPageToDelete = HashedPageToDeletePayload;
 
 pub(in crate::task_queue) struct BookArchiveSource {
     pub(in crate::task_queue) file_path: PathBuf,
     pub(in crate::task_queue) series_id: String,
     pub(in crate::task_queue) file_last_modified: i64,
     pub(in crate::task_queue) media_type: String,
-    pub(in crate::task_queue) media_status: String,
+    pub(in crate::task_queue) media_status: Option<MediaStatus>,
 }
 
-pub(in crate::task_queue) fn remove_hashed_pages_task_id(book_id: &str) -> String {
-    format!("RemoveHashedPages_{book_id}")
+#[derive(Debug, PartialEq, Eq)]
+struct BookFileMetadata {
+    file_last_modified: i64,
+    file_size: i64,
 }
 
 pub(in crate::task_queue) async fn remove_hashed_pages(
@@ -71,21 +49,25 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         return Ok(false);
     };
 
-    if !source.file_path.exists() {
-        return Err(TaskProcessingError::runtime(format!(
-            "file not found for hashed-page removal '{}': {}",
-            book_id,
-            source.file_path.display(),
-        )));
+    match fs::metadata(&source.file_path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(TaskProcessingError::runtime(format!(
+                "file not found for hashed-page removal '{}': {}",
+                book_id,
+                source.file_path.display(),
+            )));
+        }
+        Err(error) => {
+            return Err(TaskProcessingError::runtime(format!(
+                "failed to inspect source path for hashed-page removal '{}': {}: {error}",
+                book_id,
+                source.file_path.display(),
+            )));
+        }
     }
 
-    let metadata = fs::metadata(&source.file_path).map_err(|error| {
-        TaskProcessingError::runtime(format!(
-            "failed to read source metadata for hashed-page removal '{}' ('{}'): {error}",
-            book_id,
-            source.file_path.display(),
-        ))
-    })?;
+    let metadata = load_book_file_metadata(book_id, &source.file_path, "source")?;
 
     if !source.media_type.eq_ignore_ascii_case("application/zip") {
         return Err(TaskProcessingError::runtime(format!(
@@ -94,14 +76,18 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
         )));
     }
 
-    if !source.media_status.eq_ignore_ascii_case("READY") {
+    if source.media_status != Some(MediaStatus::Ready) {
         return Err(TaskProcessingError::runtime(format!(
             "media not ready for hashed-page removal '{}': {}",
-            book_id, source.media_status,
+            book_id,
+            source
+                .media_status
+                .map(MediaStatus::persisted_name)
+                .unwrap_or("UNKNOWN"),
         )));
     };
 
-    if metadata_updated_unix_seconds(&metadata) != source.file_last_modified {
+    if metadata.file_last_modified != source.file_last_modified {
         return Ok(false);
     }
 
@@ -124,12 +110,7 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
             .or_insert(0) += 1;
     }
 
-    let file_size = fs::metadata(&source.file_path)
-        .map(|metadata| metadata.len() as i64)
-        .unwrap_or_default();
-    let file_last_modified = fs::metadata(&source.file_path)
-        .map(|metadata| metadata_updated_unix_seconds(&metadata))
-        .unwrap_or_default();
+    let metadata = load_book_file_metadata(book_id, &source.file_path, "rewritten source")?;
 
     let book_id = book_id.to_string();
     let analyze_book_id = book_id.clone();
@@ -146,15 +127,16 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
 
     persist_removed_hashed_pages(
         runtime.database().write_pool(),
+        runtime.runtime_events(),
         &book_id,
         &deleted_count_by_hash,
-        file_last_modified,
-        file_size,
+        metadata.file_last_modified,
+        metadata.file_size,
     )
     .await
     .map_err(TaskProcessingError::runtime)?;
 
-    super::index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
+    index_tasks::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
     persist_duplicate_page_deleted_events(
         runtime.database().write_pool(),
@@ -167,6 +149,31 @@ pub(in crate::task_queue) async fn remove_hashed_pages(
     .map_err(TaskProcessingError::runtime)?;
 
     Ok(removed_pages.iter().any(|page| page.page_number == 1))
+}
+
+fn load_book_file_metadata(
+    book_id: &str,
+    file_path: &PathBuf,
+    source: &str,
+) -> Result<BookFileMetadata, TaskProcessingError> {
+    let metadata = fs::metadata(file_path).map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "failed to read {source} metadata for '{book_id}' ('{}'): {error}",
+            file_path.display()
+        ))
+    })?;
+    let file_size = i64::try_from(metadata.len()).map_err(|_| {
+        TaskProcessingError::runtime(format!(
+            "file size too large for '{book_id}' ('{}')",
+            file_path.display()
+        ))
+    })?;
+
+    Ok(BookFileMetadata {
+        file_last_modified: metadata_updated_unix_seconds(&metadata, file_path)
+            .map_err(TaskProcessingError::runtime)?,
+        file_size,
+    })
 }
 
 pub(in crate::task_queue) async fn load_book_archive_source(
@@ -248,7 +255,7 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
         delete_by_page_number.insert(page.page_number, page.clone());
     }
 
-    let mut kept_entries = Vec::<(String, Vec<u8>)>::new();
+    let mut kept_entries = Vec::<StoredArchiveEntry>::new();
     let mut removed_pages = Vec::<HashedPageToDelete>::new();
     let mut page_number = 0_i64;
 
@@ -298,7 +305,10 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
                 archive_path.display(),
             ))
         })?;
-        kept_entries.push((entry_name, bytes));
+        kept_entries.push(StoredArchiveEntry {
+            file_name: entry_name,
+            bytes,
+        });
     }
 
     // Windows refuses to replace the archive while the source ZIP reader still owns the file.
@@ -337,4 +347,26 @@ pub(in crate::task_queue) fn rewrite_zip_book_without_pages(
     })?;
 
     Ok(removed_pages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_book_file_metadata;
+
+    #[test]
+    fn load_book_file_metadata_fails_when_metadata_cannot_be_read() {
+        let missing_path = std::env::temp_dir().join(format!(
+            "komga-missing-hashed-page-metadata-{}",
+            std::process::id()
+        ));
+
+        let error = load_book_file_metadata("book-1", &missing_path, "rewritten source")
+            .expect_err("missing rewritten source metadata should fail");
+
+        assert!(
+            error
+                .message
+                .contains("failed to read rewritten source metadata for 'book-1'")
+        );
+    }
 }

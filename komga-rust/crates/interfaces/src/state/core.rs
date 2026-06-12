@@ -1,4 +1,5 @@
-use super::*;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeProfile {
@@ -25,6 +26,8 @@ pub struct RuntimeState {
     pub configuration_bind_address: SocketAddr,
     pub server_context_path: Option<String>,
     pub configuration_server_context_path: Option<String>,
+    pub actuator_enabled: bool,
+    pub dev_cors_enabled: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

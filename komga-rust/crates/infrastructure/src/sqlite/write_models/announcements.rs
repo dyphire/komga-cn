@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-pub async fn save_announcements_read(
+pub(crate) async fn save_announcements_read(
     pool: &SqlitePool,
     user_id: &str,
     announcement_ids: &[String],

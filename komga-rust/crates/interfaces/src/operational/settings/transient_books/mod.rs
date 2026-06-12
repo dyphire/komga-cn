@@ -4,7 +4,9 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use komga_application::operational::{TransientBookPageError, TransientBookScanError};
+use komga_application::operational::{
+    TransientBookAnalyzeError, TransientBookPageError, TransientBookScanError,
+};
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -79,8 +81,11 @@ pub(crate) async fn post_transient_book_analyze(
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
     match app.transient_books.analyze(&transient_book_id).await {
-        Some(record) => Json(transient_book_payload(&record)).into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(record) => Json(transient_book_payload(&record)).into_response(),
+        Err(TransientBookAnalyzeError::NotFound) => StatusCode::NOT_FOUND.into_response(),
+        Err(TransientBookAnalyzeError::Internal) => {
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

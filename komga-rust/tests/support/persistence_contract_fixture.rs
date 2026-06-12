@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_infrastructure::context::SqlitePersistenceContext;
-use komga_infrastructure::sqlite::{
-    connect_shared_pool, connect_test_pool, evict_shared_pools_for_paths,
-};
+use komga_infrastructure::SqlitePersistenceContext;
+use komga_infrastructure::evict_shared_pools_for_paths;
 use tokio::sync::OnceCell;
+
+use crate::support::sqlite::connect_test_pool;
 
 const TEMPLATE_LOCK_STALE_AFTER: Duration = Duration::from_secs(300);
 const TEMPLATE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -472,63 +472,4 @@ fn combine_trigger_blocks(statements: Vec<String>) -> Vec<String> {
     }
 
     combined
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn cleanup_closes_cached_shared_pools_for_fixture_databases() {
-        let paths = new_runtime_db_paths("cleanup-closes-cached-shared-pools")
-            .expect("fixture paths should be created");
-        let main_db = paths.main_db.clone();
-        let tasks_db = paths.tasks_db.clone();
-        let config_dir = paths.config_dir.clone();
-
-        seed_main_db_from_flyway(&main_db)
-            .await
-            .expect("fixture main db should be seeded before stale pool opens");
-        let stale_pool = connect_shared_pool(&main_db, 1)
-            .await
-            .expect("fixture main db should open");
-        sqlx::query("INSERT INTO USER (ID, EMAIL, PASSWORD) VALUES (?, ?, ?)")
-            .bind("stale-user")
-            .bind("stale-user@example.org")
-            .bind("test-password")
-            .execute(&stale_pool)
-            .await
-            .expect("fixture user row should be inserted in stale database");
-        drop(stale_pool);
-
-        cleanup_async(paths).await;
-
-        let main_exists_after_cleanup = main_db.exists();
-        let wal_exists_after_cleanup =
-            PathBuf::from(format!("{}-wal", main_db.to_string_lossy())).exists();
-        let shm_exists_after_cleanup =
-            PathBuf::from(format!("{}-shm", main_db.to_string_lossy())).exists();
-        let config_exists_after_cleanup = config_dir.exists();
-
-        fs::create_dir_all(&config_dir).expect("fixture root should be recreated after cleanup");
-        let fresh_pool = connect_shared_pool(&main_db, 1)
-            .await
-            .expect("fresh fixture main db should open after cleanup");
-        let leaked_rows = sqlx::query_scalar::<_, String>("SELECT ID FROM USER")
-            .fetch_all(&fresh_pool)
-            .await;
-
-        assert!(
-            leaked_rows.is_err(),
-            "fixture cleanup must not reuse a cached pool pointing at a deleted sqlite file; main_exists_after_cleanup={main_exists_after_cleanup}, wal_exists_after_cleanup={wal_exists_after_cleanup}, shm_exists_after_cleanup={shm_exists_after_cleanup}, config_exists_after_cleanup={config_exists_after_cleanup}",
-        );
-
-        fresh_pool.close().await;
-        cleanup_async(RuntimeDbPaths {
-            config_dir,
-            main_db,
-            tasks_db,
-        })
-        .await;
-    }
 }

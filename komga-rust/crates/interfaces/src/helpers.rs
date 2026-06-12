@@ -1,23 +1,16 @@
-use crate::discovery_auth::context::{
-    DetailAccessDenial, DiscoveryQueryContext, QueryRestrictions,
-};
-use crate::discovery_auth::principal::AgeRestrictionKind;
+use crate::discovery_auth::context::{DetailAccessDenial, DiscoveryQueryContext};
 use axum::Json;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookReadModel;
 use komga_domain::common_ids::{LibraryId, UserId};
 use komga_domain::discovery::{
-    AgeRestrictionKind as DomainAgeRestrictionKind,
-    DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
-    QueryRestrictions as DomainQueryRestrictions,
+    DiscoveryQueryContext as DomainDiscoveryQueryContext, MediaProfile, PageEnvelope,
 };
 use reqwest::Url;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-
-use crate::state::{ReadProgress, ReadProgressState};
 
 pub(crate) fn books_page_payload(
     page: PageEnvelope<BookReadModel>,
@@ -71,7 +64,9 @@ pub(crate) fn books_page_payload(
 
 fn book_payload(book: &BookReadModel, is_admin: bool) -> Value {
     let url = restricted_book_url(&book.url, is_admin);
-    let media_profile = media_profile_for_media_type(&book.media_type);
+    let media_profile = MediaProfile::from_media_type(&book.media_type)
+        .map(MediaProfile::api_name)
+        .unwrap_or_default();
 
     json!({
         "id": book.id,
@@ -87,7 +82,7 @@ fn book_payload(book: &BookReadModel, is_admin: bool) -> Value {
         "sizeBytes": book.size_bytes,
         "size": format_size_bytes(book.size_bytes),
         "media": {
-            "status": book.media_status,
+            "status": book.media_status.persisted_name(),
             "mediaType": book.media_type,
             "pagesCount": book.media_pages_count,
             "comment": book.media_comment,
@@ -204,18 +199,6 @@ fn format_size_bytes(size_bytes: u64) -> String {
     }
 }
 
-fn media_profile_for_media_type(media_type: &str) -> &'static str {
-    match media_type {
-        "application/zip"
-        | "application/x-rar-compressed"
-        | "application/x-rar-compressed; version=4"
-        | "application/x-rar-compressed; version=5" => "DIVINA",
-        "application/epub+zip" => "EPUB",
-        "application/pdf" => "PDF",
-        _ => "",
-    }
-}
-
 pub(crate) fn restricted_book_url(url: &str, is_admin: bool) -> String {
     if is_admin {
         return url.to_string();
@@ -302,32 +285,16 @@ pub(crate) fn query_bool(query: &str, key: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn to_domain_query_context(context: DiscoveryQueryContext) -> DomainDiscoveryQueryContext {
+pub(crate) fn to_domain_query_context(
+    context: DiscoveryQueryContext,
+) -> DomainDiscoveryQueryContext {
     DomainDiscoveryQueryContext {
         user_id: context.user_id.map(UserId::from),
         is_admin: context.is_admin,
         authorized_library_ids: context
             .authorized_library_ids
             .map(|ids| ids.into_iter().map(LibraryId::from).collect()),
-        restrictions: context.restrictions.map(to_domain_restrictions),
-    }
-}
-
-fn to_domain_restrictions(restrictions: QueryRestrictions) -> DomainQueryRestrictions {
-    DomainQueryRestrictions {
-        age: restrictions.age,
-        age_restriction: restrictions
-            .age_restriction
-            .map(to_domain_age_restriction_kind),
-        labels_allow: restrictions.labels_allow,
-        labels_exclude: restrictions.labels_exclude,
-    }
-}
-
-fn to_domain_age_restriction_kind(kind: AgeRestrictionKind) -> DomainAgeRestrictionKind {
-    match kind {
-        AgeRestrictionKind::AllowOnly => DomainAgeRestrictionKind::AllowOnly,
-        AgeRestrictionKind::Exclude => DomainAgeRestrictionKind::Exclude,
+        restrictions: context.restrictions,
     }
 }
 
@@ -336,6 +303,7 @@ pub(crate) fn detail_access_denial_response(denial: DetailAccessDenial) -> Respo
         DetailAccessDenial::Unauthorized => StatusCode::UNAUTHORIZED.into_response(),
         DetailAccessDenial::Forbidden => StatusCode::FORBIDDEN.into_response(),
         DetailAccessDenial::NotFound => StatusCode::NOT_FOUND.into_response(),
+        DetailAccessDenial::StorageFailure => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
@@ -374,16 +342,6 @@ pub(crate) fn invalid_progression_payload() -> Response {
         })),
     )
         .into_response()
-}
-
-pub(crate) fn set_read_progress(read_progress: &ReadProgressState, token: String, book_id: String) {
-    let mut all_progress = read_progress
-        .progress_by_token
-        .lock()
-        .expect("read-progress state lock should not be poisoned");
-
-    let user_progress = all_progress.entry(token).or_default();
-    user_progress.insert(book_id, ReadProgress);
 }
 
 #[cfg(test)]

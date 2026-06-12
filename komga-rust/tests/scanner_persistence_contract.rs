@@ -5,13 +5,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::support::sqlite::connect_test_pool;
 use komga_application::task_processing::TaskQueueRecord;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
-use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
-use komga_infrastructure::sqlite::connect_test_pool;
-use komga_infrastructure::task_queue::TaskRuntimeContext;
-use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
+use komga_infrastructure::{SearchEntityType, SearchIndexLifecycle};
+use komga_infrastructure::{TaskQueueScheduler, TaskRuntimeContext};
 use serde_json::{Value, json};
 use sqlx::Row;
 use zip::CompressionMethod;

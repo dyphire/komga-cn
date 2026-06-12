@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
+use komga_application::opds::{OpdsBookAuthorEntry, OpdsBookFeedEntry};
+
 use crate::request_urls::app_absolute_url;
-use crate::state::{OpdsBookAuthorEntry, OpdsBookFeedEntry};
 
 use super::types::PersistedSeries;
 use super::xml_renderer::{
@@ -18,25 +19,25 @@ pub(super) use super::xml_renderer::{OpdsV1XmlLink, xml_escape};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1NavigationEntry {
-    pub id: String,
-    pub title: String,
-    pub content: String,
-    pub href_path: String,
-    pub updated: Option<String>,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) content: String,
+    pub(super) href_path: String,
+    pub(super) updated: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1AcquisitionEntry {
-    pub id: String,
-    pub title: String,
-    pub updated: Option<String>,
-    pub content: String,
-    pub authors: Vec<String>,
-    pub acquisition_media_type: String,
-    pub acquisition_href_path: String,
-    pub thumbnail_href_path: String,
-    pub image_href_path: String,
-    pub extra_links: Vec<OpdsV1XmlLink>,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) updated: Option<String>,
+    pub(super) content: String,
+    pub(super) authors: Vec<String>,
+    pub(super) acquisition_media_type: String,
+    pub(super) acquisition_href_path: String,
+    pub(super) thumbnail_href_path: String,
+    pub(super) image_href_path: String,
+    pub(super) extra_links: Vec<OpdsV1XmlLink>,
 }
 
 pub(super) struct OpdsV1FeedHeader<'a> {
@@ -45,7 +46,24 @@ pub(super) struct OpdsV1FeedHeader<'a> {
     pub(super) title: &'a str,
     pub(super) self_path: &'a str,
     pub(super) feed_updated: Option<&'a str>,
-    pub(super) pagination: Option<(usize, bool)>,
+    pub(super) pagination: Option<OpdsPageNavigation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OpdsPageRequest {
+    pub(super) page: usize,
+    pub(super) size: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OpdsPageNavigation {
+    pub(super) page: usize,
+    pub(super) has_next: bool,
+}
+
+pub(super) struct OpdsPagedItems<T> {
+    pub(super) items: Vec<T>,
+    pub(super) has_next: bool,
 }
 
 pub(super) fn opds_v1_navigation_feed_response(
@@ -68,8 +86,7 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or_else(|| now.clone());
-    let (previous_href, next_href) =
-        navigation_paging_hrefs(feed.headers, feed.self_path, feed.pagination);
+    let paging_hrefs = navigation_paging_hrefs(feed.headers, feed.self_path, feed.pagination);
 
     atom_xml_response(render_opds_v1_navigation_feed(
         OpdsV1NavigationFeedDocument {
@@ -78,8 +95,8 @@ pub(super) fn opds_v1_navigation_feed_response_with_extra_links(
             updated: feed_updated,
             self_href,
             start_href,
-            previous_href,
-            next_href,
+            previous_href: paging_hrefs.previous,
+            next_href: paging_hrefs.next,
             extra_links,
             entries: entries
                 .into_iter()
@@ -112,22 +129,30 @@ pub(super) fn opds_v1_library_series_feed_response(
         .filter(|value| !value.is_empty())
         .unwrap_or(now.as_str())
         .to_string();
-    let (page, has_next) = feed.pagination.unwrap_or((0, false));
-    let previous_href = (page > 0).then(|| {
+    let pagination = feed.pagination.unwrap_or(OpdsPageNavigation {
+        page: 0,
+        has_next: false,
+    });
+    let previous_href = (pagination.page > 0).then(|| {
         app_absolute_url(
             feed.headers,
             format!(
                 "/opds/v1.2/libraries/{}?page={}",
                 feed.feed_id,
-                page.saturating_sub(1)
+                pagination.page.saturating_sub(1)
             )
             .as_str(),
         )
     });
-    let next_href = has_next.then(|| {
+    let next_href = pagination.has_next.then(|| {
         app_absolute_url(
             feed.headers,
-            format!("/opds/v1.2/libraries/{}?page={}", feed.feed_id, page + 1).as_str(),
+            format!(
+                "/opds/v1.2/libraries/{}?page={}",
+                feed.feed_id,
+                pagination.page + 1
+            )
+            .as_str(),
         )
     });
 
@@ -169,7 +194,7 @@ pub(super) fn opds_v1_acquisition_feed_response_with_entries(
     self_path: &str,
     entries: Vec<OpdsV1AcquisitionEntry>,
     feed_updated: Option<&str>,
-    pagination: Option<(usize, bool)>,
+    pagination: Option<OpdsPageNavigation>,
 ) -> Response {
     let self_href = app_absolute_url(headers, self_path);
     let start_href = app_absolute_url(headers, "/opds/v1.2/catalog");
@@ -178,7 +203,7 @@ pub(super) fn opds_v1_acquisition_feed_response_with_entries(
         .filter(|value| !value.is_empty())
         .map(normalize_opds_updated)
         .unwrap_or(now.clone());
-    let (previous_href, next_href) = navigation_paging_hrefs(headers, self_path, pagination);
+    let paging_hrefs = navigation_paging_hrefs(headers, self_path, pagination);
 
     atom_xml_response(render_opds_v1_acquisition_feed(
         OpdsV1AcquisitionFeedDocument {
@@ -187,8 +212,8 @@ pub(super) fn opds_v1_acquisition_feed_response_with_entries(
             updated: feed_updated,
             self_href,
             start_href,
-            previous_href,
-            next_href,
+            previous_href: paging_hrefs.previous,
+            next_href: paging_hrefs.next,
             entries: entries
                 .into_iter()
                 .map(|entry| OpdsV1XmlAcquisitionFeedEntry {
@@ -244,22 +269,34 @@ fn atom_xml_response(body: String) -> Response {
 fn navigation_paging_hrefs(
     headers: &HeaderMap,
     self_path: &str,
-    pagination: Option<(usize, bool)>,
-) -> (Option<String>, Option<String>) {
-    let Some((page, has_next)) = pagination else {
-        return (None, None);
+    pagination: Option<OpdsPageNavigation>,
+) -> OpdsPagingHrefs {
+    let Some(pagination) = pagination else {
+        return OpdsPagingHrefs {
+            previous: None,
+            next: None,
+        };
     };
 
-    let previous_href = (page > 0).then(|| {
+    let previous = (pagination.page > 0).then(|| {
         app_absolute_url(
             headers,
-            page_link_path(self_path, page.saturating_sub(1)).as_str(),
+            page_link_path(self_path, pagination.page.saturating_sub(1)).as_str(),
         )
     });
-    let next_href =
-        has_next.then(|| app_absolute_url(headers, page_link_path(self_path, page + 1).as_str()));
+    let next = pagination.has_next.then(|| {
+        app_absolute_url(
+            headers,
+            page_link_path(self_path, pagination.page + 1).as_str(),
+        )
+    });
 
-    (previous_href, next_href)
+    OpdsPagingHrefs { previous, next }
+}
+
+struct OpdsPagingHrefs {
+    previous: Option<String>,
+    next: Option<String>,
 }
 
 fn page_link_path(self_path: &str, page: usize) -> String {
@@ -300,7 +337,7 @@ pub(super) fn query_values(query: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn parse_page_size(query: &str) -> (usize, usize) {
+pub(super) fn parse_page_size(query: &str) -> OpdsPageRequest {
     let page = query_value(query, "page")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
@@ -308,18 +345,28 @@ pub(super) fn parse_page_size(query: &str) -> (usize, usize) {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20)
         .max(1);
-    (page, size)
+    OpdsPageRequest { page, size }
 }
 
-pub(super) fn paginate_vec<T>(items: Vec<T>, page: usize, size: usize) -> (Vec<T>, bool) {
-    let start = page.saturating_mul(size);
-    let end = start.saturating_add(size);
+pub(super) fn paginate_vec<T>(items: Vec<T>, page_request: OpdsPageRequest) -> OpdsPagedItems<T> {
+    let start = page_request.page.saturating_mul(page_request.size);
+    let end = start.saturating_add(page_request.size);
     if start >= items.len() {
-        return (Vec::new(), false);
+        return OpdsPagedItems {
+            items: Vec::new(),
+            has_next: false,
+        };
     }
     let has_next = end < items.len();
-    let page_items = items.into_iter().skip(start).take(size).collect::<Vec<_>>();
-    (page_items, has_next)
+    let page_items = items
+        .into_iter()
+        .skip(start)
+        .take(page_request.size)
+        .collect::<Vec<_>>();
+    OpdsPagedItems {
+        items: page_items,
+        has_next,
+    }
 }
 
 pub(super) fn percent_decode(value: &str) -> String {
@@ -745,7 +792,10 @@ mod tests {
 
     #[test]
     fn parse_page_size_does_not_cap_large_requested_size() {
-        assert_eq!(super::parse_page_size("page=2&size=250"), (2, 250));
+        assert_eq!(
+            super::parse_page_size("page=2&size=250"),
+            super::OpdsPageRequest { page: 2, size: 250 }
+        );
     }
 
     #[test]

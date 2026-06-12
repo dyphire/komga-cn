@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use crate::persisted_paths::resolve_rooted_path;
 
-use super::scan_models::*;
+use super::scan_models::{
+    ExistingScannedBookRow, LibraryScanConfig, ScannedBookRow, ScannedSidecarRow,
+    ScannedSidecarSource, ScannedSidecarType,
+};
 
 pub(super) fn collect_series_directories(
     current: &Path,
@@ -23,15 +26,24 @@ pub(super) fn collect_series_directories(
 
     let mut has_supported_book = false;
     let mut children = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "failed to read directory entry in '{}': {error}",
+                current.display()
+            )
+        })?;
         let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if metadata.is_file()
-            && !is_hidden_path(path.as_path())
-            && is_supported_book_file(path.as_path(), scan_config)
+        if is_hidden_path(path.as_path())
+            || is_library_path_excluded(path.as_path(), &scan_config.scan_directory_exclusions)
         {
+            continue;
+        }
+
+        let metadata = entry.metadata().map_err(|error| {
+            format!("failed to read metadata for '{}': {error}", path.display())
+        })?;
+        if metadata.is_file() && is_supported_book_file(path.as_path(), scan_config) {
             has_supported_book = true;
         }
         if metadata.is_dir() {
@@ -75,6 +87,18 @@ pub(super) fn is_supported_book_file(path: &Path, scan_config: &LibraryScanConfi
                     .unwrap_or(false)
             })
         })
+}
+
+pub(super) fn path_file_name_utf8(path: &Path) -> Result<&str, String> {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("path '{}' has no valid UTF-8 file name", path.display()))
+}
+
+pub(super) fn path_file_stem_utf8(path: &Path) -> Result<&str, String> {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("path '{}' has no valid UTF-8 file stem", path.display()))
 }
 
 pub(super) fn is_library_path_excluded(path: &Path, exclusions: &[String]) -> bool {
@@ -136,17 +160,12 @@ pub(super) fn build_sidecars(
     books: &[ScannedBookRow],
     sidecar_candidates: &[(PathBuf, fs::Metadata)],
     include_series_sidecars: bool,
-) -> Vec<ScannedSidecarRow> {
+) -> Result<Vec<ScannedSidecarRow>, String> {
     let mut sidecars = Vec::new();
 
     'candidate: for (path, metadata) in sidecar_candidates {
-        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let file_stem = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default();
+        let file_name = path_file_name_utf8(path)?;
+        let file_stem = path_file_stem_utf8(path)?;
 
         let is_image = matches!(
             path.extension()
@@ -171,7 +190,7 @@ pub(super) fn build_sidecars(
                 sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: series_url.to_string(),
-                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata, path)?,
                     source: ScannedSidecarSource::Series,
                     sidecar_type: ScannedSidecarType::Artwork,
                 });
@@ -186,7 +205,7 @@ pub(super) fn build_sidecars(
             sidecars.push(ScannedSidecarRow {
                 url: path.to_string_lossy().to_string(),
                 parent_url: series_url.to_string(),
-                last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
+                last_modified_unix_seconds: metadata_updated_unix_seconds(metadata, path)?,
                 source: ScannedSidecarSource::Series,
                 sidecar_type: ScannedSidecarType::Metadata,
             });
@@ -199,7 +218,7 @@ pub(super) fn build_sidecars(
                 sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: book.book_url.clone(),
-                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata, path)?,
                     source: ScannedSidecarSource::Book,
                     sidecar_type: ScannedSidecarType::Metadata,
                 });
@@ -210,7 +229,7 @@ pub(super) fn build_sidecars(
                 sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: book.book_url.clone(),
-                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata),
+                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata, path)?,
                     source: ScannedSidecarSource::Book,
                     sidecar_type: ScannedSidecarType::Artwork,
                 });
@@ -219,7 +238,7 @@ pub(super) fn build_sidecars(
         }
     }
 
-    sidecars
+    Ok(sidecars)
 }
 
 pub(super) fn is_book_artwork_sidecar(base_name: &str, book_name: &str) -> bool {
@@ -234,18 +253,44 @@ pub(super) fn is_book_artwork_sidecar(base_name: &str, book_name: &str) -> bool 
         .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }
 
-pub(super) fn to_unix_seconds(time: Option<std::time::SystemTime>) -> i64 {
-    time.and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|value| value.as_secs() as i64)
-        .unwrap_or(0)
+fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> Result<i64, String> {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => i64::try_from(duration.as_secs()).map_err(|_| {
+            format!(
+                "filesystem timestamp for '{}' is outside i64 range",
+                path.display()
+            )
+        }),
+        Err(error) => {
+            let duration = error.duration();
+            let seconds = i64::try_from(duration.as_secs()).map_err(|_| {
+                format!(
+                    "filesystem timestamp for '{}' is outside i64 range",
+                    path.display()
+                )
+            })?;
+            Ok(-seconds)
+        }
+    }
 }
 
-pub(super) fn metadata_updated_unix_seconds(metadata: &fs::Metadata) -> i64 {
+pub(super) fn metadata_updated_unix_seconds(
+    metadata: &fs::Metadata,
+    path: &Path,
+) -> Result<i64, String> {
     [metadata.created().ok(), metadata.modified().ok()]
         .into_iter()
-        .map(to_unix_seconds)
+        .flatten()
+        .map(|time| to_unix_seconds(time, path))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .max()
-        .unwrap_or(0)
+        .ok_or_else(|| {
+            format!(
+                "failed to read created or modified timestamp for '{}'",
+                path.display()
+            )
+        })
 }
 
 #[cfg(test)]

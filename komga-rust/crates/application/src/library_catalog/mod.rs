@@ -9,8 +9,9 @@ mod task_records;
 
 pub use catalog_port::LibraryCatalogPort;
 pub use commands::{CreateLibraryResult, LibraryCatalogCommandService, LibraryTaskResult};
-pub use models::{LibraryChangeSet, LibraryRecord};
+pub use models::{LibraryChangeSet, LibraryRecord, LibraryScanInterval, LibrarySeriesCover};
 pub use queries::{LibraryCatalogQueryService, LibraryDetailAccess};
 pub use repository::{
-    LibraryCatalogMutationError, LibraryCatalogMutationPort, LibraryCatalogReadPort,
+    LibraryBookSeriesRecord, LibraryCatalogMutationError, LibraryCatalogMutationPort,
+    LibraryCatalogReadPort, LibrarySeriesAndBookIds,
 };

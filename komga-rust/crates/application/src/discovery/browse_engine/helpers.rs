@@ -1,45 +1,30 @@
-use super::models::BookPosterRow;
+use super::models::{BookPosterRow, SeriesReadProgressCounts};
+use komga_domain::discovery::ReadStatus;
+use komga_domain::media_assets::ThumbnailType;
 
-pub fn media_profile_for_media_type(media_type: &str) -> &'static str {
-    match media_type {
-        "application/zip"
-        | "application/x-rar-compressed"
-        | "application/x-rar-compressed; version=4"
-        | "application/x-rar-compressed; version=5" => "divina",
-        "application/epub+zip" => "epub",
-        "application/pdf" => "pdf",
-        _ => "",
-    }
-}
-
-pub fn series_matches_read_status(
+pub(super) fn series_matches_read_status(
     books_count: u64,
-    read_progress: Option<(i64, i64)>,
-    status: &str,
+    read_progress: Option<SeriesReadProgressCounts>,
+    status: ReadStatus,
 ) -> bool {
-    match status.to_ascii_lowercase().as_str() {
-        "unread" => read_progress.is_none(),
-        "read" => read_progress
-            .map(|(read_count, _)| read_count.max(0) as u64 == books_count)
+    match status {
+        ReadStatus::Unread => read_progress.is_none(),
+        ReadStatus::Read => read_progress
+            .map(|counts| counts.read_count.max(0) as u64 == books_count)
             .unwrap_or(false),
-        "in_progress" | "inprogress" => read_progress
-            .map(|(read_count, _)| read_count.max(0) as u64 != books_count)
+        ReadStatus::InProgress => read_progress
+            .map(|counts| counts.read_count.max(0) as u64 != books_count)
             .unwrap_or(false),
-        _ => false,
     }
 }
 
-pub fn poster_matches(
+pub(super) fn poster_matches(
     poster: &BookPosterRow,
-    poster_types: Option<&Vec<String>>,
+    poster_type: Option<ThumbnailType>,
     poster_selected: Option<bool>,
 ) -> bool {
-    let type_matches = poster_types
-        .map(|values| {
-            values
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case(&poster.thumbnail_type))
-        })
+    let type_matches = poster_type
+        .map(|thumbnail_type| poster.thumbnail_type == thumbnail_type)
         .unwrap_or(true);
     let selected_matches = poster_selected
         .map(|value| poster.selected == value)
@@ -47,7 +32,7 @@ pub fn poster_matches(
     type_matches && selected_matches
 }
 
-pub fn normalized_author_filter_value(name: &str, role: &str) -> String {
+pub(super) fn normalized_author_filter_value(name: &str, role: &str) -> String {
     if role.is_empty() {
         name.to_ascii_lowercase()
     } else {
@@ -55,50 +40,66 @@ pub fn normalized_author_filter_value(name: &str, role: &str) -> String {
     }
 }
 
-pub fn author_matches_filter_value(author: &str, expected: &[String]) -> bool {
+pub(super) fn author_matches_filter_value(author: &str, expected: &[String]) -> bool {
     let normalized = author.to_ascii_lowercase();
     expected
         .iter()
         .any(|value| author_value_matches(&normalized, value))
 }
 
-pub fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> bool {
+pub(super) fn author_matches_filter(name: &str, role: &str, expected: &[String]) -> bool {
     author_matches_filter_value(&normalized_author_filter_value(name, role), expected)
 }
 
-pub fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
+pub(super) fn author_contains_filter_value(author: &str, expected: &[String]) -> bool {
     let normalized = author.to_ascii_lowercase();
     expected
         .iter()
         .any(|value| normalized.contains(value.as_str()))
 }
 
-pub fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {
+pub(super) fn author_contains_filter(name: &str, role: &str, expected: &[String]) -> bool {
     author_contains_filter_value(&normalized_author_filter_value(name, role), expected)
 }
 
-fn split_author_components(value: &str) -> (&str, Option<&str>) {
+struct AuthorComponents<'a> {
+    name: &'a str,
+    role: Option<&'a str>,
+}
+
+fn split_author_components(value: &str) -> AuthorComponents<'_> {
     if let Some(role) = value.strip_prefix("::") {
-        return ("", Some(role));
+        return AuthorComponents {
+            name: "",
+            role: Some(role),
+        };
     }
 
     if let Some((name, role)) = value.split_once("::").or_else(|| value.split_once(',')) {
-        return (name, Some(role));
+        return AuthorComponents {
+            name,
+            role: Some(role),
+        };
     }
 
-    (value, None)
+    AuthorComponents {
+        name: value,
+        role: None,
+    }
 }
 
-pub fn author_value_matches(author: &str, expected: &str) -> bool {
+pub(super) fn author_value_matches(author: &str, expected: &str) -> bool {
     if expected.contains("::") || expected.contains(',') {
-        let (expected_name, expected_role) = split_author_components(expected);
-        let (author_name, author_role) = split_author_components(author);
-        return author_name.eq_ignore_ascii_case(expected_name)
-            && author_role
+        let expected = split_author_components(expected);
+        let author = split_author_components(author);
+        return author.name.eq_ignore_ascii_case(expected.name)
+            && author
+                .role
                 .unwrap_or_default()
-                .eq_ignore_ascii_case(expected_role.unwrap_or_default());
+                .eq_ignore_ascii_case(expected.role.unwrap_or_default());
     }
 
-    let (author_name, _) = split_author_components(author);
-    author_name.eq_ignore_ascii_case(expected)
+    split_author_components(author)
+        .name
+        .eq_ignore_ascii_case(expected)
 }

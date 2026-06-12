@@ -1,40 +1,15 @@
 use axum::Json;
-use axum::body::Bytes;
-use axum::extract::{Path, Query};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use image::ImageFormat;
-use serde::Deserialize;
-use serde_json::{Value, json};
-
-use crate::cache::{
-    asset_not_modified_response, asset_ok_response, file_last_modified_header_value,
-    if_modified_since_matches,
-};
-use crate::discovery_auth::principal::principal_from_user_payload;
-use crate::identity_access::auth::{
-    AuthUser, resolved_auth_user, resolved_request_auth_user, resolved_token, user_id,
-    user_payload_json, user_shared_all_libraries, user_shared_library_ids,
-};
-use crate::state::MediaAssetsState;
-use komga_application::task_processing::{TaskKind, TaskQueueRecord, TaskRequest};
-#[cfg(test)]
-use komga_infrastructure::filesystem::media_access::page_content::{
-    load_archive_page_rows, load_generated_pdf_page_rows, read_pdf_page_as_single_page_pdf,
-    resolve_book_page_bytes,
-};
-
-use super::helpers::{
-    invalid_progression_payload, invalid_read_progress_payload, set_read_progress,
-};
+use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin, TaskQueueRecord};
+use serde_json::json;
 
 pub(crate) mod access_control;
-mod archive_payload;
-mod epub_positions;
 mod files;
 pub(crate) mod handlers;
 pub(crate) mod http_helpers;
 mod import;
+pub(crate) mod manifest_renderer;
 mod manifests;
 pub(crate) mod media_helpers;
 mod operations;
@@ -44,100 +19,14 @@ pub(crate) mod read_progress;
 pub(crate) mod thumbnails;
 pub(crate) mod types;
 
-use self::access_control::{
-    user_can_access_book_media, user_can_access_collection_media, user_can_access_readlist_media,
-    user_can_access_series_media, visible_collection_series_ids_for_user,
-    visible_readlist_book_ids_for_user,
-};
-use self::archive_payload::{build_stored_zip_archive, readlist_archive_entry_name};
-use self::epub_positions::load_persisted_epub_positions;
-use self::http_helpers::{attachment_disposition, inline_disposition, internal_error_response};
-use self::media_helpers::{book_media_is_epub, content_type_from_filename};
-#[cfg(test)]
-use self::media_helpers::{
-    normalize_epub_resource_href, parse_epub_fixed_layout, parse_epub_kobo_spans,
-};
-use self::types::PersistedBookMedia;
-
-async fn resolve_book_id_for_persisted(app: &MediaAssetsState, requested_book_id: &str) -> String {
-    let Some(index) = requested_book_id
-        .strip_prefix("book-")
-        .and_then(|value| value.parse::<usize>().ok())
-    else {
-        return requested_book_id.to_string();
-    };
-
-    if index == 0 {
-        return requested_book_id.to_string();
-    }
-
-    if matches!(
-        app.book_detail
-            .load_persisted_book_resource(requested_book_id)
-            .await,
-        Ok(Some(_))
-    ) {
-        return requested_book_id.to_string();
-    }
-
-    match app.book_detail.load_book_id_by_sorted_position(index).await {
-        Ok(Some(book_id)) => book_id,
-        _ => requested_book_id.to_string(),
-    }
-}
-
-async fn resolve_series_id_for_persisted(
-    app: &MediaAssetsState,
-    requested_series_id: &str,
-) -> String {
-    let Some(index) = requested_series_id
-        .strip_prefix("series-")
-        .and_then(|value| value.parse::<usize>().ok())
-    else {
-        return requested_series_id.to_string();
-    };
-
-    if index == 0 {
-        return requested_series_id.to_string();
-    }
-
-    if matches!(
-        app.series_detail
-            .load_persisted_series_resource(requested_series_id)
-            .await,
-        Ok(Some(_))
-    ) {
-        return requested_series_id.to_string();
-    }
-
-    match app
-        .series_detail
-        .load_series_id_by_sorted_position(index)
-        .await
-    {
-        Ok(Some(series_id)) => series_id,
-        _ => requested_series_id.to_string(),
-    }
-}
-
-async fn process_task_side_effects(
-    app: &MediaAssetsState,
-    task_records: Vec<TaskQueueRecord>,
-) -> Result<(), String> {
-    app.task_queue
-        .queue
-        .enqueue_records(
-            task_records,
-            komga_application::task_processing::SubmitUrgency::Immediate,
-        )
-        .await
-}
-
 async fn enqueue_task_records(
-    app: &MediaAssetsState,
+    task_queue: &dyn TaskQueueAdmin,
     task_records: Vec<TaskQueueRecord>,
 ) -> Response {
-    if let Err(error) = process_task_side_effects(app, task_records).await {
+    if let Err(error) = task_queue
+        .enqueue_records(task_records, SubmitUrgency::Immediate)
+        .await
+    {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": error })),

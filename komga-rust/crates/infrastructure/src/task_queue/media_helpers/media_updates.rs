@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
+use komga_domain::discovery::MediaStatus;
 use sqlx::{Row, Sqlite, SqlitePool};
+
+use crate::random_hex_token;
 
 use super::media_queries::PersistedHashedPageToDelete;
 
@@ -15,17 +15,22 @@ struct BookSseContext {
     library_id: String,
 }
 
-fn emit_book_changed(book_id: &str, context: &BookSseContext) {
-    register_runtime_sse_event(
-        "BookChanged",
-        json!({
-            "bookId": book_id,
-            "seriesId": context.series_id,
-            "libraryId": context.library_id,
-        }),
-        false,
-        None,
-    );
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::task_queue) struct BookPageHashWrite {
+    pub(in crate::task_queue) page_number: i64,
+    pub(in crate::task_queue) file_hash: String,
+}
+
+fn emit_book_changed(
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    context: &BookSseContext,
+) {
+    runtime_events.register(RuntimeSseEvent::BookChanged {
+        book_id: book_id.to_string(),
+        series_id: context.series_id.clone(),
+        library_id: context.library_id.clone(),
+    });
 }
 
 async fn load_book_sse_context(
@@ -45,7 +50,7 @@ async fn load_book_sse_context(
         })
 }
 
-pub async fn persist_book_hash(
+pub(in crate::task_queue) async fn persist_book_hash(
     pool: &SqlitePool,
     book_id: &str,
     hash: &str,
@@ -77,8 +82,9 @@ pub async fn persist_book_hash(
     Ok(())
 }
 
-pub async fn persist_removed_hashed_pages(
+pub(in crate::task_queue) async fn persist_removed_hashed_pages(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     deleted_count_by_hash: &HashMap<String, i64>,
     file_last_modified: i64,
@@ -133,12 +139,12 @@ pub async fn persist_removed_hashed_pages(
     let book_context = load_book_sse_context(pool, book_id).await?;
 
     if let Some(book_context) = book_context {
-        emit_book_changed(book_id, &book_context);
+        emit_book_changed(runtime_events, book_id, &book_context);
     }
     Ok(())
 }
 
-pub async fn persist_book_extension_repair(
+pub(in crate::task_queue) async fn persist_book_extension_repair(
     pool: &SqlitePool,
     book_id: &str,
     library_id: &str,
@@ -195,8 +201,13 @@ pub async fn persist_book_extension_repair(
     Ok(())
 }
 
-pub async fn persist_book_conversion(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "This persistence boundary writes the converted book file fields directly."
+)]
+pub(in crate::task_queue) async fn persist_book_conversion(
     pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     library_id: &str,
     book_url: &str,
@@ -270,20 +281,20 @@ pub async fn persist_book_conversion(
     let book_context = load_book_sse_context(pool, book_id).await?;
 
     if let Some(book_context) = book_context {
-        emit_book_changed(book_id, &book_context);
+        emit_book_changed(runtime_events, book_id, &book_context);
     }
     Ok(())
 }
 
-pub async fn adjust_analyzed_book_read_progress(
+pub(in crate::task_queue) async fn adjust_analyzed_book_read_progress(
     pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
-    previous_media_status: &str,
+    previous_media_status: Option<MediaStatus>,
     previous_page_count: i64,
     current_page_count: i64,
 ) -> Result<(), String> {
-    if !previous_media_status.eq_ignore_ascii_case("OUTDATED")
+    if previous_media_status != Some(MediaStatus::Outdated)
         || previous_page_count == current_page_count
     {
         return Ok(());
@@ -355,7 +366,7 @@ pub async fn adjust_analyzed_book_read_progress(
     Ok(())
 }
 
-pub async fn persist_book_conversion_events(
+pub(in crate::task_queue) async fn persist_book_conversion_events(
     pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
@@ -376,11 +387,11 @@ pub async fn persist_book_conversion_events(
             book_id,
             series_id,
             vec![
-                (
+                HistoricalEventProperty::new(
                     "reason",
                     "File was deleted after conversion to CBZ".to_string(),
                 ),
-                ("name", source_name.clone()),
+                HistoricalEventProperty::new("name", source_name.clone()),
             ],
         )
         .await
@@ -396,7 +407,10 @@ pub async fn persist_book_conversion_events(
         "BookConverted",
         book_id,
         series_id,
-        vec![("name", destination_name), ("former file", source_name)],
+        vec![
+            HistoricalEventProperty::new("name", destination_name),
+            HistoricalEventProperty::new("former file", source_name),
+        ],
     )
     .await
     .map_err(|error| format!("failed to insert BookConverted event for '{book_id}': {error}"))?;
@@ -408,10 +422,10 @@ pub async fn persist_book_conversion_events(
     Ok(())
 }
 
-pub async fn persist_book_page_hashes(
+pub(in crate::task_queue) async fn persist_book_page_hashes(
     pool: &SqlitePool,
     book_id: &str,
-    page_hashes: &[(i64, String)],
+    page_hashes: &[BookPageHashWrite],
 ) -> Result<(), String> {
     if page_hashes.is_empty() {
         return Ok(());
@@ -421,17 +435,17 @@ pub async fn persist_book_page_hashes(
         format!("failed to start restore-page-hash transaction for '{book_id}': {error}")
     })?;
 
-    for (page_number, file_hash) in page_hashes {
+    for page_hash in page_hashes {
         sqlx::query("UPDATE MEDIA_PAGE SET FILE_HASH = ? WHERE BOOK_ID = ? AND NUMBER = ?")
-            .bind(file_hash)
+            .bind(&page_hash.file_hash)
             .bind(book_id)
-            .bind(page_number.saturating_sub(1))
+            .bind(page_hash.page_number.saturating_sub(1))
             .execute(&mut *tx)
             .await
             .map_err(|error| {
                 format!(
                     "failed to restore MEDIA_PAGE hash for '{book_id}' page {}: {error}",
-                    page_number
+                    page_hash.page_number
                 )
             })?;
     }
@@ -443,7 +457,7 @@ pub async fn persist_book_page_hashes(
     Ok(())
 }
 
-pub async fn persist_duplicate_page_deleted_events(
+pub(in crate::task_queue) async fn persist_duplicate_page_deleted_events(
     pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
@@ -466,12 +480,12 @@ pub async fn persist_duplicate_page_deleted_events(
             book_id,
             series_id,
             vec![
-                ("name", book_name.clone()),
-                ("page number", removed_page.page_number.to_string()),
-                ("page file name", removed_page.file_name.clone()),
-                ("page file hash", removed_page.file_hash.clone()),
-                ("page file size", removed_page.file_size.to_string()),
-                ("page media type", removed_page.media_type.clone()),
+                HistoricalEventProperty::new("name", book_name.clone()),
+                HistoricalEventProperty::new("page number", removed_page.page_number.to_string()),
+                HistoricalEventProperty::new("page file name", removed_page.file_name.clone()),
+                HistoricalEventProperty::new("page file hash", removed_page.file_hash.clone()),
+                HistoricalEventProperty::new("page file size", removed_page.file_size.to_string()),
+                HistoricalEventProperty::new("page media type", removed_page.media_type.clone()),
             ],
         )
         .await
@@ -492,7 +506,7 @@ async fn insert_historical_event(
     event_type: &str,
     book_id: &str,
     series_id: &str,
-    properties: Vec<(&str, String)>,
+    properties: Vec<HistoricalEventProperty>,
 ) -> Result<(), sqlx::Error> {
     let event_id = generated_historical_event_id();
     sqlx::query("INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID) VALUES (?, ?, ?, ?)")
@@ -503,18 +517,32 @@ async fn insert_historical_event(
         .execute(&mut **tx)
         .await?;
 
-    for (key, value) in properties {
+    for property in properties {
         sqlx::query(
             "INSERT INTO HISTORICAL_EVENT_PROPERTIES (ID, \"KEY\", VALUE) VALUES (?, ?, ?)",
         )
         .bind(&event_id)
-        .bind(key)
-        .bind(value)
+        .bind(property.key)
+        .bind(property.value)
         .execute(&mut **tx)
         .await?;
     }
 
     Ok(())
+}
+
+struct HistoricalEventProperty {
+    key: &'static str,
+    value: String,
+}
+
+impl HistoricalEventProperty {
+    fn new(key: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            key,
+            value: value.into(),
+        }
+    }
 }
 
 async fn upsert_series_read_progress_row(
@@ -568,21 +596,4 @@ fn generated_historical_event_id() -> String {
 
 fn random_prefixed_id(prefix: &str) -> String {
     format!("{prefix}-{}", random_hex_token(12))
-}
-
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(29);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

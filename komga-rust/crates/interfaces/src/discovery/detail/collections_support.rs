@@ -1,35 +1,8 @@
-use super::*;
-use crate::state::DiscoveryState;
+use komga_application::discovery::CollectionReadModel;
+use komga_domain::discovery::PageEnvelope;
+use serde_json::{Value, json};
 use time::PrimitiveDateTime;
 use time::macros::format_description;
-
-pub(super) async fn load_persisted_collection_detail(
-    app: &DiscoveryState,
-    collection_id: &str,
-) -> Result<Option<CollectionReadModel>, String> {
-    let Some(row) = app
-        .collection
-        .load_persisted_collection_detail(collection_id)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    let collection = CollectionReadModel {
-        id: row.id,
-        name: row.name,
-        ordered: row.ordered,
-        series_ids: app
-            .collection
-            .load_persisted_collection_series_ids(collection_id)
-            .await?,
-        created_date: row.created_date,
-        last_modified_date: row.last_modified_date,
-        filtered: false,
-    };
-
-    Ok(Some(collection))
-}
 
 pub(super) fn collections_page_payload(page: PageEnvelope<CollectionReadModel>) -> Value {
     let content = page

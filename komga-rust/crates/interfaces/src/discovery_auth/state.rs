@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::context::{
     DetailAccessDenial, DetailResourceContext, DiscoveryQueryContext, to_query_context,
 };
-use super::principal::{DiscoveryPrincipal, principal_from_user_payload};
+use super::principal::{DiscoveryPrincipal, principal_from_user};
 use super::utils::session_token_from_headers;
-use crate::identity_access::auth::{resolved_request_auth_user, user_payload_json};
+use crate::identity_access::auth::resolved_request_auth_user;
 use crate::state::IdentityState;
 
 const DISCOVERY_PRINCIPAL_TTL_SECONDS: u64 = 30 * 60;
@@ -27,7 +27,11 @@ pub struct DiscoveryAuthState {
 }
 
 impl DiscoveryAuthState {
-    pub fn register_session_principal(&self, session_token: &str, principal: DiscoveryPrincipal) {
+    pub(crate) fn register_session_principal(
+        &self,
+        session_token: &str,
+        principal: DiscoveryPrincipal,
+    ) {
         let token = session_token.trim();
         if token.is_empty() {
             return;
@@ -51,7 +55,7 @@ impl DiscoveryAuthState {
         );
     }
 
-    pub fn resolve_query_context(
+    pub(crate) fn resolve_query_context(
         &self,
         headers: &HeaderMap,
         requested_library_ids: Option<&[String]>,
@@ -70,7 +74,7 @@ impl DiscoveryAuthState {
         Some(to_query_context(&principal, requested_library_ids))
     }
 
-    pub fn resolve_detail_query_context(
+    pub(crate) fn resolve_detail_query_context(
         &self,
         headers: &HeaderMap,
         detail: &DetailResourceContext,
@@ -123,9 +127,11 @@ impl DiscoveryAuthState {
         &self,
         identity: &IdentityState,
         headers: &HeaderMap,
-    ) -> Option<DiscoveryPrincipal> {
-        let user = resolved_request_auth_user(identity, headers).await?;
-        principal_from_user_payload(&user_payload_json(&user))
+    ) -> Result<Option<DiscoveryPrincipal>, String> {
+        let Some(user) = resolved_request_auth_user(identity, headers).await? else {
+            return Ok(None);
+        };
+        Ok(principal_from_user(&user))
     }
 
     fn detail_requested_library_ids(detail: &DetailResourceContext) -> Option<Vec<String>> {
@@ -135,21 +141,23 @@ impl DiscoveryAuthState {
             .map(|library_id| vec![library_id.clone()])
     }
 
-    pub async fn resolve_query_context_with_persistence(
+    pub(crate) async fn resolve_query_context_with_persistence(
         &self,
         identity: &IdentityState,
         headers: &HeaderMap,
         requested_library_ids: Option<&[String]>,
-    ) -> Option<DiscoveryQueryContext> {
+    ) -> Result<Option<DiscoveryQueryContext>, String> {
         if let Some(context) = self.resolve_query_context(headers, requested_library_ids) {
-            return Some(context);
+            return Ok(Some(context));
         }
 
-        let principal = self.request_principal(identity, headers).await?;
-        Some(to_query_context(&principal, requested_library_ids))
+        let Some(principal) = self.request_principal(identity, headers).await? else {
+            return Ok(None);
+        };
+        Ok(Some(to_query_context(&principal, requested_library_ids)))
     }
 
-    pub async fn resolve_detail_query_context_with_persistence(
+    pub(crate) async fn resolve_detail_query_context_with_persistence(
         &self,
         identity: &IdentityState,
         headers: &HeaderMap,
@@ -164,6 +172,7 @@ impl DiscoveryAuthState {
         let principal = self
             .request_principal(identity, headers)
             .await
+            .map_err(|_| DetailAccessDenial::StorageFailure)?
             .ok_or(DetailAccessDenial::Unauthorized)?;
 
         if !principal.can_access_all_libraries() {

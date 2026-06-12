@@ -1,2 +1,2 @@
-pub mod content_libraries;
-pub mod task_queue;
+pub(crate) mod content_libraries;
+pub(crate) mod task_queue;

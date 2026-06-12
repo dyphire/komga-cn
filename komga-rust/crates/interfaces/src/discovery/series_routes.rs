@@ -1,15 +1,26 @@
 use serde_json::Value;
 
+struct AuthorMatchQuery {
+    name: String,
+    role: String,
+}
+
+impl AuthorMatchQuery {
+    fn parse(value: String) -> Option<Self> {
+        let normalized = super::persisted::common_helpers::decode_query_component(&value);
+        normalized.split_once(',').map(|(name, role)| Self {
+            name: name.trim().to_string(),
+            role: role.trim().to_string(),
+        })
+    }
+}
+
 pub(super) fn author_query_to_author_match(value: String) -> Value {
-    let normalized = super::persisted::common_helpers::decode_query_component(&value);
-    let Some((name, role)) = normalized
-        .split_once(',')
-        .map(|(name, role)| (name.trim(), role.trim()))
-    else {
+    let Some(author) = AuthorMatchQuery::parse(value) else {
         return Value::Object(serde_json::Map::new());
     };
 
-    serde_json::json!({ "name": name, "role": role })
+    serde_json::json!({ "name": author.name, "role": author.role })
 }
 #[cfg(test)]
 mod tests {

@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use super::documents;
 use super::index_lifecycle::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
-    SearchQueryLifecycle, prepare_for_rebuild,
+    SearchQueryLifecycle, SearchScoredHit, prepare_for_rebuild,
 };
 
 #[cfg(test)]
@@ -14,7 +14,7 @@ use super::index_lifecycle::{
 mod tests;
 
 #[derive(Clone, Debug)]
-pub struct SearchIndexEngine {
+pub(crate) struct SearchIndexEngine {
     pool: SqlitePool,
     index_dir: PathBuf,
     owns_search_index: bool,
@@ -32,7 +32,7 @@ struct SearchIndexMutationRunner<'a> {
 }
 
 impl SearchIndexEngine {
-    pub fn new(pool: SqlitePool, index_dir: PathBuf, owns_search_index: bool) -> Self {
+    pub(crate) fn new(pool: SqlitePool, index_dir: PathBuf, owns_search_index: bool) -> Self {
         Self {
             pool,
             index_dir,
@@ -40,15 +40,15 @@ impl SearchIndexEngine {
         }
     }
 
-    pub fn read_only(pool: SqlitePool, index_dir: PathBuf) -> Self {
+    pub(crate) fn read_only(pool: SqlitePool, index_dir: PathBuf) -> Self {
         Self::new(pool, index_dir, false)
     }
 
-    pub fn index_dir(&self) -> &Path {
+    pub(crate) fn index_dir(&self) -> &Path {
         self.index_dir.as_path()
     }
 
-    pub fn search_ids(
+    pub(crate) fn search_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
@@ -61,12 +61,12 @@ impl SearchIndexEngine {
             .map_err(|error| format!("failed to execute search query: {error}"))
     }
 
-    pub fn search_scored_ids(
+    pub(crate) fn search_scored_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
-    ) -> Result<Vec<(f32, String)>, String> {
+    ) -> Result<Vec<SearchScoredHit>, String> {
         let index = SearchQueryLifecycle::bootstrap(self.index_dir())
             .map_err(|error| format!("failed to open search index for query: {error}"))?;
         index
@@ -74,65 +74,45 @@ impl SearchIndexEngine {
             .map_err(|error| format!("failed to execute scored search query: {error}"))
     }
 
-    pub fn search_ids_or_empty(
-        &self,
-        query: &str,
-        entity_type: SearchEntityType,
-        limit: usize,
-    ) -> Vec<String> {
-        self.search_ids(query, entity_type, limit)
-            .unwrap_or_default()
-    }
-
-    pub fn search_scored_ids_or_empty(
-        &self,
-        query: &str,
-        entity_type: SearchEntityType,
-        limit: usize,
-    ) -> Vec<(f32, String)> {
-        self.search_scored_ids(query, entity_type, limit)
-            .unwrap_or_default()
-    }
-
-    pub async fn upsert_book(&self, book_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_book(&self, book_id: &str) -> Result<bool, String> {
         self.upsert_entity(SearchEntityType::Book, book_id).await
     }
 
-    pub async fn upsert_series(&self, series_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_series(&self, series_id: &str) -> Result<bool, String> {
         self.upsert_entity(SearchEntityType::Series, series_id)
             .await
     }
 
-    pub async fn upsert_collection(&self, collection_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_collection(&self, collection_id: &str) -> Result<bool, String> {
         self.upsert_entity(SearchEntityType::Collection, collection_id)
             .await
     }
 
-    pub async fn upsert_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_readlist(&self, readlist_id: &str) -> Result<bool, String> {
         self.upsert_entity(SearchEntityType::ReadList, readlist_id)
             .await
     }
 
-    pub async fn delete_book(&self, book_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_book(&self, book_id: &str) -> Result<(), String> {
         self.delete_entity(SearchEntityType::Book, book_id).await
     }
 
-    pub async fn delete_series(&self, series_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_series(&self, series_id: &str) -> Result<(), String> {
         self.delete_entity(SearchEntityType::Series, series_id)
             .await
     }
 
-    pub async fn delete_collection(&self, collection_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_collection(&self, collection_id: &str) -> Result<(), String> {
         self.delete_entity(SearchEntityType::Collection, collection_id)
             .await
     }
 
-    pub async fn delete_readlist(&self, readlist_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_readlist(&self, readlist_id: &str) -> Result<(), String> {
         self.delete_entity(SearchEntityType::ReadList, readlist_id)
             .await
     }
 
-    pub async fn refresh_series_after_metadata_update(
+    pub(crate) async fn refresh_series_after_metadata_update(
         &self,
         series_id: &str,
     ) -> Result<(), String> {
@@ -148,7 +128,7 @@ impl SearchIndexEngine {
         .await
     }
 
-    pub async fn rebuild_all(&self) -> Result<(), String> {
+    pub(crate) async fn rebuild_all(&self) -> Result<(), String> {
         if !self.owns_search_index {
             return Ok(());
         }
@@ -156,7 +136,10 @@ impl SearchIndexEngine {
         recover_search_index(&self.pool, self.index_dir.as_path()).await
     }
 
-    pub async fn rebuild_entities(&self, entity_types: &[SearchEntityType]) -> Result<(), String> {
+    pub(crate) async fn rebuild_entities(
+        &self,
+        entity_types: &[SearchEntityType],
+    ) -> Result<(), String> {
         if !self.owns_search_index || entity_types.is_empty() {
             return Ok(());
         }

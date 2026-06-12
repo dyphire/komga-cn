@@ -2,16 +2,12 @@ use sqlx::{Row, SqlitePool};
 
 use super::common;
 
-pub use komga_application::discovery::{
-    BookMetadataAuthorReadModel, DiscoveryPersistedReadlistBookRecord,
-    DiscoveryPersistedReadlistRecord, PersistedComicrackMatchCandidateRecord,
+use komga_application::discovery::{
+    DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    PersistedComicrackMatchCandidateRecord,
 };
 
-pub async fn persisted_readlists_exist(pool: &SqlitePool) -> Result<bool, String> {
-    common::table_has_rows(pool, "READLIST", "persisted readlists").await
-}
-
-pub async fn load_persisted_readlists(
+pub(super) async fn load_persisted_readlists(
     pool: &SqlitePool,
 ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
     let rows = sqlx::query(
@@ -36,7 +32,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
         .collect())
 }
 
-pub async fn load_persisted_readlist_detail(
+pub(super) async fn load_persisted_readlist_detail(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
@@ -60,7 +56,7 @@ WHERE ID = ?"#,
     }))
 }
 
-pub async fn load_persisted_readlist_book_rows(
+pub(super) async fn load_persisted_readlist_book_rows(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
@@ -85,7 +81,7 @@ ORDER BY rb.NUMBER ASC"#,
         .collect())
 }
 
-pub async fn load_comicrack_match_candidates(
+pub(super) async fn load_comicrack_match_candidates(
     pool: &SqlitePool,
 ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
     let rows = sqlx::query(
@@ -118,30 +114,7 @@ LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
         .collect())
 }
 
-pub async fn load_persisted_book_authors(
-    pool: &SqlitePool,
-    book_id: &str,
-) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
-    let rows = sqlx::query(
-        r#"SELECT NAME, COALESCE(ROLE, '') AS ROLE
-FROM BOOK_METADATA_AUTHOR
-WHERE BOOK_ID = ?"#,
-    )
-    .bind(book_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| format!("query persisted book authors: {error}"))?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| BookMetadataAuthorReadModel {
-            name: row.get::<String, _>("NAME"),
-            role: row.get::<String, _>("ROLE"),
-        })
-        .collect())
-}
-
-pub async fn persist_readlist_create(
+pub(super) async fn persist_readlist_create(
     pool: &SqlitePool,
     readlist_id: &str,
     name: &str,
@@ -185,7 +158,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     Ok(())
 }
 
-pub async fn persist_readlist_update(
+pub(super) async fn persist_readlist_update(
     pool: &SqlitePool,
     readlist_id: &str,
     name: &str,
@@ -239,7 +212,7 @@ WHERE ID = ?"#,
     Ok(true)
 }
 
-pub async fn delete_persisted_readlist(
+pub(super) async fn delete_persisted_readlist(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<bool, String> {

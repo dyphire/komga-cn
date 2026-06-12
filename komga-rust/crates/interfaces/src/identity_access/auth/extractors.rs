@@ -6,17 +6,19 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 
-use super::{AuthUser, resolved_request_auth_user, user_has_role, user_is_admin};
+use komga_application::identity_access::{AuthUser, AuthUserRole, user_has_role, user_is_admin};
+
+use super::resolved_request_auth_user;
 use crate::state::IdentityState;
 
 #[derive(Clone)]
-pub struct Authenticated(pub AuthUser);
+pub(crate) struct Authenticated(pub(crate) AuthUser);
 
 #[derive(Clone)]
-pub struct Admin(pub AuthUser);
+pub(crate) struct Admin(pub(crate) AuthUser);
 
 #[derive(Clone)]
-pub struct FileDownload(pub AuthUser);
+pub(crate) struct FileDownload(pub(crate) AuthUser);
 
 impl Deref for Authenticated {
     type Target = AuthUser;
@@ -51,8 +53,10 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let Some(user) = resolved_request_auth_user(&identity, &parts.headers).await else {
-            return Err(StatusCode::UNAUTHORIZED.into_response());
+        let user = match resolved_request_auth_user(&identity, &parts.headers).await {
+            Ok(Some(user)) => user,
+            Ok(None) => return Err(StatusCode::UNAUTHORIZED.into_response()),
+            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
         };
         Ok(Self(user))
     }
@@ -84,7 +88,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let Authenticated(user) = Authenticated::from_request_parts(parts, state).await?;
-        if user_is_admin(&user) || user_has_role(&user, "FILE_DOWNLOAD") {
+        if user_is_admin(&user) || user_has_role(&user, AuthUserRole::FileDownload) {
             Ok(Self(user))
         } else {
             Err(StatusCode::FORBIDDEN.into_response())

@@ -1,10 +1,8 @@
+use crate::support::sqlite::connect_test_pool;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use komga_application::media_assets::BookMediaRecord;
 use komga_config::profile::RuntimeMode;
-use komga_infrastructure::filesystem::media_access::epub::load_epub_cover_bytes;
-use komga_infrastructure::metadata::generate_book_thumbnail;
-use komga_infrastructure::sqlite::connect_test_pool;
+use komga_infrastructure::generate_book_thumbnail;
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::fs::File;

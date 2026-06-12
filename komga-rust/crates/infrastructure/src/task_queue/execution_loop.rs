@@ -68,7 +68,7 @@ impl<'a> BackgroundTaskExecutionLoop<'a> {
         while state.in_flight < self.task_execution_pool.desired_size() {
             let task = {
                 let task_queue = self.task_queue.lock().await;
-                task_queue.take_next().await
+                task_queue.take_next().await?
             };
             let Some(task) = task else {
                 break;
@@ -89,7 +89,7 @@ impl<'a> BackgroundTaskExecutionLoop<'a> {
             let task_queue = self.task_queue.lock().await;
             task_queue
                 .fail_claimed_task(&task, error_message.as_str())
-                .await;
+                .await?;
             return Err(TaskProcessingError::runtime(error_message));
         }
 
@@ -186,14 +186,16 @@ mod tests {
                 )
                 .with_simple_type("UNSUPPORTED_TASK"),
             )
-            .await;
+            .await
+            .expect("unsupported task should enqueue");
         scheduler
             .enqueue(TaskQueueRecord::new(
                 "UpgradeIndex:execution-loop-success",
                 1_000,
                 Some("success-group".to_string()),
             ))
-            .await;
+            .await
+            .expect("successful task should enqueue");
 
         let task_queue = Arc::new(AsyncMutex::new(scheduler));
         let executed_tasks = Arc::new(AsyncMutex::new(Vec::new()));
@@ -234,7 +236,12 @@ mod tests {
         assert!(executed_tasks.contains(&"UNSUPPORTED_TASK:execution-loop-failure".to_string()));
         assert!(executed_tasks.contains(&"UpgradeIndex:execution-loop-success".to_string()));
 
-        let remaining_by_type = task_queue.lock().await.count_by_simple_type().await;
+        let remaining_by_type = task_queue
+            .lock()
+            .await
+            .count_by_simple_type()
+            .await
+            .expect("execution-loop fixture queue counts should load");
         assert!(
             remaining_by_type.is_empty(),
             "success and failed tasks should both be finalized: {remaining_by_type:?}",

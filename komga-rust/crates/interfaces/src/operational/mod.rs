@@ -4,7 +4,7 @@ mod helpers;
 mod settings;
 mod sse;
 mod webui;
-pub(crate) mod webui_assets;
+mod webui_assets;
 
 pub(super) use actuator::{
     actuator_health, actuator_info, actuator_logfile, actuator_metric_detail,

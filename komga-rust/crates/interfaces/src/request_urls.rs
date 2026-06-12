@@ -1,7 +1,7 @@
 use axum::http::{HeaderMap, header};
 use serde_json::{Value, json};
 
-pub fn opds_auth_json(headers: &HeaderMap) -> Value {
+pub(crate) fn opds_auth_json(headers: &HeaderMap) -> Value {
     let auth_url = app_absolute_url(headers, "/opds/v2/auth");
     let logo_url = app_absolute_url(headers, "/android-chrome-512x512.png");
 
@@ -31,38 +31,20 @@ pub fn opds_auth_json(headers: &HeaderMap) -> Value {
     })
 }
 
-pub fn app_absolute_url(headers: &HeaderMap, path: &str) -> String {
+pub(crate) fn app_absolute_url(headers: &HeaderMap, path: &str) -> String {
     let base_url = request_base_url(headers);
     let prefix = request_context_path(headers);
     format!("{base_url}{prefix}{path}")
 }
 
-pub fn absolutize_json_hrefs(headers: &HeaderMap, value: &mut Value) {
-    match value {
-        Value::Array(entries) => {
-            for entry in entries {
-                absolutize_json_hrefs(headers, entry);
-            }
-        }
-        Value::Object(entries) => {
-            if let Some(Value::String(href)) = entries.get_mut("href")
-                && href.starts_with('/')
-            {
-                *href = app_absolute_url(headers, href);
-            }
-            for entry in entries.values_mut() {
-                absolutize_json_hrefs(headers, entry);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub fn request_base_url(headers: &HeaderMap) -> String {
+pub(crate) fn request_base_url(headers: &HeaderMap) -> String {
     request_base_url_with_port(headers, None)
 }
 
-pub fn request_base_url_with_port(headers: &HeaderMap, fallback_port: Option<u16>) -> String {
+pub(crate) fn request_base_url_with_port(
+    headers: &HeaderMap,
+    fallback_port: Option<u16>,
+) -> String {
     let scheme = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
@@ -74,7 +56,7 @@ pub fn request_base_url_with_port(headers: &HeaderMap, fallback_port: Option<u16
     format!("{scheme}://{host}")
 }
 
-pub fn request_context_path(headers: &HeaderMap) -> String {
+pub(crate) fn request_context_path(headers: &HeaderMap) -> String {
     let prefix = headers
         .get("x-forwarded-prefix")
         .and_then(|value| value.to_str().ok())

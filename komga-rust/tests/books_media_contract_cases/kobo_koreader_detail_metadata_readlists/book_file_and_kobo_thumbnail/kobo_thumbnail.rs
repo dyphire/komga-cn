@@ -49,6 +49,30 @@ async fn seed_kobo_thumbnail_sidecar_url(
     pool.close().await;
 }
 
+async fn seed_kobo_thumbnail_missing_sidecar_url(
+    paths: &RuntimeDbPaths,
+    thumbnail_id: &str,
+    media_type: &str,
+    relative_path: &str,
+) {
+    let sidecar_path = paths.config_dir.join(relative_path);
+    let sidecar_url = reqwest::Url::from_file_path(sidecar_path.as_path())
+        .expect("missing kobo thumbnail sidecar path should convert to file url")
+        .to_string();
+
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for missing kobo thumbnail sidecar seed");
+    sqlx::query("UPDATE THUMBNAIL_BOOK SET MEDIA_TYPE = ?, THUMBNAIL = NULL, URL = ? WHERE ID = ?")
+        .bind(media_type)
+        .bind(sidecar_url)
+        .bind(thumbnail_id)
+        .execute(&pool)
+        .await
+        .expect("missing kobo thumbnail sidecar row should be updated");
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn router_kobo_thumbnail_exact_id_local_response_is_jpeg() {
     let ctx = TestFixture::builder("router-kobo-thumbnail-local-jpeg")
@@ -211,5 +235,45 @@ async fn router_kobo_thumbnail_exact_id_sidecar_stays_local_when_proxy_enabled()
     assert_eq!(
         image::guess_format(body.as_ref()).expect("kobo thumbnail sidecar body should decode"),
         image::ImageFormat::Jpeg
+    );
+}
+
+#[tokio::test]
+async fn router_kobo_thumbnail_sidecar_read_error_is_internal_even_when_proxy_enabled() {
+    let ctx = TestFixture::builder("router-kobo-thumbnail-sidecar-read-error")
+        .with_seed(|paths| async move {
+            seed_admin_kobo_path_token(&paths).await;
+        })
+        .build()
+        .await;
+    upsert_server_setting(ctx.paths(), "KOBO_PROXY", "true").await;
+    seed_kobo_thumbnail_missing_sidecar_url(
+        ctx.paths(),
+        "thumb-book-1",
+        "image/png",
+        "covers/missing-thumb-book-1.png",
+    )
+    .await;
+
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/kobo/any-token/v1/books/thumb-book-1/thumbnail/800/800/90/true/image.jpg")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("kobo thumbnail missing sidecar request should build"),
+        )
+        .await
+        .expect("kobo thumbnail missing sidecar request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        !response.headers().contains_key(header::LOCATION),
+        "existing local thumbnail sidecar read errors must not fall back to Kobo proxy"
     );
 }

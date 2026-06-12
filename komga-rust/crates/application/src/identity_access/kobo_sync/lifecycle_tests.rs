@@ -4,7 +4,7 @@ use serde_json::json;
 use super::{
     KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest, KoboSyncPage, parse_komga_sync_token_payload,
 };
-use crate::identity_access::AuthUser;
+use crate::identity_access::{AuthUser, AuthUserRole};
 
 use super::lifecycle::KoboSyncLifecycle;
 
@@ -59,7 +59,7 @@ fn request(sync_token: Option<String>) -> KoboLibrarySyncRequest {
             id: "user-1".to_string(),
             email: "user@example.org".to_string(),
             password: String::new(),
-            roles: vec!["USER".to_string(), "KOBO_SYNC".to_string()],
+            roles: vec![AuthUserRole::KoboSync],
             shared_all_libraries: true,
             shared_library_ids: Vec::new(),
             labels_allow: Vec::new(),
@@ -71,8 +71,6 @@ fn request(sync_token: Option<String>) -> KoboLibrarySyncRequest {
         store_sync_enabled: true,
         forwarded_headers: Vec::new(),
         query: None,
-        base_url: "http://localhost:8080".to_string(),
-        auth_token: "kobo-token".to_string(),
         limit: KOBO_SYNC_ITEM_LIMIT,
     }
 }

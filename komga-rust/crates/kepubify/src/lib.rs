@@ -33,17 +33,17 @@ fn convert_epub_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<V
     let container_xml = load_zip_entry_by_normalized_name(archive, "/META-INF/container.xml")
         .ok_or_else(|| "epub archive missing META-INF/container.xml".to_string())?;
 
-    let rootfile_path = parse_epub_rootfile_path(&container_xml)
+    let rootfile_path = parse_epub_rootfile_path(&container_xml)?
         .ok_or_else(|| "epub container.xml missing rootfile path".to_string())?;
 
     let package_document = load_zip_entry_by_normalized_name(archive, rootfile_path.as_str())
         .ok_or_else(|| format!("epub package document not found: {rootfile_path}"))?;
 
-    if parse_epub_fixed_layout(&package_document) {
+    if parse_epub_fixed_layout(&package_document)? {
         return write_zip_archive_with_replacements(archive, &HashMap::new());
     }
 
-    let spine_entries = parse_epub_spine_entries(&package_document, &rootfile_path);
+    let spine_entries = parse_epub_spine_entries(&package_document, &rootfile_path)?;
     if spine_entries.is_empty() {
         return write_zip_archive_with_replacements(archive, &HashMap::new());
     }
@@ -345,37 +345,42 @@ fn extract_html_attribute(tag: &str, attribute: &str) -> Option<String> {
     None
 }
 
-fn parse_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
+fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, String> {
     let mut reader = XmlReader::from_reader(container_xml);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buffer).ok()? {
-            XmlEvent::Start(event) | XmlEvent::Empty(event) => {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
                 if !xml_name_matches(event.name().as_ref(), b"rootfile") {
                     buffer.clear();
                     continue;
                 }
-                for attribute in event.attributes().flatten() {
+                for attribute in event.attributes() {
+                    let attribute = attribute.map_err(|error| {
+                        format!("failed to parse epub container document attribute: {error}")
+                    })?;
                     if xml_name_matches(attribute.key.as_ref(), b"full-path") {
-                        return attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| normalize_zip_path(value.as_ref()));
+                        let path = epub_attribute_value(attribute, "epub container document")?;
+                        return Ok(Some(normalize_zip_path(path.as_str())));
                     }
                 }
             }
-            XmlEvent::Eof => break,
+            Ok(XmlEvent::Eof) => break,
+            Err(error) => return Err(format!("failed to parse epub container document: {error}")),
             _ => {}
         }
         buffer.clear();
     }
 
-    None
+    Ok(None)
 }
 
-fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec<EpubSpineEntry> {
+fn parse_epub_spine_entries(
+    package_document: &[u8],
+    rootfile_path: &str,
+) -> Result<Vec<EpubSpineEntry>, String> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -390,22 +395,17 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                     let mut href = None::<String>;
                     let mut media_type = None::<String>;
 
-                    for attribute in event.attributes().flatten() {
+                    for attribute in event.attributes() {
+                        let attribute = attribute.map_err(|error| {
+                            format!("failed to parse epub package document attribute: {error}")
+                        })?;
                         if xml_name_matches(attribute.key.as_ref(), b"id") {
-                            id = attribute
-                                .normalized_value(XmlVersion::Implicit1_0)
-                                .ok()
-                                .map(|value| value.to_string());
+                            id = Some(epub_attribute_value(attribute, "epub package document")?);
                         } else if xml_name_matches(attribute.key.as_ref(), b"href") {
-                            href = attribute
-                                .normalized_value(XmlVersion::Implicit1_0)
-                                .ok()
-                                .map(|value| value.to_string());
+                            href = Some(epub_attribute_value(attribute, "epub package document")?);
                         } else if xml_name_matches(attribute.key.as_ref(), b"media-type") {
-                            media_type = attribute
-                                .normalized_value(XmlVersion::Implicit1_0)
-                                .ok()
-                                .map(|value| value.to_string());
+                            media_type =
+                                Some(epub_attribute_value(attribute, "epub package document")?);
                         }
                     }
 
@@ -420,36 +420,34 @@ fn parse_epub_spine_entries(package_document: &[u8], rootfile_path: &str) -> Vec
                         );
                     }
                 } else if xml_name_matches(event.name().as_ref(), b"itemref") {
-                    for attribute in event.attributes().flatten() {
-                        if xml_name_matches(attribute.key.as_ref(), b"idref")
-                            && let Some(idref) = attribute
-                                .normalized_value(XmlVersion::Implicit1_0)
-                                .ok()
-                                .map(|value| value.to_string())
-                        {
-                            spine.push(idref);
+                    for attribute in event.attributes() {
+                        let attribute = attribute.map_err(|error| {
+                            format!("failed to parse epub package document attribute: {error}")
+                        })?;
+                        if xml_name_matches(attribute.key.as_ref(), b"idref") {
+                            spine.push(epub_attribute_value(attribute, "epub package document")?);
                         }
                     }
                 }
             }
             Ok(XmlEvent::Eof) => break,
-            Err(_) => break,
+            Err(error) => return Err(format!("failed to parse epub package document: {error}")),
             _ => {}
         }
         buffer.clear();
     }
 
     if spine.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
 
-    spine
+    Ok(spine
         .into_iter()
         .filter_map(|idref| manifest.get(&idref).cloned())
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>())
 }
 
-fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
+fn parse_epub_fixed_layout(package_document: &[u8]) -> Result<bool, String> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -466,22 +464,16 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 let mut property = None::<String>;
                 let mut name = None::<String>;
                 let mut content = None::<String>;
-                for attribute in event.attributes().flatten() {
+                for attribute in event.attributes() {
+                    let attribute = attribute.map_err(|error| {
+                        format!("failed to parse epub package document attribute: {error}")
+                    })?;
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
-                        property = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        property = Some(epub_attribute_value(attribute, "epub package document")?);
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
-                        name = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        name = Some(epub_attribute_value(attribute, "epub package document")?);
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
-                        content = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        content = Some(epub_attribute_value(attribute, "epub package document")?);
                     }
                 }
 
@@ -493,7 +485,7 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("pre-paginated"))
                     {
-                        return true;
+                        return Ok(true);
                     }
                     awaiting_rendition_layout_text = true;
                 }
@@ -505,7 +497,7 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
                 {
-                    return true;
+                    return Ok(true);
                 }
             }
             Ok(XmlEvent::Empty(event)) => {
@@ -517,22 +509,16 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                 let mut property = None::<String>;
                 let mut name = None::<String>;
                 let mut content = None::<String>;
-                for attribute in event.attributes().flatten() {
+                for attribute in event.attributes() {
+                    let attribute = attribute.map_err(|error| {
+                        format!("failed to parse epub package document attribute: {error}")
+                    })?;
                     if xml_name_matches(attribute.key.as_ref(), b"property") {
-                        property = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        property = Some(epub_attribute_value(attribute, "epub package document")?);
                     } else if xml_name_matches(attribute.key.as_ref(), b"name") {
-                        name = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        name = Some(epub_attribute_value(attribute, "epub package document")?);
                     } else if xml_name_matches(attribute.key.as_ref(), b"content") {
-                        content = attribute
-                            .normalized_value(XmlVersion::Implicit1_0)
-                            .ok()
-                            .map(|value| value.to_string());
+                        content = Some(epub_attribute_value(attribute, "epub package document")?);
                     }
                 }
 
@@ -543,7 +529,7 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("pre-paginated"))
                 {
-                    return true;
+                    return Ok(true);
                 }
 
                 if name
@@ -553,27 +539,37 @@ fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
                 {
-                    return true;
+                    return Ok(true);
                 }
             }
             Ok(XmlEvent::Text(text)) if awaiting_rendition_layout_text => {
                 let value = String::from_utf8_lossy(text.as_ref()).trim().to_string();
                 if value.eq_ignore_ascii_case("pre-paginated") {
-                    return true;
+                    return Ok(true);
                 }
             }
             Ok(XmlEvent::End(event)) if xml_name_matches(event.name().as_ref(), b"meta") => {
                 awaiting_rendition_layout_text = false;
             }
             Ok(XmlEvent::Eof) => break,
-            Err(_) => break,
+            Err(error) => return Err(format!("failed to parse epub package document: {error}")),
             _ => {}
         }
 
         buffer.clear();
     }
 
-    false
+    Ok(false)
+}
+
+fn epub_attribute_value(
+    attribute: quick_xml::events::attributes::Attribute<'_>,
+    document_name: &str,
+) -> Result<String, String> {
+    attribute
+        .normalized_value(XmlVersion::Implicit1_0)
+        .map(|value| value.into_owned())
+        .map_err(|error| format!("failed to parse {document_name} attribute value: {error}"))
 }
 
 fn normalize_epub_resource_href(rootfile_path: &str, href: &str) -> String {
@@ -653,6 +649,23 @@ mod tests {
     use zip::CompressionMethod;
 
     fn build_epub_bytes(chapter: &str, opf_metadata: &str, media_type: &str) -> Vec<u8> {
+        let opf = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata>{opf_metadata}</metadata>
+  <manifest>
+    <item id="chapter-1" href="chapter-1.xhtml" media-type="{media_type}"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter-1"/>
+  </spine>
+</package>"#,
+        );
+
+        build_epub_bytes_with_package(chapter, &opf)
+    }
+
+    fn build_epub_bytes_with_package(chapter: &str, package_document: &str) -> Vec<u8> {
         let writer = Cursor::new(Vec::new());
         let mut zip = ZipWriter::new(writer);
 
@@ -681,19 +694,7 @@ mod tests {
             .expect("OPS directory should be writable");
         zip.start_file("OPS/content.opf", default)
             .expect("content.opf should be writable");
-        let opf = format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
-  <metadata>{opf_metadata}</metadata>
-  <manifest>
-    <item id="chapter-1" href="chapter-1.xhtml" media-type="{media_type}"/>
-  </manifest>
-  <spine>
-    <itemref idref="chapter-1"/>
-  </spine>
-</package>"#,
-        );
-        zip.write_all(opf.as_bytes())
+        zip.write_all(package_document.as_bytes())
             .expect("content.opf payload should be writable");
 
         zip.start_file("OPS/chapter-1.xhtml", default)
@@ -808,5 +809,29 @@ mod tests {
 
         let result = convert_epub_bytes(&source);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn convert_epub_bytes_errors_for_malformed_package_attributes() {
+        let source = build_epub_bytes_with_package(
+            "<html><body><p>hello world</p></body></html>",
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item id= href="chapter-1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter-1"/>
+  </spine>
+</package>"#,
+        );
+
+        let error = convert_epub_bytes(&source)
+            .expect_err("malformed package attributes must not return an unconverted EPUB");
+
+        assert!(
+            error.contains("epub package document"),
+            "unexpected error: {error}"
+        );
     }
 }

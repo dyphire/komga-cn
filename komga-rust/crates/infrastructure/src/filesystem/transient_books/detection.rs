@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::filesystem::media_analysis::transient_media_type_from_path;
 
-pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str {
+pub(crate) fn transient_book_content_type(path: &str, media_type: &str) -> &'static str {
     if !media_type.is_empty() {
         return known_transient_media_type(media_type);
     }
@@ -12,7 +12,7 @@ pub fn transient_book_content_type(path: &str, media_type: &str) -> &'static str
     known_transient_media_type(media_type.as_str())
 }
 
-pub fn transient_book_media_type(path: &str) -> String {
+pub(crate) fn transient_book_media_type(path: &str) -> String {
     transient_book_content_type(path, "").to_string()
 }
 

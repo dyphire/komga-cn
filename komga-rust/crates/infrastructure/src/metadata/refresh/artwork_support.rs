@@ -1,15 +1,22 @@
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::path::Path;
 
 use komga_application::media_assets::BookMediaRecord;
+use komga_domain::media_assets::ThumbnailType;
 use pdfium_render::prelude::*;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use tokio::fs;
 
 use crate::load_pdfium;
+use crate::parsing::parse_thumbnail_type;
 use crate::resolve_rooted_path;
 
-type RenderedThumbnail = (Vec<u8>, String, i64, i64);
+pub(super) struct RenderedThumbnail {
+    pub(super) bytes: Vec<u8>,
+    pub(super) media_type: String,
+    pub(super) width: i64,
+    pub(super) height: i64,
+}
 
 pub(super) async fn book_thumbnail_housekeeping(
     tx: &mut Transaction<'_, Sqlite>,
@@ -37,13 +44,28 @@ pub(super) async fn book_thumbnail_housekeeping(
         let thumbnail_blob = row.get::<Option<Vec<u8>>, _>("THUMBNAIL");
         let selected = row.get::<bool, _>("SELECTED");
 
-        let exists = thumbnail_blob
+        let blob_exists = thumbnail_blob
             .as_ref()
-            .is_some_and(|thumbnail| !thumbnail.is_empty())
-            || thumbnail_url.as_deref().is_some_and(|url| {
-                let resolved = resolve_rooted_path(library_root, url);
-                resolved.exists()
-            });
+            .is_some_and(|thumbnail| !thumbnail.is_empty());
+        let url_exists = if blob_exists {
+            false
+        } else if let Some(url) = thumbnail_url.as_deref() {
+            let resolved = resolve_rooted_path(library_root, url);
+            match fs::metadata(&resolved).await {
+                Ok(_) => true,
+                Err(error) if error.kind() == ErrorKind::NotFound => false,
+                Err(error) => {
+                    return Err(format!(
+                        "failed to inspect thumbnail URL '{}' for '{book_id}': {error}",
+                        resolved.display()
+                    ));
+                }
+            }
+        } else {
+            false
+        };
+
+        let exists = blob_exists || url_exists;
 
         if !exists {
             sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE ID = ?")
@@ -105,7 +127,12 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
         .map_err(|error| {
             format!("failed to encode generated thumbnail for '{book_id}': {error}")
         })?;
-    Ok((output.into_inner(), "image/jpeg".to_string(), width, height))
+    Ok(RenderedThumbnail {
+        bytes: output.into_inner(),
+        media_type: "image/jpeg".to_string(),
+        width,
+        height,
+    })
 }
 
 pub(super) fn render_pdf_thumbnail(
@@ -123,7 +150,13 @@ pub(super) fn render_pdf_thumbnail(
         })?;
     let page = match document.pages().first() {
         Ok(page) => page,
-        Err(_) => return Ok(None),
+        Err(PdfiumError::NoPagesInDocument) => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "failed to load first PDF page for thumbnail generation '{}': {error}",
+                media.file_path.display()
+            ));
+        }
     };
 
     let rendered = page
@@ -159,12 +192,12 @@ pub(super) fn render_pdf_thumbnail(
             )
         })?;
 
-    Ok(Some((
-        output.into_inner(),
-        "image/jpeg".to_string(),
+    Ok(Some(RenderedThumbnail {
+        bytes: output.into_inner(),
+        media_type: "image/jpeg".to_string(),
         width,
         height,
-    )))
+    }))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -341,8 +374,9 @@ pub(super) async fn import_book_local_artwork_thumbnail(
     let thumbnail_id = format!("thumbnail-book-sidecar:{book_id}:{artwork_url}");
     let selected = should_select_book_local_artwork(pool, book_id, selected_preference).await?;
 
-    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = 'SIDECAR' AND URL = ?")
+    sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = ? AND URL = ?")
         .bind(book_id)
+        .bind(ThumbnailType::Sidecar.persisted_name())
         .bind(artwork_url)
         .execute(pool)
         .await
@@ -357,12 +391,13 @@ pub(super) async fn import_book_local_artwork_thumbnail(
         r#"
         INSERT INTO THUMBNAIL_BOOK
             (ID, URL, SELECTED, TYPE, BOOK_ID, MEDIA_TYPE, FILE_SIZE, LAST_MODIFIED_DATE)
-        VALUES (?, ?, ?, 'SIDECAR', ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         "#,
     )
     .bind(&thumbnail_id)
     .bind(artwork_url)
     .bind(selected)
+    .bind(ThumbnailType::Sidecar.persisted_name())
     .bind(book_id)
     .bind(media_type_from_sidecar_path(artwork_path.as_path()))
     .bind(metadata.len() as i64)
@@ -412,30 +447,30 @@ pub(super) async fn import_series_local_artwork_thumbnail(
     let thumbnail_id = format!("thumbnail-series-sidecar:{series_id}:{artwork_url}");
     let selected = should_select_series_local_artwork(pool, series_id, selected_preference).await?;
 
-    sqlx::query(
-        "DELETE FROM THUMBNAIL_SERIES WHERE SERIES_ID = ? AND TYPE = 'SIDECAR' AND URL = ?",
-    )
-    .bind(series_id)
-    .bind(artwork_url)
-    .execute(pool)
-    .await
-    .map_err(|error| {
-        format!(
-            "failed to remove duplicated series sidecar thumbnail '{}' for '{}': {error}",
-            artwork_url, series_id,
-        )
-    })?;
+    sqlx::query("DELETE FROM THUMBNAIL_SERIES WHERE SERIES_ID = ? AND TYPE = ? AND URL = ?")
+        .bind(series_id)
+        .bind(ThumbnailType::Sidecar.persisted_name())
+        .bind(artwork_url)
+        .execute(pool)
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to remove duplicated series sidecar thumbnail '{}' for '{}': {error}",
+                artwork_url, series_id,
+            )
+        })?;
 
     sqlx::query(
         r#"
         INSERT INTO THUMBNAIL_SERIES
             (ID, URL, SELECTED, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, LAST_MODIFIED_DATE)
-        VALUES (?, ?, ?, 'SIDECAR', ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         "#,
     )
     .bind(&thumbnail_id)
     .bind(artwork_url)
     .bind(selected)
+    .bind(ThumbnailType::Sidecar.persisted_name())
     .bind(series_id)
     .bind(media_type_from_sidecar_path(artwork_path.as_path()))
     .bind(metadata.len() as i64)
@@ -484,10 +519,9 @@ async fn should_select_book_local_artwork(
     .await
     .map_err(|error| format!("failed to load selected thumbnail for '{}': {error}", book_id))?;
 
-    Ok(match selected_row {
-        None => true,
-        Some(row) => row.get::<String, _>("TYPE") == "GENERATED",
-    })
+    let thumbnail_type =
+        selected_row.map(|row| parse_thumbnail_type(&row.get::<String, _>("TYPE")));
+    Ok(thumbnail_type.is_none_or(|value| value == ThumbnailType::Generated))
 }
 
 async fn should_select_series_local_artwork(
@@ -512,10 +546,9 @@ async fn should_select_series_local_artwork(
         )
     })?;
 
-    Ok(match selected_row {
-        None => true,
-        Some(row) => row.get::<String, _>("TYPE") == "GENERATED",
-    })
+    let thumbnail_type =
+        selected_row.map(|row| parse_thumbnail_type(&row.get::<String, _>("TYPE")));
+    Ok(thumbnail_type.is_none_or(|value| value == ThumbnailType::Generated))
 }
 
 fn media_type_from_sidecar_path(path: &Path) -> &'static str {
@@ -535,11 +568,126 @@ fn media_type_from_sidecar_path(path: &Path) -> &'static str {
     }
 }
 
-pub(super) fn thumbnail_max_edge_from_setting(value: Option<&str>) -> u32 {
-    match value.unwrap_or("DEFAULT") {
-        "MEDIUM" => 600,
-        "LARGE" => 900,
-        "XLARGE" => 1200,
-        _ => 300,
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use komga_application::media_assets::BookMediaRecord;
+    use lopdf::{Document as PdfDocument, Object, dictionary};
+    use sqlx::Row;
+
+    use super::{book_thumbnail_housekeeping, render_pdf_thumbnail};
+    use crate::test_support::BootstrappedBookFixture;
+
+    fn unique_temp_path(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+    }
+
+    fn write_pdf_with_broken_first_page(path: &Path) {
+        let mut document = PdfDocument::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let page_id = document.new_object_id();
+
+        document.objects.insert(page_id, Object::Null);
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        document
+            .save(path)
+            .expect("broken first-page PDF fixture should be saved");
+    }
+
+    #[test]
+    fn render_pdf_thumbnail_propagates_first_page_load_errors() {
+        let path = unique_temp_path("komga-pdf-thumbnail-broken-first-page");
+        write_pdf_with_broken_first_page(&path);
+        let media = BookMediaRecord {
+            library_id: "library-1".to_string(),
+            media_type: "application/pdf".to_string(),
+            file_path: path.clone(),
+            file_name: "broken.pdf".to_string(),
+            page_count: 1,
+        };
+
+        let error = match render_pdf_thumbnail(&media, 300) {
+            Ok(_) => panic!("broken first PDF page must not become a missing generated thumbnail"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.contains("failed to load first PDF page for thumbnail generation"),
+            "unexpected PDF thumbnail error: {error}"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn book_thumbnail_housekeeping_propagates_sidecar_metadata_errors() {
+        let fixture = BootstrappedBookFixture::open("thumbnail-housekeeping-metadata-error").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+
+        let library_root = fixture
+            .db_path
+            .with_extension("thumbnail-housekeeping-root");
+        fs::create_dir_all(&library_root).expect("library root should be created");
+        fs::write(library_root.join("blocked"), b"not a directory")
+            .expect("blocking file should be written");
+
+        sqlx::query(
+            "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, URL, TYPE, SELECTED) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind("sidecar-thumbnail")
+        .bind("book-1")
+        .bind("blocked/cover.jpg")
+        .bind("SIDECAR")
+        .bind(true)
+        .execute(&fixture.pool)
+        .await
+        .expect("sidecar thumbnail row should be inserted");
+
+        let mut tx = fixture
+            .pool
+            .begin()
+            .await
+            .expect("housekeeping transaction should start");
+        let error = book_thumbnail_housekeeping(&mut tx, "book-1", &library_root)
+            .await
+            .expect_err("metadata error should be propagated");
+        tx.rollback()
+            .await
+            .expect("housekeeping transaction should roll back");
+
+        assert!(error.contains("failed to inspect thumbnail URL"));
+        assert!(error.contains("book-1"));
+
+        let remaining = sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE ID = ?")
+            .bind("sidecar-thumbnail")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("sidecar thumbnail row should be queryable")
+            .get::<i64, _>("COUNT");
+        assert_eq!(remaining, 1);
+
+        fixture.close().await;
+        let _ = fs::remove_dir_all(library_root);
     }
 }

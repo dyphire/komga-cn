@@ -1,47 +1,51 @@
-use super::*;
+use komga_application::discovery::{
+    BookMetadataAuthorReadModel, CollectionReadModel, SeriesAlternateTitleRecord,
+    SeriesMetadataLinkRecord,
+};
+
+use super::SeriesDetailReadModel;
+use super::detail_utils::parse_group_concat_values;
 use crate::state::DiscoveryState;
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
 
 #[derive(Clone)]
-pub struct PersistedSeriesResource {
-    pub library_id: String,
-    pub age_rating: Option<u32>,
-    pub sharing_labels: Vec<String>,
+pub(in crate::discovery) struct PersistedSeriesResource {
+    pub(in crate::discovery) library_id: String,
+    pub(in crate::discovery) age_rating: Option<u32>,
+    pub(in crate::discovery) sharing_labels: Vec<String>,
 }
 
-pub struct ExistingSeriesMetadata {
-    pub status: String,
-    pub status_lock: bool,
-    pub title: String,
-    pub title_lock: bool,
-    pub title_sort: String,
-    pub title_sort_lock: bool,
-    pub summary: String,
-    pub summary_lock: bool,
-    pub reading_direction: Option<String>,
-    pub reading_direction_lock: bool,
-    pub publisher: String,
-    pub publisher_lock: bool,
-    pub age_rating: Option<u32>,
-    pub age_rating_lock: bool,
-    pub language: String,
-    pub language_lock: bool,
-    pub genres: Vec<String>,
-    pub genres_lock: bool,
-    pub tags: Vec<String>,
-    pub tags_lock: bool,
-    pub total_book_count: Option<u32>,
-    pub total_book_count_lock: bool,
-    pub sharing_labels: Vec<String>,
-    pub sharing_labels_lock: bool,
-    pub links: Vec<SeriesMetadataLinkRecord>,
-    pub links_lock: bool,
-    pub alternate_titles: Vec<SeriesAlternateTitleRecord>,
-    pub alternate_titles_lock: bool,
+struct ExistingSeriesMetadata {
+    status_lock: bool,
+    title_lock: bool,
+    title_sort_lock: bool,
+    summary_lock: bool,
+    reading_direction_lock: bool,
+    publisher_lock: bool,
+    age_rating_lock: bool,
+    language_lock: bool,
+    genres_lock: bool,
+    tags_lock: bool,
+    total_book_count_lock: bool,
+    sharing_labels_lock: bool,
+    links: Vec<SeriesMetadataLinkRecord>,
+    links_lock: bool,
+    alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    alternate_titles_lock: bool,
 }
 
-pub async fn load_persisted_series_resource(
+#[derive(Default)]
+struct SeriesDetailReadProgressCounts {
+    read: u32,
+    in_progress: u32,
+}
+
+impl SeriesDetailReadProgressCounts {
+    fn unread_count(&self, books_count: u32) -> u32 {
+        books_count.saturating_sub(self.read.saturating_add(self.in_progress))
+    }
+}
+
+pub(in crate::discovery) async fn load_persisted_series_resource(
     app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Option<PersistedSeriesResource>, String> {
@@ -52,42 +56,10 @@ pub async fn load_persisted_series_resource(
         .map(|row| PersistedSeriesResource {
             library_id: row.library_id,
             age_rating: row.age_rating,
-            sharing_labels: parse_csv_values(&row.sharing_labels),
+            sharing_labels: parse_group_concat_values(&row.sharing_labels),
         });
 
     Ok(resource)
-}
-
-pub async fn resolve_series_id_for_persisted(
-    app: &DiscoveryState,
-    requested_series_id: &str,
-) -> String {
-    let Some(index) = requested_series_id
-        .strip_prefix("series-")
-        .and_then(|value| value.parse::<usize>().ok())
-    else {
-        return requested_series_id.to_string();
-    };
-
-    if index == 0 {
-        return requested_series_id.to_string();
-    }
-
-    if matches!(
-        load_persisted_series_resource(app, requested_series_id).await,
-        Ok(Some(_))
-    ) {
-        return requested_series_id.to_string();
-    }
-
-    match app
-        .series_detail
-        .load_series_id_by_sorted_position(index)
-        .await
-    {
-        Ok(Some(series_id)) => series_id,
-        _ => requested_series_id.to_string(),
-    }
 }
 
 pub(super) async fn load_persisted_series_detail(
@@ -104,7 +76,7 @@ pub(super) async fn load_persisted_series_detail(
     };
     let metadata = load_existing_series_metadata(app, series_id)
         .await?
-        .unwrap_or_else(|| fallback_existing_series_metadata(&row));
+        .unwrap_or_else(fallback_existing_series_metadata);
 
     let persisted_summary = app
         .series_detail
@@ -121,27 +93,26 @@ pub(super) async fn load_persisted_series_detail(
         .copied()
         .map(|value| value.clamp(0, i64::from(i32::MAX)) as u32);
 
-    let (books_read_count, books_in_progress_count) = if let Some(user_id) = user_id {
+    let read_progress_counts = if let Some(user_id) = user_id {
         let counts = app
             .series_detail
             .load_series_read_progress_counts(user_id)
             .await?
             .get(series_id)
             .copied();
-        let read = counts
-            .map(|(read, _)| read.clamp(0, i64::from(u32::MAX)) as u32)
-            .unwrap_or(0);
-        let in_progress = counts
-            .map(|(_, in_progress)| in_progress.clamp(0, i64::from(u32::MAX)) as u32)
-            .unwrap_or(0);
-        (read, in_progress)
+        SeriesDetailReadProgressCounts {
+            read: counts
+                .map(|counts| counts.read_count.clamp(0, i64::from(u32::MAX)) as u32)
+                .unwrap_or(0),
+            in_progress: counts
+                .map(|counts| counts.in_progress_count.clamp(0, i64::from(u32::MAX)) as u32)
+                .unwrap_or(0),
+        }
     } else {
-        (0, 0)
+        SeriesDetailReadProgressCounts::default()
     };
 
-    let books_unread_count = row
-        .books_count
-        .saturating_sub(books_read_count.saturating_add(books_in_progress_count));
+    let books_unread_count = read_progress_counts.unread_count(row.books_count);
 
     let model = Some(SeriesDetailReadModel {
         id: row.id,
@@ -154,9 +125,9 @@ pub(super) async fn load_persisted_series_detail(
         last_modified: row.last_modified,
         file_last_modified: row.file_last_modified,
         books_count: row.books_count,
-        books_read_count,
+        books_read_count: read_progress_counts.read,
         books_unread_count,
-        books_in_progress_count,
+        books_in_progress_count: read_progress_counts.in_progress,
         status: row.status,
         status_lock: metadata.status_lock,
         summary: row.summary,
@@ -181,7 +152,7 @@ pub(super) async fn load_persisted_series_detail(
         tags_lock: metadata.tags_lock,
         total_book_count,
         total_book_count_lock: metadata.total_book_count_lock,
-        sharing_labels: parse_csv_values(&row.sharing_labels),
+        sharing_labels: parse_group_concat_values(&row.sharing_labels),
         sharing_labels_lock: metadata.sharing_labels_lock,
         links: metadata.links,
         links_lock: metadata.links_lock,
@@ -225,31 +196,19 @@ pub(super) async fn load_persisted_series_detail(
     Ok(model)
 }
 
-fn fallback_existing_series_metadata(row: &PersistedSeriesDetailRecord) -> ExistingSeriesMetadata {
+fn fallback_existing_series_metadata() -> ExistingSeriesMetadata {
     ExistingSeriesMetadata {
-        status: row.status.clone(),
         status_lock: false,
-        title: row.title.clone(),
         title_lock: false,
-        title_sort: row.title_sort.clone(),
         title_sort_lock: false,
-        summary: row.summary.clone(),
         summary_lock: false,
-        reading_direction: Some(row.reading_direction.clone()).filter(|value| !value.is_empty()),
         reading_direction_lock: false,
-        publisher: row.publisher.clone(),
         publisher_lock: false,
-        age_rating: row.age_rating,
         age_rating_lock: false,
-        language: row.language.clone(),
         language_lock: false,
-        genres: vec![],
         genres_lock: false,
-        tags: vec![],
         tags_lock: false,
-        total_book_count: None,
         total_book_count_lock: false,
-        sharing_labels: parse_csv_values(&row.sharing_labels),
         sharing_labels_lock: false,
         links: vec![],
         links_lock: false,
@@ -295,7 +254,7 @@ pub(super) async fn load_persisted_series_collections(
         .collect())
 }
 
-pub async fn load_existing_series_metadata(
+async fn load_existing_series_metadata(
     app: &DiscoveryState,
     series_id: &str,
 ) -> Result<Option<ExistingSeriesMetadata>, String> {
@@ -304,29 +263,17 @@ pub async fn load_existing_series_metadata(
         .load_existing_series_metadata(series_id)
         .await?
         .map(|row| ExistingSeriesMetadata {
-            status: row.status,
             status_lock: row.status_lock,
-            title: row.title,
             title_lock: row.title_lock,
-            title_sort: row.title_sort,
             title_sort_lock: row.title_sort_lock,
-            summary: row.summary,
             summary_lock: row.summary_lock,
-            reading_direction: row.reading_direction,
             reading_direction_lock: row.reading_direction_lock,
-            publisher: row.publisher,
             publisher_lock: row.publisher_lock,
-            age_rating: row.age_rating,
             age_rating_lock: row.age_rating_lock,
-            language: row.language,
             language_lock: row.language_lock,
-            genres: row.genres,
             genres_lock: row.genres_lock,
-            tags: row.tags,
             tags_lock: row.tags_lock,
-            total_book_count: row.total_book_count,
             total_book_count_lock: row.total_book_count_lock,
-            sharing_labels: row.sharing_labels,
             sharing_labels_lock: row.sharing_labels_lock,
             links: row.links,
             links_lock: row.links_lock,
@@ -335,38 +282,6 @@ pub async fn load_existing_series_metadata(
         });
 
     Ok(metadata)
-}
-
-pub async fn persist_series_metadata_update(
-    app: &DiscoveryState,
-    series_id: &str,
-    update: SeriesMetadataUpdateRecord,
-) -> Result<bool, String> {
-    let updated = app
-        .series_detail
-        .persist_series_metadata_update(series_id, update)
-        .await?;
-    if updated && let Some(series) = load_persisted_series_resource(app, series_id).await? {
-        register_runtime_sse_event(
-            "SeriesChanged",
-            json!({
-                "seriesId": series_id,
-                "libraryId": series.library_id,
-            }),
-            false,
-            None,
-        );
-    }
-    Ok(updated)
-}
-
-pub async fn sync_series_search_documents_after_metadata_update(
-    app: &DiscoveryState,
-    series_id: &str,
-) -> Result<(), String> {
-    app.series_detail
-        .refresh_series_search_documents_after_metadata_update(series_id)
-        .await
 }
 
 #[cfg(test)]

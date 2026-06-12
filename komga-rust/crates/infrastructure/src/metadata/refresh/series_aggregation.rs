@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 
-use komga_application::runtime_sse::register_runtime_sse_event;
-use serde_json::json;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use sqlx::{Row, SqlitePool};
 
-pub async fn aggregate_series_metadata(pool: &SqlitePool, series_id: &str) -> Result<(), String> {
+pub(crate) async fn aggregate_series_metadata(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    series_id: &str,
+) -> Result<(), String> {
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
@@ -168,15 +171,10 @@ pub async fn aggregate_series_metadata(pool: &SqlitePool, series_id: &str) -> Re
     };
 
     if let Some(library_id) = library_id.as_deref() {
-        register_runtime_sse_event(
-            "SeriesChanged",
-            json!({
-                "seriesId": series_id_for_events,
-                "libraryId": library_id,
-            }),
-            false,
-            None,
-        );
+        runtime_events.register(RuntimeSseEvent::SeriesChanged {
+            series_id: series_id_for_events,
+            library_id: library_id.to_string(),
+        });
     }
     Ok(())
 }

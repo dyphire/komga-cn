@@ -1,18 +1,11 @@
-use crate::operational_access::load_server_settings;
 use crate::search::index_lifecycle::SearchEntityType;
-use crate::sqlite::write_models::server_settings::ServerSettingsStore;
 use crate::task_queue::JobRuntime;
+use crate::task_queue::media_helpers::{
+    find_books_for_thumbnail_regeneration, find_books_with_undersized_generated_thumbnails,
+};
 use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
 use komga_application::task_processing::{TaskExecutionOutcome, TaskProcessingError};
-
-fn thumbnail_max_edge(thumbnail_size: &str) -> i64 {
-    match thumbnail_size {
-        "MEDIUM" => 600,
-        "LARGE" => 900,
-        "XLARGE" => 1200,
-        _ => 300,
-    }
-}
+use komga_domain::discovery::MediaStatus;
 
 pub(in crate::task_queue) async fn execute_analyze_book(
     runtime: &JobRuntime<'_>,
@@ -22,7 +15,7 @@ pub(in crate::task_queue) async fn execute_analyze_book(
     let book_id = book_id.to_string();
     let outcome = super::index_tasks::analyze_book(runtime, &book_id).await?;
 
-    if outcome.media_status.eq_ignore_ascii_case("READY") && !outcome.series_id.is_empty() {
+    if outcome.media_status == Some(MediaStatus::Ready) && !outcome.series_id.is_empty() {
         let follow_up_priority = priority.saturating_add(1);
         return Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
             TaskRequest::new(TaskKind::GenerateBookThumbnail)
@@ -56,19 +49,14 @@ pub(in crate::task_queue) async fn execute_find_book_thumbnails_to_regenerate(
     priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let book_ids = if for_bigger_result_only {
-        let settings_store =
-            ServerSettingsStore::new(runtime.database().main_db().database_file().to_path_buf());
-        let settings = load_server_settings(&settings_store)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!(
-                    "load server settings for thumbnail finder failed: {error}"
-                ))
-            })?;
-        let max_edge = thumbnail_max_edge(settings.thumbnail_size);
-        super::find_books_with_undersized_generated_thumbnails(runtime, max_edge).await?
+        let max_edge = i64::from(
+            runtime
+                .thumbnail_regeneration_policy()
+                .generated_thumbnail_max_edge,
+        );
+        find_books_with_undersized_generated_thumbnails(runtime, max_edge).await?
     } else {
-        super::find_books_for_thumbnail_regeneration(runtime).await?
+        find_books_for_thumbnail_regeneration(runtime).await?
     };
     let follow_up_tasks = book_ids
         .into_iter()
@@ -92,13 +80,68 @@ mod tests {
     use crate::task_queue::test_support::{RuntimeTestFixture, execute_and_enqueue};
     use crate::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
     use image::{ImageBuffer, Rgba};
-    use komga_application::task_processing::TaskQueueRecord;
+    use komga_application::task_processing::{
+        BookPayload, FindBookThumbnailsToRegeneratePayload, TaskKind, TaskRequest,
+        ThumbnailRegenerationPolicy,
+    };
+    use komga_domain::media_assets::ThumbnailType;
     use sqlx::{Row, SqlitePool};
     use std::fs::File;
     use std::io::Write;
     use zip::CompressionMethod;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct FixturePageSize {
+        width: u32,
+        height: u32,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct PersistedPageDimensions {
+        number: i64,
+        width: Option<i64>,
+        height: Option<i64>,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct PersistedMediaSummary {
+        status: String,
+        page_count: i64,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct QueuedThumbnailTask {
+        id: String,
+        simple_type: String,
+        priority: i32,
+        group: Option<String>,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct QueuedFollowUpTask {
+        id: String,
+        simple_type: String,
+        priority: i32,
+        group: Option<String>,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct PersistedReadProgress {
+        user_id: String,
+        page: i64,
+        completed: i64,
+        last_modified_date: Option<String>,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct PersistedSeriesProgress {
+        user_id: String,
+        read_count: i64,
+        in_progress_count: i64,
+        last_modified_date: String,
+    }
 
     fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -127,19 +170,32 @@ mod tests {
         output.into_inner()
     }
 
-    fn write_cbz_fixture(path: &std::path::Path, page_sizes: &[(u32, u32)]) {
+    fn write_cbz_fixture(path: &std::path::Path, page_sizes: &[FixturePageSize]) {
         let file = File::create(path).expect("cbz fixture should be created");
         let mut zip = ZipWriter::new(file);
         let options = SimpleFileOptions::default()
             .compression_method(CompressionMethod::Stored)
             .unix_permissions(0o644);
-        for (index, (width, height)) in page_sizes.iter().copied().enumerate() {
+        for (index, page_size) in page_sizes.iter().enumerate() {
             zip.start_file(format!("{:08}.png", index + 1), options)
                 .expect("cbz page entry should be created");
-            zip.write_all(&png_bytes(width, height))
+            zip.write_all(&png_bytes(page_size.width, page_size.height))
                 .expect("cbz page bytes should be written");
         }
         zip.finish().expect("cbz fixture should finish");
+    }
+
+    fn write_invalid_cbz_fixture(path: &std::path::Path) {
+        let file = File::create(path).expect("invalid cbz fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        zip.start_file("00000001.png", options)
+            .expect("invalid cbz page entry should be created");
+        zip.write_all(b"not-an-image")
+            .expect("invalid cbz page bytes should be written");
+        zip.finish().expect("invalid cbz fixture should finish");
     }
 
     async fn open_bootstrapped_main_pool(database_file: &std::path::Path) -> SqlitePool {
@@ -235,7 +291,19 @@ mod tests {
         std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("analyze-book dimensions library root should be created");
         let archive_path = fixture.library_root.join("books/book-1.cbz");
-        write_cbz_fixture(&archive_path, &[(48, 96), (120, 80)]);
+        write_cbz_fixture(
+            &archive_path,
+            &[
+                FixturePageSize {
+                    width: 48,
+                    height: 96,
+                },
+                FixturePageSize {
+                    width: 120,
+                    height: 80,
+                },
+            ],
+        );
 
         let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
         insert_library(&pool, &fixture.library_root, analyze_dimensions).await;
@@ -258,7 +326,7 @@ mod tests {
     async fn load_persisted_page_dimensions(
         database_file: &std::path::Path,
         book_id: &str,
-    ) -> Vec<(i64, Option<i64>, Option<i64>)> {
+    ) -> Vec<PersistedPageDimensions> {
         let pool = connect_test_pool(database_file, 1)
             .await
             .expect("page dimension verify db should open");
@@ -277,14 +345,32 @@ mod tests {
         pool.close().await;
 
         rows.into_iter()
-            .map(|row| {
-                (
-                    row.get::<i64, _>("NUMBER"),
-                    row.get::<Option<i64>, _>("width"),
-                    row.get::<Option<i64>, _>("height"),
-                )
+            .map(|row| PersistedPageDimensions {
+                number: row.get("NUMBER"),
+                width: row.get("width"),
+                height: row.get("height"),
             })
             .collect()
+    }
+
+    async fn load_persisted_media_summary(
+        database_file: &std::path::Path,
+        book_id: &str,
+    ) -> PersistedMediaSummary {
+        let pool = connect_test_pool(database_file, 1)
+            .await
+            .expect("media summary verify db should open");
+        let row = sqlx::query("SELECT STATUS, PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
+            .bind(book_id)
+            .fetch_one(&pool)
+            .await
+            .expect("media summary should be queryable");
+        pool.close().await;
+
+        PersistedMediaSummary {
+            status: row.get("STATUS"),
+            page_count: row.get("PAGE_COUNT"),
+        }
     }
 
     fn analyzed_fixture_page_count(file_name: &str, _book_url: &str) -> i64 {
@@ -295,69 +381,6 @@ mod tests {
         .expect("analyze-book fixture should be analyzable")
         .pages
         .len() as i64
-    }
-
-    #[tokio::test]
-    async fn thumbnail_finder_enqueues_kotlin_style_generate_thumbnail_ids() {
-        let database_file = unique_temp_path("komga-thumbnail-finder-main");
-        let tasks_db_file = unique_temp_path("komga-thumbnail-finder-tasks");
-        let lucene_dir = unique_temp_path("komga-thumbnail-finder-lucene");
-        let library_root = unique_temp_path("komga-thumbnail-finder-root");
-
-        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
-        insert_library(&pool, &library_root, true).await;
-        insert_series(&pool, "library-1", "series-1").await;
-        insert_book(
-            &pool,
-            "book-1",
-            "book-1",
-            "books/book-1.cbz",
-            "library-1",
-            "series-1",
-            None,
-        )
-        .await;
-        pool.close().await;
-
-        let task_write_pool = connect_task_write_pool(&database_file)
-            .await
-            .expect("test private write pool should open");
-        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
-            .await
-            .expect("test private read pool should open");
-        let runtime = TaskRuntimeContext::new(
-            DatabaseHandle::file_backed(database_file.clone())
-                .await
-                .expect("test db should open"),
-            tasks_db_file,
-            lucene_dir,
-            false,
-            1,
-            task_write_pool,
-            task_read_pool,
-        );
-        let scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-test").await;
-        let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
-            .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
-
-        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
-        assert!(matches!(result, Some(Ok(()))));
-
-        let generated = scheduler
-            .admin_for_test()
-            .await
-            .admin
-            .take_available("thumbnail-finder-assert")
-            .expect("finder should enqueue one generate thumbnail task");
-
-        assert_eq!(generated.id, "GenerateBookThumbnail_book-1");
-        assert_eq!(generated.simple_type, "GenerateBookThumbnail");
-        assert_eq!(generated.priority, 6);
-        assert_eq!(generated.group, None);
-
-        let _ = std::fs::remove_file(database_file);
-        let _ = std::fs::remove_dir_all(library_root);
     }
 
     #[tokio::test]
@@ -389,7 +412,7 @@ mod tests {
         sqlx::query("INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, SELECTED) VALUES (?, ?, ?, ?)")
             .bind("thumb-book-1")
             .bind("book-1")
-            .bind("USER_UPLOADED")
+            .bind(ThumbnailType::UserUploaded.persisted_name())
             .bind(true)
             .execute(&pool)
             .await
@@ -416,8 +439,12 @@ mod tests {
         let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-all-books-test")
                 .await;
-        let finder_task = TaskQueueRecord::new("FindBookThumbnailsToRegenerate", 6, None)
-            .with_payload(serde_json::json!({ "for_bigger_result_only": false }).to_string());
+        let finder_task = TaskRequest::with_payload(
+            TaskKind::FindBookThumbnailsToRegenerate,
+            FindBookThumbnailsToRegeneratePayload::new(false),
+        )
+        .priority(6)
+        .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -429,17 +456,127 @@ mod tests {
             .admin
             .take_available("thumbnail-finder-all-books-assert")
         {
-            generated.push((task.id, task.priority));
+            generated.push(QueuedThumbnailTask {
+                id: task.id,
+                simple_type: task.simple_type,
+                priority: task.priority,
+                group: task.group,
+            });
         }
-        generated.sort_by(|left, right| left.0.cmp(&right.0));
+        generated.sort_by(|left, right| left.id.cmp(&right.id));
 
         assert_eq!(
             generated,
             vec![
-                ("GenerateBookThumbnail_book-1".to_string(), 6),
-                ("GenerateBookThumbnail_book-2".to_string(), 6),
+                QueuedThumbnailTask {
+                    id: "GenerateBookThumbnail_book-1".to_string(),
+                    simple_type: "GenerateBookThumbnail".to_string(),
+                    priority: 6,
+                    group: None,
+                },
+                QueuedThumbnailTask {
+                    id: "GenerateBookThumbnail_book-2".to_string(),
+                    simple_type: "GenerateBookThumbnail".to_string(),
+                    priority: 6,
+                    group: None,
+                },
             ],
             "full thumbnail regeneration should target every non-deleted book and keep the finder task priority for Kotlin parity",
+        );
+
+        let _ = std::fs::remove_file(database_file);
+        let _ = std::fs::remove_dir_all(library_root);
+    }
+
+    #[tokio::test]
+    async fn thumbnail_finder_bigger_only_uses_runtime_thumbnail_policy() {
+        let database_file = unique_temp_path("komga-thumbnail-finder-bigger-policy-main");
+        let tasks_db_file = unique_temp_path("komga-thumbnail-finder-bigger-policy-tasks");
+        let lucene_dir = unique_temp_path("komga-thumbnail-finder-bigger-policy-lucene");
+        let library_root = unique_temp_path("komga-thumbnail-finder-bigger-policy-root");
+
+        let pool = open_bootstrapped_main_pool(database_file.as_path()).await;
+        insert_library(&pool, &library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        for book_id in ["book-small", "book-large"] {
+            insert_book(
+                &pool,
+                book_id,
+                book_id,
+                &format!("books/{book_id}.cbz"),
+                "library-1",
+                "series-1",
+                None,
+            )
+            .await;
+        }
+        for (thumbnail_id, book_id, width, height) in [
+            ("thumb-small", "book-small", 350_i64, 350_i64),
+            ("thumb-large", "book-large", 650_i64, 650_i64),
+        ] {
+            sqlx::query(
+                "INSERT INTO THUMBNAIL_BOOK (ID, BOOK_ID, TYPE, SELECTED, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(thumbnail_id)
+            .bind(book_id)
+            .bind(ThumbnailType::Generated.persisted_name())
+            .bind(true)
+            .bind(width)
+            .bind(height)
+            .execute(&pool)
+            .await
+            .expect("generated thumbnail row should be inserted");
+        }
+        pool.close().await;
+
+        let task_write_pool = connect_task_write_pool(&database_file)
+            .await
+            .expect("test private write pool should open");
+        let task_read_pool = connect_task_pool(&database_file, default_read_max_connections())
+            .await
+            .expect("test private read pool should open");
+        let runtime = TaskRuntimeContext::new(
+            DatabaseHandle::file_backed(database_file.clone())
+                .await
+                .expect("test db should open"),
+            tasks_db_file,
+            lucene_dir,
+            false,
+            1,
+            task_write_pool,
+            task_read_pool,
+        )
+        .with_thumbnail_regeneration_policy(ThumbnailRegenerationPolicy {
+            generated_thumbnail_max_edge: 600,
+        });
+        let scheduler =
+            TaskQueueScheduler::for_runtime(runtime.clone(), "thumbnail-finder-bigger-policy-test")
+                .await;
+        let finder_task = TaskRequest::with_payload(
+            TaskKind::FindBookThumbnailsToRegenerate,
+            FindBookThumbnailsToRegeneratePayload::new(true),
+        )
+        .priority(6)
+        .into_queue_record();
+
+        let result = execute_and_enqueue(&scheduler, &runtime, &finder_task).await;
+        assert!(matches!(result, Some(Ok(()))));
+
+        let generated = scheduler
+            .admin_for_test()
+            .await
+            .admin
+            .take_available("thumbnail-finder-bigger-policy-assert")
+            .expect("runtime policy should enqueue undersized generated thumbnail");
+        assert_eq!(generated.id, "GenerateBookThumbnail_book-small");
+        assert!(
+            scheduler
+                .admin_for_test()
+                .await
+                .admin
+                .take_available("thumbnail-finder-bigger-policy-assert")
+                .is_none(),
+            "runtime policy should not enqueue thumbnails at or above the configured edge",
         );
 
         let _ = std::fs::remove_file(database_file);
@@ -452,8 +589,10 @@ mod tests {
         let runtime = fixture.runtime_context(false, false).await;
         let scheduler =
             TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test").await;
-        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("AnalyzeBook");
+        let task = TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new("book-1"))
+            .priority(90)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -477,7 +616,18 @@ mod tests {
         assert!(media_row.get::<i64, _>("PAGE_COUNT") > 0);
         assert_eq!(
             load_persisted_page_dimensions(fixture.database_file.as_path(), "book-1").await,
-            vec![(0, Some(48), Some(96)), (1, Some(120), Some(80))],
+            vec![
+                PersistedPageDimensions {
+                    number: 0,
+                    width: Some(48),
+                    height: Some(96),
+                },
+                PersistedPageDimensions {
+                    number: 1,
+                    width: Some(120),
+                    height: Some(80),
+                },
+            ],
             "analyze-book should persist page dimensions when library ANALYZE_DIMENSIONS is enabled",
         );
         assert!(
@@ -492,27 +642,113 @@ mod tests {
             .admin
             .take_available("analyze-book-follow-up-assert")
         {
-            queued.push((task.id, task.simple_type, task.priority, task.group));
+            queued.push(QueuedFollowUpTask {
+                id: task.id,
+                simple_type: task.simple_type,
+                priority: task.priority,
+                group: task.group,
+            });
         }
-        queued.sort_by(|left, right| left.0.cmp(&right.0));
+        queued.sort_by(|left, right| left.id.cmp(&right.id));
 
         assert_eq!(
             queued,
             vec![
-                (
-                    "GenerateBookThumbnail_book-1".to_string(),
-                    "GenerateBookThumbnail".to_string(),
-                    91,
-                    None,
-                ),
-                (
-                    "RefreshBookMetadata_book-1".to_string(),
-                    "RefreshBookMetadata".to_string(),
-                    91,
-                    Some("series-1".to_string()),
-                ),
+                QueuedFollowUpTask {
+                    id: "GenerateBookThumbnail_book-1".to_string(),
+                    simple_type: "GenerateBookThumbnail".to_string(),
+                    priority: 91,
+                    group: None,
+                },
+                QueuedFollowUpTask {
+                    id: "RefreshBookMetadata_book-1".to_string(),
+                    simple_type: "RefreshBookMetadata".to_string(),
+                    priority: 91,
+                    group: Some("series-1".to_string()),
+                },
             ],
             "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
+        );
+
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn analyze_book_records_decode_error_and_continues_with_next_book() {
+        let fixture = RuntimeTestFixture::new("analyze-book-decode-error-continues");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("analyze-book decode-error library root should be created");
+        write_invalid_cbz_fixture(&fixture.library_root.join("books/book-bad.cbz"));
+        write_cbz_fixture(
+            &fixture.library_root.join("books/book-good.cbz"),
+            &[FixturePageSize {
+                width: 48,
+                height: 96,
+            }],
+        );
+
+        let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
+        insert_library(&pool, &fixture.library_root, true).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        for (book_id, url) in [
+            ("book-bad", "books/book-bad.cbz"),
+            ("book-good", "books/book-good.cbz"),
+        ] {
+            insert_book(&pool, book_id, book_id, url, "library-1", "series-1", None).await;
+        }
+        pool.close().await;
+
+        let runtime = fixture.runtime_context(true, false).await;
+        let scheduler =
+            TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-decode-error-test")
+                .await;
+        for book_id in ["book-bad", "book-good"] {
+            scheduler
+                .enqueue(
+                    TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new(book_id))
+                        .group("series-1")
+                        .into_queue_record(),
+                )
+                .await
+                .expect("analyze-book task should enqueue");
+        }
+
+        let bad_task = scheduler
+            .take_next()
+            .await
+            .expect("bad analyze-book task should be claimable")
+            .expect("bad analyze-book task should exist");
+        assert_eq!(bad_task.id, "AnalyzeBook_book-bad");
+        assert!(matches!(
+            execute_and_enqueue(&scheduler, &runtime, &bad_task).await,
+            Some(Ok(()))
+        ));
+
+        let good_task = scheduler
+            .take_next()
+            .await
+            .expect("good analyze-book task should still be claimable")
+            .expect("good analyze-book task should exist after bad book analysis");
+        assert_eq!(good_task.id, "AnalyzeBook_book-good");
+        assert!(matches!(
+            execute_and_enqueue(&scheduler, &runtime, &good_task).await,
+            Some(Ok(()))
+        ));
+
+        assert_eq!(
+            load_persisted_media_summary(fixture.database_file.as_path(), "book-bad").await,
+            PersistedMediaSummary {
+                status: "ERROR".to_string(),
+                page_count: 0,
+            },
+            "decode errors should be recorded on the current book instead of failing the queue",
+        );
+        let good_media =
+            load_persisted_media_summary(fixture.database_file.as_path(), "book-good").await;
+        assert_eq!(good_media.status, "READY");
+        assert!(
+            good_media.page_count > 0,
+            "the next book should be analyzed after a previous decode error",
         );
 
         fixture.cleanup().await;
@@ -528,15 +764,28 @@ mod tests {
             "analyze-book-disabled-dimensions-test",
         )
         .await;
-        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("AnalyzeBook");
+        let task = TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new("book-1"))
+            .priority(90)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
 
         assert_eq!(
             load_persisted_page_dimensions(fixture.database_file.as_path(), "book-1").await,
-            vec![(0, None, None), (1, None, None)],
+            vec![
+                PersistedPageDimensions {
+                    number: 0,
+                    width: None,
+                    height: None,
+                },
+                PersistedPageDimensions {
+                    number: 1,
+                    width: None,
+                    height: None,
+                },
+            ],
             "analyze-book should leave page dimensions null when library ANALYZE_DIMENSIONS is disabled",
         );
 
@@ -661,8 +910,10 @@ mod tests {
             "analyze-book-read-progress-adjust-test",
         )
         .await;
-        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("AnalyzeBook");
+        let task = TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new("book-1"))
+            .priority(90)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -699,42 +950,55 @@ mod tests {
 
         let persisted_progress = progress_rows
             .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("USER_ID"),
-                    row.get::<i64, _>("PAGE"),
-                    row.get::<i64, _>("COMPLETED"),
-                )
+            .map(|row| PersistedReadProgress {
+                user_id: row.get("USER_ID"),
+                page: row.get("PAGE"),
+                completed: row.get("COMPLETED"),
+                last_modified_date: None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
             persisted_progress,
             vec![
-                ("user-completed".to_string(), page_count, 1_i64),
-                ("user-incomplete".to_string(), 1_i64, 0_i64),
+                PersistedReadProgress {
+                    user_id: "user-completed".to_string(),
+                    page: page_count,
+                    completed: 1_i64,
+                    last_modified_date: None,
+                },
+                PersistedReadProgress {
+                    user_id: "user-incomplete".to_string(),
+                    page: 1_i64,
+                    completed: 0_i64,
+                    last_modified_date: None,
+                },
             ],
             "outdated analyze-book should realign completed progress to the new page count and reset incomplete progress to page 1",
         );
 
         let persisted_series = series_rows
             .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("USER_ID"),
-                    row.get::<i64, _>("READ_COUNT"),
-                    row.get::<i64, _>("IN_PROGRESS_COUNT"),
-                    row.get::<String, _>("LAST_MODIFIED_DATE"),
-                )
+            .map(|row| PersistedSeriesProgress {
+                user_id: row.get("USER_ID"),
+                read_count: row.get("READ_COUNT"),
+                in_progress_count: row.get("IN_PROGRESS_COUNT"),
+                last_modified_date: row.get("LAST_MODIFIED_DATE"),
             })
             .collect::<Vec<_>>();
-        assert_eq!(persisted_series[0].0, "user-completed".to_string());
-        assert_eq!(persisted_series[0].1, 1_i64);
-        assert_eq!(persisted_series[0].2, 0_i64);
-        assert_ne!(persisted_series[0].3, "2000-01-01 00:00:00");
-        assert_eq!(persisted_series[1].0, "user-incomplete".to_string());
-        assert_eq!(persisted_series[1].1, 0_i64);
-        assert_eq!(persisted_series[1].2, 1_i64);
-        assert_ne!(persisted_series[1].3, "2000-01-01 00:00:00");
+        assert_eq!(persisted_series[0].user_id, "user-completed".to_string());
+        assert_eq!(persisted_series[0].read_count, 1_i64);
+        assert_eq!(persisted_series[0].in_progress_count, 0_i64);
+        assert_ne!(
+            persisted_series[0].last_modified_date,
+            "2000-01-01 00:00:00"
+        );
+        assert_eq!(persisted_series[1].user_id, "user-incomplete".to_string());
+        assert_eq!(persisted_series[1].read_count, 0_i64);
+        assert_eq!(persisted_series[1].in_progress_count, 1_i64);
+        assert_ne!(
+            persisted_series[1].last_modified_date,
+            "2000-01-01 00:00:00"
+        );
 
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
@@ -876,8 +1140,10 @@ mod tests {
             "analyze-book-read-progress-keep-test",
         )
         .await;
-        let task = TaskQueueRecord::new("AnalyzeBook_book-1", 90, Some("series-1".to_string()))
-            .with_simple_type("AnalyzeBook");
+        let task = TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new("book-1"))
+            .priority(90)
+            .group("series-1")
+            .into_queue_record();
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -908,60 +1174,56 @@ mod tests {
 
         let persisted_progress = progress_rows
             .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("USER_ID"),
-                    row.get::<i64, _>("PAGE"),
-                    row.get::<i64, _>("COMPLETED"),
-                    row.get::<String, _>("LAST_MODIFIED_DATE"),
-                )
+            .map(|row| PersistedReadProgress {
+                user_id: row.get("USER_ID"),
+                page: row.get("PAGE"),
+                completed: row.get("COMPLETED"),
+                last_modified_date: Some(row.get("LAST_MODIFIED_DATE")),
             })
             .collect::<Vec<_>>();
         assert_eq!(
             persisted_progress,
             vec![
-                (
-                    "user-completed".to_string(),
-                    actual_page_count,
-                    1_i64,
-                    "2001-01-01 00:00:00".to_string(),
-                ),
-                (
-                    "user-incomplete".to_string(),
-                    0_i64,
-                    0_i64,
-                    "2001-01-02 00:00:00".to_string(),
-                ),
+                PersistedReadProgress {
+                    user_id: "user-completed".to_string(),
+                    page: actual_page_count,
+                    completed: 1_i64,
+                    last_modified_date: Some("2001-01-01 00:00:00".to_string()),
+                },
+                PersistedReadProgress {
+                    user_id: "user-incomplete".to_string(),
+                    page: 0_i64,
+                    completed: 0_i64,
+                    last_modified_date: Some("2001-01-02 00:00:00".to_string()),
+                },
             ],
             "outdated analyze-book must keep read progress untouched when the page count is unchanged",
         );
 
         let persisted_series = series_rows
             .into_iter()
-            .map(|row| {
-                (
-                    row.get::<String, _>("USER_ID"),
-                    row.get::<i64, _>("READ_COUNT"),
-                    row.get::<i64, _>("IN_PROGRESS_COUNT"),
-                    row.get::<String, _>("LAST_MODIFIED_DATE"),
-                )
+            .map(|row| PersistedSeriesProgress {
+                user_id: row.get("USER_ID"),
+                read_count: row.get("READ_COUNT"),
+                in_progress_count: row.get("IN_PROGRESS_COUNT"),
+                last_modified_date: row.get("LAST_MODIFIED_DATE"),
             })
             .collect::<Vec<_>>();
         assert_eq!(
             persisted_series,
             vec![
-                (
-                    "user-completed".to_string(),
-                    1_i64,
-                    0_i64,
-                    "2000-01-01 00:00:00".to_string(),
-                ),
-                (
-                    "user-incomplete".to_string(),
-                    0_i64,
-                    1_i64,
-                    "2000-01-01 00:00:00".to_string(),
-                ),
+                PersistedSeriesProgress {
+                    user_id: "user-completed".to_string(),
+                    read_count: 1_i64,
+                    in_progress_count: 0_i64,
+                    last_modified_date: "2000-01-01 00:00:00".to_string(),
+                },
+                PersistedSeriesProgress {
+                    user_id: "user-incomplete".to_string(),
+                    read_count: 0_i64,
+                    in_progress_count: 1_i64,
+                    last_modified_date: "2000-01-01 00:00:00".to_string(),
+                },
             ],
             "unchanged page counts must not refresh series read-progress aggregates",
         );

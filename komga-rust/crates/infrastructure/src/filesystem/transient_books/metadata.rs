@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 use super::{TransientEpubManifestItem, TransientMetadataInference, epub};
 use crate::metadata::{
@@ -13,12 +14,14 @@ use detection::transient_book_media_type;
 
 use super::detection;
 
-pub(super) fn infer_transient_metadata(path_or_name: &str) -> TransientMetadataInference {
+pub(super) fn infer_transient_metadata(
+    path_or_name: &str,
+) -> Result<TransientMetadataInference, String> {
     let media_type = transient_book_media_type(path_or_name);
     if media_type == "application/epub+zip"
-        && let Some(inferred) = infer_transient_epub_metadata_from_path(path_or_name)
+        && let Some(inferred) = infer_transient_epub_metadata_from_path(path_or_name)?
     {
-        return inferred;
+        return Ok(inferred);
     }
 
     if matches!(
@@ -29,12 +32,12 @@ pub(super) fn infer_transient_metadata(path_or_name: &str) -> TransientMetadataI
             | "application/x-rar-compressed; version=4"
             | "application/x-rar-compressed; version=5"
     ) && let Some(inferred) =
-        infer_transient_comicinfo_provider_metadata_from_path(path_or_name, media_type.as_str())
+        infer_transient_comicinfo_provider_metadata_from_path(path_or_name, media_type.as_str())?
     {
-        return inferred;
+        return Ok(inferred);
     }
 
-    TransientMetadataInference::default()
+    Ok(TransientMetadataInference::default())
 }
 
 fn merge_transient_metadata_inference(
@@ -69,58 +72,119 @@ fn transient_metadata_inference_from_provider(
 fn infer_transient_comicinfo_provider_metadata_from_path(
     path: &str,
     media_type: &str,
-) -> Option<TransientMetadataInference> {
+) -> Result<Option<TransientMetadataInference>, String> {
     let comicinfo_bytes = if media_type == "application/zip" {
-        let file = fs::File::open(path).ok()?;
-        let mut archive = ZipArchive::new(file).ok()?;
-        let mut entry = archive.by_name("ComicInfo.xml").ok()?;
-        let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).ok()?;
+        let file = fs::File::open(path)
+            .map_err(|error| format!("open transient metadata archive '{path}': {error}"))?;
+        let mut archive = ZipArchive::new(file)
+            .map_err(|error| format!("read transient metadata archive '{path}': {error}"))?;
+        let Some(bytes) = read_zip_entry_bytes_for_metadata(&mut archive, "ComicInfo.xml", path)?
+        else {
+            return Ok(None);
+        };
         bytes
     } else {
-        read_rar_entry_bytes(Path::new(path), "ComicInfo.xml")
-            .ok()
-            .flatten()?
+        let Some(bytes) = read_rar_entry_bytes(Path::new(path), "ComicInfo.xml")
+            .map_err(|error| format!("read transient metadata archive '{path}': {error}"))?
+        else {
+            return Ok(None);
+        };
+        bytes
     };
-    let comicinfo_xml = String::from_utf8(comicinfo_bytes).ok()?;
-    Some(transient_metadata_inference_from_provider(
+    let Ok(comicinfo_xml) = String::from_utf8(comicinfo_bytes) else {
+        return Ok(None);
+    };
+    Ok(Some(transient_metadata_inference_from_provider(
         infer_transient_comicinfo_provider_metadata(&comicinfo_xml),
-    ))
+    )))
 }
 
-fn infer_transient_epub_metadata_from_path(path: &str) -> Option<TransientMetadataInference> {
-    let file = fs::File::open(path).ok()?;
-    let mut archive = ZipArchive::new(file).ok()?;
-    let container_xml =
-        epub::read_zip_entry_bytes_normalized(&mut archive, "META-INF/container.xml")?;
-    let rootfile_path = epub::parse_transient_epub_rootfile_path(&container_xml)?;
-    let package_document = epub::read_zip_entry_bytes_normalized(&mut archive, &rootfile_path)?;
-    let manifest = epub::parse_transient_epub_manifest_items(&package_document, &rootfile_path);
+fn infer_transient_epub_metadata_from_path(
+    path: &str,
+) -> Result<Option<TransientMetadataInference>, String> {
+    let file = fs::File::open(path)
+        .map_err(|error| format!("open transient metadata archive '{path}': {error}"))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|error| format!("read transient metadata archive '{path}': {error}"))?;
+    let Some(container_xml) =
+        read_zip_entry_bytes_for_metadata(&mut archive, "META-INF/container.xml", path)?
+    else {
+        return Err(format!("missing transient epub container in '{path}'"));
+    };
+    let rootfile_path = epub::parse_transient_epub_rootfile_path(&container_xml)
+        .ok_or_else(|| format!("parse transient epub container in '{path}'"))?;
+    let Some(package_document) =
+        read_zip_entry_bytes_for_metadata(&mut archive, &rootfile_path, path)?
+    else {
+        return Err(format!(
+            "missing transient epub package '{rootfile_path}' in '{path}'"
+        ));
+    };
+    let manifest = epub::parse_transient_epub_manifest_items(&package_document, &rootfile_path)
+        .map_err(|error| {
+            format!("parse transient epub package '{rootfile_path}' in '{path}': {error}")
+        })?;
     let mut inferred = transient_metadata_inference_from_provider(
-        infer_transient_epub_provider_metadata(&package_document),
+        infer_transient_epub_provider_metadata(&package_document)?,
     );
     inferred.number = None;
 
     if let Some(comicinfo_inference) =
-        infer_transient_comicinfo_provider_metadata_from_epub_archive(&mut archive, &manifest)
+        infer_transient_comicinfo_provider_metadata_from_epub_archive(
+            &mut archive,
+            &manifest,
+            path,
+        )?
     {
         merge_transient_metadata_inference(&mut inferred, comicinfo_inference);
     }
 
-    Some(inferred)
+    Ok(Some(inferred))
 }
 
 fn infer_transient_comicinfo_provider_metadata_from_epub_archive<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     manifest: &std::collections::HashMap<String, TransientEpubManifestItem>,
-) -> Option<TransientMetadataInference> {
+    path: &str,
+) -> Result<Option<TransientMetadataInference>, String> {
     let comicinfo_path = manifest
         .values()
         .find(|item| item.href == "ComicInfo.xml")
-        .map(|item| item.href.as_str())?;
-    let comicinfo_bytes = epub::read_zip_entry_bytes_normalized(archive, comicinfo_path)?;
-    let comicinfo_xml = String::from_utf8(comicinfo_bytes).ok()?;
-    Some(transient_metadata_inference_from_provider(
+        .map(|item| item.href.as_str());
+    let Some(comicinfo_path) = comicinfo_path else {
+        return Ok(None);
+    };
+    let Some(comicinfo_bytes) = read_zip_entry_bytes_for_metadata(archive, comicinfo_path, path)?
+    else {
+        return Ok(None);
+    };
+    let Ok(comicinfo_xml) = String::from_utf8(comicinfo_bytes) else {
+        return Ok(None);
+    };
+    Ok(Some(transient_metadata_inference_from_provider(
         infer_transient_comicinfo_provider_metadata(&comicinfo_xml),
-    ))
+    )))
+}
+
+fn read_zip_entry_bytes_for_metadata<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    entry_path: &str,
+    archive_path: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let mut entry = match archive.by_name(entry_path) {
+        Ok(entry) => entry,
+        Err(ZipError::FileNotFound) => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "read transient metadata archive entry '{entry_path}' from '{archive_path}': {error}"
+            ));
+        }
+    };
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).map_err(|error| {
+        format!(
+            "read transient metadata archive entry '{entry_path}' from '{archive_path}': {error}"
+        )
+    })?;
+    Ok(Some(bytes))
 }

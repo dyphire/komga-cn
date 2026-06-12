@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use komga_application::media_assets::metadata_writer::SearchSyncPort;
+use komga_application::media_assets::SearchSyncPort;
 use sqlx::SqlitePool;
 
 use crate::search::engine::SearchIndexEngine;

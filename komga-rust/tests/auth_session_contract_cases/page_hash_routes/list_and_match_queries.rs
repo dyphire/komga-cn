@@ -78,6 +78,68 @@ async fn router_get_page_hashes_filters_by_action_query_like_kotlin() {
 }
 
 #[tokio::test]
+async fn router_get_page_hashes_maps_known_entries_to_api_page_contract() {
+    let ctx = TestFixture::new("router-page-hashes-known-api-page-contract").await;
+    seed_known_page_hash_samples(ctx.paths()).await;
+
+    let app = ctx.app().clone();
+    let auth_token = ctx.login_admin().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/page-hashes?action=DELETE_AUTO&sort=hash,asc")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("known page hashes api page request should build"),
+        )
+        .await
+        .expect("known page hashes api page request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        json!({
+            "content": [{
+                "hash": "beta-hash",
+                "size": 220,
+                "action": "DELETE_AUTO",
+                "deleteCount": 2,
+                "matchCount": 1,
+                "created": "2024-01-02T00:00:00",
+                "lastModified": "2024-01-03T00:00:00"
+            }],
+            "pageable": {
+                "pageNumber": 0,
+                "pageSize": 20,
+                "sort": {
+                    "empty": false,
+                    "sorted": true,
+                    "unsorted": false
+                },
+                "offset": 0,
+                "paged": true,
+                "unpaged": false
+            },
+            "last": true,
+            "totalElements": 1,
+            "totalPages": 1,
+            "first": true,
+            "size": 20,
+            "number": 0,
+            "sort": {
+                "empty": false,
+                "sorted": true,
+                "unsorted": false
+            },
+            "numberOfElements": 1,
+            "empty": false
+        })
+    );
+}
+
+#[tokio::test]
 async fn router_get_page_hashes_rejects_invalid_action_query_like_kotlin() {
     let ctx = TestFixture::new("router-page-hashes-known-invalid-action").await;
     seed_known_page_hash_samples(ctx.paths()).await;

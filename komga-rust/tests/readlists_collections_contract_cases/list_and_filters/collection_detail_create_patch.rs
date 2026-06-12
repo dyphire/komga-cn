@@ -176,6 +176,35 @@ async fn router_collection_create_rejects_missing_name_like_kotlin() {
 }
 
 #[tokio::test]
+async fn router_collection_create_rejects_malformed_json_before_field_validation() {
+    let ctx = TestFixture::new("router-collection-create-malformed-json").await;
+    let auth_token = ctx.login_admin().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Broken Collection","#))
+                .expect("collection create malformed-json request should build"),
+        )
+        .await
+        .expect("collection create malformed-json request should complete");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let payload = response_json(response).await;
+    assert_bad_request_message(
+        &payload,
+        "Request body must be a JSON object",
+        "/api/v1/collections",
+    );
+}
+
+#[tokio::test]
 async fn router_collection_create_rejects_missing_ordered_like_kotlin() {
     let ctx = TestFixture::new("router-collection-create-missing-ordered").await;
     let auth_token = ctx.login_admin().await;

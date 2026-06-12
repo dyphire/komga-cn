@@ -18,10 +18,10 @@ mod imp {
     #[folder = "../../../komga-webui/dist"]
     struct EmbeddedWebUiAssets;
 
-    pub struct WebUiAssets;
+    pub(in crate::operational) struct WebUiAssets;
 
     impl WebUiAssets {
-        pub fn get(path: &str) -> Option<Cow<'static, [u8]>> {
+        pub(in crate::operational) fn get(path: &str) -> Option<Cow<'static, [u8]>> {
             EmbeddedWebUiAssets::get(path).map(|asset| asset.data)
         }
     }
@@ -31,13 +31,13 @@ mod imp {
 mod imp {
     use std::borrow::Cow;
 
-    pub struct WebUiAssets;
+    pub(in crate::operational) struct WebUiAssets;
 
     impl WebUiAssets {
-        pub fn get(_path: &str) -> Option<Cow<'static, [u8]>> {
+        pub(in crate::operational) fn get(_path: &str) -> Option<Cow<'static, [u8]>> {
             None
         }
     }
 }
 
-pub use imp::WebUiAssets;
+pub(super) use imp::WebUiAssets;

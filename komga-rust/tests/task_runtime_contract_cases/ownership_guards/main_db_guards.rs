@@ -1,4 +1,7 @@
 use super::*;
+use komga_application::task_processing::{
+    ImportBookCopyMode, ImportBookPayload, TaskKind, TaskRequest,
+};
 
 #[tokio::test]
 async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
@@ -17,17 +20,6 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
     std::fs::write(&source_file, b"blocked-import-payload")
         .expect("blocked import source file should be written");
 
-    let payload = json!({
-        "copy_mode": "COPY",
-        "book": {
-            "source_file": source_file,
-            "series_id": "series-1",
-            "destination_name": null,
-            "upgrade_book_id": null
-        }
-    })
-    .to_string();
-
     let runtime = runtime_task_context_with_overrides(
         ctx.paths(),
         TaskRuntimeOwnershipOverrides {
@@ -39,15 +31,22 @@ async fn runtime_blocks_import_book_when_main_database_is_external_owned() {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(
-            TaskQueueRecord::new(
-                "ImportBook:blocked-import",
-                1_000,
-                Some("series-1".to_string()),
+            TaskRequest::with_payload(
+                TaskKind::ImportBook,
+                ImportBookPayload::new(
+                    source_file.to_string_lossy().to_string(),
+                    "series-1",
+                    ImportBookCopyMode::Copy,
+                    None,
+                    None,
+                ),
             )
-            .with_simple_type("ImportBook")
-            .with_payload(payload),
+            .priority(1_000)
+            .group("series-1")
+            .into_queue_record_with_id("blocked-import"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -166,7 +165,8 @@ async fn runtime_blocks_extension_repair_when_main_database_is_external_owned() 
                 .to_string(),
             ),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -256,7 +256,8 @@ async fn runtime_blocks_find_books_to_convert_when_main_database_is_external_own
             )
             .with_simple_type("FindBooksToConvert"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     let processed = scheduler
         .process_available(&runtime.job())
         .await

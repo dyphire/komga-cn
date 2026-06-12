@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
+use crate::parsing::{clamp_kotlin_int_u32, parse_sqlite_group_concat_values};
 use komga_application::opds::{
-    BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsBookAuthorEntry, OpdsBookFeedEntry,
-    OpdsBookFeedKind, OpdsBookFeedQuery, OpdsCatalogPort, OpdsFeedUserContext,
-    OpdsLatestSeriesFeedQuery, OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries,
-    OpdsSeriesEntry,
+    BrowsePublisherEntry, BrowseSeriesNavigationEntry, BrowseSeriesNavigationPage,
+    OpdsBookAuthorEntry, OpdsBookFeedEntry, OpdsBookFeedKind, OpdsBookFeedQuery,
+    OpdsBrowseCatalogPort, OpdsFeedCatalogPort, OpdsFeedUserContext, OpdsLatestSeriesFeedQuery,
+    OpdsLibrarySeriesQuery, OpdsPagedBooks, OpdsPagedSeries, OpdsSeriesEntry, OpdsSeriesFeedPage,
 };
 
 #[derive(Clone)]
@@ -23,7 +24,7 @@ impl OpdsCatalogAccess {
 }
 
 #[async_trait]
-impl OpdsCatalogPort for OpdsCatalogAccess {
+impl OpdsFeedCatalogPort for OpdsCatalogAccess {
     async fn load_book_feed_page(
         &self,
         query: OpdsBookFeedQuery<'_>,
@@ -45,12 +46,15 @@ impl OpdsCatalogPort for OpdsCatalogAccess {
     async fn load_library_series_feed_page(
         &self,
         query: OpdsLibrarySeriesQuery<'_>,
-    ) -> Result<(Vec<OpdsSeriesEntry>, bool), String> {
+    ) -> Result<OpdsSeriesFeedPage, String> {
         load_library_series_feed_page(self.db.read_pool(), query)
             .await
             .map_err(|error| error.to_string())
     }
+}
 
+#[async_trait]
+impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
     async fn load_browse_series_navigation_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
@@ -58,7 +62,7 @@ impl OpdsCatalogPort for OpdsCatalogAccess {
         publishers: &[String],
         page: usize,
         size: usize,
-    ) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), String> {
+    ) -> Result<BrowseSeriesNavigationPage, String> {
         load_browse_series_navigation_entries(
             self.db.read_pool(),
             allowed_library_ids,
@@ -102,19 +106,18 @@ impl OpdsCatalogPort for OpdsCatalogAccess {
     }
 }
 
-fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u16> {
-    row.try_get::<i64, _>("AGE_RATING")
-        .ok()
-        .and_then(|value| u16::try_from(value).ok())
+fn parsed_age_rating(row: &sqlx::sqlite::SqliteRow) -> Option<u32> {
+    row.get::<Option<i64>, _>("AGE_RATING")
+        .map(clamp_kotlin_int_u32)
+}
+
+fn optional_non_empty_string(row: &sqlx::sqlite::SqliteRow, column: &str) -> Option<String> {
+    let value = row.get::<String, _>(column);
+    (!value.is_empty()).then_some(value)
 }
 
 fn parsed_sharing_labels(row: &sqlx::sqlite::SqliteRow) -> Vec<String> {
-    row.get::<String, _>("SHARING_LABELS")
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
+    parse_sqlite_group_concat_values(&row.get::<String, _>("SHARING_LABELS"))
 }
 
 fn parsed_book_authors(row: &sqlx::sqlite::SqliteRow) -> Vec<OpdsBookAuthorEntry> {
@@ -297,7 +300,7 @@ async fn load_latest_series_feed_page(
 async fn load_library_series_feed_page(
     pool: &SqlitePool,
     query: OpdsLibrarySeriesQuery<'_>,
-) -> Result<(Vec<OpdsSeriesEntry>, bool), sqlx::Error> {
+) -> Result<OpdsSeriesFeedPage, sqlx::Error> {
     let visible_offset = query.page.saturating_mul(query.size);
     let mut raw_offset = 0_i64;
     let scan_limit = (query.size + 1).max(20) as i64;
@@ -334,10 +337,10 @@ async fn load_library_series_feed_page(
         }
     };
 
-    Ok((
-        visible_page.into_iter().take(query.size).collect(),
+    Ok(OpdsSeriesFeedPage {
+        series: visible_page.into_iter().take(query.size).collect(),
         has_next,
-    ))
+    })
 }
 
 async fn load_browse_series_navigation_entries(
@@ -347,10 +350,13 @@ async fn load_browse_series_navigation_entries(
     publishers: &[String],
     page: usize,
     size: usize,
-) -> Result<(Vec<BrowseSeriesNavigationEntry>, usize), sqlx::Error> {
+) -> Result<BrowseSeriesNavigationPage, sqlx::Error> {
     let authorized_library_ids = sorted_authorized_library_ids(allowed_library_ids);
     if allowed_library_ids.is_some() && authorized_library_ids.is_empty() {
-        return Ok((vec![], 0));
+        return Ok(BrowseSeriesNavigationPage {
+            entries: Vec::new(),
+            total_count: 0,
+        });
     }
 
     let mut clauses = vec!["s.DELETED_DATE IS NULL".to_string()];
@@ -423,15 +429,16 @@ OFFSET ?"#,
         .fetch_all(pool)
         .await?;
 
-    Ok((
-        rows.into_iter()
+    Ok(BrowseSeriesNavigationPage {
+        entries: rows
+            .into_iter()
             .map(|row| BrowseSeriesNavigationEntry {
                 id: row.get::<String, _>("ID"),
                 title: row.get::<String, _>("TITLE"),
             })
             .collect(),
-        total,
-    ))
+        total_count: total,
+    })
 }
 
 async fn load_browse_publisher_entries(
@@ -509,7 +516,10 @@ async fn load_keep_reading_books(
     rp.PAGE AS LAST_READ,
     rp.READ_DATE AS LAST_READ_DATE,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED
 FROM READ_PROGRESS rp
 JOIN BOOK b ON b.ID = rp.BOOK_ID
@@ -561,10 +571,7 @@ ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC"#,
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: optional_non_empty_string(&row, "ISBN"),
             authors: parsed_book_authors(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
@@ -572,19 +579,13 @@ ORDER BY COALESCE(rp.READ_DATE, '') DESC, b.ID ASC"#,
             media_type: row.get::<String, _>("MEDIA_TYPE"),
             page_count: row.get::<i64, _>("PAGE_COUNT"),
             epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
-            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
-            last_read_date: row
-                .try_get::<Option<String>, _>("LAST_READ_DATE")
-                .ok()
-                .flatten(),
+            last_read: row.get::<Option<i64>, _>("LAST_READ"),
+            last_read_date: row.get::<Option<String>, _>("LAST_READ_DATE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row
-                .try_get::<String, _>("RELEASE_DATE")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            release_date: optional_non_empty_string(&row, "RELEASE_DATE"),
         })
         .collect())
 }
@@ -623,7 +624,10 @@ async fn load_on_deck_books(
     COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
     COALESCE(m.EPUB_DIVINA_COMPATIBLE, 0) AS EPUB_DIVINA_COMPATIBLE,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) AS ORDER_INDEX,
     COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED,
     COALESCE(rps.MOST_RECENT_READ_DATE, '') AS MOST_RECENT_READ_DATE
@@ -702,10 +706,7 @@ ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_IN
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: optional_non_empty_string(&row, "ISBN"),
             authors: parsed_book_authors(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
@@ -719,10 +720,7 @@ ORDER BY COALESCE(rps.MOST_RECENT_READ_DATE, '') DESC, b.SERIES_ID ASC, ORDER_IN
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row
-                .try_get::<String, _>("RELEASE_DATE")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            release_date: optional_non_empty_string(&row, "RELEASE_DATE"),
         });
     }
 
@@ -785,7 +783,10 @@ async fn load_latest_books_paged(
     rp.PAGE AS LAST_READ,
     rp.READ_DATE AS LAST_READ_DATE,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED
 FROM BOOK b
 LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
@@ -841,10 +842,7 @@ OFFSET ?"#,
             number: row.get::<String, _>("NUMBER"),
             number_sort: row.get::<f64, _>("NUMBER_SORT"),
             summary: row.get::<String, _>("SUMMARY"),
-            isbn: row
-                .try_get::<String, _>("ISBN")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            isbn: optional_non_empty_string(&row, "ISBN"),
             authors: parsed_book_authors(&row),
             tags: parsed_book_tags(&row),
             file_name: row.get::<String, _>("FILE_NAME"),
@@ -852,19 +850,13 @@ OFFSET ?"#,
             media_type: row.get::<String, _>("MEDIA_TYPE"),
             page_count: row.get::<i64, _>("PAGE_COUNT"),
             epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
-            last_read: row.try_get::<Option<i64>, _>("LAST_READ").ok().flatten(),
-            last_read_date: row
-                .try_get::<Option<String>, _>("LAST_READ_DATE")
-                .ok()
-                .flatten(),
+            last_read: row.get::<Option<i64>, _>("LAST_READ"),
+            last_read_date: row.get::<Option<String>, _>("LAST_READ_DATE"),
             library_id: row.get::<String, _>("LIBRARY_ID"),
             age_rating: parsed_age_rating(&row),
             sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
-            release_date: row
-                .try_get::<String, _>("RELEASE_DATE")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            release_date: optional_non_empty_string(&row, "RELEASE_DATE"),
         })
         .collect())
 }
@@ -899,15 +891,20 @@ async fn load_latest_series_paged(
     s.LIBRARY_ID,
     COALESCE(sm.TITLE, s.NAME) AS TITLE,
     COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
-    COALESCE(s.ONESHOT, 0) AS ONESHOT,
+    s.ONESHOT AS ONESHOT,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE {where_clause}
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, ONESHOT, AGE_RATING, LAST_MODIFIED
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME), s.ONESHOT,
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
 ORDER BY s.LAST_MODIFIED_DATE DESC, s.ID DESC
 LIMIT ?
 OFFSET ?"#,
@@ -946,17 +943,23 @@ async fn load_library_series(
     s.ID,
     s.LIBRARY_ID,
     COALESCE(sm.TITLE, s.NAME) AS TITLE,
-    COALESCE(s.ONESHOT, 0) AS ONESHOT,
+    s.ONESHOT AS ONESHOT,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE s.DELETED_DATE IS NULL
     AND s.LIBRARY_ID = ?
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, TITLE_SORT, ONESHOT, AGE_RATING, LAST_MODIFIED
-ORDER BY TITLE_SORT COLLATE NOCASE ASC, s.ID ASC
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME), s.ONESHOT,
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
+ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
 LIMIT ?
 OFFSET ?"#,
     )
@@ -1017,15 +1020,20 @@ async fn load_series_page(
     s.ID,
     s.LIBRARY_ID,
     COALESCE(sm.TITLE, s.NAME) AS TITLE,
-    COALESCE(s.ONESHOT, 0) AS ONESHOT,
+    s.ONESHOT AS ONESHOT,
     COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-    COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+              FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                    FROM SERIES_METADATA_SHARING sms_inner
+                    WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
     COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM SERIES s
 LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE {where_clause}
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, ONESHOT, AGE_RATING, LAST_MODIFIED
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME), s.ONESHOT,
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
 ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC
 LIMIT ?
 OFFSET ?"#,
@@ -1050,9 +1058,8 @@ OFFSET ?"#,
             title: row.get::<String, _>("TITLE"),
             one_shot: row.get::<bool, _>("ONESHOT"),
             age_rating: row
-                .try_get::<i64, _>("AGE_RATING")
-                .ok()
-                .and_then(|value| u16::try_from(value).ok()),
+                .get::<Option<i64>, _>("AGE_RATING")
+                .map(clamp_kotlin_int_u32),
             sharing_labels: row
                 .get::<String, _>("SHARING_LABELS")
                 .split(',')

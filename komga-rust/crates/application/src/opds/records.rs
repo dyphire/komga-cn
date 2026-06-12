@@ -1,3 +1,5 @@
+use komga_domain::discovery::MediaStatus;
+
 // Record types for OPDS catalog and persisted access, migrated from infrastructure.
 
 #[derive(Clone)]
@@ -37,7 +39,7 @@ pub struct OpdsBookFeedEntry {
     pub last_read: Option<i64>,
     pub last_read_date: Option<String>,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
     pub release_date: Option<String>,
@@ -49,7 +51,7 @@ pub struct OpdsSeriesEntry {
     pub library_id: String,
     pub title: String,
     pub one_shot: bool,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
@@ -69,7 +71,7 @@ pub struct PersistedSeriesRecord {
     pub library_id: String,
     pub title: String,
     pub summary: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
@@ -89,13 +91,13 @@ pub struct PersistedSeriesBookRecord {
     pub file_name: String,
     pub file_size: i64,
     pub media_type: String,
-    pub media_status: Option<String>,
+    pub media_status: Option<MediaStatus>,
     pub page_count: i64,
     pub epub_divina_compatible: bool,
     pub last_read: Option<i64>,
     pub last_read_date: Option<String>,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
     pub release_date: Option<String>,
@@ -130,11 +132,11 @@ pub struct PersistedReadlistBookRecord {
     pub file_name: String,
     pub file_size: i64,
     pub media_type: String,
-    pub media_status: Option<String>,
+    pub media_status: Option<MediaStatus>,
     pub page_count: i64,
     pub epub_divina_compatible: bool,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
     pub release_date: Option<String>,
@@ -145,7 +147,7 @@ pub struct PersistedSeriesSearchRecord {
     pub id: String,
     pub title: String,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }
@@ -168,7 +170,7 @@ pub struct PersistedBookSearchRecord {
     pub page_count: i64,
     pub epub_divina_compatible: bool,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
     pub release_date: Option<String>,
@@ -189,7 +191,7 @@ pub struct PersistedBookFeedRecord {
     pub file_name: String,
     pub media_type: String,
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: Vec<String>,
     pub last_modified: String,
 }

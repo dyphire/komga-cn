@@ -2,29 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibraryScanInterval {
-    Disabled,
-    Hourly,
-    Every6h,
-    Every12h,
-    Daily,
-    Weekly,
-}
-
-impl LibraryScanInterval {
-    pub fn duration_seconds(self) -> Option<u64> {
-        match self {
-            Self::Disabled => None,
-            Self::Hourly => Some(60 * 60),
-            Self::Every6h => Some(6 * 60 * 60),
-            Self::Every12h => Some(12 * 60 * 60),
-            Self::Daily => Some(24 * 60 * 60),
-            Self::Weekly => Some(7 * 24 * 60 * 60),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskQueueRecord {
     pub id: String,
@@ -64,6 +41,14 @@ impl TaskQueueRecord {
     pub fn with_simple_type(mut self, simple_type: impl Into<String>) -> Self {
         self.simple_type = simple_type.into();
         self
+    }
+
+    pub fn target(&self) -> Option<&str> {
+        self.id.strip_prefix(&self.simple_type).and_then(|suffix| {
+            suffix
+                .strip_prefix(':')
+                .or_else(|| suffix.strip_prefix('_'))
+        })
     }
 }
 
@@ -127,11 +112,18 @@ pub struct TaskExecutionResult {
 
 #[async_trait]
 pub trait TaskExecutionFinalizationPort: Sync {
-    async fn enqueue_follow_up_task(&self, task: TaskQueueRecord);
+    async fn enqueue_follow_up_task(
+        &self,
+        task: TaskQueueRecord,
+    ) -> Result<(), TaskProcessingError>;
 
-    async fn complete_task(&self, task_id: &str);
+    async fn complete_task(&self, task_id: &str) -> Result<(), TaskProcessingError>;
 
-    async fn fail_task(&self, task: &TaskQueueRecord, error: &TaskProcessingError);
+    async fn fail_task(
+        &self,
+        task: &TaskQueueRecord,
+        error: &TaskProcessingError,
+    ) -> Result<(), TaskProcessingError>;
 }
 
 pub async fn finalize_task_execution(
@@ -141,13 +133,13 @@ pub async fn finalize_task_execution(
     match task_result.outcome {
         Ok(outcome) => {
             for task in outcome.follow_up_tasks() {
-                port.enqueue_follow_up_task(task).await;
+                port.enqueue_follow_up_task(task).await?;
             }
-            port.complete_task(&task_result.task.id).await;
+            port.complete_task(&task_result.task.id).await?;
             Ok(())
         }
         Err(error) => {
-            port.fail_task(&task_result.task, &error).await;
+            port.fail_task(&task_result.task, &error).await?;
             Err(error)
         }
     }
@@ -340,26 +332,49 @@ mod tests {
 
     #[async_trait]
     impl TaskExecutionFinalizationPort for RecordingFinalizationPort {
-        async fn enqueue_follow_up_task(&self, task: TaskQueueRecord) {
+        async fn enqueue_follow_up_task(
+            &self,
+            task: TaskQueueRecord,
+        ) -> Result<(), TaskProcessingError> {
             self.events
                 .lock()
                 .unwrap()
                 .push(format!("enqueue:{}", task.id));
+            Ok(())
         }
 
-        async fn complete_task(&self, task_id: &str) {
+        async fn complete_task(&self, task_id: &str) -> Result<(), TaskProcessingError> {
             self.events
                 .lock()
                 .unwrap()
                 .push(format!("complete:{task_id}"));
+            Ok(())
         }
 
-        async fn fail_task(&self, task: &TaskQueueRecord, error: &TaskProcessingError) {
+        async fn fail_task(
+            &self,
+            task: &TaskQueueRecord,
+            error: &TaskProcessingError,
+        ) -> Result<(), TaskProcessingError> {
             self.events
                 .lock()
                 .unwrap()
                 .push(format!("fail:{}:{}", task.id, error.message));
+            Ok(())
         }
+    }
+
+    #[test]
+    fn task_queue_record_target_reads_kotlin_and_runtime_id_shapes() {
+        let kotlin_task =
+            TaskQueueRecord::new("AnalyzeBook_book-1", 6, None).with_simple_type("AnalyzeBook");
+        let runtime_task =
+            TaskQueueRecord::new("RuntimeTask:book-2", 6, None).with_simple_type("RuntimeTask");
+        let targetless_task = TaskQueueRecord::new("UpgradeIndex", 2, None);
+
+        assert_eq!(kotlin_task.target(), Some("book-1"));
+        assert_eq!(runtime_task.target(), Some("book-2"));
+        assert_eq!(targetless_task.target(), None);
     }
 
     #[tokio::test]

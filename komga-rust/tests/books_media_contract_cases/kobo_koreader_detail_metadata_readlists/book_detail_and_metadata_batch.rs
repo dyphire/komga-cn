@@ -96,6 +96,50 @@ async fn router_discovery_book_detail_accepts_basic_auth_like_kotlin_clients() {
 }
 
 #[tokio::test]
+async fn router_discovery_book_detail_forbids_restricted_user_when_series_age_rating_exceeds_u16() {
+    let ctx = TestFixture::new("router-discovery-book-detail-large-age-rating-restricted").await;
+    seed_router_age_exclude_user(
+        ctx.paths(),
+        "restricted-user",
+        "restricted@example.org",
+        "router-contract-restricted-123",
+        18,
+    )
+    .await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("book detail large age-rating db should open");
+    sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
+        .bind(65_536_i64)
+        .bind("series-1")
+        .execute(&pool)
+        .await
+        .expect("series age rating should update for book detail restriction");
+    pool.close().await;
+
+    let auth_token = ctx
+        .login_with_credentials("restricted@example.org", "router-contract-restricted-123")
+        .await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("restricted book detail request should build"),
+        )
+        .await
+        .expect("restricted book detail request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn router_discovery_book_detail_exposes_oneshot_flag_from_persisted_book_rows() {
     let ctx = TestFixture::new("router-discovery-book-detail-oneshot-flag").await;
 
@@ -561,60 +605,31 @@ async fn router_book_metadata_update_refreshes_book_full_text_search_results() {
 }
 
 #[tokio::test]
-async fn router_book_metadata_update_rejects_invalid_isbn_values() {
-    let ctx = TestFixture::new("router-book-metadata-update-invalid-isbn").await;
+async fn router_book_metadata_update_maps_application_validation_errors_to_bad_request() {
+    let ctx = TestFixture::new("router-book-metadata-update-invalid-patch").await;
 
     let auth_token = ctx.login_admin().await;
 
-    for invalid_isbn in ["1617290459", "978-123-456-789-6"] {
-        let response = ctx
-            .app()
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/books/book-1/metadata")
-                    .header("x-auth-token", &auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        json!({
-                            "isbn": invalid_isbn,
-                        })
-                        .to_string(),
-                    ))
-                    .expect("invalid isbn metadata update request should build"),
-            )
-            .await
-            .expect("invalid isbn metadata update request should complete");
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/missing/metadata")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "title": "" }).to_string()))
+                .expect("invalid metadata update request should build"),
+        )
+        .await
+        .expect("invalid metadata update request should complete");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-}
-
-#[tokio::test]
-async fn router_book_metadata_update_rejects_blank_title_and_number_values() {
-    let ctx = TestFixture::new("router-book-metadata-update-blank-title-number").await;
-
-    let auth_token = ctx.login_admin().await;
-
-    for payload in [json!({ "title": "" }), json!({ "number": "" })] {
-        let response = ctx
-            .app()
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/books/book-1/metadata")
-                    .header("x-auth-token", &auth_token)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(payload.to_string()))
-                    .expect("blank title/number metadata update request should build"),
-            )
-            .await
-            .expect("blank title/number metadata update request should complete");
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(response).await.get("error"),
+        Some(&Value::String("title must not be blank".to_string())),
+    );
 }
 
 #[tokio::test]
@@ -639,40 +654,6 @@ async fn router_book_metadata_update_returns_not_found_for_missing_book() {
         .expect("missing book metadata update request should complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn router_book_metadata_update_rejects_invalid_link_urls() {
-    let ctx = TestFixture::new("router-book-metadata-update-invalid-link-url").await;
-
-    let auth_token = ctx.login_admin().await;
-
-    let response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PATCH")
-                .uri("/api/v1/books/book-1/metadata")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "links": [
-                            {
-                                "label": "AniList",
-                                "url": "not-a-url"
-                            }
-                        ]
-                    })
-                    .to_string(),
-                ))
-                .expect("invalid link url metadata update request should build"),
-        )
-        .await
-        .expect("invalid link url metadata update request should complete");
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

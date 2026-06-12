@@ -14,50 +14,50 @@ struct OpdsV1XmlAttribute {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1NavigationFeedDocument {
-    pub id: String,
-    pub title: String,
-    pub updated: String,
-    pub self_href: String,
-    pub start_href: String,
-    pub previous_href: Option<String>,
-    pub next_href: Option<String>,
-    pub extra_links: Vec<OpdsV1XmlLink>,
-    pub entries: Vec<OpdsV1NavigationFeedEntry>,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) updated: String,
+    pub(super) self_href: String,
+    pub(super) start_href: String,
+    pub(super) previous_href: Option<String>,
+    pub(super) next_href: Option<String>,
+    pub(super) extra_links: Vec<OpdsV1XmlLink>,
+    pub(super) entries: Vec<OpdsV1NavigationFeedEntry>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1NavigationFeedEntry {
-    pub id: String,
-    pub title: String,
-    pub updated: String,
-    pub content: String,
-    pub href: String,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) updated: String,
+    pub(super) content: String,
+    pub(super) href: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1AcquisitionFeedDocument {
-    pub id: String,
-    pub title: String,
-    pub updated: String,
-    pub self_href: String,
-    pub start_href: String,
-    pub previous_href: Option<String>,
-    pub next_href: Option<String>,
-    pub entries: Vec<OpdsV1AcquisitionFeedEntry>,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) updated: String,
+    pub(super) self_href: String,
+    pub(super) start_href: String,
+    pub(super) previous_href: Option<String>,
+    pub(super) next_href: Option<String>,
+    pub(super) entries: Vec<OpdsV1AcquisitionFeedEntry>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct OpdsV1AcquisitionFeedEntry {
-    pub id: String,
-    pub title: String,
-    pub updated: String,
-    pub content: String,
-    pub authors: Vec<String>,
-    pub acquisition_media_type: String,
-    pub acquisition_href: String,
-    pub thumbnail_href: String,
-    pub image_href: String,
-    pub extra_links: Vec<OpdsV1XmlLink>,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) updated: String,
+    pub(super) content: String,
+    pub(super) authors: Vec<String>,
+    pub(super) acquisition_media_type: String,
+    pub(super) acquisition_href: String,
+    pub(super) thumbnail_href: String,
+    pub(super) image_href: String,
+    pub(super) extra_links: Vec<OpdsV1XmlLink>,
 }
 
 impl OpdsV1XmlLink {

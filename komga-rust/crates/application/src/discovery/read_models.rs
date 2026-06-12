@@ -1,3 +1,6 @@
+use super::reading_direction::SeriesReadingDirection;
+use komga_domain::discovery::{MediaStatus, SeriesStatus};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LibraryReadModel {
     pub id: String,
@@ -20,11 +23,11 @@ pub struct SeriesReadModel {
     pub books_read_count: u64,
     pub books_unread_count: u64,
     pub books_in_progress_count: u64,
-    pub status: String,
+    pub status: SeriesStatus,
     pub summary: String,
-    pub reading_direction: String,
+    pub reading_direction: Option<SeriesReadingDirection>,
     pub publisher: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub language: String,
     pub genres: Vec<String>,
     pub tags: Vec<String>,
@@ -79,7 +82,7 @@ pub struct BookReadModel {
     pub last_modified: String,
     pub file_last_modified: String,
     pub size_bytes: u64,
-    pub media_status: String,
+    pub media_status: MediaStatus,
     pub media_type: String,
     pub media_pages_count: u32,
     pub media_comment: String,

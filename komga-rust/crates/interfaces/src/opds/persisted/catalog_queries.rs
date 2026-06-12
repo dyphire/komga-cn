@@ -3,10 +3,13 @@ use std::collections::HashSet;
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
 
-use crate::request_urls::app_absolute_url;
-use crate::state::{BrowseSeriesNavigationEntry, OpdsCatalogPort, OpdsSeriesEntry};
+use komga_application::opds::{
+    BrowseSeriesNavigationEntry, OpdsBrowseCatalogPort, OpdsSeriesEntry,
+};
 
-use super::PersistedSeries;
+use crate::request_urls::app_absolute_url;
+
+use super::{OpdsJsonNavigationPage, PersistedSeries};
 
 fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
     PersistedSeries {
@@ -17,15 +20,15 @@ fn persisted_series(entry: OpdsSeriesEntry) -> PersistedSeries {
 }
 
 pub(super) async fn load_browse_series_navigation(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
     publishers: &[String],
     page: usize,
     size: usize,
-) -> Result<(Vec<Value>, usize), String> {
-    let (entries, total) = backend
+) -> Result<OpdsJsonNavigationPage, String> {
+    let page_result = backend
         .load_browse_series_navigation_entries(
             allowed_library_ids.as_ref(),
             library_id,
@@ -35,16 +38,20 @@ pub(super) async fn load_browse_series_navigation(
         )
         .await?;
 
-    Ok(browse_series_navigation_values(headers, entries, total))
+    Ok(browse_series_navigation_values(
+        headers,
+        page_result.entries,
+        page_result.total_count,
+    ))
 }
 
 pub(super) fn browse_series_navigation_values(
     headers: &HeaderMap,
     entries: Vec<BrowseSeriesNavigationEntry>,
     total: usize,
-) -> (Vec<Value>, usize) {
-    (
-        entries
+) -> OpdsJsonNavigationPage {
+    OpdsJsonNavigationPage {
+        entries: entries
             .into_iter()
             .map(|entry| {
                 json!({
@@ -54,12 +61,12 @@ pub(super) fn browse_series_navigation_values(
                 })
             })
             .collect(),
-        total,
-    )
+        total_count: total,
+    }
 }
 
 pub(super) async fn load_browse_publisher_navigation(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
@@ -85,7 +92,7 @@ pub(super) async fn load_browse_publisher_navigation(
 }
 
 pub(super) async fn load_series_page(
-    backend: &dyn OpdsCatalogPort,
+    backend: &dyn OpdsBrowseCatalogPort,
     allowed_library_ids: &Option<HashSet<String>>,
     search: Option<&str>,
     publishers: &[String],

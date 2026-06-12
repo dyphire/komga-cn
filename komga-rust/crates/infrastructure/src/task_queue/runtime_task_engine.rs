@@ -6,17 +6,17 @@ use komga_application::task_processing::{
 };
 use tokio::sync::{Mutex, Notify};
 
-use super::TaskExecutionPoolHandle;
+use super::execution_pool::TaskExecutionPoolHandle;
 use super::queue_scheduler::TaskQueueScheduler;
 
-pub struct RuntimeTaskEngine {
+pub(super) struct RuntimeTaskEngine {
     scheduler: Arc<Mutex<TaskQueueScheduler>>,
     execution_pool: TaskExecutionPoolHandle,
     wakeup: Arc<Notify>,
 }
 
 impl RuntimeTaskEngine {
-    pub fn new(
+    pub(super) fn new(
         scheduler: Arc<Mutex<TaskQueueScheduler>>,
         execution_pool: TaskExecutionPoolHandle,
         wakeup: Arc<Notify>,
@@ -59,7 +59,7 @@ impl TaskQueue for RuntimeTaskEngine {
         Ok(())
     }
 
-    async fn status(&self) -> QueueStatus {
+    async fn status(&self) -> Result<QueueStatus, String> {
         let scheduler = self.scheduler.lock().await;
         TaskQueue::status(&*scheduler).await
     }
@@ -67,7 +67,7 @@ impl TaskQueue for RuntimeTaskEngine {
 
 #[async_trait::async_trait]
 impl TaskQueueAdmin for RuntimeTaskEngine {
-    async fn clear_unowned_tasks(&self) -> usize {
+    async fn clear_unowned_tasks(&self) -> Result<usize, String> {
         let scheduler = self.scheduler.lock().await;
         TaskQueueAdmin::clear_unowned_tasks(&*scheduler).await
     }
@@ -88,8 +88,9 @@ mod tests {
     use super::*;
     use crate::database_handle::DatabaseHandle;
     use crate::sqlite::{connect_task_pool, connect_task_write_pool, default_read_max_connections};
+    use crate::task_queue::TaskRuntimeContext;
+    use crate::task_queue::execution_pool::TaskExecutionPoolHandle;
     use crate::task_queue::queue_scheduler::TaskQueueScheduler;
-    use crate::task_queue::{TaskExecutionPoolHandle, TaskRuntimeContext};
     use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin};
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -115,6 +116,13 @@ mod tests {
 
     async fn test_task_runtime_context() -> TaskRuntimeContext {
         let root = test_temp_root();
+        test_task_runtime_context_with_tasks_db(root.join("tasks.sqlite"), root).await
+    }
+
+    async fn test_task_runtime_context_with_tasks_db(
+        tasks_db_file: PathBuf,
+        root: PathBuf,
+    ) -> TaskRuntimeContext {
         let main_db = DatabaseHandle::file_backed(root.join("database.sqlite"))
             .await
             .expect("test db should open");
@@ -127,7 +135,7 @@ mod tests {
                 .expect("test task read pool should open");
         TaskRuntimeContext::new(
             main_db,
-            root.join("tasks.sqlite"),
+            tasks_db_file,
             root.join("lucene"),
             true,
             1,
@@ -179,13 +187,47 @@ mod tests {
                 "urgency={urgency:?} should control background worker wakeup"
             );
 
-            let queued_tasks = task_queue.lock().await.count_by_simple_type().await;
+            let queued_tasks = task_queue
+                .lock()
+                .await
+                .count_by_simple_type()
+                .await
+                .expect("runtime task engine fixture queue counts should load");
             assert_eq!(
                 queued_tasks.get("ScanLibrary"),
                 Some(&1),
                 "urgency={urgency:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn enqueue_records_reports_persisted_store_initialization_errors() {
+        let root = test_temp_root();
+        std::fs::write(root.join("blocked"), b"not a directory")
+            .expect("blocking tasks db component should be written");
+        let runtime =
+            test_task_runtime_context_with_tasks_db(root.join("blocked/tasks.sqlite"), root).await;
+        let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
+        let task_queue = Arc::new(Mutex::new(
+            TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
+        ));
+        let task_wakeup = Arc::new(tokio::sync::Notify::new());
+        let engine: Box<dyn TaskQueueAdmin> = Box::new(RuntimeTaskEngine::new(
+            task_queue,
+            task_execution_pool,
+            task_wakeup,
+        ));
+
+        let error = engine
+            .enqueue_records(vec![scan_library_task()], SubmitUrgency::Immediate)
+            .await
+            .expect_err("task queue persistence initialization errors should be reported");
+
+        assert!(
+            error.contains("inspect tasks sqlite file"),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]

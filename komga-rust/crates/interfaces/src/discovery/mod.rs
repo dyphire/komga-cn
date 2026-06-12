@@ -1,7 +1,8 @@
-pub mod books;
-pub mod detail;
+pub(crate) mod books;
+pub(crate) mod detail;
 pub(crate) mod facets;
-pub mod persisted;
+mod persisted;
 mod query;
-pub mod series;
+mod request_resolution;
+pub(crate) mod series;
 mod series_routes;

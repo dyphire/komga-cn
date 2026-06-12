@@ -1,6 +1,76 @@
 use super::*;
 
 #[tokio::test]
+async fn router_readlist_and_collection_thumbnails_return_internal_error_when_existence_check_fails()
+ {
+    let ctx = TestFixture::new("router-list-collection-thumbnail-existence-check-error").await;
+    let auth_token = ctx.login_admin().await;
+    let image_bytes = fixture_png_bytes();
+    let (readlist_content_type, readlist_body) =
+        multipart_image_upload_body("file", "readlist.png", "image/png", false, &image_bytes);
+    let (collection_content_type, collection_body) =
+        multipart_image_upload_body("file", "collection.png", "image/png", false, &image_bytes);
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("readlist thumbnail existence failure db should open");
+    sqlx::query("ALTER TABLE READLIST RENAME TO READLIST_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("readlist table should be renamed for thumbnail existence failure");
+    pool.close().await;
+
+    let readlist_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/readlists/readlist-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, readlist_content_type)
+                .body(Body::from(readlist_body))
+                .expect("readlist thumbnail existence failure request should build"),
+        )
+        .await
+        .expect("readlist thumbnail existence failure request should complete");
+
+    assert_eq!(
+        readlist_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("collection thumbnail existence failure db should open");
+    sqlx::query("ALTER TABLE COLLECTION RENAME TO COLLECTION_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("collection table should be renamed for thumbnail existence failure");
+    pool.close().await;
+
+    let collection_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/collections/collection-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, collection_content_type)
+                .body(Body::from(collection_body))
+                .expect("collection thumbnail existence failure request should build"),
+        )
+        .await
+        .expect("collection thumbnail existence failure request should complete");
+
+    assert_eq!(
+        collection_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
+
+#[tokio::test]
 async fn router_readlist_thumbnail_upload_parses_multipart_image_and_selected_flag() {
     let ctx = TestFixture::new("router-readlist-thumbnail-upload-multipart").await;
     let auth_token = ctx.login_admin().await;
@@ -597,6 +667,31 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
         !body.is_empty(),
         "readlist mosaic thumbnail should not be empty"
     );
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("readlist mosaic source failure db should open");
+    sqlx::query("ALTER TABLE THUMBNAIL_BOOK RENAME TO THUMBNAIL_BOOK_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("book thumbnail table should be renamed for readlist mosaic source failure");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail source failure request should build"),
+        )
+        .await
+        .expect("readlist thumbnail source failure request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[tokio::test]
@@ -724,4 +819,29 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
         !body.is_empty(),
         "collection mosaic thumbnail should not be empty"
     );
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("collection mosaic source failure db should open");
+    sqlx::query("ALTER TABLE THUMBNAIL_SERIES RENAME TO THUMBNAIL_SERIES_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("series thumbnail table should be renamed for collection mosaic source failure");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection thumbnail source failure request should build"),
+        )
+        .await
+        .expect("collection thumbnail source failure request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }

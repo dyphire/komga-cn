@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use komga_application::operational::HistoryPort;
-use serde_json::{Value, json};
+use komga_application::operational::{
+    HistoryEvent, HistoryPage, HistoryPort, HistorySort, HistorySortDirection, HistorySortProperty,
+    HistorySortSelection,
+};
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
@@ -23,9 +26,9 @@ impl HistoryPort for HistoryAccess {
         &self,
         page: u64,
         size: u64,
-        sorts: Vec<String>,
-    ) -> Result<Value, String> {
-        load_history_page(self.db.read_pool(), page, size, &sorts)
+        sort: HistorySortSelection,
+    ) -> Result<HistoryPage, String> {
+        load_history_page(self.db.read_pool(), page, size, sort)
             .await
             .map_err(|e| e.to_string())
     }
@@ -39,12 +42,17 @@ struct PersistedHistoricalEvent {
     timestamp: String,
 }
 
+struct HistorySortPlan {
+    order_by: Vec<String>,
+    sorted: bool,
+}
+
 pub(crate) async fn load_history_page(
     pool: &SqlitePool,
     page: u64,
     size: u64,
-    sorts: &[String],
-) -> Result<Value, sqlx::Error> {
+    sort: HistorySortSelection,
+) -> Result<HistoryPage, sqlx::Error> {
     let total_elements = sqlx::query(
         r#"SELECT COUNT(*) AS COUNT
         FROM HISTORICAL_EVENT"#,
@@ -56,14 +64,14 @@ pub(crate) async fn load_history_page(
     let size = size.max(1);
     let offset = page.saturating_mul(size);
 
-    let (order_by, sort_payload) = history_sort_details(sorts);
+    let sort_plan = history_sort_details(sort);
     let mut sql = String::from(
         r#"SELECT ID, TYPE, BOOK_ID, SERIES_ID, TIMESTAMP
         FROM HISTORICAL_EVENT"#,
     );
-    if !order_by.is_empty() {
+    if !sort_plan.order_by.is_empty() {
         sql.push_str(" ORDER BY ");
-        sql.push_str(&order_by.join(", "));
+        sql.push_str(&sort_plan.order_by.join(", "));
     }
     sql.push_str(" LIMIT ? OFFSET ?");
 
@@ -82,7 +90,7 @@ pub(crate) async fn load_history_page(
         })
         .collect::<Vec<_>>();
 
-    let mut properties_by_id: HashMap<String, serde_json::Map<String, Value>> = HashMap::new();
+    let mut properties_by_id: HashMap<String, BTreeMap<String, String>> = HashMap::new();
     if !events.is_empty() {
         let placeholders = std::iter::repeat_n("?", events.len())
             .collect::<Vec<_>>()
@@ -106,7 +114,7 @@ pub(crate) async fn load_history_page(
             properties_by_id
                 .entry(event_id)
                 .or_default()
-                .insert(key, Value::String(value));
+                .insert(key, value);
         }
     }
 
@@ -114,89 +122,48 @@ pub(crate) async fn load_history_page(
         .into_iter()
         .map(|event| {
             let properties = properties_by_id.remove(&event.id).unwrap_or_default();
-            json!({
-                "id": event.id,
-                "type": event.event_type,
-                "bookId": event.book_id,
-                "seriesId": event.series_id,
-                "timestamp": event.timestamp,
-                "properties": properties,
-            })
+            HistoryEvent {
+                id: event.id,
+                event_type: event.event_type,
+                book_id: event.book_id,
+                series_id: event.series_id,
+                timestamp: event.timestamp,
+                properties,
+            }
         })
         .collect::<Vec<_>>();
 
-    let total_pages = if total_elements == 0 {
-        0
-    } else {
-        total_elements.div_ceil(size)
-    };
-    let number_of_elements = content.len() as u64;
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-
-    Ok(json!({
-        "content": content,
-        "pageable": {
-            "pageNumber": page,
-            "pageSize": size,
-            "sort": sort_payload.clone(),
-            "offset": offset,
-            "paged": true,
-            "unpaged": false,
-        },
-        "last": last,
-        "totalElements": total_elements,
-        "totalPages": total_pages,
-        "first": first,
-        "size": size,
-        "number": page,
-        "sort": sort_payload,
-        "numberOfElements": number_of_elements,
-        "empty": number_of_elements == 0,
-    }))
+    Ok(HistoryPage::new(
+        page,
+        size,
+        total_elements,
+        content,
+        sort_plan.sorted,
+    ))
 }
 
-fn history_sort_details(sorts: &[String]) -> (Vec<String>, Value) {
-    let order_by = history_order_by(sorts);
-    let is_sorted = sorts.is_empty() || !order_by.is_empty();
-    let payload = json!({
-        "empty": !is_sorted,
-        "sorted": is_sorted,
-        "unsorted": !is_sorted,
-    });
-
-    (order_by, payload)
-}
-
-fn history_order_by(sorts: &[String]) -> Vec<String> {
-    if sorts.is_empty() {
-        return vec!["TIMESTAMP DESC".to_string()];
+fn history_sort_details(sort: HistorySortSelection) -> HistorySortPlan {
+    HistorySortPlan {
+        order_by: history_order_by(&sort.sorts),
+        sorted: sort.sorted,
     }
-
-    sorts
-        .iter()
-        .filter_map(|sort| history_sort_clause(sort))
-        .collect()
 }
 
-fn history_sort_clause(sort: &str) -> Option<String> {
-    let (property, direction) = match sort.split_once(',') {
-        Some((property, direction)) => (property.trim(), direction.trim()),
-        None => (sort.trim(), "asc"),
+fn history_order_by(sorts: &[HistorySort]) -> Vec<String> {
+    sorts.iter().map(history_sort_clause).collect()
+}
+
+fn history_sort_clause(sort: &HistorySort) -> String {
+    let field = match sort.property {
+        HistorySortProperty::Type => "TYPE",
+        HistorySortProperty::BookId => "BOOK_ID",
+        HistorySortProperty::SeriesId => "SERIES_ID",
+        HistorySortProperty::Timestamp => "TIMESTAMP",
+    };
+    let direction = match sort.direction {
+        HistorySortDirection::Asc => "ASC",
+        HistorySortDirection::Desc => "DESC",
     };
 
-    let field = match property {
-        "type" => "TYPE",
-        "bookId" => "BOOK_ID",
-        "seriesId" => "SERIES_ID",
-        "timestamp" => "TIMESTAMP",
-        _ => return None,
-    };
-    let direction = if direction.eq_ignore_ascii_case("desc") {
-        "DESC"
-    } else {
-        "ASC"
-    };
-
-    Some(format!("{field} {direction}"))
+    format!("{field} {direction}")
 }

@@ -2,13 +2,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_domain::discovery::{
-    PageEnvelope, QueryRestrictions as DomainRestrictions, content_allowed_by_restrictions,
-};
+use komga_domain::discovery::{PageEnvelope, QueryRestrictions, content_allowed_by_restrictions};
 use serde_json::{Value, json};
 
-use crate::discovery_auth::context::QueryRestrictions;
-use crate::discovery_auth::principal::AgeRestrictionKind;
 use crate::helpers::{books_page_payload, query_bool, query_value, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
@@ -33,22 +29,13 @@ fn normalize_books_latest_unpaged_page_shape<T>(mut page: PageEnvelope<T>) -> Pa
 
 fn ondeck_content_allowed(
     restrictions: Option<&QueryRestrictions>,
-    age_rating: Option<u16>,
+    age_rating: Option<u32>,
     sharing_labels: &[String],
 ) -> bool {
     let Some(restrictions) = restrictions else {
         return true;
     };
-    let domain_restrictions = DomainRestrictions {
-        age: restrictions.age,
-        age_restriction: restrictions.age_restriction.map(|kind| match kind {
-            AgeRestrictionKind::AllowOnly => komga_domain::discovery::AgeRestrictionKind::AllowOnly,
-            AgeRestrictionKind::Exclude => komga_domain::discovery::AgeRestrictionKind::Exclude,
-        }),
-        labels_allow: restrictions.labels_allow.clone(),
-        labels_exclude: restrictions.labels_exclude.clone(),
-    };
-    content_allowed_by_restrictions(&domain_restrictions, age_rating, sharing_labels)
+    content_allowed_by_restrictions(restrictions, age_rating, sharing_labels)
 }
 
 fn ondeck_page_payload(content: Vec<Value>, uri: &Uri) -> Value {
@@ -118,7 +105,7 @@ fn ondeck_page_payload(content: Vec<Value>, uri: &Uri) -> Value {
     })
 }
 
-pub async fn books_latest(
+pub(crate) async fn books_latest(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
@@ -127,20 +114,24 @@ pub async fn books_latest(
     let query = uri.query().unwrap_or_default();
 
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids = remap_requested_library_ids_for_persisted(
+    let library_ids = match remap_requested_library_ids_for_persisted(
         app.library_id_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
-    .or(requested_library_ids);
+    {
+        Ok(library_ids) => library_ids.or(requested_library_ids),
+        Err(error) => return internal_error_response(error),
+    };
 
     let interfaces_context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -153,11 +144,10 @@ pub async fn books_latest(
     {
         Ok(page) => {
             let page = if resolved.response.kotlin_unpaged_shape {
-                (normalize_books_latest_unpaged_page_shape(page), true)
+                normalize_books_latest_unpaged_page_shape(page)
             } else {
-                (page, true)
-            }
-            .0;
+                page
+            };
             Json(books_page_payload(
                 page,
                 context.is_admin,
@@ -170,7 +160,7 @@ pub async fn books_latest(
     }
 }
 
-pub async fn books_ondeck(
+pub(crate) async fn books_ondeck(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
@@ -178,19 +168,23 @@ pub async fn books_ondeck(
 ) -> Response {
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids = remap_requested_library_ids_for_persisted(
+    let library_ids = match remap_requested_library_ids_for_persisted(
         app.library_id_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
     .await
-    .or(requested_library_ids);
+    {
+        Ok(library_ids) => library_ids.or(requested_library_ids),
+        Err(error) => return internal_error_response(error),
+    };
     let context = match app
         .discovery_auth
         .resolve_query_context_with_persistence(&app.identity, &headers, library_ids.as_deref())
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let Some(user_id) = context.user_id.as_deref() else {
         return StatusCode::UNAUTHORIZED.into_response();

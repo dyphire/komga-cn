@@ -2,6 +2,38 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 #[tokio::test]
+async fn router_claim_status_returns_internal_error_when_status_lookup_fails() {
+    let ctx = TestFixture::builder("router-claim-status-lookup-error")
+        .without_standard_seed()
+        .build()
+        .await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for claim status failure setup");
+    sqlx::query("ALTER TABLE USER RENAME TO USER_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("user table should be renamed for claim status failure setup");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/claim")
+                .body(Body::empty())
+                .expect("claim status failure request should build"),
+        )
+        .await
+        .expect("claim status failure request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
 async fn router_users_me_basic_auth_defaults_to_session_cookie_without_auth_token_header() {
     let ctx = TestFixture::new("router-users-me-basic-defaults-to-cookie").await;
     let basic_token = STANDARD.encode("admin@example.org:router-contract-admin-123");
@@ -140,6 +172,11 @@ pub(crate) async fn verify_login_set_cookie_returns_session_cookie_for_header_se
         .expect("login/set-cookie should return set-cookie header");
     assert!(set_cookie.starts_with(&format!("KOMGA-SESSION={auth_token}")));
     assert!(set_cookie.contains("Path=/"));
+}
+
+#[tokio::test]
+async fn router_login_set_cookie_returns_session_cookie_for_header_session() {
+    verify_login_set_cookie_returns_session_cookie_for_header_session().await;
 }
 
 #[tokio::test]

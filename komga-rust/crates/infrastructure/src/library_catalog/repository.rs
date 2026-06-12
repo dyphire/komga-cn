@@ -1,31 +1,41 @@
 use async_trait::async_trait;
 use komga_application::library_catalog::{
-    LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
+    LibraryBookSeriesRecord, LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
+    LibraryScanInterval, LibrarySeriesAndBookIds, LibrarySeriesCover,
 };
-use komga_application::runtime_sse::register_runtime_sse_event;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
-use serde_json::json;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 
-use crate::read_models::{get_persisted_library, list_persisted_libraries};
+use crate::read_models::{
+    PersistedLibraryReadModel, get_persisted_library, list_persisted_libraries,
+};
 use crate::sqlite::write_models::libraries::{
-    PersistedLibraryWriteModel, delete_persisted_library, library_book_ids,
-    library_book_ids_with_empty_hash, library_series_and_book_ids,
+    PersistedLibraryBookSeriesRecord, PersistedLibrarySeriesAndBookIds, PersistedLibraryWriteModel,
+    delete_persisted_library, library_book_ids, library_book_ids_with_empty_hash,
+    library_books_with_mismatched_extensions, library_series_and_book_ids,
     load_persisted_library_write_model, persist_library_create, persist_library_update,
     validate_library_before_persist,
 };
 
-#[derive(Clone, Debug)]
-pub struct SqliteLibraryCatalogAdapter {
+#[derive(Clone)]
+pub(super) struct SqliteLibraryCatalogAdapter {
     read_pool: SqlitePool,
     write_pool: SqlitePool,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
 }
 
 impl SqliteLibraryCatalogAdapter {
-    pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
+    pub(super) fn new(
+        read_pool: SqlitePool,
+        write_pool: SqlitePool,
+        runtime_events: Arc<dyn RuntimeSseEventSink>,
+    ) -> Self {
         Self {
             read_pool,
             write_pool,
+            runtime_events,
         }
     }
 }
@@ -37,7 +47,11 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
         context: &DiscoveryQueryContext,
     ) -> Result<Vec<LibraryRecord>, DiscoveryError> {
         let libraries = list_persisted_libraries(&self.read_pool, context).await?;
-        Ok(libraries.into_iter().map(LibraryRecord::from).collect())
+        libraries
+            .into_iter()
+            .map(library_record_from_read_model)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DiscoveryError::Persistence)
     }
 
     async fn get_library(
@@ -46,17 +60,20 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
         library_id: &str,
     ) -> Result<Option<LibraryRecord>, DiscoveryError> {
         let library = get_persisted_library(&self.read_pool, context, library_id).await?;
-        Ok(library.map(LibraryRecord::from))
+        library
+            .map(library_record_from_read_model)
+            .transpose()
+            .map_err(DiscoveryError::Persistence)
     }
 }
 
 #[async_trait]
 impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String> {
-        load_persisted_library_write_model(&self.read_pool, library_id)
+        let library = load_persisted_library_write_model(&self.read_pool, library_id)
             .await
-            .map(|library| library.map(LibraryRecord::from))
-            .map_err(|error| format!("load persisted library: {error}"))
+            .map_err(|error| format!("load persisted library: {error}"))?;
+        library.map(library_record_from_write_model).transpose()
     }
 
     async fn validate_library(&self, library: &LibraryRecord) -> Result<(), String> {
@@ -67,12 +84,9 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         persist_library_create(&self.write_pool, &library.clone().into())
             .await
             .map_err(|error| format!("persist library create: {error}"))?;
-        register_runtime_sse_event(
-            "LibraryAdded",
-            json!({ "libraryId": library.id }),
-            false,
-            None,
-        );
+        self.runtime_events.register(RuntimeSseEvent::LibraryAdded {
+            library_id: library.id.clone(),
+        });
         Ok(())
     }
 
@@ -81,12 +95,10 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
             .await
             .map_err(|error| format!("persist library update: {error}"))?;
         if updated {
-            register_runtime_sse_event(
-                "LibraryChanged",
-                json!({ "libraryId": library.id }),
-                false,
-                None,
-            );
+            self.runtime_events
+                .register(RuntimeSseEvent::LibraryChanged {
+                    library_id: library.id.clone(),
+                });
         }
         Ok(updated)
     }
@@ -96,12 +108,10 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
             .await
             .map_err(|error| format!("delete persisted library: {error}"))?;
         if deleted {
-            register_runtime_sse_event(
-                "LibraryDeleted",
-                json!({ "libraryId": library_id }),
-                false,
-                None,
-            );
+            self.runtime_events
+                .register(RuntimeSseEvent::LibraryDeleted {
+                    library_id: library_id.to_string(),
+                });
         }
         Ok(deleted)
     }
@@ -117,18 +127,10 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn library_books_with_mismatched_extensions(
         &self,
         library_id: &str,
-    ) -> Result<Vec<(String, String)>, String> {
-        crate::task_queue::media_helpers::media_queries::load_books_for_extension_repair(
-            &self.write_pool,
-            library_id,
-        )
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| (row.book_id, row.series_id))
-                .collect()
-        })
-        .map_err(|error| format!("load library mismatched extension books: {error}"))
+    ) -> Result<Vec<LibraryBookSeriesRecord>, String> {
+        library_books_with_mismatched_extensions(&self.read_pool, library_id)
+            .await
+            .map(|books| books.into_iter().map(convert_book_series_record).collect())
     }
 
     async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String> {
@@ -140,85 +142,116 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> Result<Option<(Vec<String>, Vec<(String, String)>)>, String> {
+    ) -> Result<Option<LibrarySeriesAndBookIds>, String> {
         library_series_and_book_ids(&self.read_pool, library_id)
             .await
+            .map(|ids| ids.map(convert_series_and_book_ids))
             .map_err(|error| format!("load library series and book ids: {error}"))
     }
 }
 
-impl From<crate::read_models::PersistedLibraryReadModel> for LibraryRecord {
-    fn from(value: crate::read_models::PersistedLibraryReadModel) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            root: value.root,
-            import_comicinfo_book: value.import_comicinfo_book,
-            import_comicinfo_series: value.import_comicinfo_series,
-            import_comicinfo_collection: value.import_comicinfo_collection,
-            import_comicinfo_readlist: value.import_comicinfo_readlist,
-            import_comicinfo_series_append_volume: value.import_comicinfo_series_append_volume,
-            import_epub_book: value.import_epub_book,
-            import_epub_series: value.import_epub_series,
-            import_mylar_series: value.import_mylar_series,
-            import_local_artwork: value.import_local_artwork,
-            import_barcode_isbn: value.import_barcode_isbn,
-            scan_force_modified_time: value.scan_force_modified_time,
-            scan_interval: value.scan_interval,
-            scan_on_startup: value.scan_on_startup,
-            scan_cbx: value.scan_cbx,
-            scan_pdf: value.scan_pdf,
-            scan_epub: value.scan_epub,
-            scan_directory_exclusions: value.scan_directory_exclusions,
-            repair_extensions: value.repair_extensions,
-            convert_to_cbz: value.convert_to_cbz,
-            empty_trash_after_scan: value.empty_trash_after_scan,
-            series_cover: value.series_cover,
-            hash_files: value.hash_files,
-            hash_pages: value.hash_pages,
-            hash_koreader: value.hash_koreader,
-            analyze_dimensions: value.analyze_dimensions,
-            oneshots_directory: value.oneshots_directory,
-            unavailable: value.unavailable,
-        }
+fn convert_book_series_record(value: PersistedLibraryBookSeriesRecord) -> LibraryBookSeriesRecord {
+    LibraryBookSeriesRecord {
+        book_id: value.book_id,
+        series_id: value.series_id,
     }
 }
 
-impl From<crate::sqlite::write_models::libraries::PersistedLibraryWriteModel> for LibraryRecord {
-    fn from(value: crate::sqlite::write_models::libraries::PersistedLibraryWriteModel) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            root: value.root,
-            import_comicinfo_book: value.import_comicinfo_book,
-            import_comicinfo_series: value.import_comicinfo_series,
-            import_comicinfo_collection: value.import_comicinfo_collection,
-            import_comicinfo_readlist: value.import_comicinfo_readlist,
-            import_comicinfo_series_append_volume: value.import_comicinfo_series_append_volume,
-            import_epub_book: value.import_epub_book,
-            import_epub_series: value.import_epub_series,
-            import_mylar_series: value.import_mylar_series,
-            import_local_artwork: value.import_local_artwork,
-            import_barcode_isbn: value.import_barcode_isbn,
-            scan_force_modified_time: value.scan_force_modified_time,
-            scan_interval: value.scan_interval,
-            scan_on_startup: value.scan_on_startup,
-            scan_cbx: value.scan_cbx,
-            scan_pdf: value.scan_pdf,
-            scan_epub: value.scan_epub,
-            scan_directory_exclusions: value.scan_directory_exclusions,
-            repair_extensions: value.repair_extensions,
-            convert_to_cbz: value.convert_to_cbz,
-            empty_trash_after_scan: value.empty_trash_after_scan,
-            series_cover: value.series_cover,
-            hash_files: value.hash_files,
-            hash_pages: value.hash_pages,
-            hash_koreader: value.hash_koreader,
-            analyze_dimensions: value.analyze_dimensions,
-            oneshots_directory: value.oneshots_directory,
-            unavailable: value.unavailable,
-        }
+fn convert_series_and_book_ids(value: PersistedLibrarySeriesAndBookIds) -> LibrarySeriesAndBookIds {
+    LibrarySeriesAndBookIds {
+        series_ids: value.series_ids,
+        books: value
+            .books
+            .into_iter()
+            .map(convert_book_series_record)
+            .collect(),
     }
+}
+
+fn library_record_from_read_model(
+    value: PersistedLibraryReadModel,
+) -> Result<LibraryRecord, String> {
+    Ok(LibraryRecord {
+        id: value.id,
+        name: value.name,
+        root: value.root,
+        import_comicinfo_book: value.import_comicinfo_book,
+        import_comicinfo_series: value.import_comicinfo_series,
+        import_comicinfo_collection: value.import_comicinfo_collection,
+        import_comicinfo_readlist: value.import_comicinfo_readlist,
+        import_comicinfo_series_append_volume: value.import_comicinfo_series_append_volume,
+        import_epub_book: value.import_epub_book,
+        import_epub_series: value.import_epub_series,
+        import_mylar_series: value.import_mylar_series,
+        import_local_artwork: value.import_local_artwork,
+        import_barcode_isbn: value.import_barcode_isbn,
+        scan_force_modified_time: value.scan_force_modified_time,
+        scan_interval: scan_interval_from_persisted(&value.scan_interval)?,
+        scan_on_startup: value.scan_on_startup,
+        scan_cbx: value.scan_cbx,
+        scan_pdf: value.scan_pdf,
+        scan_epub: value.scan_epub,
+        scan_directory_exclusions: value.scan_directory_exclusions,
+        repair_extensions: value.repair_extensions,
+        convert_to_cbz: value.convert_to_cbz,
+        empty_trash_after_scan: value.empty_trash_after_scan,
+        series_cover: series_cover_from_persisted(&value.series_cover)?,
+        hash_files: value.hash_files,
+        hash_pages: value.hash_pages,
+        hash_koreader: value.hash_koreader,
+        analyze_dimensions: value.analyze_dimensions,
+        oneshots_directory: value.oneshots_directory,
+        unavailable: value.unavailable,
+    })
+}
+
+fn library_record_from_write_model(
+    value: PersistedLibraryWriteModel,
+) -> Result<LibraryRecord, String> {
+    Ok(LibraryRecord {
+        id: value.id,
+        name: value.name,
+        root: value.root,
+        import_comicinfo_book: value.import_comicinfo_book,
+        import_comicinfo_series: value.import_comicinfo_series,
+        import_comicinfo_collection: value.import_comicinfo_collection,
+        import_comicinfo_readlist: value.import_comicinfo_readlist,
+        import_comicinfo_series_append_volume: value.import_comicinfo_series_append_volume,
+        import_epub_book: value.import_epub_book,
+        import_epub_series: value.import_epub_series,
+        import_mylar_series: value.import_mylar_series,
+        import_local_artwork: value.import_local_artwork,
+        import_barcode_isbn: value.import_barcode_isbn,
+        scan_force_modified_time: value.scan_force_modified_time,
+        scan_interval: scan_interval_from_persisted(&value.scan_interval)?,
+        scan_on_startup: value.scan_on_startup,
+        scan_cbx: value.scan_cbx,
+        scan_pdf: value.scan_pdf,
+        scan_epub: value.scan_epub,
+        scan_directory_exclusions: value.scan_directory_exclusions,
+        repair_extensions: value.repair_extensions,
+        convert_to_cbz: value.convert_to_cbz,
+        empty_trash_after_scan: value.empty_trash_after_scan,
+        series_cover: series_cover_from_persisted(&value.series_cover)?,
+        hash_files: value.hash_files,
+        hash_pages: value.hash_pages,
+        hash_koreader: value.hash_koreader,
+        analyze_dimensions: value.analyze_dimensions,
+        oneshots_directory: value.oneshots_directory,
+        unavailable: value.unavailable,
+    })
+}
+
+fn scan_interval_from_persisted(value: &str) -> Result<LibraryScanInterval, String> {
+    let normalized = value.trim().to_ascii_uppercase();
+    LibraryScanInterval::from_persisted_name(normalized.as_str())
+        .ok_or_else(|| format!("unsupported library scan interval: {value}"))
+}
+
+fn series_cover_from_persisted(value: &str) -> Result<LibrarySeriesCover, String> {
+    let normalized = value.trim().to_ascii_uppercase();
+    LibrarySeriesCover::from_persisted_name(normalized.as_str())
+        .ok_or_else(|| format!("unsupported library series cover: {value}"))
 }
 
 impl From<LibraryRecord> for PersistedLibraryWriteModel {
@@ -238,7 +271,7 @@ impl From<LibraryRecord> for PersistedLibraryWriteModel {
             import_local_artwork: value.import_local_artwork,
             import_barcode_isbn: value.import_barcode_isbn,
             scan_force_modified_time: value.scan_force_modified_time,
-            scan_interval: value.scan_interval,
+            scan_interval: value.scan_interval.persisted_name().to_string(),
             scan_on_startup: value.scan_on_startup,
             scan_cbx: value.scan_cbx,
             scan_pdf: value.scan_pdf,
@@ -247,7 +280,7 @@ impl From<LibraryRecord> for PersistedLibraryWriteModel {
             repair_extensions: value.repair_extensions,
             convert_to_cbz: value.convert_to_cbz,
             empty_trash_after_scan: value.empty_trash_after_scan,
-            series_cover: value.series_cover,
+            series_cover: value.series_cover.persisted_name().to_string(),
             hash_files: value.hash_files,
             hash_pages: value.hash_pages,
             hash_koreader: value.hash_koreader,

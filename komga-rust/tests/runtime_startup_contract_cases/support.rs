@@ -12,6 +12,16 @@ pub(super) fn startup_contract_lock() -> MutexGuard<'static, ()> {
         .expect("startup contract lock should not be poisoned")
 }
 
+pub(super) async fn connect_test_pool(
+    path: impl AsRef<std::path::Path>,
+    max_connections: u32,
+) -> Result<sqlx::SqlitePool, sqlx::Error> {
+    sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(max_connections)
+        .connect_with(komga_infrastructure::file_backed_connect_options(path))
+        .await
+}
+
 pub(super) fn unique_temp_dir(prefix: &str) -> PathBuf {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -33,7 +43,7 @@ pub(super) fn create_stale_schema_search_index(index_dir: &std::path::Path) {
 }
 
 pub(super) fn create_runtime_index_with_stale_analyzer_version(index_dir: &std::path::Path) {
-    komga_infrastructure::search::index_lifecycle::SearchIndexLifecycle::bootstrap(index_dir)
+    komga_infrastructure::SearchIndexLifecycle::bootstrap(index_dir)
         .expect("runtime index fixture should bootstrap");
     fs::write(
         index_dir.join(ANALYZER_VERSION_MARKER_FILE),

@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::{BTreeMap, HashMap};
 
-use crate::runtime_sse::register_runtime_sse_event;
+use crate::random_tokens::random_hex_token;
+use crate::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
@@ -10,14 +9,17 @@ use icu::collator::{
 use icu::locale::locale;
 use komga_domain::common_ids::LibraryId;
 use komga_domain::discovery::{
-    DiscoveryError, DiscoveryQueryContext, PageEnvelope, content_allowed_by_restrictions,
+    DiscoveryError, DiscoveryQueryContext, MediaStatus, PageEnvelope, ReadStatus,
+    content_allowed_by_restrictions,
 };
-use serde_json::json;
+use quick_xml::Reader as XmlReader;
+use quick_xml::XmlVersion;
+use quick_xml::events::Event as XmlEvent;
 
 use super::{
-    BookMetadataAuthorReadModel, BookReadModel, DiscoveryPersistedReadlistRecord,
-    PersistedBookResourceRecord, ReadListReadModel, ReadlistBookPort, ReadlistPort,
-    ReadlistSearchPort,
+    BookReadModel, DiscoveryPersistedReadlistRecord, PersistedBookResourceRecord,
+    PersistedComicrackMatchCandidateRecord, ReadListReadModel, ReadlistBookPort,
+    ReadlistComicRackMatchPort, ReadlistMutationPort, ReadlistProjectionPort, ReadlistSearchPort,
 };
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
@@ -52,8 +54,8 @@ pub struct ReadListBooksQuery {
     pub library_ids: Option<Vec<String>>,
     pub deleted: Option<bool>,
     pub tags: Option<Vec<String>>,
-    pub read_statuses: Option<Vec<String>>,
-    pub media_statuses: Option<Vec<String>>,
+    pub read_statuses: Option<Vec<ReadStatus>>,
+    pub media_statuses: Option<Vec<MediaStatus>>,
     pub authors: Option<Vec<String>>,
 }
 
@@ -79,6 +81,88 @@ pub struct ReadlistCreateResult {
 pub enum ReadlistMutationError {
     DuplicateName,
     Persistence(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackReadListRequestBook {
+    pub series_candidates: Vec<String>,
+    pub number: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackReadListRequest {
+    pub name: String,
+    pub books: Vec<ComicRackReadListRequestBook>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComicRackReadListParseError {
+    InvalidXml,
+    MissingBooks,
+    MissingName,
+    MissingBookIdentity,
+}
+
+impl ComicRackReadListParseError {
+    pub fn error_code(self) -> &'static str {
+        match self {
+            Self::InvalidXml => "ERR_1015",
+            Self::MissingBooks => "ERR_1029",
+            Self::MissingName => "ERR_1030",
+            Self::MissingBookIdentity => "ERR_1031",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComicRackReadListMatchError {
+    DuplicateName,
+}
+
+impl ComicRackReadListMatchError {
+    pub fn error_code(self) -> &'static str {
+        match self {
+            Self::DuplicateName => "ERR_1009",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackMatchSeries {
+    pub series_id: String,
+    pub title: String,
+    pub release_date: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackMatchBook {
+    pub book_id: String,
+    pub number: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackReadListMatchGroup {
+    pub series: ComicRackMatchSeries,
+    pub books: Vec<ComicRackMatchBook>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackReadListRequestMatch {
+    pub request: ComicRackReadListRequestBook,
+    pub matches: Vec<ComicRackReadListMatchGroup>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComicRackReadListMatchResult {
+    pub name: String,
+    pub error: Option<ComicRackReadListMatchError>,
+    pub requests: Vec<ComicRackReadListRequestMatch>,
+}
+
+struct ReadlistBookVisibility {
+    book_ids: Vec<String>,
+    filtered: bool,
 }
 
 impl std::fmt::Display for ReadlistMutationError {
@@ -108,15 +192,20 @@ pub fn classify_readlist_books_query(
     Ok(ReadListBooksOwnership::DependencyOnly)
 }
 
-pub struct ReadlistListService<'a> {
-    readlists: &'a dyn ReadlistPort,
+pub struct ReadlistProjectionService<'a> {
+    readlists: &'a dyn ReadlistProjectionPort,
     books: &'a dyn ReadlistBookPort,
     search: &'a dyn ReadlistSearchPort,
 }
 
-impl<'a> ReadlistListService<'a> {
+struct VisibleReadlistProjection {
+    readlist: ReadListReadModel,
+    books: Vec<BookReadModel>,
+}
+
+impl<'a> ReadlistProjectionService<'a> {
     pub fn new(
-        readlists: &'a dyn ReadlistPort,
+        readlists: &'a dyn ReadlistProjectionPort,
         books: &'a dyn ReadlistBookPort,
         search: &'a dyn ReadlistSearchPort,
     ) -> Self {
@@ -133,10 +222,9 @@ impl<'a> ReadlistListService<'a> {
         visibility_context: &DiscoveryQueryContext,
         query: ReadListsQuery,
     ) -> Result<PageEnvelope<ReadListReadModel>, String> {
-        let visibility = ReadlistVisibilityService::new(self.readlists, self.books);
         let requested_library_ids =
             library_ids_to_strings(requested_context.authorized_library_ids.as_ref());
-        let mut content = visibility
+        let mut content = self
             .load_readlists(requested_library_ids.as_deref())
             .await?;
 
@@ -150,51 +238,37 @@ impl<'a> ReadlistListService<'a> {
 
         let mut visible_content = Vec::with_capacity(content.len());
         for readlist in content {
-            let Some(mut visible_readlist) = visibility
-                .load_readlist_detail(&readlist.id, visibility_context)
-                .await?
-            else {
-                continue;
-            };
-
             if let Some(library_ids) = query.library_ids.as_ref() {
                 let requested_library_query =
                     readlist_books_visibility_query(readlist.id.clone(), Some(library_ids.clone()));
-                let Some(requested_library_books) = visibility
-                    .visible_readlist_books(visibility_context, &requested_library_query)
+                let Some(requested_library_projection) = self
+                    .visible_readlist_projection(visibility_context, &requested_library_query)
                     .await?
                 else {
                     continue;
                 };
 
-                if requested_library_books.is_empty() {
+                if requested_library_projection.books.is_empty() {
                     continue;
                 }
             }
 
             let visibility_query = readlist_books_visibility_query(readlist.id.clone(), None);
-            let Some(visible_books) = visibility
-                .visible_readlist_books(visibility_context, &visibility_query)
+            let Some(projection) = self
+                .visible_readlist_projection(visibility_context, &visibility_query)
                 .await?
             else {
                 continue;
             };
 
-            let visible_book_ids = visible_books
-                .into_iter()
-                .map(|book| book.id)
-                .collect::<Vec<_>>();
-            if visible_book_ids.is_empty() {
-                if visible_readlist.book_ids.is_empty() && !visible_readlist.filtered {
-                    visible_content.push(visible_readlist);
+            if projection.books.is_empty() {
+                if projection.readlist.book_ids.is_empty() && !projection.readlist.filtered {
+                    visible_content.push(projection.readlist);
                 }
                 continue;
             }
 
-            visible_readlist.filtered =
-                visible_readlist.filtered || visible_readlist.book_ids != visible_book_ids;
-            visible_readlist.book_ids = visible_book_ids;
-            visible_content.push(visible_readlist);
+            visible_content.push(projection.readlist);
         }
 
         sort_readlists(&mut visible_content, query.sort, search_ranks.as_ref());
@@ -218,8 +292,8 @@ impl<'a> ReadlistListService<'a> {
                 .search
                 .search_readlist_scored_ids(search_group, READLIST_SEARCH_CANDIDATE_LIMIT)
                 .await?;
-            for (_score, id) in ranked_hits {
-                if let std::collections::hash_map::Entry::Vacant(entry) = ranks.entry(id) {
+            for hit in ranked_hits {
+                if let std::collections::hash_map::Entry::Vacant(entry) = ranks.entry(hit.id) {
                     entry.insert(next_rank);
                     next_rank += 1;
                 }
@@ -231,49 +305,59 @@ impl<'a> ReadlistListService<'a> {
 }
 
 pub struct ReadlistMutationService<'a> {
-    readlists: &'a dyn ReadlistPort,
+    readlists: &'a dyn ReadlistMutationPort,
+    runtime_events: &'a dyn RuntimeSseEventSink,
 }
 
-pub struct ReadlistVisibilityService<'a> {
-    readlists: &'a dyn ReadlistPort,
-    books: &'a dyn ReadlistBookPort,
+pub struct ComicRackReadListMatchService<'a> {
+    readlists: &'a dyn ReadlistComicRackMatchPort,
 }
 
-impl<'a> ReadlistVisibilityService<'a> {
-    pub fn new(readlists: &'a dyn ReadlistPort, books: &'a dyn ReadlistBookPort) -> Self {
-        Self { readlists, books }
+impl<'a> ComicRackReadListMatchService<'a> {
+    pub fn new(readlists: &'a dyn ReadlistComicRackMatchPort) -> Self {
+        Self { readlists }
     }
 
-    pub async fn list_readlists(
+    pub async fn match_readlist(
         &self,
-        library_ids: Option<&[String]>,
-    ) -> Result<Vec<ReadListReadModel>, String> {
-        self.load_readlists(library_ids).await
-    }
+        request: &ComicRackReadListRequest,
+    ) -> Result<ComicRackReadListMatchResult, String> {
+        let readlists = self.readlists.load_persisted_readlists().await?;
+        let error = readlists
+            .iter()
+            .any(|readlist| readlist.name.eq_ignore_ascii_case(&request.name))
+            .then_some(ComicRackReadListMatchError::DuplicateName);
 
+        let candidates = self.readlists.load_comicrack_match_candidates().await?;
+        let requests = request
+            .books
+            .iter()
+            .map(|book| match_comicrack_request_book(book, &candidates))
+            .collect::<Vec<_>>();
+
+        Ok(ComicRackReadListMatchResult {
+            name: request.name.clone(),
+            error,
+            requests,
+        })
+    }
+}
+
+impl<'a> ReadlistProjectionService<'a> {
     pub async fn readlist_detail(
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
     ) -> Result<Option<ReadListReadModel>, String> {
-        let Some(mut readlist) = self.load_readlist_detail(readlist_id, context).await? else {
-            return Ok(None);
-        };
         let query = readlist_books_visibility_query(readlist_id, None);
-        let Some(visible_books) = self.visible_readlist_books(context, &query).await? else {
+        let Some(projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
         };
-        let visible_book_ids = visible_books
-            .into_iter()
-            .map(|book| book.id)
-            .collect::<Vec<_>>();
-        if visible_book_ids.is_empty() {
+        if projection.books.is_empty() {
             return Ok(None);
         }
 
-        readlist.filtered = readlist.book_ids != visible_book_ids;
-        readlist.book_ids = visible_book_ids;
-        Ok(Some(readlist))
+        Ok(Some(projection.readlist))
     }
 
     pub async fn list_readlist_books(
@@ -281,18 +365,12 @@ impl<'a> ReadlistVisibilityService<'a> {
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
     ) -> Result<Option<PageEnvelope<BookReadModel>>, String> {
-        let Some(readlist) = self
-            .load_readlist_detail(&query.readlist_id, context)
-            .await?
-        else {
-            return Ok(None);
-        };
-        let Some(mut visible_books) = self.visible_readlist_books(context, &query).await? else {
+        let Some(mut projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
         };
 
-        sort_readlist_books(&mut visible_books, readlist.ordered);
-        Ok(Some(paginate_readlist_books(visible_books, &query)))
+        sort_readlist_books(&mut projection.books, projection.readlist.ordered);
+        Ok(Some(paginate_readlist_books(projection.books, &query)))
     }
 
     pub async fn visible_readlist_book_ids(
@@ -301,13 +379,11 @@ impl<'a> ReadlistVisibilityService<'a> {
         readlist_id: &str,
     ) -> Result<Option<Vec<String>>, String> {
         let query = readlist_books_visibility_query(readlist_id, None);
-        let Some(visible_books) = self.visible_readlist_books(context, &query).await? else {
+        let Some(projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
         };
 
-        Ok(Some(
-            visible_books.into_iter().map(|book| book.id).collect(),
-        ))
+        Ok(Some(projection.readlist.book_ids))
     }
 
     pub async fn readlist_book_sibling(
@@ -318,15 +394,13 @@ impl<'a> ReadlistVisibilityService<'a> {
         next: bool,
     ) -> Result<Option<BookReadModel>, String> {
         let query = readlist_books_visibility_query(readlist_id, None);
-        let Some(readlist) = self.load_readlist_detail(readlist_id, context).await? else {
-            return Ok(None);
-        };
-        let Some(mut visible_books) = self.visible_readlist_books(context, &query).await? else {
+        let Some(mut projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
         };
 
-        sort_readlist_books(&mut visible_books, readlist.ordered);
-        let Some(current_index) = visible_books.iter().position(|book| book.id == book_id) else {
+        sort_readlist_books(&mut projection.books, projection.readlist.ordered);
+        let Some(current_index) = projection.books.iter().position(|book| book.id == book_id)
+        else {
             return Ok(None);
         };
         let sibling_index = if next {
@@ -337,7 +411,7 @@ impl<'a> ReadlistVisibilityService<'a> {
             current_index - 1
         };
 
-        Ok(visible_books.get(sibling_index).cloned())
+        Ok(projection.books.get(sibling_index).cloned())
     }
 
     pub async fn readlists_for_book(
@@ -350,25 +424,19 @@ impl<'a> ReadlistVisibilityService<'a> {
         readlists.retain(|readlist| readlist.book_ids.iter().any(|id| id == book_id));
 
         let mut visible_readlists = Vec::with_capacity(readlists.len());
-        for mut readlist in readlists {
+        for readlist in readlists {
             let query = readlist_books_visibility_query(readlist.id.clone(), None);
-            let Some(visible_books) = self
-                .visible_readlist_books(visibility_context, &query)
+            let Some(projection) = self
+                .visible_readlist_projection(visibility_context, &query)
                 .await?
             else {
                 continue;
             };
-            let visible_book_ids = visible_books
-                .into_iter()
-                .map(|book| book.id)
-                .collect::<Vec<_>>();
-            if !visible_book_ids.iter().any(|id| id == book_id) {
+            if !projection.readlist.book_ids.iter().any(|id| id == book_id) {
                 continue;
             }
 
-            readlist.filtered = readlist.book_ids != visible_book_ids;
-            readlist.book_ids = visible_book_ids;
-            visible_readlists.push(readlist);
+            visible_readlists.push(projection.readlist);
         }
 
         Ok(visible_readlists)
@@ -383,13 +451,16 @@ impl<'a> ReadlistVisibilityService<'a> {
         let mut readlists = Vec::with_capacity(rows.len());
         for row in rows {
             let id = row.id.clone();
-            let (book_ids, filtered) =
-                load_readlist_book_ids(self.readlists, &id, library_ids).await?;
-            if library_ids.is_some() && book_ids.is_empty() {
+            let visibility = load_readlist_book_ids(self.readlists, &id, library_ids).await?;
+            if library_ids.is_some() && visibility.book_ids.is_empty() {
                 continue;
             }
 
-            readlists.push(readlist_from_record(row, book_ids, filtered));
+            readlists.push(readlist_from_record(
+                row,
+                visibility.book_ids,
+                visibility.filtered,
+            ));
         }
 
         Ok(readlists)
@@ -410,22 +481,26 @@ impl<'a> ReadlistVisibilityService<'a> {
 
         let authorized_library_ids =
             library_ids_to_strings(context.authorized_library_ids.as_ref());
-        let (book_ids, filtered) = load_readlist_book_ids(
+        let visibility = load_readlist_book_ids(
             self.readlists,
             readlist_id,
             authorized_library_ids.as_deref(),
         )
         .await?;
 
-        Ok(Some(readlist_from_record(row, book_ids, filtered)))
+        Ok(Some(readlist_from_record(
+            row,
+            visibility.book_ids,
+            visibility.filtered,
+        )))
     }
 
-    async fn visible_readlist_books(
+    async fn visible_readlist_projection(
         &self,
         context: &DiscoveryQueryContext,
         query: &ReadListBooksQuery,
-    ) -> Result<Option<Vec<BookReadModel>>, String> {
-        let Some(readlist) = self
+    ) -> Result<Option<VisibleReadlistProjection>, String> {
+        let Some(mut readlist) = self
             .load_readlist_detail(&query.readlist_id, context)
             .await?
         else {
@@ -435,6 +510,19 @@ impl<'a> ReadlistVisibilityService<'a> {
             return Ok(None);
         }
 
+        let books = self.visible_readlist_books(context, query).await?;
+        let visible_book_ids = books.iter().map(|book| book.id.clone()).collect::<Vec<_>>();
+        readlist.filtered = readlist.filtered || readlist.book_ids != visible_book_ids;
+        readlist.book_ids = visible_book_ids;
+
+        Ok(Some(VisibleReadlistProjection { readlist, books }))
+    }
+
+    async fn visible_readlist_books(
+        &self,
+        context: &DiscoveryQueryContext,
+        query: &ReadListBooksQuery,
+    ) -> Result<Vec<BookReadModel>, String> {
         let authorized_library_ids =
             library_ids_to_strings(context.authorized_library_ids.as_ref());
         let user_id = context.user_id.as_ref().map(|user_id| user_id.as_str());
@@ -478,21 +566,26 @@ impl<'a> ReadlistVisibilityService<'a> {
                 continue;
             };
 
-            let authors = self.books.load_persisted_book_authors(&row.book_id).await?;
-            if !matches_readlist_book_filters(&detail, &authors, query) {
+            if !matches_readlist_book_filters(&detail, query) {
                 continue;
             }
 
             visible.push(detail);
         }
 
-        Ok(Some(visible))
+        Ok(visible)
     }
 }
 
 impl<'a> ReadlistMutationService<'a> {
-    pub fn new(readlists: &'a dyn ReadlistPort) -> Self {
-        Self { readlists }
+    pub fn new(
+        readlists: &'a dyn ReadlistMutationPort,
+        runtime_events: &'a dyn RuntimeSseEventSink,
+    ) -> Self {
+        Self {
+            readlists,
+            runtime_events,
+        }
     }
 
     pub async fn create_readlist(
@@ -513,15 +606,11 @@ impl<'a> ReadlistMutationService<'a> {
             .await
             .map_err(ReadlistMutationError::Persistence)?;
 
-        register_runtime_sse_event(
-            "ReadListAdded",
-            json!({
-                "readListId": readlist_id,
-                "bookIds": input.book_ids,
-            }),
-            false,
-            None,
-        );
+        self.runtime_events
+            .register(RuntimeSseEvent::ReadListAdded {
+                readlist_id: readlist_id.clone(),
+                book_ids: input.book_ids.clone(),
+            });
         self.readlists
             .upsert_readlist_search_document(&readlist_id)
             .await
@@ -553,15 +642,11 @@ impl<'a> ReadlistMutationService<'a> {
             return Ok(false);
         }
 
-        register_runtime_sse_event(
-            "ReadListChanged",
-            json!({
-                "readListId": readlist_id,
-                "bookIds": input.book_ids,
-            }),
-            false,
-            None,
-        );
+        self.runtime_events
+            .register(RuntimeSseEvent::ReadListChanged {
+                readlist_id: readlist_id.to_string(),
+                book_ids: input.book_ids.clone(),
+            });
         self.readlists
             .upsert_readlist_search_document(readlist_id)
             .await
@@ -585,15 +670,11 @@ impl<'a> ReadlistMutationService<'a> {
         }
 
         if let Some(readlist) = existing {
-            register_runtime_sse_event(
-                "ReadListDeleted",
-                json!({
-                    "readListId": readlist_id,
-                    "bookIds": readlist.book_ids,
-                }),
-                false,
-                None,
-            );
+            self.runtime_events
+                .register(RuntimeSseEvent::ReadListDeleted {
+                    readlist_id: readlist_id.to_string(),
+                    book_ids: readlist.book_ids,
+                });
         }
         self.readlists
             .delete_readlist_search_document(readlist_id)
@@ -635,10 +716,171 @@ impl<'a> ReadlistMutationService<'a> {
         else {
             return Ok(None);
         };
-        let (book_ids, filtered) =
-            load_readlist_book_ids(self.readlists, readlist_id, None).await?;
+        let visibility = load_readlist_book_ids(self.readlists, readlist_id, None).await?;
 
-        Ok(Some(readlist_from_record(row, book_ids, filtered)))
+        Ok(Some(readlist_from_record(
+            row,
+            visibility.book_ids,
+            visibility.filtered,
+        )))
+    }
+}
+
+pub fn parse_comicrack_readlist(
+    bytes: &[u8],
+) -> Result<ComicRackReadListRequest, ComicRackReadListParseError> {
+    let mut reader = XmlReader::from_reader(bytes);
+    reader.config_mut().trim_text(true);
+
+    let mut buffer = Vec::new();
+    let mut readlist_name = None::<String>;
+    let mut books = Vec::<ComicRackReadListRequestBook>::new();
+    let mut reading_name = false;
+    let mut depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(XmlEvent::Start(event)) => {
+                depth += 1;
+                if xml_name_matches(event.name().as_ref(), b"Name") {
+                    reading_name = true;
+                } else if xml_name_matches(event.name().as_ref(), b"Book") {
+                    books.push(parse_comicrack_book(&event)?);
+                }
+            }
+            Ok(XmlEvent::Empty(event)) if xml_name_matches(event.name().as_ref(), b"Book") => {
+                books.push(parse_comicrack_book(&event)?);
+            }
+            Ok(XmlEvent::Text(text)) if reading_name => {
+                let value = String::from_utf8_lossy(text.as_ref()).trim().to_string();
+                readlist_name = Some(value);
+            }
+            Ok(XmlEvent::End(event)) if xml_name_matches(event.name().as_ref(), b"Name") => {
+                depth = depth.saturating_sub(1);
+                reading_name = false;
+            }
+            Ok(XmlEvent::End(_)) => {
+                depth = depth.saturating_sub(1);
+            }
+            Ok(XmlEvent::Eof) => {
+                if depth != 0 {
+                    return Err(ComicRackReadListParseError::InvalidXml);
+                }
+                break;
+            }
+            Err(_) => return Err(ComicRackReadListParseError::InvalidXml),
+            _ => {}
+        }
+        buffer.clear();
+    }
+
+    let name = readlist_name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or(ComicRackReadListParseError::MissingName)?;
+    if books.is_empty() {
+        return Err(ComicRackReadListParseError::MissingBooks);
+    }
+
+    Ok(ComicRackReadListRequest { name, books })
+}
+
+fn parse_comicrack_book(
+    event: &quick_xml::events::BytesStart<'_>,
+) -> Result<ComicRackReadListRequestBook, ComicRackReadListParseError> {
+    let mut series = None::<String>;
+    let mut number = None::<String>;
+    let mut volume = None::<String>;
+
+    for attribute in event.attributes() {
+        let attribute = attribute.map_err(|_| ComicRackReadListParseError::InvalidXml)?;
+        if xml_name_matches(attribute.key.as_ref(), b"Series") {
+            series = Some(comicrack_attribute_value(attribute)?);
+        } else if xml_name_matches(attribute.key.as_ref(), b"Number") {
+            number = Some(comicrack_attribute_value(attribute)?);
+        } else if xml_name_matches(attribute.key.as_ref(), b"Volume") {
+            volume = Some(comicrack_attribute_value(attribute)?);
+        }
+    }
+
+    let series = series
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or(ComicRackReadListParseError::MissingBookIdentity)?;
+    let number = number
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or(ComicRackReadListParseError::MissingBookIdentity)?;
+
+    let mut series_candidates = vec![series.clone()];
+    if let Some(volume) = volume
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != "1")
+    {
+        series_candidates.push(format!("{series} ({volume})"));
+    }
+
+    Ok(ComicRackReadListRequestBook {
+        series_candidates,
+        number,
+    })
+}
+
+fn comicrack_attribute_value(
+    attribute: quick_xml::events::attributes::Attribute<'_>,
+) -> Result<String, ComicRackReadListParseError> {
+    attribute
+        .normalized_value(XmlVersion::Implicit1_0)
+        .map(|value| value.into_owned())
+        .map_err(|_| ComicRackReadListParseError::InvalidXml)
+}
+
+fn match_comicrack_request_book(
+    book: &ComicRackReadListRequestBook,
+    candidates: &[PersistedComicrackMatchCandidateRecord],
+) -> ComicRackReadListRequestMatch {
+    let mut grouped = BTreeMap::<String, ComicRackReadListMatchGroup>::new();
+    for candidate in candidates.iter().filter(|candidate| {
+        book.series_candidates
+            .iter()
+            .any(|series| series.eq_ignore_ascii_case(&candidate.series_title))
+            && normalized_comicrack_number(&book.number)
+                == normalized_comicrack_number(&candidate.book_number)
+    }) {
+        grouped
+            .entry(candidate.series_id.clone())
+            .or_insert_with(|| ComicRackReadListMatchGroup {
+                series: ComicRackMatchSeries {
+                    series_id: candidate.series_id.clone(),
+                    title: candidate.series_title.clone(),
+                    release_date: candidate.series_release_date.clone(),
+                },
+                books: Vec::new(),
+            })
+            .books
+            .push(ComicRackMatchBook {
+                book_id: candidate.book_id.clone(),
+                number: candidate.book_number.clone(),
+                title: candidate.book_title.clone(),
+            });
+    }
+
+    ComicRackReadListRequestMatch {
+        request: book.clone(),
+        matches: grouped.into_values().collect(),
+    }
+}
+
+fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+    actual.eq_ignore_ascii_case(expected)
+}
+
+fn normalized_comicrack_number(value: &str) -> String {
+    let normalized = value.trim().trim_start_matches('0').to_ascii_lowercase();
+    if normalized.is_empty() {
+        value.trim().to_ascii_lowercase()
+    } else {
+        normalized
     }
 }
 
@@ -660,10 +902,10 @@ fn readlist_from_record(
 }
 
 async fn load_readlist_book_ids(
-    readlists: &dyn ReadlistPort,
+    readlists: &dyn ReadlistProjectionPort,
     readlist_id: &str,
     library_ids: Option<&[String]>,
-) -> Result<(Vec<String>, bool), String> {
+) -> Result<ReadlistBookVisibility, String> {
     let rows = readlists
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
@@ -675,7 +917,10 @@ async fn load_readlist_book_ids(
         .map(|row| row.book_id)
         .collect::<Vec<_>>();
 
-    Ok((book_ids.clone(), book_ids.len() < total_count))
+    Ok(ReadlistBookVisibility {
+        filtered: book_ids.len() < total_count,
+        book_ids,
+    })
 }
 
 fn readlist_books_visibility_query(
@@ -719,16 +964,12 @@ fn book_resource_allowed(
         content_allowed_by_restrictions(
             restrictions,
             resource.age_rating,
-            &parse_csv_values(&resource.sharing_labels),
+            &parse_group_concat_values(&resource.sharing_labels),
         )
     })
 }
 
-fn matches_readlist_book_filters(
-    book: &BookReadModel,
-    book_authors: &[BookMetadataAuthorReadModel],
-    query: &ReadListBooksQuery,
-) -> bool {
+fn matches_readlist_book_filters(book: &BookReadModel, query: &ReadListBooksQuery) -> bool {
     if query.deleted.is_some_and(|deleted| deleted != book.deleted) {
         return false;
     }
@@ -742,22 +983,18 @@ fn matches_readlist_book_filters(
     }) {
         return false;
     }
-    if query.media_statuses.as_ref().is_some_and(|statuses| {
-        !statuses.is_empty()
-            && !statuses
-                .iter()
-                .any(|status| book.media_status.eq_ignore_ascii_case(status))
-    }) {
+    if query
+        .media_statuses
+        .as_ref()
+        .is_some_and(|statuses| !statuses.is_empty() && !statuses.contains(&book.media_status))
+    {
         return false;
     }
     if let Some(read_statuses) = query.read_statuses.as_ref()
         && !read_statuses.is_empty()
     {
         let read_status = persisted_read_status(book);
-        if !read_statuses
-            .iter()
-            .any(|status| read_status.eq_ignore_ascii_case(status))
-        {
+        if !read_statuses.contains(&read_status) {
             return false;
         }
     }
@@ -768,11 +1005,11 @@ fn matches_readlist_book_filters(
         let matches_author_filter = authors
             .iter()
             .filter_map(|author| parse_author_filter(author))
-            .any(|(requested_name, requested_role)| {
+            .any(|filter| {
                 has_author_filters = true;
-                book_authors.iter().any(|author| {
-                    author.name.eq_ignore_ascii_case(&requested_name)
-                        && author.role.eq_ignore_ascii_case(&requested_role)
+                book.metadata_authors.iter().any(|author| {
+                    author.name.eq_ignore_ascii_case(&filter.name)
+                        && author.role.eq_ignore_ascii_case(&filter.role)
                 })
             });
         if has_author_filters && !matches_author_filter {
@@ -783,20 +1020,37 @@ fn matches_readlist_book_filters(
     true
 }
 
-fn parse_author_filter(value: &str) -> Option<(String, String)> {
-    let (name, role) = value.rsplit_once(',')?;
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return None;
-    }
-    Some((name, role.trim().to_ascii_lowercase()))
+struct ReadListAuthorFilter {
+    name: String,
+    role: String,
 }
 
-fn persisted_read_status(book: &BookReadModel) -> &'static str {
+impl ReadListAuthorFilter {
+    fn parse(value: &str) -> Option<Self> {
+        match value.rsplit_once(',') {
+            Some((name, role)) => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                Some(Self {
+                    name,
+                    role: role.trim().to_ascii_lowercase(),
+                })
+            }
+            None => None,
+        }
+    }
+}
+
+fn parse_author_filter(value: &str) -> Option<ReadListAuthorFilter> {
+    ReadListAuthorFilter::parse(value)
+}
+
+fn persisted_read_status(book: &BookReadModel) -> ReadStatus {
     match book.read_progress.as_ref() {
-        Some(progress) if progress.completed => "READ",
-        Some(progress) if progress.page > 0 => "IN_PROGRESS",
-        _ => "UNREAD",
+        Some(progress) => ReadStatus::from_progress(progress.page, progress.completed),
+        None => ReadStatus::Unread,
     }
 }
 
@@ -908,12 +1162,14 @@ fn paginate_readlist_books(
     PageEnvelope::from_slice(content, query.page, query.size, total_elements)
 }
 
-fn parse_csv_values(raw: &str) -> Vec<String> {
+fn parse_group_concat_values(raw: &str) -> Vec<String> {
+    const SEPARATOR: char = '\u{1e}';
+
     if raw.trim().is_empty() {
         return vec![];
     }
 
-    raw.split(',')
+    raw.split(SEPARATOR)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -924,41 +1180,27 @@ fn generated_readlist_id() -> String {
     format!("readlist-{}", random_hex_token(12))
 }
 
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(31);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
     use komga_domain::common_ids::LibraryId;
-    use komga_domain::discovery::DiscoveryQueryContext;
+    use komga_domain::discovery::{DiscoveryQueryContext, MediaStatus, ReadStatus};
     use std::{collections::HashMap, sync::Mutex};
 
     use crate::discovery::{
-        BookMetadataAuthorReadModel, BookMetadataLinkReadModel, BookReadModel,
-        DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
-        PersistedBookResourceRecord, PersistedComicrackMatchCandidateRecord, ReadlistBookPort,
-        ReadlistPort, ReadlistSearchPort, resolve_readlist_books_query,
+        BookMetadataLinkReadModel, BookReadModel, DiscoveryPersistedReadlistBookRecord,
+        DiscoveryPersistedReadlistRecord, PersistedBookResourceRecord,
+        PersistedComicrackMatchCandidateRecord, ReadlistBookPort, ReadlistComicRackMatchPort,
+        ReadlistMutationPort, ReadlistProjectionPort, ReadlistSearchPort, ScoredSearchHit,
     };
+    use crate::runtime_sse::RuntimeSseEventStore;
 
     use super::{
-        ReadListBooksOwnership, ReadListBooksQuery, ReadListsQuery, ReadListsSort,
-        ReadlistListService, ReadlistMutationInput, ReadlistMutationService,
-        ReadlistVisibilityService, classify_readlist_books_query,
+        ComicRackReadListMatchError, ComicRackReadListMatchService, ComicRackReadListParseError,
+        ComicRackReadListRequest, ComicRackReadListRequestBook, ReadListBooksOwnership,
+        ReadListBooksQuery, ReadListsQuery, ReadListsSort, ReadlistMutationInput,
+        ReadlistMutationService, ReadlistProjectionService, classify_readlist_books_query,
+        parse_comicrack_readlist,
     };
 
     #[test]
@@ -971,8 +1213,8 @@ mod tests {
             library_ids: Some(vec!["library-1".to_string()]),
             deleted: Some(false),
             tags: Some(vec!["favorite".to_string()]),
-            read_statuses: Some(vec!["read".to_string()]),
-            media_statuses: Some(vec!["READY".to_string()]),
+            read_statuses: Some(vec![ReadStatus::Read]),
+            media_statuses: Some(vec![MediaStatus::Ready]),
             authors: Some(vec!["alice".to_string()]),
         };
 
@@ -983,9 +1225,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn readlists_list_service_uses_requested_libraries_only_for_candidate_scope() {
+    async fn readlist_projection_service_uses_requested_libraries_only_for_candidate_scope() {
         let ports = TestReadlistPorts::new();
-        let service = ReadlistListService::new(&ports, &ports, &ports);
+        let service = ReadlistProjectionService::new(&ports, &ports, &ports);
         let requested_context = context_with_libraries(["library-a"]);
         let visibility_context = context_with_libraries(["library-a", "library-b"]);
 
@@ -1021,7 +1263,8 @@ mod tests {
     #[tokio::test]
     async fn readlist_mutation_service_create_persists_sse_and_search_sync_as_one_boundary() {
         let ports = TestReadlistPorts::new();
-        let service = ReadlistMutationService::new(&ports);
+        let runtime_events = RuntimeSseEventStore::default();
+        let service = ReadlistMutationService::new(&ports, &runtime_events);
         let result = service
             .create_readlist(ReadlistMutationInput {
                 name: "New ReadList".to_string(),
@@ -1042,21 +1285,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn readlist_visibility_service_exposes_visible_book_ids_for_media_boundaries() {
+    async fn readlist_projection_service_applies_visibility_consistently_across_readlist_surfaces()
+    {
         let ports = TestReadlistPorts::new();
-        let service = ReadlistVisibilityService::new(&ports, &ports);
+        let service = ReadlistProjectionService::new(&ports, &ports, &ports);
+        let context = context_with_libraries(["library-a"]);
 
-        let book_ids = service
-            .visible_readlist_book_ids(&context_with_libraries(["library-a"]), "readlist-1")
+        let detail = service
+            .readlist_detail(&context, "readlist-1")
             .await
-            .expect("readlist visibility should resolve")
+            .expect("readlist detail should resolve")
             .expect("readlist should remain visible");
+        let book_ids = service
+            .visible_readlist_book_ids(&context, "readlist-1")
+            .await
+            .expect("readlist book ids should resolve")
+            .expect("readlist book ids should remain visible");
+        let books = service
+            .list_readlist_books(&context, readlist_books_query("readlist-1", 0, 20))
+            .await
+            .expect("readlist books should resolve")
+            .expect("readlist books should remain visible");
+        let next_book = service
+            .readlist_book_sibling(&context, "readlist-1", "book-a", true)
+            .await
+            .expect("readlist sibling should resolve");
 
-        assert_eq!(book_ids, vec!["book-a"]);
+        assert_eq!(detail.book_ids, vec!["book-a".to_string()]);
+        assert_eq!(book_ids, detail.book_ids);
+        assert_eq!(
+            books
+                .content
+                .iter()
+                .map(|book| book.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-a"],
+        );
+        assert!(
+            next_book.is_none(),
+            "hidden books must not leak through sibling navigation"
+        );
     }
 
     #[tokio::test]
-    async fn readlist_visibility_service_sorts_unordered_books_before_pagination() {
+    async fn readlist_projection_service_sorts_unordered_books_before_pagination() {
         let mut ports = TestReadlistPorts::new();
         ports.readlists.push(readlist_record_with_ordered(
             "readlist-unordered",
@@ -1094,11 +1366,11 @@ mod tests {
             );
         }
 
-        let service = ReadlistVisibilityService::new(&ports, &ports);
+        let service = ReadlistProjectionService::new(&ports, &ports, &ports);
         let page = service
             .list_readlist_books(
                 &context_with_libraries(["library-a"]),
-                resolve_readlist_books_query("readlist-unordered", "page=0&size=2"),
+                readlist_books_query("readlist-unordered", 0, 2),
             )
             .await
             .expect("readlist books should resolve")
@@ -1114,6 +1386,104 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_comicrack_readlist_normalizes_request_at_application_boundary() {
+        let request = parse_comicrack_readlist(
+            br#"<ReadingList><Name>ReadList 1</Name><Books><Book Series="Series 1" Number="001" Volume="2" /></Books></ReadingList>"#,
+        )
+        .expect("valid ComicRack readlist should parse");
+
+        assert_eq!(
+            request,
+            ComicRackReadListRequest {
+                name: "ReadList 1".to_string(),
+                books: vec![ComicRackReadListRequestBook {
+                    series_candidates: vec!["Series 1".to_string(), "Series 1 (2)".to_string()],
+                    number: "001".to_string(),
+                }],
+            },
+        );
+        assert_eq!(
+            parse_comicrack_readlist(b"<ReadingList>"),
+            Err(ComicRackReadListParseError::InvalidXml),
+        );
+        assert_eq!(
+            parse_comicrack_readlist(
+                br#"<ReadingList><Name>ReadList 1</Name><Books><Book Series= Number="1" /></Books></ReadingList>"#,
+            ),
+            Err(ComicRackReadListParseError::InvalidXml),
+        );
+        assert_eq!(
+            parse_comicrack_readlist(
+                br#"<ReadingList><Name>   </Name><Books><Book Series="Series 1" Number="1" /></Books></ReadingList>"#,
+            ),
+            Err(ComicRackReadListParseError::MissingName),
+        );
+        assert_eq!(
+            parse_comicrack_readlist(br#"<ReadingList><Name>ReadList 1</Name></ReadingList>"#),
+            Err(ComicRackReadListParseError::MissingBooks),
+        );
+        assert_eq!(
+            parse_comicrack_readlist(
+                br#"<ReadingList><Name>ReadList 1</Name><Books><Book Series="Series 1" /></Books></ReadingList>"#,
+            ),
+            Err(ComicRackReadListParseError::MissingBookIdentity),
+        );
+    }
+
+    #[tokio::test]
+    async fn comicrack_match_service_groups_candidates_and_marks_duplicate_names() {
+        let mut ports = TestReadlistPorts::new();
+        ports.readlists.push(readlist_record_with_ordered(
+            "readlist-3",
+            "Imported CBL",
+            true,
+        ));
+        ports.comicrack_candidates = vec![
+            comicrack_candidate("series-1", "Series 1", "book-1", "1", "Book 1"),
+            comicrack_candidate("series-1", "Series 1", "book-2", "001", "Book 1 Variant"),
+            comicrack_candidate("series-2", "Series 1 (2)", "book-3", "1", "Book 1 Volume 2"),
+            comicrack_candidate("series-3", "Other Series", "book-4", "1", "Other Book"),
+        ];
+
+        let request = ComicRackReadListRequest {
+            name: "imported cbl".to_string(),
+            books: vec![
+                ComicRackReadListRequestBook {
+                    series_candidates: vec!["Series 1".to_string(), "Series 1 (2)".to_string()],
+                    number: "0001".to_string(),
+                },
+                ComicRackReadListRequestBook {
+                    series_candidates: vec!["Missing".to_string()],
+                    number: "1".to_string(),
+                },
+            ],
+        };
+        let result = ComicRackReadListMatchService::new(&ports)
+            .match_readlist(&request)
+            .await
+            .expect("ComicRack match should resolve");
+
+        assert_eq!(
+            result.error,
+            Some(ComicRackReadListMatchError::DuplicateName)
+        );
+        assert_eq!(result.requests.len(), 2);
+        assert_eq!(result.requests[0].request, request.books[0]);
+        assert_eq!(result.requests[0].matches.len(), 2);
+        assert_eq!(result.requests[0].matches[0].series.series_id, "series-1");
+        assert_eq!(
+            result.requests[0].matches[0]
+                .books
+                .iter()
+                .map(|book| book.book_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["book-1", "book-2"],
+        );
+        assert_eq!(result.requests[0].matches[1].series.series_id, "series-2");
+        assert!(result.requests[1].matches.is_empty());
+    }
+
     fn context_with_libraries<const N: usize>(libraries: [&str; N]) -> DiscoveryQueryContext {
         DiscoveryQueryContext {
             user_id: None,
@@ -1123,12 +1493,28 @@ mod tests {
         }
     }
 
+    fn readlist_books_query(readlist_id: &str, page: usize, size: usize) -> ReadListBooksQuery {
+        ReadListBooksQuery {
+            readlist_id: readlist_id.to_string(),
+            page,
+            size,
+            unpaged: false,
+            library_ids: None,
+            deleted: None,
+            tags: None,
+            read_statuses: None,
+            media_statuses: None,
+            authors: None,
+        }
+    }
+
     struct TestReadlistPorts {
         readlists: Vec<DiscoveryPersistedReadlistRecord>,
         readlist_books: HashMap<String, Vec<DiscoveryPersistedReadlistBookRecord>>,
         books: HashMap<String, BookReadModel>,
         book_resources: HashMap<String, PersistedBookResourceRecord>,
-        search_hits: HashMap<String, Vec<(f32, String)>>,
+        search_hits: HashMap<String, Vec<ScoredSearchHit>>,
+        comicrack_candidates: Vec<PersistedComicrackMatchCandidateRecord>,
         created_readlists: Mutex<Vec<String>>,
         updated_readlists: Mutex<Vec<String>>,
         deleted_readlists: Mutex<Vec<String>>,
@@ -1175,8 +1561,14 @@ mod tests {
             let search_hits = HashMap::from([(
                 "space".to_string(),
                 vec![
-                    (2.0, "readlist-2".to_string()),
-                    (1.0, "readlist-1".to_string()),
+                    ScoredSearchHit {
+                        score: 2.0,
+                        id: "readlist-2".to_string(),
+                    },
+                    ScoredSearchHit {
+                        score: 1.0,
+                        id: "readlist-1".to_string(),
+                    },
                 ],
             )]);
 
@@ -1189,6 +1581,7 @@ mod tests {
                 books,
                 book_resources,
                 search_hits,
+                comicrack_candidates: Vec::new(),
                 created_readlists: Mutex::new(Vec::new()),
                 updated_readlists: Mutex::new(Vec::new()),
                 deleted_readlists: Mutex::new(Vec::new()),
@@ -1213,7 +1606,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ReadlistPort for TestReadlistPorts {
+    impl ReadlistProjectionPort for TestReadlistPorts {
         async fn load_persisted_readlists(
             &self,
         ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
@@ -1241,13 +1634,10 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+    }
 
-        async fn load_comicrack_match_candidates(
-            &self,
-        ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
-            Ok(vec![])
-        }
-
+    #[async_trait]
+    impl ReadlistMutationPort for TestReadlistPorts {
         async fn persist_readlist_create(
             &self,
             readlist_id: &str,
@@ -1325,13 +1715,6 @@ mod tests {
         ) -> Result<Option<BookReadModel>, String> {
             Ok(self.books.get(book_id).cloned())
         }
-
-        async fn load_persisted_book_authors(
-            &self,
-            _book_id: &str,
-        ) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
-            Ok(vec![])
-        }
     }
 
     #[async_trait]
@@ -1340,8 +1723,23 @@ mod tests {
             &self,
             query: &str,
             _limit: usize,
-        ) -> Result<Vec<(f32, String)>, String> {
+        ) -> Result<Vec<ScoredSearchHit>, String> {
             Ok(self.search_hits.get(query).cloned().unwrap_or_default())
+        }
+    }
+
+    #[async_trait]
+    impl ReadlistComicRackMatchPort for TestReadlistPorts {
+        async fn load_persisted_readlists(
+            &self,
+        ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+            Ok(self.readlists.clone())
+        }
+
+        async fn load_comicrack_match_candidates(
+            &self,
+        ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+            Ok(self.comicrack_candidates.clone())
         }
     }
 
@@ -1370,6 +1768,23 @@ mod tests {
         }
     }
 
+    fn comicrack_candidate(
+        series_id: &str,
+        series_title: &str,
+        book_id: &str,
+        book_number: &str,
+        book_title: &str,
+    ) -> PersistedComicrackMatchCandidateRecord {
+        PersistedComicrackMatchCandidateRecord {
+            series_id: series_id.to_string(),
+            series_title: series_title.to_string(),
+            series_release_date: Some("2024-01-15".to_string()),
+            book_id: book_id.to_string(),
+            book_title: book_title.to_string(),
+            book_number: book_number.to_string(),
+        }
+    }
+
     fn sample_book(id: &str) -> BookReadModel {
         sample_book_with_release_date(id, None)
     }
@@ -1388,7 +1803,7 @@ mod tests {
             last_modified: "2024-01-01T00:00:00Z".to_string(),
             file_last_modified: "2024-01-01T00:00:00Z".to_string(),
             size_bytes: 1,
-            media_status: "READY".to_string(),
+            media_status: MediaStatus::Ready,
             media_type: "application/zip".to_string(),
             media_pages_count: 1,
             media_comment: String::new(),

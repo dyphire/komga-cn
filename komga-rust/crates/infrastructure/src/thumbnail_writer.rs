@@ -3,7 +3,9 @@ use komga_application::media_assets::{
     CollectionThumbnailRecord, EntityThumbnailRecord, ReadlistThumbnailRecord,
     SeriesThumbnailRecord, ThumbnailWriterPort,
 };
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 
 use crate::metadata;
 
@@ -13,11 +15,15 @@ use crate::metadata;
 #[derive(Clone)]
 pub struct ThumbnailWriter {
     write_pool: SqlitePool,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
 }
 
 impl ThumbnailWriter {
-    pub fn new(write_pool: SqlitePool) -> Self {
-        Self { write_pool }
+    pub fn new(write_pool: SqlitePool, runtime_events: Arc<dyn RuntimeSseEventSink>) -> Self {
+        Self {
+            write_pool,
+            runtime_events,
+        }
     }
 }
 
@@ -36,6 +42,7 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     ) -> Result<EntityThumbnailRecord, String> {
         metadata::insert_book_thumbnail(
             &self.write_pool,
+            self.runtime_events.as_ref(),
             book_id,
             thumbnail,
             media_type,
@@ -47,11 +54,21 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     }
 
     async fn select_book(&self, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::select_book_thumbnail(&self.write_pool, thumbnail_id).await
+        metadata::select_book_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            thumbnail_id,
+        )
+        .await
     }
 
     async fn delete_book(&self, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::delete_book_thumbnail(&self.write_pool, thumbnail_id).await
+        metadata::delete_book_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            thumbnail_id,
+        )
+        .await
     }
 
     // --- Series ---
@@ -67,6 +84,7 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     ) -> Result<SeriesThumbnailRecord, String> {
         metadata::insert_series_thumbnail(
             &self.write_pool,
+            self.runtime_events.as_ref(),
             series_id,
             thumbnail,
             media_type,
@@ -78,11 +96,23 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     }
 
     async fn select_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::select_series_thumbnail(&self.write_pool, series_id, thumbnail_id).await
+        metadata::select_series_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            series_id,
+            thumbnail_id,
+        )
+        .await
     }
 
     async fn delete_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::delete_series_thumbnail(&self.write_pool, series_id, thumbnail_id).await
+        metadata::delete_series_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            series_id,
+            thumbnail_id,
+        )
+        .await
     }
 
     // --- Readlist ---
@@ -98,6 +128,7 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     ) -> Result<ReadlistThumbnailRecord, String> {
         metadata::insert_readlist_thumbnail(
             &self.write_pool,
+            self.runtime_events.as_ref(),
             readlist_id,
             thumbnail,
             media_type,
@@ -109,11 +140,23 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     }
 
     async fn select_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::select_readlist_thumbnail(&self.write_pool, readlist_id, thumbnail_id).await
+        metadata::select_readlist_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            readlist_id,
+            thumbnail_id,
+        )
+        .await
     }
 
     async fn delete_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::delete_readlist_thumbnail(&self.write_pool, readlist_id, thumbnail_id).await
+        metadata::delete_readlist_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            readlist_id,
+            thumbnail_id,
+        )
+        .await
     }
 
     // --- Collection ---
@@ -129,6 +172,7 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     ) -> Result<CollectionThumbnailRecord, String> {
         metadata::insert_collection_thumbnail(
             &self.write_pool,
+            self.runtime_events.as_ref(),
             collection_id,
             thumbnail,
             media_type,
@@ -140,7 +184,12 @@ impl ThumbnailWriterPort for ThumbnailWriter {
     }
 
     async fn select_collection(&self, thumbnail_id: &str) -> Result<bool, String> {
-        metadata::select_collection_thumbnail(&self.write_pool, thumbnail_id).await
+        metadata::select_collection_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            thumbnail_id,
+        )
+        .await
     }
 
     async fn delete_collection(
@@ -148,6 +197,12 @@ impl ThumbnailWriterPort for ThumbnailWriter {
         collection_id: &str,
         thumbnail_id: &str,
     ) -> Result<bool, String> {
-        metadata::delete_collection_thumbnail(&self.write_pool, collection_id, thumbnail_id).await
+        metadata::delete_collection_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            collection_id,
+            thumbnail_id,
+        )
+        .await
     }
 }

@@ -4,7 +4,7 @@ use komga_application::task_processing::{
 
 use super::JobRuntime;
 use super::queue_scheduler::TaskQueueScheduler;
-use super::task_job_pipeline::TaskJobPipeline;
+use super::task_job_dispatch::TaskJobDispatcher;
 
 pub(super) async fn process_available_serial(
     scheduler: &TaskQueueScheduler,
@@ -17,7 +17,7 @@ pub(super) async fn process_available_serial(
     let mut processed = 0usize;
     let mut logged_start = false;
     loop {
-        let Some(task) = scheduler.take_next().await else {
+        let Some(task) = scheduler.take_next().await? else {
             if logged_start {
                 scheduler.log_process_available("completed", processed, None);
             }
@@ -29,7 +29,7 @@ pub(super) async fn process_available_serial(
         }
 
         scheduler.log_task_start(&task);
-        let outcome = TaskJobPipeline::new(*runtime).execute(&task).await;
+        let outcome = TaskJobDispatcher::new(*runtime).execute_record(&task).await;
         if let Err(error) = finalize_task_result(
             scheduler,
             TaskExecutionResult { task, outcome },
@@ -48,7 +48,7 @@ pub(super) async fn recover_and_process(
     scheduler: &TaskQueueScheduler,
     runtime: &JobRuntime<'_>,
 ) -> Result<usize, TaskProcessingError> {
-    let recovered_tasks = scheduler.disown_all_and_collect_owned().await;
+    let recovered_tasks = scheduler.disown_all_and_collect_owned().await?;
     for task in &recovered_tasks {
         scheduler.log_task_event("task_recover", task, "recovered", None);
     }

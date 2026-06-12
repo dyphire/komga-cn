@@ -1,7 +1,16 @@
-use super::*;
+use axum::extract::{Extension, Path, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use komga_application::identity_access::DeviceThumbnailBinary;
+use std::net::SocketAddr;
+
+use crate::access_log::RequestConnectionInfo;
+use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
+use crate::identity_access::device_auth::load_kobo_proxy_enabled;
+use crate::state::{IdentityAccessState, IdentityState};
 
 struct KoboThumbnailRequest<'a> {
-    app: &'a IdentityAccessState,
+    identity: &'a IdentityState,
     server_settings: &'a dyn komga_application::operational::ServerSettingsPort,
     auth_token: &'a str,
     headers: &'a HeaderMap,
@@ -11,7 +20,7 @@ struct KoboThumbnailRequest<'a> {
     height: &'a str,
 }
 
-pub async fn kobo_book_thumbnail(
+pub(crate) async fn kobo_book_thumbnail(
     State(app): State<IdentityAccessState>,
     Path((auth_token, thumbnail_id, width, height, _)): Path<(
         String,
@@ -24,7 +33,7 @@ pub async fn kobo_book_thumbnail(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(KoboThumbnailRequest {
-        app: &app,
+        identity: &app.identity,
         server_settings: app.server_settings.as_ref(),
         auth_token: auth_token.as_str(),
         headers: &headers,
@@ -36,7 +45,7 @@ pub async fn kobo_book_thumbnail(
     .await
 }
 
-pub async fn kobo_book_thumbnail_with_quality(
+pub(crate) async fn kobo_book_thumbnail_with_quality(
     State(app): State<IdentityAccessState>,
     Path((auth_token, thumbnail_id, width, height, _, _)): Path<(
         String,
@@ -50,7 +59,7 @@ pub async fn kobo_book_thumbnail_with_quality(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(KoboThumbnailRequest {
-        app: &app,
+        identity: &app.identity,
         server_settings: app.server_settings.as_ref(),
         auth_token: auth_token.as_str(),
         headers: &headers,
@@ -63,23 +72,18 @@ pub async fn kobo_book_thumbnail_with_quality(
 }
 
 async fn kobo_book_thumbnail_response(req: KoboThumbnailRequest<'_>) -> Response {
-    if let Err(status) = required_kobo_user(
-        &req.app.identity,
-        req.auth_token,
-        req.headers,
-        req.remote_addr,
-    )
-    .await
+    if let Err(status) =
+        required_kobo_user(req.identity, req.auth_token, req.headers, req.remote_addr).await
     {
         return status.into_response();
     }
 
-    match load_thumbnail_by_id(req.app, req.thumbnail_id).await {
-        Ok(Some((media_type, bytes))) => {
-            let jpeg_bytes = if media_type.eq_ignore_ascii_case("image/jpeg") {
-                bytes
+    match load_thumbnail_by_id(req.identity, req.thumbnail_id).await {
+        Ok(Some(thumbnail)) => {
+            let jpeg_bytes = if thumbnail.media_type.eq_ignore_ascii_case("image/jpeg") {
+                thumbnail.bytes
             } else {
-                match encode_kobo_thumbnail_as_jpeg(&bytes) {
+                match encode_kobo_thumbnail_as_jpeg(&thumbnail.bytes) {
                     Some(jpeg_bytes) => jpeg_bytes,
                     None => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
                 }
@@ -93,7 +97,11 @@ async fn kobo_book_thumbnail_response(req: KoboThumbnailRequest<'_>) -> Response
                 .into_response()
         }
         Ok(None) => {
-            if load_kobo_proxy_enabled(req.server_settings).await {
+            let proxy_enabled = match load_kobo_proxy_enabled(req.server_settings).await {
+                Ok(enabled) => enabled,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            };
+            if proxy_enabled {
                 let location = format!(
                     "https://cdn.kobo.com/book-images/{}/{}/{}/false/image.jpg",
                     req.thumbnail_id, req.width, req.height
@@ -125,10 +133,10 @@ fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 async fn load_thumbnail_by_id(
-    app: &IdentityAccessState,
+    identity: &IdentityState,
     thumbnail_id: &str,
-) -> Result<Option<(String, Vec<u8>)>, String> {
-    app.identity
+) -> Result<Option<DeviceThumbnailBinary>, String> {
+    identity
         .device_sync()
         .load_thumbnail_by_id(thumbnail_id)
         .await

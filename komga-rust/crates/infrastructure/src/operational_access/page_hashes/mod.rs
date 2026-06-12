@@ -1,7 +1,7 @@
-use komga_application::media_assets::{PageHashDeleteTarget, PageHashThumbnail};
 use komga_application::operational::{
-    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
-    PageHashPort, PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+    PageHashDeleteTarget, PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry,
+    PageHashMatchesQuery, PageHashPage, PageHashPort, PageHashThumbnail, PageHashUnknownEntry,
+    PageHashUnknownQuery, PageHashUpsertCommand,
 };
 
 use crate::database_handle::DatabaseHandle;

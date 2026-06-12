@@ -26,7 +26,8 @@ async fn runtime_blocks_book_thumbnail_generation_when_main_database_is_external
             1_000,
             Some("book-1".to_string()),
         ))
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await
@@ -66,7 +67,8 @@ async fn runtime_generate_book_thumbnail_replaces_invalid_selected_thumbnail_wit
             TaskQueueRecord::new("GenerateBookThumbnail_book-1", 1_000, None)
                 .with_simple_type("GenerateBookThumbnail"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     scheduler
         .process_available(&runtime.job())
         .await

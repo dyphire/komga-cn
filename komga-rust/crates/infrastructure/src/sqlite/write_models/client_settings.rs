@@ -1,11 +1,12 @@
+use komga_application::operational::{ClientGlobalSettings, ClientUserSettings};
 use sqlx::SqlitePool;
 
-pub async fn upsert_client_settings_global(
+pub(crate) async fn upsert_client_settings_global(
     pool: &SqlitePool,
-    settings: &[(String, String, bool)],
+    settings: &ClientGlobalSettings,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    for (key, value, allow_unauthorized) in settings {
+    for (key, setting) in settings {
         sqlx::query(
             r#"INSERT INTO CLIENT_SETTINGS_GLOBAL (KEY, VALUE, ALLOW_UNAUTHORIZED)
                VALUES (?, ?, ?)
@@ -14,8 +15,8 @@ pub async fn upsert_client_settings_global(
                    ALLOW_UNAUTHORIZED = excluded.ALLOW_UNAUTHORIZED"#,
         )
         .bind(key)
-        .bind(value)
-        .bind(*allow_unauthorized)
+        .bind(&setting.value)
+        .bind(setting.allow_unauthorized)
         .execute(&mut *tx)
         .await?;
     }
@@ -23,13 +24,13 @@ pub async fn upsert_client_settings_global(
     Ok(())
 }
 
-pub async fn upsert_client_settings_user(
+pub(crate) async fn upsert_client_settings_user(
     pool: &SqlitePool,
     user_id: &str,
-    settings: &[(String, String)],
+    settings: &ClientUserSettings,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    for (key, value) in settings {
+    for (key, setting) in settings {
         sqlx::query(
             r#"INSERT INTO CLIENT_SETTINGS_USER (USER_ID, KEY, VALUE)
                VALUES (?, ?, ?)
@@ -38,7 +39,7 @@ pub async fn upsert_client_settings_user(
         )
         .bind(user_id)
         .bind(key)
-        .bind(value)
+        .bind(&setting.value)
         .execute(&mut *tx)
         .await?;
     }
@@ -46,7 +47,7 @@ pub async fn upsert_client_settings_user(
     Ok(())
 }
 
-pub async fn delete_client_settings_global(
+pub(crate) async fn delete_client_settings_global(
     pool: &SqlitePool,
     keys: &[String],
 ) -> Result<(), sqlx::Error> {
@@ -65,7 +66,7 @@ pub async fn delete_client_settings_global(
     Ok(())
 }
 
-pub async fn delete_client_settings_user(
+pub(crate) async fn delete_client_settings_user(
     pool: &SqlitePool,
     user_id: &str,
     keys: &[String],

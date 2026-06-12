@@ -2,10 +2,6 @@ use std::collections::BTreeMap;
 
 use super::env_config::RuntimeConfig;
 use super::error::ConfigError;
-use super::path_resolution::{
-    ensure_runtime_directories, is_default_home_config_dir, validate_temp_directory,
-};
-use super::profile::RuntimeMode;
 
 mod runtime_checks;
 

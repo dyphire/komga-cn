@@ -3,7 +3,9 @@ use std::path::Path;
 use komga_application::operational::{
     TransientBookAnalysis as AppTransientBookAnalysis,
     TransientBookFileMetadata as AppTransientBookFileMetadata,
-    TransientBookPage as AppTransientBookPage, TransientBookPort, TransientBookScanEntry,
+    TransientBookPage as AppTransientBookPage,
+    TransientBookPageContent as AppTransientBookPageContent, TransientBookPort,
+    TransientBookScanEntry, TransientBookSeriesInference,
 };
 
 use crate::database_handle::DatabaseHandle;
@@ -22,9 +24,9 @@ impl TransientBookAccess {
 
 #[async_trait::async_trait]
 impl TransientBookPort for TransientBookAccess {
-    fn analyze_transient_book(&self, path: &str) -> AppTransientBookAnalysis {
-        let result = transient_books::analyze_transient_book(path);
-        AppTransientBookAnalysis {
+    fn analyze_transient_book(&self, path: &str) -> Result<AppTransientBookAnalysis, String> {
+        let result = transient_books::analyze_transient_book(path)?;
+        Ok(AppTransientBookAnalysis {
             status: result.status,
             media_type: result.media_type,
             page_count: result.page_count,
@@ -37,27 +39,33 @@ impl TransientBookPort for TransientBookAccess {
             comment: result.comment,
             number: result.number,
             series_id: result.series_id,
-        }
+        })
     }
 
     async fn infer_transient_series_and_number(
         &self,
         transient_name: &str,
-    ) -> (Option<String>, Option<f64>) {
-        transient_books::infer_transient_series_and_number(self.db.read_pool(), transient_name)
-            .await
+    ) -> Result<TransientBookSeriesInference, String> {
+        let inference =
+            transient_books::infer_transient_series_and_number(self.db.read_pool(), transient_name)
+                .await?;
+        Ok(TransientBookSeriesInference {
+            series_id: inference.series_id,
+            number: inference.number,
+        })
     }
 
-    fn list_transient_book_entries(&self, root: &Path) -> Vec<TransientBookScanEntry> {
-        transient_books::list_transient_book_entries(root)
+    fn list_transient_book_entries(
+        &self,
+        root: &Path,
+    ) -> Result<Vec<TransientBookScanEntry>, String> {
+        Ok(transient_books::list_transient_book_entries(root)?
             .into_iter()
-            .filter_map(|entry| {
-                Some(TransientBookScanEntry {
-                    path: entry.get("path")?.as_str()?.to_string(),
-                    name: entry.get("name")?.as_str()?.to_string(),
-                })
+            .map(|entry| TransientBookScanEntry {
+                path: entry.path,
+                name: entry.name,
             })
-            .collect()
+            .collect())
     }
 
     async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
@@ -67,15 +75,15 @@ impl TransientBookPort for TransientBookAccess {
     fn load_transient_book_file_metadata(
         &self,
         path: &str,
-    ) -> Option<AppTransientBookFileMetadata> {
+    ) -> Result<AppTransientBookFileMetadata, String> {
         let meta = transient_books::load_transient_book_file_metadata(path)?;
-        Some(AppTransientBookFileMetadata {
+        Ok(AppTransientBookFileMetadata {
             file_last_modified_unix_nanos: meta.file_last_modified_unix_nanos,
             size_bytes: meta.size_bytes,
         })
     }
 
-    fn transient_book_exists(&self, path: &str) -> bool {
+    fn transient_book_exists(&self, path: &str) -> Result<bool, String> {
         transient_books::transient_book_exists(path)
     }
 
@@ -85,7 +93,7 @@ impl TransientBookPort for TransientBookAccess {
         media_type: &str,
         pages: &[AppTransientBookPage],
         page_number: u32,
-    ) -> Option<(String, Vec<u8>)> {
+    ) -> Result<Option<AppTransientBookPageContent>, String> {
         let infra_pages: Vec<TransientBookPage> = pages
             .iter()
             .map(|p| TransientBookPage {
@@ -97,7 +105,16 @@ impl TransientBookPort for TransientBookAccess {
                 size_bytes: p.size_bytes,
             })
             .collect();
-        transient_books::transient_book_page_content(path, media_type, &infra_pages, page_number)
+        let content = transient_books::transient_book_page_content(
+            path,
+            media_type,
+            &infra_pages,
+            page_number,
+        )?;
+        Ok(content.map(|content| AppTransientBookPageContent {
+            content_type: content.content_type,
+            bytes: content.bytes,
+        }))
     }
 }
 

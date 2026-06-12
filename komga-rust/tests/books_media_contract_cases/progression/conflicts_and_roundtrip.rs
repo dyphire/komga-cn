@@ -236,6 +236,48 @@ async fn router_book_progression_put_persists_modified_device_and_locator() {
 }
 
 #[tokio::test]
+async fn router_book_progression_get_rejects_invalid_persisted_locator_shape() {
+    let ctx = TestFixture::new("router-book-progression-get-invalid-locator-shape").await;
+    let auth_token = ctx.login_admin().await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for invalid progression locator seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(5_i64)
+    .bind(false)
+    .bind("2024-01-03 00:00:00")
+    .bind("reader-1")
+    .bind("KOReader")
+    .bind(serde_json::to_vec(&json!([])).expect("invalid locator fixture should serialize"))
+    .execute(&pool)
+    .await
+    .expect("invalid read progress locator row should insert");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("book progression invalid-locator get request should build"),
+        )
+        .await
+        .expect("book progression invalid-locator get request should complete");
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
 async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
     let ctx = TestFixture::new("router-book-progression-opds-v2-roundtrip").await;
 

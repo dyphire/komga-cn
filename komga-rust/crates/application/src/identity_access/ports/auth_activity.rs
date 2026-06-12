@@ -1,21 +1,38 @@
 use async_trait::async_trait;
 
-use super::super::user_models::{AuthUser, PersistedAuthenticationActivity};
+use super::super::user_models::{
+    AuthUser, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
+};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AuthenticationActivityApiKey<'a> {
+    pub id: Option<&'a str>,
+    pub comment: Option<&'a str>,
+}
+
+impl<'a> AuthenticationActivityApiKey<'a> {
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    pub fn from_persisted(metadata: Option<&'a PersistedApiKeyMetadata>) -> Self {
+        metadata
+            .map(|metadata| Self {
+                id: Some(metadata.id()),
+                comment: Some(metadata.comment()),
+            })
+            .unwrap_or_default()
+    }
+}
 
 #[async_trait]
 pub trait AuthActivityPort: Send + Sync {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
-    ) -> Option<Vec<PersistedAuthenticationActivity>>;
+    ) -> Result<Vec<PersistedAuthenticationActivity>, String>;
 
-    async fn persisted_cleanup_authentication_activity(&self) -> Option<u64>;
-
-    async fn persisted_latest_authentication_activity_by_user_and_api_key(
-        &self,
-        user_id: &str,
-        api_key_id: &str,
-    ) -> Option<PersistedAuthenticationActivity>;
+    async fn persisted_cleanup_authentication_activity(&self) -> Result<u64, String>;
 
     async fn persisted_record_failed_authentication_activity(
         &self,
@@ -30,8 +47,7 @@ pub trait AuthActivityPort: Send + Sync {
         &self,
         user: &AuthUser,
         source: &str,
-        api_key_id: Option<&str>,
-        api_key_comment: Option<&str>,
+        api_key: AuthenticationActivityApiKey<'_>,
         ip: Option<&str>,
         user_agent: Option<&str>,
     ) -> Option<()>;

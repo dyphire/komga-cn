@@ -8,12 +8,13 @@ use icu::locale::locale;
 use sqlx::{Row, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
-use super::records::{
-    PersistedBookFeedRecord, PersistedNamedRecord, PersistedSeriesRecord, parsed_age_rating,
-    parsed_sharing_labels,
+use komga_application::opds::{
+    PersistedBookFeedRecord, PersistedNamedRecord, PersistedSeriesRecord,
 };
 
-pub async fn load_publishers(
+use super::records::{parsed_age_rating, parsed_sharing_labels};
+
+pub(super) async fn load_publishers(
     pool: &SqlitePool,
     allowed_library_ids: Option<&HashSet<String>>,
 ) -> Result<Vec<String>, sqlx::Error> {
@@ -65,7 +66,7 @@ fn tertiary_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
         .expect("unicode collator for OPDS collection sorting should construct")
 }
 
-pub async fn load_collections(
+pub(super) async fn load_collections(
     pool: &SqlitePool,
     library_id: Option<&str>,
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
@@ -97,10 +98,8 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
             name: row.get::<String, _>("NAME"),
-            last_modified: row
-                .try_get::<String, _>("LAST_MODIFIED")
-                .unwrap_or_default(),
-            ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+            ordered: row.get::<bool, _>("ORDERED"),
         })
         .collect::<Vec<_>>();
 
@@ -117,7 +116,7 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
     Ok(records)
 }
 
-pub async fn load_collection(
+pub(super) async fn load_collection(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Option<PersistedNamedRecord>, sqlx::Error> {
@@ -134,14 +133,12 @@ LIMIT 1"#,
     Ok(row.map(|row| PersistedNamedRecord {
         id: row.get::<String, _>("ID"),
         name: row.get::<String, _>("NAME"),
-        last_modified: row
-            .try_get::<String, _>("LAST_MODIFIED")
-            .unwrap_or_default(),
-        ordered: row.try_get::<bool, _>("ORDERED").unwrap_or(false),
+        last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        ordered: row.get::<bool, _>("ORDERED"),
     }))
 }
 
-pub async fn load_collection_books(
+pub(super) async fn load_collection_books(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<Vec<PersistedBookFeedRecord>, sqlx::Error> {
@@ -149,7 +146,10 @@ pub async fn load_collection_books(
         r#"SELECT b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE, b.NAME AS FILE_NAME,
        COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION_SERIES cs
 JOIN BOOK b ON b.SERIES_ID = cs.SERIES_ID
@@ -160,7 +160,10 @@ LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE cs.COLLECTION_ID = ?
   AND b.DELETED_DATE IS NULL
-GROUP BY b.ID, b.LIBRARY_ID, TITLE, FILE_NAME, MEDIA_TYPE, AGE_RATING, LAST_MODIFIED
+GROUP BY b.ID, b.LIBRARY_ID, COALESCE(bm.TITLE, b.NAME), b.NAME,
+         COALESCE(m.MEDIA_TYPE, 'application/octet-stream'),
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(b.LAST_MODIFIED_DATE, b.CREATED_DATE, '')
 ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
          b.ID ASC"#,
     )
@@ -183,7 +186,7 @@ ORDER BY cs.NUMBER ASC, COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
         .collect())
 }
 
-pub async fn load_collection_series(
+pub(super) async fn load_collection_series(
     pool: &SqlitePool,
     collection_id: &str,
     ordered: bool,
@@ -191,7 +194,10 @@ pub async fn load_collection_series(
     let query = if ordered {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION_SERIES cs
 JOIN SERIES s ON s.ID = cs.SERIES_ID
@@ -199,13 +205,18 @@ LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE cs.COLLECTION_ID = ?
   AND s.DELETED_DATE IS NULL
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
 ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC,
          s.ID ASC"#
     } else {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
-       COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS,
+       COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                 FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
+                       FROM SERIES_METADATA_SHARING sms_inner
+                       WHERE sms_inner.SERIES_ID = s.ID)), '') AS SHARING_LABELS,
        COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '') AS LAST_MODIFIED
 FROM COLLECTION_SERIES cs
 JOIN SERIES s ON s.ID = cs.SERIES_ID
@@ -213,7 +224,9 @@ LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
 LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE cs.COLLECTION_ID = ?
   AND s.DELETED_DATE IS NULL
-GROUP BY s.ID, s.LIBRARY_ID, TITLE, AGE_RATING, LAST_MODIFIED
+GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(sm.AGE_RATING, NULL),
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
 ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"#
     };
     let rows = sqlx::query(query)
@@ -228,17 +241,8 @@ ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"
             library_id: row.get::<String, _>("LIBRARY_ID"),
             title: row.get::<String, _>("TITLE"),
             summary: String::new(),
-            age_rating: row
-                .try_get::<i64, _>("AGE_RATING")
-                .ok()
-                .and_then(|value| u16::try_from(value).ok()),
-            sharing_labels: row
-                .get::<String, _>("SHARING_LABELS")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect(),
+            age_rating: parsed_age_rating(&row),
+            sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())

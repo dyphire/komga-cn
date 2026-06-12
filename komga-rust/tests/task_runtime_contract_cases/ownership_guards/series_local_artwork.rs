@@ -10,7 +10,8 @@ async fn enqueue_refresh_series_local_artwork(scheduler: &mut TaskQueueScheduler
             )
             .with_simple_type("RefreshSeriesLocalArtwork"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 }
 
 #[tokio::test]
@@ -395,7 +396,6 @@ async fn runtime_replaces_generated_selection_when_importing_series_local_artwor
 
 #[tokio::test]
 async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_events() {
-    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-series-local-artwork-sse-events").await;
 
     let series_dir = ctx.paths().config_dir.join("series/series-1");
@@ -425,8 +425,9 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
         .expect("existing series thumbnails should be cleared before local artwork sse test");
     pool.close().await;
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(ctx.paths()).await;
+    let cursor = ctx.runtime_events().current_cursor();
+    let runtime =
+        runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_refresh_series_local_artwork(&mut scheduler, "series-1").await;
     scheduler
@@ -434,20 +435,18 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
         .await
         .expect("series local artwork refresh should complete for sse contract");
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
     let thumbnail_events = events
         .iter()
-        .filter(|event| event.name == "ThumbnailSeriesAdded")
-        .filter(|event| {
-            event
-                .payload
-                .get("seriesId")
-                .and_then(|value| value.as_str())
-                == Some("series-1")
+        .filter_map(|event| match &event.event {
+            RuntimeSseEvent::ThumbnailSeriesAdded {
+                series_id,
+                selected,
+            } if series_id == "series-1" => Some(*selected),
+            _ => None,
         })
         .collect::<Vec<_>>();
 
@@ -457,7 +456,7 @@ async fn runtime_series_local_artwork_refresh_emits_thumbnail_series_added_event
     );
     let selected_states = thumbnail_events
         .iter()
-        .filter_map(|event| event.payload.get("selected").and_then(Value::as_bool))
+        .copied()
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         selected_states,

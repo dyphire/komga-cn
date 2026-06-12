@@ -1,26 +1,25 @@
-use std::path::Path;
-
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::{
-    BookMediaRecord, BookPageRecord, ContentResolverPort, EpubNavigationReaderPort,
-    EpubPositionsExtension, load_book_epub_navigation,
+    EpubExtensionBlob, EpubNavigationContentPort, EpubNavigationExtension,
+    EpubNavigationExtensionReaderPort, EpubNavigationPosition, EpubNavigationReaderPort,
+    load_book_epub_navigation, load_book_epub_positions,
 };
 
 #[tokio::test]
 async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
     let reader = TestEpubNavigationReader {
         media_files: vec!["/OEBPS/chapter-2.xhtml".to_string()],
-        extension_blob: Some((
-            "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
-            Vec::new(),
-        )),
+        extension_blob: Some(EpubExtensionBlob {
+            extension_class: "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            bytes: Vec::new(),
+        }),
     };
     let content = TestContentResolver {
-        extension: EpubPositionsExtension {
+        extension: EpubNavigationExtension {
             positions: vec![
-                json!({
+                epub_position(json!({
                     "href": "OEBPS/chapter-1.xhtml",
                     "type": "application/xhtml+xml",
                     "locations": {
@@ -28,8 +27,8 @@ async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
                         "totalProgression": 0.1,
                         "position": 1
                     }
-                }),
-                json!({
+                })),
+                epub_position(json!({
                     "href": "OEBPS/chapter-2.xhtml",
                     "type": "application/xhtml+xml",
                     "koboSpan": "kobo.2.1",
@@ -38,9 +37,10 @@ async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
                         "totalProgression": 0.42,
                         "position": 2
                     }
-                }),
+                })),
             ],
             is_fixed_layout: false,
+            ..EpubNavigationExtension::default()
         },
     };
 
@@ -55,10 +55,10 @@ async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
         }))
         .expect("locator should normalize against EPUB positions");
     assert_eq!(
-        normalized.pointer("/locations/totalProgression"),
+        normalized.raw().pointer("/locations/totalProgression"),
         Some(&json!(0.42))
     );
-    assert_eq!(normalized.get("koboSpan"), Some(&json!("kobo.2.1")));
+    assert_eq!(normalized.raw().get("koboSpan"), Some(&json!("kobo.2.1")));
 
     let locator = navigation
         .koreader_locator_for_progress("/body/DocFragment[2]/body/div/p[1]/text().0")
@@ -79,15 +79,19 @@ async fn epub_navigation_normalizes_locator_and_maps_koreader_fragments() {
 async fn epub_navigation_loads_existing_blob_without_extension_class_gate() {
     let reader = TestEpubNavigationReader {
         media_files: Vec::new(),
-        extension_blob: Some(("legacy.extension.Class".to_string(), Vec::new())),
+        extension_blob: Some(EpubExtensionBlob {
+            extension_class: "legacy.extension.Class".to_string(),
+            bytes: Vec::new(),
+        }),
     };
     let content = TestContentResolver {
-        extension: EpubPositionsExtension {
-            positions: vec![json!({
+        extension: EpubNavigationExtension {
+            positions: vec![epub_position(json!({
                 "href": "chapter-1.xhtml",
                 "locations": { "progression": 0.0 }
-            })],
+            }))],
             is_fixed_layout: false,
+            ..EpubNavigationExtension::default()
         },
     };
 
@@ -98,9 +102,87 @@ async fn epub_navigation_loads_existing_blob_without_extension_class_gate() {
     assert_eq!(navigation.positions().len(), 1);
 }
 
+#[tokio::test]
+async fn epub_positions_ignore_non_epub_extension_class() {
+    let reader = TestEpubNavigationReader {
+        media_files: Vec::new(),
+        extension_blob: Some(EpubExtensionBlob {
+            extension_class: "legacy.extension.Class".to_string(),
+            bytes: Vec::new(),
+        }),
+    };
+    let content = TestContentResolver {
+        extension: EpubNavigationExtension {
+            positions: vec![epub_position(json!({
+                "href": "chapter-1.xhtml",
+                "locations": { "progression": 0.0 }
+            }))],
+            is_fixed_layout: false,
+            ..EpubNavigationExtension::default()
+        },
+    };
+
+    let positions = load_book_epub_positions(&reader, &content, "book-1")
+        .await
+        .expect("non-EPUB extension class should not fail the positions boundary");
+
+    assert_eq!(positions, None);
+}
+
+#[tokio::test]
+async fn epub_navigation_uses_typed_positions_while_preserving_raw_payload() {
+    let raw_position = json!({
+        "href": "chapter-1.xhtml",
+        "type": "application/xhtml+xml",
+        "koboSpan": "span-1",
+        "locations": {
+            "position": 1,
+            "progression": 0.25,
+            "totalProgression": 0.5
+        }
+    });
+    let reader = TestEpubNavigationReader {
+        media_files: Vec::new(),
+        extension_blob: Some(EpubExtensionBlob {
+            extension_class: "org.gotson.komga.domain.model.MediaExtensionEpub".to_string(),
+            bytes: Vec::new(),
+        }),
+    };
+    let content = TestContentResolver {
+        extension: EpubNavigationExtension {
+            positions: vec![EpubNavigationPosition::from_raw(raw_position.clone())],
+            is_fixed_layout: false,
+            ..EpubNavigationExtension::default()
+        },
+    };
+
+    let navigation = load_book_epub_navigation(&reader, &content, "book-1")
+        .await
+        .expect("epub navigation should load");
+    let position = navigation
+        .positions()
+        .first()
+        .expect("typed position should be exposed");
+
+    assert_eq!(position.href(), Some("chapter-1.xhtml"));
+    assert_eq!(position.progression(), Some(0.25));
+    assert_eq!(position.total_progression(), Some(0.5));
+    assert_eq!(position.raw(), &raw_position);
+}
+
 struct TestEpubNavigationReader {
     media_files: Vec<String>,
-    extension_blob: Option<(String, Vec<u8>)>,
+    extension_blob: Option<EpubExtensionBlob>,
+}
+
+#[async_trait]
+impl EpubNavigationExtensionReaderPort for TestEpubNavigationReader {
+    async fn epub_extension_blob(
+        &self,
+        _book_id: &str,
+    ) -> Result<Option<EpubExtensionBlob>, String> {
+        Ok(self.extension_blob.clone())
+    }
 }
 
 #[async_trait]
@@ -108,120 +190,21 @@ impl EpubNavigationReaderPort for TestEpubNavigationReader {
     async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
         Ok(self.media_files.clone())
     }
-
-    async fn epub_extension_blob(
-        &self,
-        _book_id: &str,
-    ) -> Result<Option<(String, Vec<u8>)>, String> {
-        Ok(self.extension_blob.clone())
-    }
 }
 
 struct TestContentResolver {
-    extension: EpubPositionsExtension,
+    extension: EpubNavigationExtension,
 }
 
-#[async_trait]
-impl ContentResolverPort for TestContentResolver {
-    async fn resolve_page_bytes(
-        &self,
-        _media: &BookMediaRecord,
-        _page: &BookPageRecord,
-        _page_number: u64,
-    ) -> Option<Vec<u8>> {
-        None
-    }
-
-    async fn render_page_thumbnail(
-        &self,
-        _media: &BookMediaRecord,
-        _page: &BookPageRecord,
-        _page_number: u64,
-        _max_edge: u32,
-    ) -> Option<Vec<u8>> {
-        None
-    }
-
-    async fn archive_page_row(
-        &self,
-        _media: &BookMediaRecord,
-        _page_number: u64,
-    ) -> Option<BookPageRecord> {
-        None
-    }
-
-    async fn archive_page_rows(&self, _media: &BookMediaRecord) -> Option<Vec<BookPageRecord>> {
-        None
-    }
-
-    fn pdf_page_row(&self, _media: &BookMediaRecord, _page_number: u64) -> Option<BookPageRecord> {
-        None
-    }
-
-    fn generated_pdf_page_rows(&self, _media: &BookMediaRecord) -> Vec<BookPageRecord> {
-        Vec::new()
-    }
-
-    fn read_pdf_page_as_single_page_pdf(
-        &self,
-        _media: &BookMediaRecord,
-        _page_number: u64,
-    ) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn detect_pdf_page_count(&self, _media: &BookMediaRecord) -> Option<u64> {
-        None
-    }
-
-    async fn read_media_file_bytes(&self, _path: &Path) -> Option<Vec<u8>> {
-        None
-    }
-
-    async fn read_media_file_size(&self, _path: &Path) -> Option<i64> {
-        None
-    }
-
-    fn is_font_resource(&self, _resource_name: &str) -> bool {
-        false
-    }
-
-    async fn read_epub_resource_bytes(
-        &self,
-        _epub_path: &Path,
-        _resource_name: &str,
-    ) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn decode_epub_positions_extension(
+impl EpubNavigationContentPort for TestContentResolver {
+    fn decode_epub_navigation_extension(
         &self,
         _blob: &[u8],
-    ) -> Result<EpubPositionsExtension, String> {
+    ) -> Result<EpubNavigationExtension, String> {
         Ok(self.extension.clone())
     }
+}
 
-    async fn epub_archive_positions(&self, _media: &BookMediaRecord) -> Option<Vec<Value>> {
-        None
-    }
-
-    async fn epub_cover_bytes(&self, _media: &BookMediaRecord) -> Option<(Vec<u8>, String)> {
-        None
-    }
-
-    async fn epub_package_document(&self, _media: &BookMediaRecord) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn epub_fixed_layout(&self, _package_document: &[u8]) -> bool {
-        false
-    }
-
-    fn epub_kobo_spans(&self, _resource_bytes: &[u8]) -> Vec<(String, f64)> {
-        Vec::new()
-    }
-
-    fn normalize_epub_resource_href(&self, _rootfile_path: &str, href: &str) -> String {
-        href.to_string()
-    }
+fn epub_position(raw: Value) -> EpubNavigationPosition {
+    EpubNavigationPosition::from_raw(raw)
 }

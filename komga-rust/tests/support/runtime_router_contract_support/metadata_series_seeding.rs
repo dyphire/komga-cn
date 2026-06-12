@@ -1,4 +1,4 @@
-use komga_infrastructure::sqlite::connect_test_pool;
+use crate::support::sqlite::connect_test_pool;
 
 use super::RuntimeDbPaths;
 

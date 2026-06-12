@@ -1,5 +1,6 @@
 use sqlx::Row;
 
+use crate::parsing::parse_sqlite_group_concat_values;
 use crate::search::index_lifecycle::{
     SearchDocument, SearchEntityType, SearchField, SearchFieldEntry,
 };
@@ -11,10 +12,8 @@ fn search_field(field: SearchField, value: String) -> SearchFieldEntry {
 }
 
 fn search_fields(field: SearchField, values: String) -> Vec<SearchFieldEntry> {
-    values
-        .split('|')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+    parse_sqlite_group_concat_values(&values)
+        .into_iter()
         .map(|value| SearchFieldEntry::new(field, value))
         .collect()
 }
@@ -68,11 +67,42 @@ pub(super) async fn load_book_search_document(
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.READING_DIRECTION, '') ELSE '' END AS ONESHOT_READING_DIRECTION,
              CASE WHEN b.oneshot = 1 THEN COALESCE(CAST(sm.AGE_RATING AS TEXT), '') ELSE '' END AS ONESHOT_AGE_RATING,
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.LANGUAGE, '') ELSE '' END AS ONESHOT_LANGUAGE,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(g.GENRE, '|') FROM SERIES_METADATA_GENRE g WHERE g.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_GENRES,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
-             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(g.GENRE, char(30))
+                      FROM SERIES_METADATA_GENRE g
+                      WHERE g.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_GENRES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(sh.LABEL, char(30))
+                      FROM SERIES_METADATA_SHARING sh
+                      WHERE sh.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_SHARING_LABELS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(bt.TAG, char(30))
+                  FROM BOOK_METADATA_TAG bt
+                  WHERE bt.BOOK_ID = b.ID),
+                 ''
+             ) AS BOOK_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHORS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -108,11 +138,42 @@ pub(super) async fn load_oneshot_book_search_documents(
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.READING_DIRECTION, '') ELSE '' END AS ONESHOT_READING_DIRECTION,
              CASE WHEN b.oneshot = 1 THEN COALESCE(CAST(sm.AGE_RATING AS TEXT), '') ELSE '' END AS ONESHOT_AGE_RATING,
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.LANGUAGE, '') ELSE '' END AS ONESHOT_LANGUAGE,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(g.GENRE, '|') FROM SERIES_METADATA_GENRE g WHERE g.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_GENRES,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
-             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(g.GENRE, char(30))
+                      FROM SERIES_METADATA_GENRE g
+                      WHERE g.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_GENRES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(sh.LABEL, char(30))
+                      FROM SERIES_METADATA_SHARING sh
+                      WHERE sh.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_SHARING_LABELS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(bt.TAG, char(30))
+                  FROM BOOK_METADATA_TAG bt
+                  WHERE bt.BOOK_ID = b.ID),
+                 ''
+             ) AS BOOK_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHORS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -156,14 +217,49 @@ pub(super) async fn load_series_search_document(
                       AND sm.TOTAL_BOOK_COUNT = s.BOOK_COUNT THEN 'true'
                  ELSE ''
              END AS COMPLETE,
-             COALESCE((SELECT GROUP_CONCAT(st.TAG, '|') FROM SERIES_METADATA_TAG st WHERE st.SERIES_ID = s.ID), '') AS SERIES_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(bmat.TAG, '|') FROM BOOK_METADATA_AGGREGATION_TAG bmat WHERE bmat.SERIES_ID = s.ID), '') AS BOOK_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(sg.GENRE, '|') FROM SERIES_METADATA_GENRE sg WHERE sg.SERIES_ID = s.ID), '') AS GENRES,
-             COALESCE((SELECT GROUP_CONCAT(ss.LABEL, '|') FROM SERIES_METADATA_SHARING ss WHERE ss.SERIES_ID = s.ID), '') AS SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS,
-             COALESCE((SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHOR_ROLES,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(st.TAG, char(30))
+                  FROM SERIES_METADATA_TAG st
+                  WHERE st.SERIES_ID = s.ID),
+                 ''
+             ) AS SERIES_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(bmat.TAG, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_TAG bmat
+                  WHERE bmat.SERIES_ID = s.ID),
+                 ''
+             ) AS BOOK_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(sg.GENRE, char(30))
+                  FROM SERIES_METADATA_GENRE sg
+                  WHERE sg.SERIES_ID = s.ID),
+                 ''
+             ) AS GENRES,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(ss.LABEL, char(30))
+                  FROM SERIES_METADATA_SHARING ss
+                  WHERE ss.SERIES_ID = s.ID),
+                 ''
+             ) AS SHARING_LABELS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(baa.NAME, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_AUTHOR baa
+                  WHERE baa.SERIES_ID = s.ID),
+                 ''
+             ) AS AUTHORS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_AUTHOR baa
+                  WHERE baa.SERIES_ID = s.ID),
+                 ''
+             ) AS AUTHOR_ROLES,
              COALESCE(sm.TITLE_SORT, '') AS TITLE_SORT,
-             COALESCE((SELECT GROUP_CONCAT(sat.TITLE, '|') FROM SERIES_METADATA_ALTERNATE_TITLE sat WHERE sat.SERIES_ID = s.ID), '') AS ALTERNATE_TITLES
+             COALESCE(
+                 (SELECT GROUP_CONCAT(sat.TITLE, char(30))
+                  FROM SERIES_METADATA_ALTERNATE_TITLE sat
+                  WHERE sat.SERIES_ID = s.ID),
+                 ''
+             ) AS ALTERNATE_TITLES
           FROM SERIES s
           LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
@@ -219,11 +315,42 @@ async fn load_all_book_search_documents(
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.READING_DIRECTION, '') ELSE '' END AS ONESHOT_READING_DIRECTION,
              CASE WHEN b.oneshot = 1 THEN COALESCE(CAST(sm.AGE_RATING AS TEXT), '') ELSE '' END AS ONESHOT_AGE_RATING,
              CASE WHEN b.oneshot = 1 THEN COALESCE(sm.LANGUAGE, '') ELSE '' END AS ONESHOT_LANGUAGE,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(g.GENRE, '|') FROM SERIES_METADATA_GENRE g WHERE g.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_GENRES,
-             CASE WHEN b.oneshot = 1 THEN COALESCE((SELECT GROUP_CONCAT(sh.LABEL, '|') FROM SERIES_METADATA_SHARING sh WHERE sh.SERIES_ID = s.ID), '') ELSE '' END AS ONESHOT_SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(bt.TAG, '|') FROM BOOK_METADATA_TAG bt WHERE bt.BOOK_ID = b.ID), '') AS BOOK_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHORS,
-             COALESCE((SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, '|') FROM BOOK_METADATA_AUTHOR ba WHERE ba.BOOK_ID = b.ID), '') AS AUTHOR_ROLES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(g.GENRE, char(30))
+                      FROM SERIES_METADATA_GENRE g
+                      WHERE g.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_GENRES,
+             CASE
+                 WHEN b.oneshot = 1 THEN COALESCE(
+                     (SELECT GROUP_CONCAT(sh.LABEL, char(30))
+                      FROM SERIES_METADATA_SHARING sh
+                      WHERE sh.SERIES_ID = s.ID),
+                     ''
+                 )
+                 ELSE ''
+             END AS ONESHOT_SHARING_LABELS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(bt.TAG, char(30))
+                  FROM BOOK_METADATA_TAG bt
+                  WHERE bt.BOOK_ID = b.ID),
+                 ''
+             ) AS BOOK_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHORS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(COALESCE(ba.ROLE, '') || '::' || ba.NAME, char(30))
+                  FROM BOOK_METADATA_AUTHOR ba
+                  WHERE ba.BOOK_ID = b.ID),
+                 ''
+             ) AS AUTHOR_ROLES,
              COALESCE(STRFTIME('%Y', bm.RELEASE_DATE), '') AS RELEASE_YEAR,
              CASE WHEN b.DELETED_DATE IS NULL THEN 'false' ELSE 'true' END AS DELETED,
              CASE WHEN b.oneshot = 1 THEN 'true' ELSE 'false' END AS ONESHOT
@@ -264,14 +391,49 @@ async fn load_all_series_search_documents(
                       AND sm.TOTAL_BOOK_COUNT = s.BOOK_COUNT THEN 'true'
                  ELSE ''
              END AS COMPLETE,
-             COALESCE((SELECT GROUP_CONCAT(st.TAG, '|') FROM SERIES_METADATA_TAG st WHERE st.SERIES_ID = s.ID), '') AS SERIES_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(bmat.TAG, '|') FROM BOOK_METADATA_AGGREGATION_TAG bmat WHERE bmat.SERIES_ID = s.ID), '') AS BOOK_TAGS,
-             COALESCE((SELECT GROUP_CONCAT(sg.GENRE, '|') FROM SERIES_METADATA_GENRE sg WHERE sg.SERIES_ID = s.ID), '') AS GENRES,
-             COALESCE((SELECT GROUP_CONCAT(ss.LABEL, '|') FROM SERIES_METADATA_SHARING ss WHERE ss.SERIES_ID = s.ID), '') AS SHARING_LABELS,
-             COALESCE((SELECT GROUP_CONCAT(baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHORS,
-             COALESCE((SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, '|') FROM BOOK_METADATA_AGGREGATION_AUTHOR baa WHERE baa.SERIES_ID = s.ID), '') AS AUTHOR_ROLES,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(st.TAG, char(30))
+                  FROM SERIES_METADATA_TAG st
+                  WHERE st.SERIES_ID = s.ID),
+                 ''
+             ) AS SERIES_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(bmat.TAG, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_TAG bmat
+                  WHERE bmat.SERIES_ID = s.ID),
+                 ''
+             ) AS BOOK_TAGS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(sg.GENRE, char(30))
+                  FROM SERIES_METADATA_GENRE sg
+                  WHERE sg.SERIES_ID = s.ID),
+                 ''
+             ) AS GENRES,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(ss.LABEL, char(30))
+                  FROM SERIES_METADATA_SHARING ss
+                  WHERE ss.SERIES_ID = s.ID),
+                 ''
+             ) AS SHARING_LABELS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(baa.NAME, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_AUTHOR baa
+                  WHERE baa.SERIES_ID = s.ID),
+                 ''
+             ) AS AUTHORS,
+             COALESCE(
+                 (SELECT GROUP_CONCAT(COALESCE(baa.ROLE, '') || '::' || baa.NAME, char(30))
+                  FROM BOOK_METADATA_AGGREGATION_AUTHOR baa
+                  WHERE baa.SERIES_ID = s.ID),
+                 ''
+             ) AS AUTHOR_ROLES,
              COALESCE(sm.TITLE_SORT, '') AS TITLE_SORT,
-             COALESCE((SELECT GROUP_CONCAT(sat.TITLE, '|') FROM SERIES_METADATA_ALTERNATE_TITLE sat WHERE sat.SERIES_ID = s.ID), '') AS ALTERNATE_TITLES
+             COALESCE(
+                 (SELECT GROUP_CONCAT(sat.TITLE, char(30))
+                  FROM SERIES_METADATA_ALTERNATE_TITLE sat
+                  WHERE sat.SERIES_ID = s.ID),
+                 ''
+             ) AS ALTERNATE_TITLES
           FROM SERIES s
           LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID
@@ -457,11 +619,7 @@ fn build_named_document(
 
 fn search_role_author_fields(values: String) -> Vec<SearchFieldEntry> {
     let mut fields = Vec::new();
-    for value in values
-        .split('|')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    for value in parse_sqlite_group_concat_values(&values) {
         let Some((role, name)) = value.split_once(AUTHOR_ROLE_DELIMITER) else {
             continue;
         };
@@ -488,5 +646,244 @@ fn normalize_author_role_fields(role: &str) -> &'static [SearchField] {
         "editor" => &[SearchField::Editor],
         "translator" => &[SearchField::Translator],
         _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use sqlx::SqlitePool;
+
+    use super::*;
+    use crate::sqlite::{connect_test_pool, setup};
+
+    fn temp_db_path(case_id: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "komga-rust-search-documents-{case_id}-{nanos}.sqlite"
+        ))
+    }
+
+    async fn open_bootstrapped_pool(case_id: &str) -> (PathBuf, SqlitePool) {
+        let db_path = temp_db_path(case_id);
+        let pool = connect_test_pool(db_path.as_path(), 1)
+            .await
+            .expect("temporary sqlite db should open");
+        setup::bootstrap_pool(&pool)
+            .await
+            .expect("temporary sqlite db should bootstrap main schema");
+        (db_path, pool)
+    }
+
+    async fn seed_library(pool: &SqlitePool) {
+        sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT) VALUES (?, ?, ?)")
+            .bind("library-1")
+            .bind("Library 1")
+            .bind("/tmp")
+            .execute(pool)
+            .await
+            .expect("library row should be inserted");
+    }
+
+    async fn seed_series(pool: &SqlitePool, series_id: &str, oneshot: bool) {
+        sqlx::query(
+            r#"
+            INSERT INTO SERIES (
+                ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot
+            )
+            VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)
+            "#,
+        )
+        .bind(series_id)
+        .bind(0_i64)
+        .bind(series_id)
+        .bind(format!("series/{series_id}"))
+        .bind("library-1")
+        .bind(oneshot)
+        .execute(pool)
+        .await
+        .expect("series row should be inserted");
+    }
+
+    async fn seed_series_metadata(pool: &SqlitePool, series_id: &str, status: &str) {
+        sqlx::query(
+            r#"
+            INSERT INTO SERIES_METADATA (
+                STATUS, TITLE, TITLE_SORT, PUBLISHER, SERIES_ID
+            )
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(status)
+        .bind(series_id)
+        .bind(series_id)
+        .bind("Publisher")
+        .bind(series_id)
+        .execute(pool)
+        .await
+        .expect("series metadata row should be inserted");
+    }
+
+    async fn seed_book(pool: &SqlitePool, book_id: &str, series_id: &str, oneshot: bool) {
+        sqlx::query(
+            r#"
+            INSERT INTO BOOK (
+                ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
+                NUMBER, LIBRARY_ID, oneshot
+            )
+            VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(book_id)
+        .bind(0_i64)
+        .bind(book_id)
+        .bind(format!("books/{book_id}.cbz"))
+        .bind(series_id)
+        .bind(0_i64)
+        .bind(1_i64)
+        .bind("library-1")
+        .bind(oneshot)
+        .execute(pool)
+        .await
+        .expect("book row should be inserted");
+    }
+
+    async fn seed_book_metadata(pool: &SqlitePool, book_id: &str) {
+        sqlx::query(
+            "INSERT INTO BOOK_METADATA (BOOK_ID, TITLE, NUMBER, NUMBER_SORT) VALUES (?, ?, ?, ?)",
+        )
+        .bind(book_id)
+        .bind(book_id)
+        .bind("1")
+        .bind(1.0_f64)
+        .execute(pool)
+        .await
+        .expect("book metadata row should be inserted");
+    }
+
+    fn search_field_values(document: &SearchDocument, field: SearchField) -> Vec<&str> {
+        document
+            .fields
+            .iter()
+            .filter(|entry| entry.field == field)
+            .map(|entry| entry.value.as_str())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn search_document_loaders_preserve_separator_characters_in_metadata_values() {
+        let (db_path, pool) = open_bootstrapped_pool("separator-values").await;
+        seed_library(&pool).await;
+        seed_series(&pool, "series-separator", true).await;
+        seed_series_metadata(&pool, "series-separator", "ONGOING").await;
+        seed_book(&pool, "book-separator", "series-separator", true).await;
+        seed_book_metadata(&pool, "book-separator").await;
+
+        sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+            .bind("series-separator")
+            .bind("Sci | Fi")
+            .execute(&pool)
+            .await
+            .expect("series genre should be inserted");
+        sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+            .bind("series-separator")
+            .bind("Family | Kids")
+            .execute(&pool)
+            .await
+            .expect("sharing label should be inserted");
+        sqlx::query("INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+            .bind("series-separator")
+            .bind("Series | Tag")
+            .execute(&pool)
+            .await
+            .expect("series tag should be inserted");
+        sqlx::query(
+            "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+        )
+        .bind("series-separator")
+        .bind("")
+        .bind("Alt | Title")
+        .execute(&pool)
+        .await
+        .expect("alternate title should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+            .bind("book-separator")
+            .bind("Action | Comedy")
+            .execute(&pool)
+            .await
+            .expect("book tag should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+            .bind("book-separator")
+            .bind("Alex | Writer")
+            .bind("writer")
+            .execute(&pool)
+            .await
+            .expect("book author should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION (SERIES_ID) VALUES (?)")
+            .bind("series-separator")
+            .execute(&pool)
+            .await
+            .expect("series metadata aggregation should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+            .bind("series-separator")
+            .bind("Aggregated | Tag")
+            .execute(&pool)
+            .await
+            .expect("aggregated book tag should be inserted");
+        sqlx::query(
+            "INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE) VALUES (?, ?, ?)",
+        )
+        .bind("series-separator")
+        .bind("Dana | Editor")
+        .bind("editor")
+        .execute(&pool)
+        .await
+        .expect("aggregated author should be inserted");
+
+        let book_document = load_book_search_document(pool.clone(), "book-separator")
+            .await
+            .expect("book search document should load")
+            .expect("book search document should exist");
+        assert_eq!(
+            search_field_values(&book_document, SearchField::BookTag),
+            vec!["Action | Comedy"]
+        );
+        assert_eq!(
+            search_field_values(&book_document, SearchField::Writer),
+            vec!["Alex | Writer"]
+        );
+        assert_eq!(
+            search_field_values(&book_document, SearchField::Genre),
+            vec!["Sci | Fi"]
+        );
+        assert_eq!(
+            search_field_values(&book_document, SearchField::SharingLabel),
+            vec!["Family | Kids"]
+        );
+
+        let series_document = load_series_search_document(pool.clone(), "series-separator")
+            .await
+            .expect("series search document should load")
+            .expect("series search document should exist");
+        assert_eq!(
+            search_field_values(&series_document, SearchField::SeriesTag),
+            vec!["Series | Tag"]
+        );
+        assert_eq!(
+            search_field_values(&series_document, SearchField::BookTag),
+            vec!["Aggregated | Tag"]
+        );
+        assert_eq!(
+            search_field_values(&series_document, SearchField::Editor),
+            vec!["Dana | Editor"]
+        );
+        assert!(search_field_values(&series_document, SearchField::Title).contains(&"Alt | Title"));
+
+        pool.close().await;
+        let _ = std::fs::remove_file(db_path);
     }
 }

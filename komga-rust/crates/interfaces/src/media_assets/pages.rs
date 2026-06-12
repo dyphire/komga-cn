@@ -1,18 +1,40 @@
-use super::*;
-use crate::identity_access::auth::Authenticated;
-use crate::media_responses::{BookMediaResponses, BookPageResponseOptions};
-use crate::opds::OpdsV1Authenticated;
-use crate::state::MediaAssetsState;
-use axum::extract::State;
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde_json::json;
 
-pub async fn book_page(
+use super::access_control::user_can_access_book_media;
+use super::http_helpers::internal_error_response;
+use super::media_helpers::book_media_is_epub;
+use crate::book_page_query::BookPageQuery;
+use crate::cache::{
+    asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
+};
+use crate::identity_access::auth::Authenticated;
+use crate::media_responses::BookMediaResponses;
+use crate::opds_auth::OpdsV1Authenticated;
+use crate::state::MediaAssetsState;
+use komga_application::discovery::resolve_persisted_book_id;
+use komga_application::identity_access::{AuthUserRole, user_has_role};
+use komga_application::media_assets::{EpubNavigationLoadError, load_book_epub_positions};
+
+fn book_media_responses(app: &MediaAssetsState) -> BookMediaResponses<'_> {
+    BookMediaResponses::new(
+        app.book_media_reader.as_ref(),
+        app.book_media_content.as_ref(),
+        app.book_id_resolver.as_ref(),
+    )
+}
+
+pub(crate) async fn book_page(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    BookMediaResponses::for_media_assets(&app)
+    book_media_responses(&app)
         .book_page(
             &user,
             &headers,
@@ -23,101 +45,82 @@ pub async fn book_page(
         .await
 }
 
-pub async fn book_page_opds_v1(
+pub(crate) async fn book_page_opds_v1(
     State(app): State<MediaAssetsState>,
     OpdsV1Authenticated(user): OpdsV1Authenticated,
     headers: HeaderMap,
-    Query(mut query): Query<BookPageQuery>,
+    Query(query): Query<BookPageQuery>,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    query.zero_based = true;
-    query.content_negotiation = false;
-    BookMediaResponses::for_media_assets(&app)
+    book_media_responses(&app)
         .book_page(
             &user,
             &headers,
             &book_id,
             page_number,
-            query.into_response_options(),
+            query.into_opds_v1_response_options(),
         )
         .await
 }
 
-pub async fn book_page_raw(
+pub(crate) async fn book_page_raw(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path((book_id, page_number_signed)): Path<(String, i32)>,
 ) -> Response {
-    BookMediaResponses::for_media_assets(&app)
+    book_media_responses(&app)
         .book_page_raw(&user, &headers, &book_id, page_number_signed)
         .await
 }
 
-#[derive(Deserialize, Default)]
-pub struct BookPageQuery {
-    #[serde(default)]
-    pub(crate) convert: Option<String>,
-
-    #[serde(default)]
-    pub(crate) zero_based: bool,
-
-    #[serde(default = "book_page_content_negotiation_default")]
-    #[serde(rename = "contentNegotiation")]
-    pub(crate) content_negotiation: bool,
-}
-
-impl BookPageQuery {
-    pub(crate) fn into_response_options(self) -> BookPageResponseOptions {
-        BookPageResponseOptions {
-            convert: self.convert,
-            zero_based: self.zero_based,
-            content_negotiation: self.content_negotiation,
-        }
-    }
-}
-
-fn book_page_content_negotiation_default() -> bool {
-    true
-}
-
-pub async fn book_page_thumbnail(
+pub(crate) async fn book_page_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path((book_id, page_number)): Path<(String, u32)>,
 ) -> Response {
-    BookMediaResponses::for_media_assets(&app)
+    book_media_responses(&app)
         .book_page_thumbnail(&user, &headers, &book_id, page_number)
         .await
 }
 
-pub async fn book_pages(
+pub(crate) async fn book_pages(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    BookMediaResponses::for_media_assets(&app)
-        .book_pages(&user, &book_id)
-        .await
+    book_media_responses(&app).book_pages(&user, &book_id).await
 }
 
-pub async fn book_positions(
+pub(crate) async fn book_positions(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let resolved_book_id = resolve_book_id_for_persisted(&app, &book_id).await;
+    let resolved_book_id = resolve_persisted_book_id(app.book_id_resolver.as_ref(), &book_id).await;
 
-    let media = match app.reader.book_media(&resolved_book_id).await {
+    let media = match app.book_media_reader.book_media(&resolved_book_id).await {
         Ok(Some(media)) => media,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
-
-    if !user_can_access_book_media(app.reader.as_ref(), &resolved_book_id, &user, &media).await {
+    if !user_has_role(&user, AuthUserRole::PageStreaming) {
         return StatusCode::FORBIDDEN.into_response();
+    }
+
+    match user_can_access_book_media(
+        app.book_media_reader.as_ref(),
+        &resolved_book_id,
+        &user,
+        &media,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+        Err(error) => return internal_error_response(error),
     }
 
     if !book_media_is_epub(&media) {
@@ -126,7 +129,13 @@ pub async fn book_positions(
 
     let last_modified = file_last_modified_header_value(media.file_path.as_path());
 
-    match load_persisted_epub_positions(&app, &resolved_book_id).await {
+    match load_book_epub_positions(
+        app.epub_navigation_reader.as_ref(),
+        app.epub_navigation_content.as_ref(),
+        &resolved_book_id,
+    )
+    .await
+    {
         Ok(Some(positions)) if !positions.is_empty() => {
             if let Some(last_modified) = last_modified.as_deref()
                 && if_modified_since_matches(&headers, last_modified)
@@ -152,6 +161,7 @@ pub async fn book_positions(
             response
         }
         Ok(_) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error),
+        Err(EpubNavigationLoadError::MissingExtension) => StatusCode::NOT_FOUND.into_response(),
+        Err(EpubNavigationLoadError::Internal(error)) => internal_error_response(error),
     }
 }

@@ -2,7 +2,6 @@ use super::persisted::authors_queries::authors_v2_page_payload;
 use super::persisted::common_helpers::{
     decode_query_component, discovery_error_response, internal_error_response,
 };
-use super::persisted::models::PersistedAuthorsScope;
 use crate::discovery_auth::context::DiscoveryQueryContext;
 use crate::discovery_auth::state::DiscoveryAuthState;
 use crate::helpers::{query_bool, query_value, query_values, to_domain_query_context};
@@ -12,7 +11,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::{FacetKind, FacetScope};
+use komga_application::discovery::{FacetKind, FacetScope, PersistedAuthorsScope};
 use serde_json::json;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
@@ -37,10 +36,14 @@ async fn resolve_query_context_or_unauthorized(
     headers: &HeaderMap,
     requested_library_ids: Option<&[String]>,
 ) -> Result<DiscoveryQueryContext, Response> {
-    auth_state
+    match auth_state
         .resolve_query_context_with_persistence(identity, headers, requested_library_ids)
         .await
-        .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())
+    {
+        Ok(Some(context)) => Ok(context),
+        Ok(None) => Err(StatusCode::UNAUTHORIZED.into_response()),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    }
 }
 
 struct CollectionFacetScope {
@@ -71,7 +74,7 @@ async fn resolve_collection_facet_scope(
     })
 }
 
-pub async fn authors_names(
+pub(crate) async fn authors_names(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -103,7 +106,7 @@ pub async fn authors_names(
     }
 }
 
-pub async fn authors_roles(
+pub(crate) async fn authors_roles(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -188,7 +191,7 @@ pub(crate) async fn authors_deprecated_get(
     Json(json!(authors)).into_response()
 }
 
-pub async fn authors_v2(
+pub(crate) async fn authors_v2(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -301,7 +304,7 @@ async fn collection_facet_handler(
     }
 }
 
-pub async fn genres(
+pub(crate) async fn genres(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -310,7 +313,7 @@ pub async fn genres(
     collection_facet_handler(&app, &headers, &uri, FacetKind::Genres).await
 }
 
-pub async fn tags(
+pub(crate) async fn tags(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -319,7 +322,7 @@ pub async fn tags(
     collection_facet_handler(&app, &headers, &uri, FacetKind::Tags).await
 }
 
-pub async fn series_tags(
+pub(crate) async fn series_tags(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -328,7 +331,7 @@ pub async fn series_tags(
     collection_facet_handler(&app, &headers, &uri, FacetKind::SeriesTags).await
 }
 
-pub async fn languages(
+pub(crate) async fn languages(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -337,7 +340,7 @@ pub async fn languages(
     collection_facet_handler(&app, &headers, &uri, FacetKind::Languages).await
 }
 
-pub async fn publishers(
+pub(crate) async fn publishers(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -346,7 +349,7 @@ pub async fn publishers(
     collection_facet_handler(&app, &headers, &uri, FacetKind::Publishers).await
 }
 
-pub async fn age_ratings(
+pub(crate) async fn age_ratings(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -355,7 +358,7 @@ pub async fn age_ratings(
     collection_facet_handler(&app, &headers, &uri, FacetKind::AgeRatings).await
 }
 
-pub async fn sharing_labels(
+pub(crate) async fn sharing_labels(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -364,7 +367,7 @@ pub async fn sharing_labels(
     collection_facet_handler(&app, &headers, &uri, FacetKind::SharingLabels).await
 }
 
-pub async fn series_release_dates(
+pub(crate) async fn series_release_dates(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,

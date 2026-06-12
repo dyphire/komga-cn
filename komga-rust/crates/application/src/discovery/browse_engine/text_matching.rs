@@ -1,25 +1,16 @@
 #[derive(Clone, Copy)]
-pub enum TextMatchMode {
+pub(super) enum TextMatchMode {
     Exact,
     Contains,
     StartsWith,
     EndsWith,
 }
 
-pub fn first_group_key(title: &str) -> String {
-    title
-        .trim()
-        .chars()
-        .next()
-        .map(|ch| ch.to_lowercase().collect::<String>())
-        .unwrap_or_else(|| "#".to_string())
-}
-
-pub fn filter_rows<T>(rows: Vec<T>, mut predicate: impl FnMut(&T) -> bool) -> Vec<T> {
-    rows.into_iter().filter(|row| predicate(row)).collect()
-}
-
-pub fn normalized_text_matches(value: &str, expected: &[String], mode: TextMatchMode) -> bool {
+pub(super) fn normalized_text_matches(
+    value: &str,
+    expected: &[String],
+    mode: TextMatchMode,
+) -> bool {
     let normalized = value.to_ascii_lowercase();
     match mode {
         TextMatchMode::Exact => expected.contains(&normalized),
@@ -35,7 +26,7 @@ pub fn normalized_text_matches(value: &str, expected: &[String], mode: TextMatch
     }
 }
 
-pub fn any_normalized_text_matches<'a>(
+pub(super) fn any_normalized_text_matches<'a>(
     values: impl IntoIterator<Item = &'a str>,
     expected: &[String],
     mode: TextMatchMode,
@@ -45,7 +36,7 @@ pub fn any_normalized_text_matches<'a>(
         .any(|value| normalized_text_matches(value, expected, mode))
 }
 
-pub fn any_ignore_ascii_case<'a>(
+pub(super) fn any_ignore_ascii_case<'a>(
     values: impl IntoIterator<Item = &'a str>,
     expected: &[String],
 ) -> bool {
@@ -56,7 +47,7 @@ pub fn any_ignore_ascii_case<'a>(
     })
 }
 
-pub fn matches_optional_value<T>(
+pub(super) fn matches_optional_value<T>(
     value: Option<T>,
     missing_result: bool,
     predicate: impl FnOnce(T) -> bool,
@@ -65,23 +56,4 @@ pub fn matches_optional_value<T>(
         Some(value) => predicate(value),
         None => missing_result,
     }
-}
-
-pub fn matches_any_regex(value: &str, patterns: &[regex::Regex]) -> bool {
-    patterns.iter().any(|regex| regex.is_match(value))
-}
-
-pub fn compile_case_insensitive_regexes(
-    patterns: &[String],
-    field: &str,
-) -> Result<Vec<regex::Regex>, String> {
-    patterns
-        .iter()
-        .map(|pattern| {
-            regex::RegexBuilder::new(pattern)
-                .case_insensitive(true)
-                .build()
-                .map_err(|error| format!("invalid {field} regex `{pattern}`: {error}"))
-        })
-        .collect()
 }

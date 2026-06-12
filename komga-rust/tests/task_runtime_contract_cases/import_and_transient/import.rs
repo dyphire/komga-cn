@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use komga_application::media_assets::{
     BookImportPort, BookImportService, BooksImportEntry, ImportBookOutcome, ImportCopyMode,
 };
+use komga_application::runtime_sse::RuntimeSseEventStore;
+use komga_application::task_processing::ImportBookPayload;
 use std::sync::{Arc, Mutex};
 
 async fn enqueue_books_import(app: &Router, auth_token: &str, payload: Value, context: &str) {
@@ -376,17 +378,25 @@ async fn router_books_import_runtime_follow_up_enqueues_analyze_book_instead_of_
     let import_row = rows.pop().expect("queued import task row should exist");
 
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let follow_up_tasks = BookImportService::new(Arc::new(RecordingImportPort {
-        calls: calls.clone(),
-        outcome: Some(ImportBookOutcome {
-            library_id: "library-1".to_string(),
-            imported_book_id: "book-imported-1".to_string(),
-            sidecar_imported: false,
-            artwork_sidecar_imported: false,
+    let follow_up_tasks = BookImportService::new(
+        Arc::new(RecordingImportPort {
+            calls: calls.clone(),
+            outcome: Some(ImportBookOutcome {
+                library_id: "library-1".to_string(),
+                imported_book_id: "book-imported-1".to_string(),
+                sidecar_imported: false,
+                artwork_sidecar_imported: false,
+            }),
         }),
-    }))
+        Arc::new(RuntimeSseEventStore::default()),
+    )
     .process_queued_book_payload(
-        &import_row.get::<String, _>("PAYLOAD"),
+        ImportBookPayload::from_task_record(
+            &TaskQueueRecord::new("ImportBook:queued-import", 100, None)
+                .with_simple_type("ImportBook")
+                .with_payload(import_row.get::<String, _>("PAYLOAD")),
+        )
+        .expect("queued import task payload should parse"),
         import_row.get::<i64, _>("PRIORITY") as i32,
     )
     .await

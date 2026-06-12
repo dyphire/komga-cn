@@ -1,15 +1,17 @@
+use async_trait::async_trait;
+use komga_domain::discovery::SeriesStatus;
 use std::collections::HashMap;
 
-use async_trait::async_trait;
-
-use super::read_models::{BookMetadataAuthorReadModel, BookReadModel, SeriesReadModel};
+use super::browse_engine::SeriesReadProgressCounts;
+use super::read_models::{BookReadModel, SeriesReadModel};
+use super::reading_direction::SeriesReadingDirection;
 
 // --- Book record types ---
 
 #[derive(Clone)]
 pub struct PersistedBookResourceRecord {
     pub library_id: String,
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub sharing_labels: String,
 }
 
@@ -31,7 +33,7 @@ pub struct PersistedCollectionAccessRecord {
 }
 
 pub struct PersistedSeriesRestrictionRecord {
-    pub age_rating: Option<u16>,
+    pub age_rating: Option<u32>,
     pub labels: Vec<String>,
 }
 
@@ -84,9 +86,9 @@ pub struct PersistedSeriesDetailRecord {
     pub last_modified: String,
     pub file_last_modified: String,
     pub books_count: u32,
-    pub status: String,
+    pub status: SeriesStatus,
     pub summary: String,
-    pub reading_direction: String,
+    pub reading_direction: Option<SeriesReadingDirection>,
     pub publisher: String,
     pub age_rating: Option<u32>,
     pub language: String,
@@ -107,8 +109,9 @@ pub struct PersistedSeriesCollectionRecord {
     pub last_modified_date: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExistingSeriesMetadataRecord {
-    pub status: String,
+    pub status: SeriesStatus,
     pub status_lock: bool,
     pub title: String,
     pub title_lock: bool,
@@ -116,7 +119,7 @@ pub struct ExistingSeriesMetadataRecord {
     pub title_sort_lock: bool,
     pub summary: String,
     pub summary_lock: bool,
-    pub reading_direction: Option<String>,
+    pub reading_direction: Option<SeriesReadingDirection>,
     pub reading_direction_lock: bool,
     pub publisher: String,
     pub publisher_lock: bool,
@@ -138,20 +141,21 @@ pub struct ExistingSeriesMetadataRecord {
     pub alternate_titles_lock: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesMetadataLinkRecord {
     pub label: String,
     pub url: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesAlternateTitleRecord {
     pub label: String,
     pub title: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeriesMetadataUpdateRecord {
-    pub status: String,
+    pub status: SeriesStatus,
     pub status_lock: bool,
     pub title: String,
     pub title_lock: bool,
@@ -159,7 +163,7 @@ pub struct SeriesMetadataUpdateRecord {
     pub title_sort_lock: bool,
     pub summary: String,
     pub summary_lock: bool,
-    pub reading_direction: Option<String>,
+    pub reading_direction: Option<SeriesReadingDirection>,
     pub reading_direction_lock: bool,
     pub publisher: String,
     pub publisher_lock: bool,
@@ -195,18 +199,10 @@ pub trait ReadlistBookPort: Send + Sync {
         book_id: &str,
         user_id: Option<&str>,
     ) -> Result<Option<BookReadModel>, String>;
-
-    async fn load_persisted_book_authors(
-        &self,
-        book_id: &str,
-    ) -> Result<Vec<BookMetadataAuthorReadModel>, String>;
 }
 
 #[async_trait]
 pub trait BookDetailPort: Send + Sync {
-    async fn load_book_id_by_sorted_position(&self, index: usize)
-    -> Result<Option<String>, String>;
-
     async fn load_persisted_book_resource(
         &self,
         book_id: &str,
@@ -223,11 +219,44 @@ pub trait BookDetailPort: Send + Sync {
         book_id: &str,
         direction: PersistedBookSiblingDirectionRecord,
     ) -> Result<Option<String>, String>;
+}
 
-    async fn load_persisted_book_authors(
-        &self,
-        book_id: &str,
-    ) -> Result<Vec<BookMetadataAuthorReadModel>, String>;
+#[async_trait]
+pub trait PersistedBookIdResolverPort: Send + Sync {
+    async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String>;
+
+    async fn load_book_id_by_sorted_position(&self, index: usize)
+    -> Result<Option<String>, String>;
+}
+
+pub async fn resolve_persisted_book_id<B>(book_ids: &B, requested_book_id: &str) -> String
+where
+    B: PersistedBookIdResolverPort + ?Sized,
+{
+    let Some(index) = requested_book_id
+        .strip_prefix("book-")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return requested_book_id.to_string();
+    };
+
+    if index == 0 {
+        return requested_book_id.to_string();
+    }
+
+    if matches!(
+        book_ids
+            .persisted_book_resource_exists(requested_book_id)
+            .await,
+        Ok(true)
+    ) {
+        return requested_book_id.to_string();
+    }
+
+    match book_ids.load_book_id_by_sorted_position(index).await {
+        Ok(Some(book_id)) => book_id,
+        _ => requested_book_id.to_string(),
+    }
 }
 
 #[async_trait]
@@ -249,13 +278,6 @@ where
     ) -> Result<Option<BookReadModel>, String> {
         BookDetailPort::load_persisted_book_detail(self, book_id, user_id).await
     }
-
-    async fn load_persisted_book_authors(
-        &self,
-        book_id: &str,
-    ) -> Result<Vec<BookMetadataAuthorReadModel>, String> {
-        BookDetailPort::load_persisted_book_authors(self, book_id).await
-    }
 }
 
 #[async_trait]
@@ -266,11 +288,6 @@ pub trait SeriesDetailPort: Send + Sync {
         &self,
         series_id: &str,
     ) -> Result<PersistedSeriesRestrictionRecord, String>;
-
-    async fn load_series_id_by_sorted_position(
-        &self,
-        index: usize,
-    ) -> Result<Option<String>, String>;
 
     async fn load_persisted_series_resource(
         &self,
@@ -289,7 +306,7 @@ pub trait SeriesDetailPort: Send + Sync {
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, (i64, i64)>, String>;
+    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String>;
 
     async fn load_persisted_series_collections(
         &self,
@@ -300,17 +317,46 @@ pub trait SeriesDetailPort: Send + Sync {
         &self,
         series_id: &str,
     ) -> Result<Option<ExistingSeriesMetadataRecord>, String>;
+}
 
-    async fn persist_series_metadata_update(
-        &self,
-        series_id: &str,
-        update: SeriesMetadataUpdateRecord,
-    ) -> Result<bool, String>;
+#[async_trait]
+pub trait PersistedSeriesIdResolverPort: Send + Sync {
+    async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String>;
 
-    async fn refresh_series_search_documents_after_metadata_update(
+    async fn load_series_id_by_sorted_position(
         &self,
-        series_id: &str,
-    ) -> Result<(), String>;
+        index: usize,
+    ) -> Result<Option<String>, String>;
+}
+
+pub async fn resolve_persisted_series_id<S>(series_ids: &S, requested_series_id: &str) -> String
+where
+    S: PersistedSeriesIdResolverPort + ?Sized,
+{
+    let Some(index) = requested_series_id
+        .strip_prefix("series-")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return requested_series_id.to_string();
+    };
+
+    if index == 0 {
+        return requested_series_id.to_string();
+    }
+
+    if matches!(
+        series_ids
+            .persisted_series_resource_exists(requested_series_id)
+            .await,
+        Ok(true)
+    ) {
+        return requested_series_id.to_string();
+    }
+
+    match series_ids.load_series_id_by_sorted_position(index).await {
+        Ok(Some(series_id)) => series_id,
+        _ => requested_series_id.to_string(),
+    }
 }
 
 #[async_trait]
@@ -382,12 +428,17 @@ pub trait CollectionPort: Send + Sync {
 }
 
 #[async_trait]
-pub trait CollectionListPort: Send + Sync {
+pub trait CollectionProjectionPort: Send + Sync {
     async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
     async fn load_persisted_collections(
         &self,
     ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+
+    async fn load_persisted_collection_detail(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
 
     async fn load_persisted_collection_series_ids(
         &self,
@@ -396,7 +447,7 @@ pub trait CollectionListPort: Send + Sync {
 }
 
 #[async_trait]
-impl<T> CollectionListPort for T
+impl<T> CollectionProjectionPort for T
 where
     T: CollectionPort + ?Sized,
 {
@@ -416,38 +467,12 @@ where
     ) -> Result<Vec<String>, String> {
         CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
     }
-}
 
-#[async_trait]
-pub trait CollectionDetailPort: Send + Sync {
-    async fn load_persisted_collection_detail(
-        &self,
-        collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
-
-    async fn load_persisted_collection_series_ids(
-        &self,
-        collection_id: &str,
-    ) -> Result<Vec<String>, String>;
-}
-
-#[async_trait]
-impl<T> CollectionDetailPort for T
-where
-    T: CollectionPort + ?Sized,
-{
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
     ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
         CollectionPort::load_persisted_collection_detail(self, collection_id).await
-    }
-
-    async fn load_persisted_collection_series_ids(
-        &self,
-        collection_id: &str,
-    ) -> Result<Vec<String>, String> {
-        CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
     }
 }
 
@@ -551,7 +576,7 @@ where
 }
 
 #[async_trait]
-pub trait ReadlistPort: Send + Sync {
+pub trait ReadlistProjectionPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
     ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
@@ -565,11 +590,21 @@ pub trait ReadlistPort: Send + Sync {
         &self,
         readlist_id: &str,
     ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
+}
+
+#[async_trait]
+pub trait ReadlistComicRackMatchPort: Send + Sync {
+    async fn load_persisted_readlists(
+        &self,
+    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
 
     async fn load_comicrack_match_candidates(
         &self,
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
+}
 
+#[async_trait]
+pub trait ReadlistMutationPort: ReadlistProjectionPort {
     async fn persist_readlist_create(
         &self,
         readlist_id: &str,

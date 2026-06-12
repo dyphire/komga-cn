@@ -64,7 +64,8 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
             )
             .with_simple_type("AggregateSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     let processed = scheduler
         .process_available(&runtime.job())
         .await
@@ -184,7 +185,8 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
             )
             .with_simple_type("AggregateSeriesMetadata"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
     let processed = scheduler
         .process_available(&runtime.job())
         .await

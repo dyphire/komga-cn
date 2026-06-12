@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::media_assets::PageHashDeleteTargetPage;
 use crate::task_processing::{
     HashedPageToDeletePayload, RemoveHashedPagesPayload, SubmitUrgency, TaskKind, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,
@@ -8,8 +7,9 @@ use crate::task_processing::{
 
 use super::PageHashPort;
 use super::page_hash_models::{
-    PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage,
-    PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+    PageHashDeleteTargetPage, PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry,
+    PageHashMatchesQuery, PageHashPage, PageHashThumbnail, PageHashUnknownEntry,
+    PageHashUnknownQuery, PageHashUpsertCommand,
 };
 
 const REMOVE_HASHED_PAGES_PRIORITY: i32 = 4;
@@ -98,7 +98,7 @@ impl PageHashService {
     pub async fn load_page_hash_thumbnail(
         &self,
         page_hash: &str,
-    ) -> Result<Option<crate::media_assets::PageHashThumbnail>, String> {
+    ) -> Result<Option<PageHashThumbnail>, String> {
         self.page_hashes.load_page_hash_thumbnail(page_hash).await
     }
 
@@ -106,7 +106,7 @@ impl PageHashService {
         &self,
         page_hash: &str,
         resize_to: Option<u32>,
-    ) -> Result<Option<crate::media_assets::PageHashThumbnail>, String> {
+    ) -> Result<Option<PageHashThumbnail>, String> {
         self.page_hashes
             .load_unknown_page_hash_thumbnail(page_hash, resize_to)
             .await

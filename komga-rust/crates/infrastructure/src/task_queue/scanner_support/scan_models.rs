@@ -6,50 +6,50 @@ use super::scan_sse::RuntimeSseRecord;
 /// Contains everything the pipeline needs to decide follow-up tasks,
 /// without coupling to task-kind knowledge.
 #[derive(Clone, Debug)]
-pub(crate) struct LibraryScanResult {
-    pub book_ids: Vec<String>,
-    pub series_rows: Vec<ScannedSeriesRow>,
-    pub sidecars: Vec<ScannedSidecarRow>,
-    pub changed_sidecar_urls: Vec<String>,
-    pub renumbered_book_ids: Vec<String>,
-    pub changed_series_ids: Vec<String>,
-    pub book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
-    pub should_empty_trash: bool,
+pub(in crate::task_queue) struct LibraryScanResult {
+    pub(in crate::task_queue) book_ids: Vec<String>,
+    pub(in crate::task_queue) series_rows: Vec<ScannedSeriesRow>,
+    pub(in crate::task_queue) sidecars: Vec<ScannedSidecarRow>,
+    pub(in crate::task_queue) changed_sidecar_urls: Vec<String>,
+    pub(in crate::task_queue) renumbered_book_ids: Vec<String>,
+    pub(in crate::task_queue) changed_series_ids: Vec<String>,
+    pub(in crate::task_queue) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
+    pub(in crate::task_queue) should_empty_trash: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct LibraryScanConfig {
-    pub root: String,
-    pub scan_cbx: bool,
-    pub scan_pdf: bool,
-    pub scan_epub: bool,
-    pub scan_force_modified_time: bool,
-    pub oneshots_directory: Option<String>,
-    pub scan_directory_exclusions: Vec<String>,
+pub(in crate::task_queue) struct LibraryScanConfig {
+    pub(in crate::task_queue) root: String,
+    pub(in crate::task_queue) scan_cbx: bool,
+    pub(in crate::task_queue) scan_pdf: bool,
+    pub(in crate::task_queue) scan_epub: bool,
+    pub(in crate::task_queue) scan_force_modified_time: bool,
+    pub(in crate::task_queue) oneshots_directory: Option<String>,
+    pub(in crate::task_queue) scan_directory_exclusions: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScannedLibrary {
-    pub root_available: bool,
-    pub series_rows: Vec<ScannedSeriesRow>,
-    pub sidecars: Vec<ScannedSidecarRow>,
-    pub book_ids: Vec<String>,
-    pub changed_existing_book_ids: HashSet<String>,
-    pub series_ids_requiring_book_sync: HashSet<String>,
-    pub discovered_series_ids: HashSet<String>,
-    pub discovered_book_ids: HashSet<String>,
+pub(in crate::task_queue) struct ScannedLibrary {
+    pub(in crate::task_queue) root_available: bool,
+    pub(in crate::task_queue) series_rows: Vec<ScannedSeriesRow>,
+    pub(in crate::task_queue) sidecars: Vec<ScannedSidecarRow>,
+    pub(in crate::task_queue) book_ids: Vec<String>,
+    pub(in crate::task_queue) changed_existing_book_ids: HashSet<String>,
+    pub(in crate::task_queue) series_ids_requiring_book_sync: HashSet<String>,
+    pub(in crate::task_queue) discovered_series_ids: HashSet<String>,
+    pub(in crate::task_queue) discovered_book_ids: HashSet<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ExistingScannedBookRow {
-    pub(crate) book_id: String,
-    pub(crate) series_id: String,
-    pub(crate) file_last_modified_unix_seconds: i64,
+pub(in crate::task_queue) struct ExistingScannedBookRow {
+    pub(in crate::task_queue) book_id: String,
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) file_last_modified_unix_seconds: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ExistingScannedSeriesRow {
-    pub(crate) file_last_modified_unix_seconds: i64,
+pub(in crate::task_queue) struct ExistingScannedSeriesRow {
+    pub(in crate::task_queue) file_last_modified_unix_seconds: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -64,43 +64,43 @@ pub(super) struct PersistedScannedSeriesBookRow {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScannedSeriesRow {
-    pub series_id: String,
-    pub series_name: String,
-    pub series_url: String,
-    pub series_last_modified_unix_seconds: i64,
-    pub oneshot: bool,
-    pub books: Vec<ScannedBookRow>,
+pub(in crate::task_queue) struct ScannedSeriesRow {
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) series_name: String,
+    pub(in crate::task_queue) series_url: String,
+    pub(in crate::task_queue) series_last_modified_unix_seconds: i64,
+    pub(in crate::task_queue) oneshot: bool,
+    pub(in crate::task_queue) books: Vec<ScannedBookRow>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScannedBookRow {
-    pub book_id: String,
-    pub book_name: String,
-    pub book_url: String,
-    pub file_name: String,
-    pub file_size: i64,
-    pub file_last_modified_unix_seconds: i64,
-    pub oneshot: bool,
+pub(in crate::task_queue) struct ScannedBookRow {
+    pub(in crate::task_queue) book_id: String,
+    pub(in crate::task_queue) book_name: String,
+    pub(in crate::task_queue) book_url: String,
+    pub(in crate::task_queue) file_name: String,
+    pub(in crate::task_queue) file_size: i64,
+    pub(in crate::task_queue) file_last_modified_unix_seconds: i64,
+    pub(in crate::task_queue) oneshot: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScannedSidecarRow {
-    pub url: String,
-    pub parent_url: String,
-    pub last_modified_unix_seconds: i64,
-    pub source: ScannedSidecarSource,
-    pub sidecar_type: ScannedSidecarType,
+pub(in crate::task_queue) struct ScannedSidecarRow {
+    pub(in crate::task_queue) url: String,
+    pub(in crate::task_queue) parent_url: String,
+    pub(in crate::task_queue) last_modified_unix_seconds: i64,
+    pub(in crate::task_queue) source: ScannedSidecarSource,
+    pub(in crate::task_queue) sidecar_type: ScannedSidecarType,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ScannedSidecarSource {
+pub(in crate::task_queue) enum ScannedSidecarSource {
     Series,
     Book,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ScannedSidecarType {
+pub(in crate::task_queue) enum ScannedSidecarType {
     Metadata,
     Artwork,
 }
@@ -114,10 +114,10 @@ pub(super) struct InsertedBookCandidate {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct BookMetadataRefreshRequest {
-    pub(crate) book_id: String,
-    pub(crate) series_id: String,
-    pub(crate) capabilities: Vec<String>,
+pub(in crate::task_queue) struct BookMetadataRefreshRequest {
+    pub(in crate::task_queue) book_id: String,
+    pub(in crate::task_queue) series_id: String,
+    pub(in crate::task_queue) capabilities: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -133,6 +133,12 @@ pub(super) struct PersistScannedLibraryOutcome {
     pub(super) changed_series_ids: Vec<String>,
     pub(super) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
     pub(super) runtime_events: Vec<RuntimeSseRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct RestoredBookMatches {
+    pub(super) series_ids: Vec<String>,
+    pub(super) book_metadata_refreshes: Vec<BookMetadataRefreshRequest>,
 }
 
 #[derive(Clone, Debug)]

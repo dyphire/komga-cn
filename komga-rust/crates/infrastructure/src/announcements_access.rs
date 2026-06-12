@@ -3,14 +3,14 @@ use sqlx::SqlitePool;
 use crate::sqlite::read_models::announcements::load_announcement_read_ids as load_announcement_read_ids_model;
 use crate::sqlite::write_models::announcements::save_announcements_read as save_announcements_read_model;
 
-pub async fn load_announcement_read_ids(
+pub(crate) async fn load_announcement_read_ids(
     pool: &SqlitePool,
     user_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     load_announcement_read_ids_model(pool, user_id).await
 }
 
-pub async fn save_announcements_read(
+pub(crate) async fn save_announcements_read(
     pool: &SqlitePool,
     user_id: &str,
     announcement_ids: &[String],

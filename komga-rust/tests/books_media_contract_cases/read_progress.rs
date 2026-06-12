@@ -1,6 +1,63 @@
 use super::*;
 
 #[tokio::test]
+async fn router_read_progress_returns_internal_error_when_existence_check_fails() {
+    let ctx = TestFixture::new("router-read-progress-existence-check-error").await;
+    let auth_token = ctx.login_admin().await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for read-progress existence failure setup");
+    sqlx::query("ALTER TABLE BOOK RENAME TO BOOK_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("book table should be renamed for existence failure setup");
+    pool.close().await;
+
+    let book_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/v1/books/book-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "page": 1 }).to_string()))
+                .expect("book read-progress existence failure request should build"),
+        )
+        .await
+        .expect("book read-progress existence failure request should complete");
+
+    assert_eq!(book_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should reopen for series existence failure setup");
+    sqlx::query("ALTER TABLE SERIES RENAME TO SERIES_BROKEN")
+        .execute(&pool)
+        .await
+        .expect("series table should be renamed for existence failure setup");
+    pool.close().await;
+
+    let series_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/series/series-1/read-progress")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("series read-progress existence failure request should build"),
+        )
+        .await
+        .expect("series read-progress existence failure request should complete");
+
+    assert_eq!(series_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
 async fn router_book_read_progress_accepts_basic_auth_without_session_bootstrap() {
     let ctx = TestFixture::new("router-book-read-progress-basic-auth-compat").await;
 

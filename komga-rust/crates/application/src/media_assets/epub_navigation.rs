@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{BookMediaPort, ContentResolverPort, EpubPositionsExtension};
+use super::{
+    BookMediaPort, ContentResolverPort, EpubExtensionBlob, EpubNavigationExtension,
+    EpubNavigationPosition,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EpubNavigationLoadError {
@@ -18,15 +21,56 @@ pub enum EpubNavigationError {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EpubNavigation {
     media_files: Vec<String>,
-    extension: EpubPositionsExtension,
+    extension: EpubNavigationExtension,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NormalizedEpubLocator {
+    raw: Value,
+    progression: f64,
+    total_progression: Option<f64>,
+}
+
+impl NormalizedEpubLocator {
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+
+    pub fn into_raw(self) -> Value {
+        self.raw
+    }
+
+    pub fn progression(&self) -> f64 {
+        self.progression
+    }
+
+    pub fn total_progression(&self) -> Option<f64> {
+        self.total_progression
+    }
 }
 
 #[async_trait]
-pub trait EpubNavigationReaderPort: Send + Sync {
-    async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
-
+pub trait EpubNavigationExtensionReaderPort: Send + Sync {
     async fn epub_extension_blob(&self, book_id: &str)
-    -> Result<Option<(String, Vec<u8>)>, String>;
+    -> Result<Option<EpubExtensionBlob>, String>;
+}
+
+#[async_trait]
+impl<T> EpubNavigationExtensionReaderPort for T
+where
+    T: BookMediaPort + ?Sized,
+{
+    async fn epub_extension_blob(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<EpubExtensionBlob>, String> {
+        BookMediaPort::epub_extension_blob(self, book_id).await
+    }
+}
+
+#[async_trait]
+pub trait EpubNavigationReaderPort: EpubNavigationExtensionReaderPort {
+    async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
 }
 
 #[async_trait]
@@ -37,12 +81,24 @@ where
     async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String> {
         BookMediaPort::book_media_files(self, book_id).await
     }
+}
 
-    async fn epub_extension_blob(
+pub trait EpubNavigationContentPort: Send + Sync {
+    fn decode_epub_navigation_extension(
         &self,
-        book_id: &str,
-    ) -> Result<Option<(String, Vec<u8>)>, String> {
-        BookMediaPort::epub_extension_blob(self, book_id).await
+        blob: &[u8],
+    ) -> Result<EpubNavigationExtension, String>;
+}
+
+impl<T> EpubNavigationContentPort for T
+where
+    T: ContentResolverPort + ?Sized,
+{
+    fn decode_epub_navigation_extension(
+        &self,
+        blob: &[u8],
+    ) -> Result<EpubNavigationExtension, String> {
+        ContentResolverPort::decode_epub_navigation_extension(self, blob)
     }
 }
 
@@ -53,13 +109,30 @@ pub async fn load_book_epub_navigation<R, C>(
 ) -> Result<EpubNavigation, EpubNavigationLoadError>
 where
     R: EpubNavigationReaderPort + ?Sized,
-    C: ContentResolverPort + ?Sized,
+    C: EpubNavigationContentPort + ?Sized,
 {
     let media_files = reader
         .book_media_files(book_id)
         .await
         .map_err(EpubNavigationLoadError::Internal)?;
-    let Some((_extension_class, blob)) = reader
+    let extension = load_book_epub_navigation_extension(reader, content, book_id).await?;
+
+    Ok(EpubNavigation {
+        media_files,
+        extension,
+    })
+}
+
+pub async fn load_book_epub_navigation_extension<R, C>(
+    reader: &R,
+    content: &C,
+    book_id: &str,
+) -> Result<EpubNavigationExtension, EpubNavigationLoadError>
+where
+    R: EpubNavigationExtensionReaderPort + ?Sized,
+    C: EpubNavigationContentPort + ?Sized,
+{
+    let Some(extension_blob) = reader
         .epub_extension_blob(book_id)
         .await
         .map_err(EpubNavigationLoadError::Internal)?
@@ -68,17 +141,48 @@ where
     };
 
     let extension = content
-        .decode_epub_positions_extension(&blob)
+        .decode_epub_navigation_extension(&extension_blob.bytes)
         .map_err(EpubNavigationLoadError::Internal)?;
 
-    Ok(EpubNavigation {
-        media_files,
-        extension,
-    })
+    Ok(extension)
+}
+
+pub async fn load_book_epub_positions<R, C>(
+    reader: &R,
+    content: &C,
+    book_id: &str,
+) -> Result<Option<Vec<Value>>, EpubNavigationLoadError>
+where
+    R: EpubNavigationExtensionReaderPort + ?Sized,
+    C: EpubNavigationContentPort + ?Sized,
+{
+    let Some(extension_blob) = reader
+        .epub_extension_blob(book_id)
+        .await
+        .map_err(EpubNavigationLoadError::Internal)?
+    else {
+        return Ok(None);
+    };
+    if !epub_extension_blob_is_epub(&extension_blob) {
+        return Ok(None);
+    }
+
+    let positions = content
+        .decode_epub_navigation_extension(&extension_blob.bytes)
+        .map_err(EpubNavigationLoadError::Internal)?
+        .positions
+        .into_iter()
+        .map(EpubNavigationPosition::into_raw)
+        .collect::<Vec<_>>();
+    if positions.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(positions))
+    }
 }
 
 impl EpubNavigation {
-    pub fn positions(&self) -> &[Value] {
+    pub fn positions(&self) -> &[EpubNavigationPosition] {
         self.extension.positions.as_slice()
     }
 
@@ -86,10 +190,13 @@ impl EpubNavigation {
         self.extension
             .positions
             .get(page.saturating_sub(1) as usize)
-            .cloned()
+            .map(|position| position.raw().clone())
     }
 
-    pub fn normalize_locator(&self, locator: &Value) -> Result<Value, EpubNavigationError> {
+    pub fn normalize_locator(
+        &self,
+        locator: &Value,
+    ) -> Result<NormalizedEpubLocator, EpubNavigationError> {
         let href_base = normalized_href_base(
             locator
                 .get("href")
@@ -121,7 +228,12 @@ impl EpubNavigation {
             ));
         };
 
-        Ok(normalized_epub_locator(locator, &matched_position))
+        let normalized_locator = normalized_epub_locator(locator, &matched_position);
+        Ok(NormalizedEpubLocator {
+            total_progression: locator_total_progression(&normalized_locator),
+            raw: normalized_locator,
+            progression: locator_progression,
+        })
     }
 
     pub fn koreader_locator_for_progress(
@@ -139,10 +251,11 @@ impl EpubNavigation {
                 "Could not get Epub resource index from progress: {progress}"
             )));
         };
-        let Some(matched_position) =
-            self.extension.positions.iter().find(|position| {
-                position.get("href").and_then(Value::as_str) == Some(href.as_str())
-            })
+        let Some(matched_position) = self
+            .extension
+            .positions
+            .iter()
+            .find(|position| position.href() == Some(href.as_str()))
         else {
             return Err(EpubNavigationError::BadRequest(format!(
                 "Could not get Epub resource index from progress: {progress}"
@@ -178,7 +291,11 @@ impl EpubNavigation {
             .any(|position| position_matches_href(position, href_base))
     }
 
-    fn matched_position(&self, href_base: &str, locator_progression: f64) -> Option<Value> {
+    fn matched_position(
+        &self,
+        href_base: &str,
+        locator_progression: f64,
+    ) -> Option<EpubNavigationPosition> {
         let matching_positions = self
             .extension
             .positions
@@ -189,7 +306,7 @@ impl EpubNavigation {
 
         matching_positions
             .iter()
-            .find(|position| position_progression(position) == Some(locator_progression))
+            .find(|position| position.progression() == Some(locator_progression))
             .cloned()
             .or_else(|| {
                 if self.extension.is_fixed_layout && matching_positions.len() == 1 {
@@ -199,18 +316,20 @@ impl EpubNavigation {
                 let before = matching_positions
                     .iter()
                     .filter(|position| {
-                        position_progression(position)
+                        position
+                            .progression()
                             .is_some_and(|value| value < locator_progression)
                     })
-                    .max_by_key(|position| position_number(position))
+                    .max_by_key(|position| position.position())
                     .cloned();
                 let after = matching_positions
                     .iter()
                     .filter(|position| {
-                        position_progression(position)
+                        position
+                            .progression()
                             .is_some_and(|value| value > locator_progression)
                     })
-                    .min_by_key(|position| position_number(position))
+                    .min_by_key(|position| position.position())
                     .cloned();
 
                 match (before, after) {
@@ -223,7 +342,7 @@ impl EpubNavigation {
     fn unique_hrefs(&self) -> Vec<String> {
         let mut unique_hrefs = Vec::<String>::new();
         for position in &self.extension.positions {
-            let Some(position_href) = position.get("href").and_then(Value::as_str) else {
+            let Some(position_href) = position.href() else {
                 continue;
             };
             let position_href = position_href.trim();
@@ -234,6 +353,14 @@ impl EpubNavigation {
         }
         unique_hrefs
     }
+}
+
+fn epub_extension_blob_is_epub(extension_blob: &EpubExtensionBlob) -> bool {
+    extension_blob.extension_class.is_empty()
+        || extension_blob
+            .extension_class
+            .to_ascii_lowercase()
+            .contains("mediaextensionepub")
 }
 
 pub fn normalized_href_base(href: &str) -> String {
@@ -275,29 +402,21 @@ fn locator_progression(locator: &Value) -> Option<f64> {
         .and_then(Value::as_f64)
 }
 
-fn position_progression(position: &Value) -> Option<f64> {
-    position
+fn locator_total_progression(locator: &Value) -> Option<f64> {
+    locator
         .get("locations")
-        .and_then(|value| value.get("progression"))
+        .and_then(|value| value.get("totalProgression"))
         .and_then(Value::as_f64)
 }
 
-fn position_number(position: &Value) -> Option<i64> {
+fn position_matches_href(position: &EpubNavigationPosition, href_base: &str) -> bool {
     position
-        .get("locations")
-        .and_then(|value| value.get("position"))
-        .and_then(Value::as_i64)
-}
-
-fn position_matches_href(position: &Value, href_base: &str) -> bool {
-    position
-        .get("href")
-        .and_then(Value::as_str)
+        .href()
         .map(|value| normalized_href_base(value) == href_base)
         .unwrap_or(false)
 }
 
-fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
+fn normalized_epub_locator(locator: &Value, matched_position: &EpubNavigationPosition) -> Value {
     let mut locator = locator.clone();
     let Some(locator_map) = locator.as_object_mut() else {
         return locator;
@@ -306,24 +425,20 @@ fn normalized_epub_locator(locator: &Value, matched_position: &Value) -> Value {
     locator_map.insert(
         "type".to_string(),
         matched_position
-            .get("type")
+            .media_type()
             .cloned()
             .unwrap_or_else(|| Value::String(String::new())),
     );
 
     let current_kobo_span_missing = locator_map.get("koboSpan").is_none_or(Value::is_null);
-    if current_kobo_span_missing && let Some(kobo_span) = matched_position.get("koboSpan").cloned()
-    {
+    if current_kobo_span_missing && let Some(kobo_span) = matched_position.kobo_span().cloned() {
         locator_map.insert("koboSpan".to_string(), kobo_span);
     }
 
     if let Some(locations) = locator_map
         .get_mut("locations")
         .and_then(Value::as_object_mut)
-        && let Some(total_progression) = matched_position
-            .get("locations")
-            .and_then(|value| value.get("totalProgression"))
-            .cloned()
+        && let Some(total_progression) = matched_position.total_progression_value().cloned()
     {
         locations.insert("totalProgression".to_string(), total_progression);
     }
@@ -360,24 +475,23 @@ fn parse_koreader_doc_fragment_index(
     }
 }
 
-fn koreader_epub_locator(href: &str, matched_position: &Value) -> Value {
+fn koreader_epub_locator(href: &str, matched_position: &EpubNavigationPosition) -> Value {
     let mut locator = json!({
         "href": href,
         "type": matched_position
-            .get("type")
+            .media_type()
             .cloned()
             .unwrap_or_else(|| Value::String("application/xhtml+xml".to_string())),
         "locations": {
             "progression": 0.0,
             "totalProgression": matched_position
-                .get("locations")
-                .and_then(|value| value.get("totalProgression"))
+                .total_progression_value()
                 .cloned()
                 .unwrap_or(Value::Null),
         },
     });
 
-    if let Some(kobo_span) = matched_position.get("koboSpan").cloned()
+    if let Some(kobo_span) = matched_position.kobo_span().cloned()
         && !kobo_span.is_null()
     {
         locator

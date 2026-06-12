@@ -2,9 +2,9 @@ mod duplicates;
 mod feeds;
 mod tags;
 
-pub use duplicates::books_duplicates;
-pub use feeds::{books_latest, books_ondeck};
-pub use tags::book_tags;
+pub(crate) use duplicates::books_duplicates;
+pub(crate) use feeds::{books_latest, books_ondeck};
+pub(crate) use tags::book_tags;
 
 use super::persisted::common_helpers::{internal_error_response, requested_query_values};
 use super::persisted::library_mappings::remap_requested_library_ids_for_persisted;
@@ -18,6 +18,7 @@ use axum::extract::Path as AxumPath;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use komga_application::discovery::resolve_persisted_series_id;
 use komga_domain::discovery::{DiscoveryError, PageEnvelope};
 use serde_json::{Value, json};
 
@@ -37,7 +38,7 @@ fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bo
     .into_response()
 }
 
-pub async fn books_list(
+pub(crate) async fn books_list(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
@@ -58,8 +59,9 @@ pub async fn books_list(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(ctx) => ctx,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(ctx)) => ctx,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -96,11 +98,15 @@ pub(crate) async fn books_deprecated_get(
     let app = &app;
     let query = uri.query().unwrap_or_default();
     let requested_library_ids = requested_query_values(query, "library_id");
-    let library_ids = remap_requested_library_ids_for_persisted(
+    let library_ids = match remap_requested_library_ids_for_persisted(
         app.library_id_mapping.as_ref(),
         requested_library_ids.as_ref(),
     )
-    .await;
+    .await
+    {
+        Ok(library_ids) => library_ids,
+        Err(error) => return internal_error_response(error),
+    };
     let requested_non_empty_library_ids = requested_library_ids
         .as_ref()
         .is_some_and(|values| !values.is_empty());
@@ -132,8 +138,9 @@ pub(crate) async fn books_deprecated_get(
         )
         .await
     {
-        Some(ctx) => ctx,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(ctx)) => ctx,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 
@@ -156,14 +163,15 @@ pub(crate) async fn books_deprecated_get(
     }
 }
 
-pub async fn series_books_deprecated(
+pub(crate) async fn series_books_deprecated(
     State(app): State<DiscoveryState>,
     _authenticated: Authenticated,
     headers: HeaderMap,
     uri: Uri,
     AxumPath(series_id): AxumPath<String>,
 ) -> Response {
-    let resolved_series_id = super::detail::resolve_series_id_for_persisted(&app, &series_id).await;
+    let resolved_series_id =
+        resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     let Some(resource) =
         (match super::detail::load_persisted_series_resource(&app, &resolved_series_id).await {
             Ok(resource) => resource,
@@ -199,8 +207,9 @@ pub async fn series_books_deprecated(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(ctx) => ctx,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(ctx)) => ctx,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let context = to_domain_query_context(interfaces_context);
 

@@ -1,26 +1,37 @@
-use super::*;
 use crate::discovery::persisted::common_helpers::decode_query_component;
 use crate::discovery::series::series_read_model_page_payload;
 use crate::discovery::series_routes::author_query_to_author_match;
-use crate::helpers::{to_domain_query_context, validation_error_response};
+use crate::helpers::{
+    query_bool, query_value, query_values, to_domain_query_context, validation_error_response,
+};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
-use axum::extract::State;
+use axum::Json;
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{
-    CollectionListService, CollectionMutationError, CollectionMutationInput,
-    CollectionMutationService, CollectionVisibilityService, PageRequest, SeriesBrowseRequest,
-    parse_series_filter_from_json, resolve_collection_list_request,
+    CollectionMutationError, CollectionMutationInput, CollectionReadModel, PageRequest,
+    SeriesBrowseRequest, SeriesReadModel,
 };
+use komga_domain::discovery::PageEnvelope;
+use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::collections_support::{
+    collection_payload, collections_page_payload, collections_unpaged_payload,
+};
+use super::detail_utils::internal_error_response;
+use crate::discovery::query::{parse_series_filter_from_json, resolve_collection_list_request};
 struct CollectionPatchInput {
     name: Option<String>,
     ordered: Option<bool>,
     series_ids: Option<Vec<String>>,
 }
 
-pub async fn collection_series(
+pub(crate) async fn collection_series(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -32,25 +43,22 @@ pub async fn collection_series(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let query_string = uri.query().unwrap_or_default();
-    let collection = match load_persisted_collection_detail(&app, &collection_id).await {
+    let domain_context = to_domain_query_context(visible_context);
+    let collection = match app
+        .persisted_sets
+        .collection_detail(&domain_context, &collection_id)
+        .await
+    {
         Ok(Some(collection)) => collection,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
-    let domain_context = to_domain_query_context(visible_context);
-    let service =
-        CollectionVisibilityService::new(app.collection.as_ref(), app.series_detail.as_ref());
-    let visible_series_ids = match service
-        .visible_collection_series_ids(&domain_context, &collection)
-        .await
-    {
-        Ok(ids) => ids,
-        Err(error) => return internal_error_response(error),
-    };
+    let visible_series_ids = collection.series_ids.clone();
     if visible_series_ids.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -282,14 +290,13 @@ fn query_bool_option(query: &str, key: &str) -> Option<bool> {
     })
 }
 
-pub async fn collections(
+pub(crate) async fn collections(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    let query_string = uri.query().unwrap_or_default();
-    let resolved = resolve_collection_list_request(query_string);
+    let resolved = resolve_collection_list_request(&uri);
     let unpaged = resolved.query.unpaged;
 
     let visible_context = match app
@@ -297,8 +304,9 @@ pub async fn collections(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let request_scope_context = if resolved.requested_library_ids.is_empty() {
         None
@@ -312,19 +320,16 @@ pub async fn collections(
             )
             .await
         {
-            Some(context) => Some(context),
-            None => return StatusCode::UNAUTHORIZED.into_response(),
+            Ok(Some(context)) => Some(context),
+            Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     };
 
-    let service = CollectionListService::new(
-        app.collection.as_ref(),
-        app.series_detail.as_ref(),
-        app.collection_search.as_ref(),
-    );
     let domain_visible_context = to_domain_query_context(visible_context);
     let domain_request_scope_context = request_scope_context.clone().map(to_domain_query_context);
-    let page = match service
+    let page = match app
+        .persisted_sets
         .list_collections(
             &domain_visible_context,
             domain_request_scope_context.as_ref(),
@@ -344,24 +349,32 @@ pub async fn collections(
     Json(collections_page_payload(page)).into_response()
 }
 
-pub async fn collection_create(
+pub(crate) async fn collection_create(
     State(app): State<DiscoveryState>,
     _: Admin,
     body: Bytes,
 ) -> Response {
-    let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
+    let payload = match serde_json::from_slice::<Value>(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return collection_create_bad_request("Request body must be a JSON object");
+        }
+    };
     let input = match parse_collection_create_input(&payload) {
         Ok(input) => input,
         Err(response) => return response,
     };
 
-    let service = CollectionMutationService::new(app.collection.as_ref());
-    let created = match service.create_collection(input).await {
+    let created = match app.persisted_sets.create_collection(input).await {
         Ok(created) => created,
         Err(error) => return collection_mutation_error_response(error, "/api/v1/collections"),
     };
 
-    match load_persisted_collection_detail(&app, &created.collection_id).await {
+    match app
+        .persisted_sets
+        .collection_for_mutation(&created.collection_id)
+        .await
+    {
         Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
@@ -609,7 +622,7 @@ fn merge_collection_patch_input(
     }
 }
 
-pub async fn collection_detail(
+pub(crate) async fn collection_detail(
     State(app): State<DiscoveryState>,
     _: Authenticated,
     headers: HeaderMap,
@@ -620,13 +633,13 @@ pub async fn collection_detail(
         .resolve_query_context_with_persistence(&app.identity, &headers, None)
         .await
     {
-        Some(context) => context,
-        None => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(context)) => context,
+        Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let service =
-        CollectionVisibilityService::new(app.collection.as_ref(), app.series_detail.as_ref());
-    match service
+    match app
+        .persisted_sets
         .collection_detail(&to_domain_query_context(context), &collection_id)
         .await
     {
@@ -636,7 +649,7 @@ pub async fn collection_detail(
     }
 }
 
-pub async fn collection_update(
+pub(crate) async fn collection_update(
     State(app): State<DiscoveryState>,
     _: Admin,
     Path(collection_id): Path<String>,
@@ -653,29 +666,35 @@ pub async fn collection_update(
         Ok(input) => input,
         Err(response) => return response,
     };
-    let existing = match load_persisted_collection_detail(&app, &collection_id).await {
+    let existing = match app
+        .persisted_sets
+        .collection_for_mutation(&collection_id)
+        .await
+    {
         Ok(Some(collection)) => collection,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error_response(error),
     };
     let input = merge_collection_patch_input(&existing, patch);
 
-    let service = CollectionMutationService::new(app.collection.as_ref());
     let path = format!("/api/v1/collections/{collection_id}");
-    match service.update_collection(&collection_id, input).await {
+    match app
+        .persisted_sets
+        .update_collection(&collection_id, input)
+        .await
+    {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => collection_mutation_error_response(error, path.as_str()),
     }
 }
 
-pub async fn collection_delete(
+pub(crate) async fn collection_delete(
     State(app): State<DiscoveryState>,
     _: Admin,
     Path(collection_id): Path<String>,
 ) -> Response {
-    let service = CollectionMutationService::new(app.collection.as_ref());
-    match service.delete_collection(&collection_id).await {
+    match app.persisted_sets.delete_collection(&collection_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error.to_string()),

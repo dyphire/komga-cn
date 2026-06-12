@@ -1,7 +1,17 @@
-use super::*;
-use crate::discovery_persisted_access::models::{ReadProgressSummary, WebLinkEntry};
+use std::collections::HashMap;
 
-pub async fn load_book_poster_summaries(
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Error, QueryBuilder, Row, Sqlite, SqlitePool};
+
+use komga_domain::discovery::{MediaStatus, ReadStatus};
+
+use super::common;
+use super::models::{
+    AuthorEntry, BookPosterSummary, BookSummary, ReadProgressSummary, WebLinkEntry,
+};
+use crate::parsing::parse_thumbnail_type;
+
+pub(super) async fn load_book_poster_summaries(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, Vec<BookPosterSummary>>, String> {
     let rows = sqlx::query(
@@ -16,7 +26,7 @@ pub async fn load_book_poster_summaries(
     for row in rows {
         let book_id = row.get::<String, _>("BOOK_ID");
         let poster = BookPosterSummary {
-            thumbnail_type: row.get::<String, _>("TYPE"),
+            thumbnail_type: parse_thumbnail_type(&row.get::<String, _>("TYPE")),
             selected: row.get::<i64, _>("SELECTED") != 0,
         };
         posters.entry(book_id).or_default().push(poster);
@@ -25,7 +35,7 @@ pub async fn load_book_poster_summaries(
     Ok(posters)
 }
 
-pub async fn load_persisted_book_summaries(
+pub(super) async fn load_persisted_book_summaries(
     pool: &SqlitePool,
     user_id: Option<&str>,
 ) -> Result<Vec<BookSummary>, String> {
@@ -36,7 +46,7 @@ pub async fn load_persisted_book_summaries(
     Ok(map_book_summary_rows(rows))
 }
 
-pub async fn load_persisted_book_summaries_by_ids(
+pub(super) async fn load_persisted_book_summaries_by_ids(
     pool: &SqlitePool,
     user_id: Option<&str>,
     ids: &[String],
@@ -58,10 +68,10 @@ pub async fn load_persisted_book_summaries_by_ids(
 }
 
 async fn fetch_persisted_book_summary_rows(
-    pool: &sqlx::SqlitePool,
+    pool: &SqlitePool,
     user_id: Option<&str>,
     ids: Option<&[String]>,
-) -> Result<Vec<sqlx::sqlite::SqliteRow>, sqlx::Error> {
+) -> Result<Vec<SqliteRow>, Error> {
     let mut query = QueryBuilder::<Sqlite>::new(book_summary_select_sql(user_id.is_some()));
 
     if let Some(user_id) = user_id {
@@ -101,9 +111,10 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.LANGUAGE AS LANGUAGE,
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
-                  COALESCE((SELECT GROUP_CONCAT(DISTINCT smg.GENRE)
-                            FROM SERIES_METADATA_GENRE smg
-                            WHERE smg.SERIES_ID = s.ID), '') AS GENRES,
+                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
+                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                                  FROM SERIES_METADATA_GENRE smg
+                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -123,7 +134,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                             FROM BOOK_METADATA_AUTHOR ba
                             WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
                   COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bt.TAG)
+                  COALESCE((SELECT GROUP_CONCAT(bt.TAG, char(30))
                             FROM BOOK_METADATA_TAG bt
                             WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
                   COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
@@ -174,9 +185,10 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.LANGUAGE AS LANGUAGE,
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
-                  COALESCE((SELECT GROUP_CONCAT(DISTINCT smg.GENRE)
-                            FROM SERIES_METADATA_GENRE smg
-                            WHERE smg.SERIES_ID = s.ID), '') AS GENRES,
+                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
+                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                                  FROM SERIES_METADATA_GENRE smg
+                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -196,7 +208,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                             FROM BOOK_METADATA_AUTHOR ba
                             WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
                   COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bt.TAG)
+                  COALESCE((SELECT GROUP_CONCAT(bt.TAG, char(30))
                             FROM BOOK_METADATA_TAG bt
                             WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
                   COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
@@ -224,7 +236,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
     }
 }
 
-pub async fn load_persisted_book_count(pool: &SqlitePool) -> Result<usize, String> {
+pub(super) async fn load_persisted_book_count(pool: &SqlitePool) -> Result<usize, String> {
     let row = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM BOOK"#)
         .fetch_one(pool)
         .await
@@ -232,7 +244,7 @@ pub async fn load_persisted_book_count(pool: &SqlitePool) -> Result<usize, Strin
     Ok(row.get::<i64, _>("COUNT").max(0) as usize)
 }
 
-fn map_book_summary(row: sqlx::sqlite::SqliteRow) -> BookSummary {
+fn map_book_summary(row: SqliteRow) -> BookSummary {
     BookSummary {
         id: row.get::<String, _>("ID"),
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -247,13 +259,13 @@ fn map_book_summary(row: sqlx::sqlite::SqliteRow) -> BookSummary {
         last_modified: row.get::<String, _>("LAST_MODIFIED_DATE"),
         file_last_modified: row.get::<String, _>("FILE_LAST_MODIFIED"),
         size_bytes: row.get::<i64, _>("FILE_SIZE").max(0) as u64,
-        media_status: row.get::<String, _>("MEDIA_STATUS"),
+        media_status: projected_media_status(&row),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         media_pages_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u32,
         media_comment: row.get::<String, _>("MEDIA_COMMENT"),
         media_epub_divina_compatible: row.get::<bool, _>("EPUB_DIVINA_COMPATIBLE"),
         media_epub_is_kepub: row.get::<bool, _>("EPUB_IS_KEPUB"),
-        read_status: row.get::<String, _>("READ_STATUS"),
+        read_status: projected_read_status(&row),
         metadata_title_lock: row.get::<bool, _>("METADATA_TITLE_LOCK"),
         metadata_summary: row.get::<String, _>("METADATA_SUMMARY"),
         metadata_summary_lock: row.get::<bool, _>("METADATA_SUMMARY_LOCK"),
@@ -274,23 +286,33 @@ fn map_book_summary(row: sqlx::sqlite::SqliteRow) -> BookSummary {
         read_progress: parse_read_progress_summary(&row),
         deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
         oneshot: row.get::<bool, _>("ONESHOT"),
-        genres: common::parse_csv_values(&row.get::<String, _>("GENRES")),
+        genres: common::parse_group_concat_values(&row.get::<String, _>("GENRES")),
         language: row.get::<Option<String>, _>("LANGUAGE"),
         publisher: row.get::<Option<String>, _>("PUBLISHER"),
         age_rating: row
             .get::<Option<i64>, _>("AGE_RATING")
-            .map(|value| value.max(0) as u16),
-        metadata_tags: common::parse_csv_values(&row.get::<String, _>("METADATA_TAGS")),
+            .map(common::clamp_kotlin_int_u32),
+        metadata_tags: common::parse_group_concat_values(&row.get::<String, _>("METADATA_TAGS")),
         metadata_authors: parse_author_entries(&row.get::<String, _>("METADATA_AUTHORS")),
         metadata_links: parse_web_link_entries(&row.get::<String, _>("METADATA_LINKS")),
     }
 }
 
-fn map_book_summary_rows(rows: Vec<sqlx::sqlite::SqliteRow>) -> Vec<BookSummary> {
+fn map_book_summary_rows(rows: Vec<SqliteRow>) -> Vec<BookSummary> {
     rows.into_iter().map(map_book_summary).collect()
 }
 
-fn parse_read_progress_summary(row: &sqlx::sqlite::SqliteRow) -> Option<ReadProgressSummary> {
+fn projected_read_status(row: &SqliteRow) -> ReadStatus {
+    let raw = row.get::<String, _>("READ_STATUS");
+    ReadStatus::parse(&raw).expect("book read-status projection should use known values")
+}
+
+fn projected_media_status(row: &SqliteRow) -> MediaStatus {
+    let raw = row.get::<String, _>("MEDIA_STATUS");
+    MediaStatus::parse(&raw).expect("book media-status projection should use known values")
+}
+
+fn parse_read_progress_summary(row: &SqliteRow) -> Option<ReadProgressSummary> {
     row.get::<Option<i64>, _>("READ_PROGRESS_PAGE")
         .map(|page| ReadProgressSummary {
             page: page as i32,
@@ -343,4 +365,43 @@ fn parse_web_link_entries(raw: &str) -> Vec<WebLinkEntry> {
                 })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::BootstrappedBookFixture;
+
+    #[tokio::test]
+    async fn load_persisted_book_summaries_preserves_commas_in_metadata_values() {
+        let fixture = BootstrappedBookFixture::open("persisted-book-comma-values").await;
+        fixture.insert_library_series().await;
+        fixture.insert_series_metadata().await;
+        fixture.insert_book("book-1").await;
+        fixture.insert_book_metadata("book-1").await;
+
+        sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+            .bind("series-1")
+            .bind("Sci, Fi")
+            .execute(&fixture.pool)
+            .await
+            .expect("genre should be inserted");
+        sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+            .bind("book-1")
+            .bind("Slice, Life")
+            .execute(&fixture.pool)
+            .await
+            .expect("book metadata tag should be inserted");
+
+        let summaries = load_persisted_book_summaries(&fixture.pool, None)
+            .await
+            .expect("book summaries should load");
+        let summary = summaries
+            .first()
+            .expect("book summaries should include seeded book");
+
+        assert_eq!(summary.genres, vec!["Sci, Fi"]);
+        assert_eq!(summary.metadata_tags, vec!["Slice, Life"]);
+        fixture.close().await;
+    }
 }

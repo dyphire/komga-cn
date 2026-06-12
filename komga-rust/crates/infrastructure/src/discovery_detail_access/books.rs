@@ -4,10 +4,14 @@ use komga_application::discovery::{
     BookReadModel, BookReadProgressReadModel, PersistedBookResourceRecord,
     PersistedBookSiblingDirectionRecord,
 };
+use komga_domain::discovery::MediaStatus;
 
-use crate::parsing::{parse_csv_values, parse_metadata_authors, parse_metadata_links};
+use super::common;
+use crate::parsing::{
+    parse_metadata_authors, parse_metadata_links, parse_sqlite_group_concat_values,
+};
 
-pub async fn load_book_id_by_sorted_position(
+pub(super) async fn load_book_id_by_sorted_position(
     pool: &SqlitePool,
     index: usize,
 ) -> Result<Option<String>, String> {
@@ -28,17 +32,19 @@ pub async fn load_book_id_by_sorted_position(
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
 
-pub async fn load_persisted_book_resource(
+pub(super) async fn load_persisted_book_resource(
     pool: &SqlitePool,
     book_id: &str,
 ) -> Result<Option<PersistedBookResourceRecord>, String> {
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID, sm.AGE_RATING,
-                COALESCE(GROUP_CONCAT(DISTINCT sms.LABEL), '') AS SHARING_LABELS
+                COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
+                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                                FROM SERIES_METADATA_SHARING sms
+                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
          FROM BOOK b
          JOIN SERIES s ON s.ID = b.SERIES_ID
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-         LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
          WHERE b.ID = ?
          GROUP BY b.LIBRARY_ID, sm.AGE_RATING"#,
     )
@@ -51,12 +57,12 @@ pub async fn load_persisted_book_resource(
         library_id: row.get::<String, _>("LIBRARY_ID"),
         age_rating: row
             .get::<Option<i64>, _>("AGE_RATING")
-            .map(|value| value as u16),
+            .map(common::clamp_kotlin_int_u32),
         sharing_labels: row.get::<String, _>("SHARING_LABELS"),
     }))
 }
 
-pub async fn load_persisted_book_detail(
+pub(super) async fn load_persisted_book_detail(
     pool: &SqlitePool,
     book_id: &str,
     user_id: Option<&str>,
@@ -82,7 +88,7 @@ pub async fn load_persisted_book_detail(
                           FROM BOOK_METADATA_AUTHOR ba
                           WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
                 COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
-                COALESCE((SELECT GROUP_CONCAT(bt.TAG)
+                COALESCE((SELECT GROUP_CONCAT(bt.TAG, char(30))
                           FROM BOOK_METADATA_TAG bt
                           WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
                 COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
@@ -131,7 +137,7 @@ pub async fn load_persisted_book_detail(
         last_modified: row.get::<String, _>("LAST_MODIFIED_DATE"),
         file_last_modified: row.get::<String, _>("FILE_LAST_MODIFIED"),
         size_bytes: row.get::<i64, _>("FILE_SIZE").max(0) as u64,
-        media_status: row.get::<String, _>("MEDIA_STATUS"),
+        media_status: projected_media_status(&row),
         media_type: row.get::<String, _>("MEDIA_TYPE"),
         media_pages_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u32,
         media_comment: row.get::<String, _>("MEDIA_COMMENT"),
@@ -149,7 +155,7 @@ pub async fn load_persisted_book_detail(
         metadata_release_date_lock: row.get::<bool, _>("METADATA_RELEASE_DATE_LOCK"),
         metadata_authors: parse_metadata_authors(&row.get::<String, _>("METADATA_AUTHORS")),
         metadata_authors_lock: row.get::<bool, _>("METADATA_AUTHORS_LOCK"),
-        metadata_tags: parse_csv_values(&row.get::<String, _>("METADATA_TAGS")),
+        metadata_tags: parse_sqlite_group_concat_values(&row.get::<String, _>("METADATA_TAGS")),
         metadata_tags_lock: row.get::<bool, _>("METADATA_TAGS_LOCK"),
         metadata_isbn: row.get::<String, _>("METADATA_ISBN"),
         metadata_isbn_lock: row.get::<bool, _>("METADATA_ISBN_LOCK"),
@@ -184,7 +190,12 @@ pub async fn load_persisted_book_detail(
     }))
 }
 
-pub async fn load_persisted_book_sibling_id(
+fn projected_media_status(row: &sqlx::sqlite::SqliteRow) -> MediaStatus {
+    let raw = row.get::<String, _>("MEDIA_STATUS");
+    MediaStatus::parse(&raw).expect("book media-status projection should use known values")
+}
+
+pub(super) async fn load_persisted_book_sibling_id(
     pool: &SqlitePool,
     book_id: &str,
     direction: PersistedBookSiblingDirectionRecord,

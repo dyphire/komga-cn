@@ -4,10 +4,12 @@ use komga_application::library_catalog::{
     LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryDetailAccess,
     LibraryRecord, LibraryTaskResult,
 };
+use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
+use std::sync::Arc;
 
-use super::SqliteLibraryCatalogAdapter;
+use super::repository::SqliteLibraryCatalogAdapter;
 
 #[derive(Clone)]
 pub struct LibraryCatalogAccess {
@@ -15,9 +17,13 @@ pub struct LibraryCatalogAccess {
 }
 
 impl LibraryCatalogAccess {
-    pub fn new(read_pool: SqlitePool, write_pool: SqlitePool) -> Self {
+    pub fn new(
+        read_pool: SqlitePool,
+        write_pool: SqlitePool,
+        runtime_events: Arc<dyn RuntimeSseEventSink>,
+    ) -> Self {
         Self {
-            adapter: SqliteLibraryCatalogAdapter::new(read_pool, write_pool),
+            adapter: SqliteLibraryCatalogAdapter::new(read_pool, write_pool, runtime_events),
         }
     }
 }

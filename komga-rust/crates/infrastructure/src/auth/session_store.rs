@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
@@ -8,18 +7,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use komga_application::identity_access::{
     AuthUser, AuthUserSessionSnapshot, RememberMeRuntime, SessionRuntime,
-    user_from_session_snapshot, user_session_snapshot,
+    user_age_restriction_from_persisted_columns, user_from_session_snapshot,
+    user_roles_from_persisted_names, user_session_snapshot,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
-pub fn session_token_store() -> &'static SessionRegistry {
+use crate::random_hex_token;
+
+pub(crate) fn session_token_store() -> &'static SessionRegistry {
     &SESSION_REGISTRY
 }
 
 static SESSION_REGISTRY: LazyLock<SessionRegistry> = LazyLock::new(SessionRegistry::new);
 
-pub struct SessionRegistry {
+pub(crate) struct SessionRegistry {
     sessions: SessionStore,
     remember_me: RememberMeTokenStore,
 }
@@ -36,9 +38,9 @@ struct RememberMeTokenStore {
 }
 
 #[derive(Clone)]
-pub struct RememberMeRuntimeSettings {
-    pub key: String,
-    pub duration_days: u64,
+pub(crate) struct RememberMeRuntimeSettings {
+    pub(crate) key: String,
+    pub(crate) duration_days: u64,
 }
 
 struct SessionTokenRecord {
@@ -47,6 +49,22 @@ struct SessionTokenRecord {
     last_accessed_epoch_seconds: AtomicU64,
     runtime_key: String,
     oauth2_authorization_states: Mutex<HashMap<String, String>>,
+}
+
+struct UserSharingLabels {
+    allow: Vec<String>,
+    exclude: Vec<String>,
+}
+
+struct UserSharingLabelRow {
+    label: String,
+    allow: bool,
+}
+
+struct PersistedUserCoreRow {
+    user: AuthUser,
+    age: Option<i64>,
+    age_restriction_allow_only: Option<bool>,
 }
 
 const DEFAULT_REMEMBER_ME_DURATION_DAYS: u64 = 365;
@@ -279,13 +297,16 @@ impl SessionStore {
         token
     }
 
-    fn resolve_session_user(&self, token: &str) -> Option<AuthUser> {
-        let session = self
+    fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+        let Some(session) = self
             .sessions
             .read()
             .expect("session registry lock should not be poisoned")
             .get(token)
-            .cloned()?;
+            .cloned()
+        else {
+            return Ok(None);
+        };
         let now = now_epoch_seconds();
         let session_max_inactive_seconds =
             self.session_max_inactive_seconds_for_runtime_key(session.runtime_key.as_str());
@@ -301,13 +322,16 @@ impl SessionStore {
                 session_max_inactive_seconds,
                 now,
             );
-            return None;
+            return Ok(None);
         }
 
         session
             .last_accessed_epoch_seconds
             .store(now, Ordering::Relaxed);
-        session.user.as_ref().map(user_from_session_snapshot)
+        let Some(user) = session.user.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some(user_from_session_snapshot(user)))
     }
 
     fn invalidate_user_sessions(&self, target_user_id: &str) {
@@ -395,20 +419,28 @@ impl RememberMeTokenStore {
         ))
     }
 
-    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
-        let parsed_token = parse_remember_me_token(token)?;
+    fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+        let Some(parsed_token) = parse_remember_me_token(token) else {
+            return Ok(None);
+        };
         if parsed_token.algorithm != REMEMBER_ME_SIGNATURE_ALGORITHM {
-            return None;
+            return Ok(None);
         }
         if parsed_token.expiry_epoch_millis <= now_epoch_millis() {
-            return None;
+            return Ok(None);
         }
-        let database_file =
-            self.remember_me_database_path_for_runtime_key(parsed_token.runtime_key())?;
-        let user = load_persisted_user_by_login_identifier(
+        let Some(database_file) =
+            self.remember_me_database_path_for_runtime_key(parsed_token.runtime_key())
+        else {
+            return Ok(None);
+        };
+        let Some(user) = load_persisted_user_by_login_identifier(
             database_file.as_path(),
             parsed_token.login_identifier.as_str(),
-        )?;
+        )?
+        else {
+            return Ok(None);
+        };
         let expected_signature = remember_me_signature(
             parsed_token.login_identifier.as_str(),
             parsed_token.expiry_epoch_millis,
@@ -418,35 +450,40 @@ impl RememberMeTokenStore {
                 .as_str(),
         );
         if parsed_token.signature != expected_signature {
-            return None;
+            return Ok(None);
         }
-        Some(user)
+        Ok(Some(user))
     }
 
     fn invalidate_remember_me_token(&self, _token: &str) {}
 }
 
 impl SessionRegistry {
-    pub fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
+    pub(crate) fn sync_session_settings(&self, runtime_key: &str, max_inactive_seconds: u64) {
         self.sessions
             .sync_session_settings(runtime_key, max_inactive_seconds);
     }
 
-    pub fn sync_remember_me_settings(&self, runtime_key: &str, key: &str, duration_days: u64) {
+    pub(crate) fn sync_remember_me_settings(
+        &self,
+        runtime_key: &str,
+        key: &str,
+        duration_days: u64,
+    ) {
         self.remember_me
             .sync_remember_me_settings(runtime_key, key, duration_days);
     }
 
-    pub fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
+    pub(crate) fn remember_me_max_age_seconds(&self, runtime_key: &str) -> u64 {
         self.remember_me.remember_me_max_age_seconds(runtime_key)
     }
 
-    pub fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
+    pub(crate) fn sync_remember_me_database_path(&self, runtime_key: &str, database_file: &Path) {
         self.remember_me
             .sync_remember_me_database_path(runtime_key, database_file);
     }
 
-    pub fn invalidate_user_sessions_for_runtime_key(
+    pub(crate) fn invalidate_user_sessions_for_runtime_key(
         &self,
         runtime_key: &str,
         target_user_id: &str,
@@ -455,7 +492,7 @@ impl SessionRegistry {
             .invalidate_user_sessions_for_runtime_key(runtime_key, target_user_id);
     }
 
-    pub fn store_oauth2_authorization_state(
+    pub(crate) fn store_oauth2_authorization_state(
         &self,
         runtime_key: &str,
         session_token: &str,
@@ -470,7 +507,7 @@ impl SessionRegistry {
         );
     }
 
-    pub fn take_oauth2_authorization_state(
+    pub(crate) fn take_oauth2_authorization_state(
         &self,
         runtime_key: &str,
         session_token: &str,
@@ -486,7 +523,7 @@ impl RememberMeRuntime for SessionRegistry {
         self.remember_me.issue_remember_me_token(user, runtime_key)
     }
 
-    fn resolve_remember_me_user(&self, token: &str) -> Option<AuthUser> {
+    fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
         self.remember_me.resolve_remember_me_user(token)
     }
 
@@ -500,7 +537,7 @@ impl SessionRuntime for SessionRegistry {
         self.sessions.issue_session_token(user, runtime_key)
     }
 
-    fn resolve_session_user(&self, token: &str) -> Option<AuthUser> {
+    fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
         self.sessions.resolve_session_user(token)
     }
 
@@ -623,23 +660,6 @@ fn remember_me_duration_days_to_seconds(duration_days: u64) -> u64 {
     normalized_remember_me_duration_days(duration_days).saturating_mul(24 * 60 * 60)
 }
 
-fn random_hex_token(byte_len: usize) -> String {
-    let mut bytes = vec![0u8; byte_len];
-    if let Ok(mut file) = std::fs::File::open("/dev/urandom") {
-        let _ = file.read_exact(&mut bytes);
-    } else {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or_default();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((seed >> ((index % 8) * 8)) as u8) ^ (index as u8).wrapping_mul(13);
-        }
-    }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn now_epoch_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -687,28 +707,40 @@ fn short_sha256_hex(input: &[u8], length: usize) -> String {
 fn load_persisted_user_by_login_identifier(
     database_file: &Path,
     login_identifier: &str,
-) -> Option<AuthUser> {
-    let connection = Connection::open(database_file).ok()?;
-    let user = connection
+) -> Result<Option<AuthUser>, String> {
+    let connection = Connection::open(database_file).map_err(|error| error.to_string())?;
+    let persisted = connection
         .query_row(
             "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER WHERE LOWER(EMAIL) = LOWER(?) LIMIT 1",
             params![login_identifier],
             |row: &Row<'_>| {
-                Ok(AuthUser {
-                    id: row.get(0)?,
-                    email: row.get(1)?,
-                    password: row.get(2)?,
-                    roles: Vec::new(),
-                    shared_all_libraries: row.get(3)?,
-                    shared_library_ids: Vec::new(),
-                    labels_allow: Vec::new(),
-                    labels_exclude: Vec::new(),
-                    age_restriction: age_restriction_from_row(row.get(4)?, row.get(5)?),
+                Ok(PersistedUserCoreRow {
+                    user: AuthUser {
+                        id: row.get(0)?,
+                        email: row.get(1)?,
+                        password: row.get(2)?,
+                        roles: Vec::new(),
+                        shared_all_libraries: row.get(3)?,
+                        shared_library_ids: Vec::new(),
+                        labels_allow: Vec::new(),
+                        labels_exclude: Vec::new(),
+                        age_restriction: None,
+                    },
+                    age: row.get(4)?,
+                    age_restriction_allow_only: row.get(5)?,
                 })
             },
         )
         .optional()
-        .ok()??;
+        .map_err(|error| error.to_string())?;
+    let Some(persisted) = persisted else {
+        return Ok(None);
+    };
+    let user = persisted.user;
+    let age_restriction = user_age_restriction_from_persisted_columns(
+        persisted.age,
+        persisted.age_restriction_allow_only,
+    );
 
     let roles = query_string_column(
         &connection,
@@ -716,76 +748,66 @@ fn load_persisted_user_by_login_identifier(
         user.id.as_str(),
     )?
     .into_iter()
-    .filter(|role| role != "USER")
     .collect::<Vec<_>>();
     let shared_library_ids = query_string_column(
         &connection,
         "SELECT LIBRARY_ID FROM USER_LIBRARY_SHARING WHERE USER_ID = ? ORDER BY LIBRARY_ID",
         user.id.as_str(),
     )?;
-    let (labels_allow, labels_exclude) = query_user_sharing_labels(&connection, user.id.as_str())?;
+    let sharing_labels = query_user_sharing_labels(&connection, user.id.as_str())?;
 
-    Some(AuthUser {
-        roles,
+    Ok(Some(AuthUser {
+        roles: user_roles_from_persisted_names(roles),
         shared_library_ids,
-        labels_allow,
-        labels_exclude,
+        labels_allow: sharing_labels.allow,
+        labels_exclude: sharing_labels.exclude,
+        age_restriction,
         ..user
-    })
+    }))
 }
 
-fn query_string_column(connection: &Connection, sql: &str, user_id: &str) -> Option<Vec<String>> {
-    let mut statement = connection.prepare(sql).ok()?;
+fn query_string_column(
+    connection: &Connection,
+    sql: &str,
+    user_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![user_id], |row: &Row<'_>| row.get::<_, String>(0))
-        .ok()?;
-    rows.collect::<Result<Vec<_>, _>>().ok()
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 fn query_user_sharing_labels(
     connection: &Connection,
     user_id: &str,
-) -> Option<(Vec<String>, Vec<String>)> {
+) -> Result<UserSharingLabels, String> {
     let mut statement = connection
         .prepare(
             "SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY ALLOW DESC, LABEL",
         )
-        .ok()?;
+        .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![user_id], |row: &Row<'_>| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            Ok(UserSharingLabelRow {
+                label: row.get(0)?,
+                allow: row.get(1)?,
+            })
         })
-        .ok()?;
+        .map_err(|error| error.to_string())?;
     let mut labels_allow = Vec::new();
     let mut labels_exclude = Vec::new();
     for row in rows {
-        let (label, allow) = row.ok()?;
-        if allow {
-            labels_allow.push(label);
+        let sharing_label = row.map_err(|error| error.to_string())?;
+        if sharing_label.allow {
+            labels_allow.push(sharing_label.label);
         } else {
-            labels_exclude.push(label);
+            labels_exclude.push(sharing_label.label);
         }
     }
-    Some((labels_allow, labels_exclude))
-}
-
-fn age_restriction_from_row(
-    age: Option<i64>,
-    allow_only: Option<bool>,
-) -> Option<komga_application::identity_access::AuthUserAgeRestriction> {
-    match (age, allow_only) {
-        (Some(age), Some(true)) => {
-            Some(komga_application::identity_access::AuthUserAgeRestriction {
-                age,
-                restriction: "ALLOW_ONLY".to_string(),
-            })
-        }
-        (Some(age), Some(false)) => {
-            Some(komga_application::identity_access::AuthUserAgeRestriction {
-                age,
-                restriction: "EXCLUDE".to_string(),
-            })
-        }
-        _ => None,
-    }
+    Ok(UserSharingLabels {
+        allow: labels_allow,
+        exclude: labels_exclude,
+    })
 }

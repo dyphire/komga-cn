@@ -24,6 +24,7 @@ lopdf.workspace = true
 quick-xml.workspace = true
 time.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 async-trait.workspace = true
 image.workspace = true
 tracing.workspace = true

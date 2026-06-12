@@ -10,7 +10,8 @@ async fn enqueue_delete_book(scheduler: &mut TaskQueueScheduler, book_id: &str) 
             )
             .with_simple_type("DeleteBook"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 }
 
 async fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &str) {
@@ -23,7 +24,8 @@ async fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &s
             )
             .with_simple_type("DeleteSeries"),
         )
-        .await;
+        .await
+        .expect("task enqueue should succeed");
 }
 
 #[tokio::test]
@@ -293,7 +295,6 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
 
 #[tokio::test]
 async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
-    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-delete-book-sse-book-changed").await;
 
     let delete_dir = ctx.paths().config_dir.join("delete-book-sse");
@@ -313,8 +314,9 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
         .expect("delete-book sse fixture book url should be updated");
     pool.close().await;
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(ctx.paths()).await;
+    let cursor = ctx.runtime_events().current_cursor();
+    let runtime =
+        runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
     scheduler
@@ -322,40 +324,20 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
         .await
         .expect("delete-book runtime should process successfully for sse contract");
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
-    let book_changed = events
-        .iter()
-        .find(|event| {
-            event.name == "BookChanged"
-                && event.payload.get("bookId").and_then(|value| value.as_str()) == Some("book-1")
-                && event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some("series-1")
-                && event
-                    .payload
-                    .get("libraryId")
-                    .and_then(|value| value.as_str())
-                    == Some("library-1")
-        })
-        .expect("delete-book runtime should emit BookChanged SSE");
-
-    assert_eq!(
-        book_changed.payload.get("bookId"),
-        Some(&Value::String("book-1".to_string()))
-    );
-    assert_eq!(
-        book_changed.payload.get("seriesId"),
-        Some(&Value::String("series-1".to_string()))
-    );
-    assert_eq!(
-        book_changed.payload.get("libraryId"),
-        Some(&Value::String("library-1".to_string()))
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.event,
+            RuntimeSseEvent::BookChanged {
+                book_id,
+                series_id,
+                library_id,
+            } if book_id == "book-1" && series_id == "series-1" && library_id == "library-1"
+        )),
+        "delete-book runtime should emit BookChanged SSE",
     );
 }
 
@@ -1062,7 +1044,6 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
 
 #[tokio::test]
 async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
-    let _guard = runtime_sse_contract_guard().await;
     let ctx = TestFixture::new("runtime-delete-series-sse-series-changed").await;
 
     let series_dir = ctx.paths().config_dir.join("delete-series-sse/series-1");
@@ -1089,8 +1070,9 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
         .expect("delete-series sse fixture book url should be updated");
     pool.close().await;
 
-    let cursor = komga_application::runtime_sse::current_runtime_sse_event_cursor();
-    let runtime = runtime_task_context(ctx.paths()).await;
+    let cursor = ctx.runtime_events().current_cursor();
+    let runtime =
+        runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
     scheduler
@@ -1098,35 +1080,19 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
         .await
         .expect("delete-series runtime should process successfully for sse contract");
 
-    let (_, events) = komga_application::runtime_sse::pending_runtime_sse_events(
-        cursor,
-        "runtime-contract-admin",
-        true,
-    );
-    let series_changed = events
-        .iter()
-        .find(|event| {
-            event.name == "SeriesChanged"
-                && event
-                    .payload
-                    .get("seriesId")
-                    .and_then(|value| value.as_str())
-                    == Some("series-1")
-                && event
-                    .payload
-                    .get("libraryId")
-                    .and_then(|value| value.as_str())
-                    == Some("library-1")
-        })
-        .expect("delete-series runtime should emit SeriesChanged SSE");
-
-    assert_eq!(
-        series_changed.payload.get("seriesId"),
-        Some(&Value::String("series-1".to_string()))
-    );
-    assert_eq!(
-        series_changed.payload.get("libraryId"),
-        Some(&Value::String("library-1".to_string()))
+    let events = ctx
+        .runtime_events()
+        .pending_events(cursor, "runtime-contract-admin", true)
+        .events;
+    assert!(
+        events.iter().any(|event| matches!(
+            &event.event,
+            RuntimeSseEvent::SeriesChanged {
+                series_id,
+                library_id,
+            } if series_id == "series-1" && library_id == "library-1"
+        )),
+        "delete-series runtime should emit SeriesChanged SSE",
     );
 }
 

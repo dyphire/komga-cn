@@ -1,13 +1,54 @@
+use async_trait::async_trait;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::{BookProgressionInput, BookProgressionReaderPort, ProgressWriterPort};
+use super::{
+    BookProgressionInput, BookProgressionReaderPort, BookProgressionRecord, ProgressWriterPort,
+};
+
+#[async_trait]
+pub trait BookProgressionWriteReaderPort: Send + Sync {
+    async fn book_progression(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<BookProgressionRecord>, String>;
+}
+
+#[async_trait]
+impl<T> BookProgressionWriteReaderPort for T
+where
+    T: BookProgressionReaderPort + ?Sized,
+{
+    async fn book_progression(
+        &self,
+        book_id: &str,
+        user_id: &str,
+    ) -> Result<Option<BookProgressionRecord>, String> {
+        BookProgressionReaderPort::book_progression(self, book_id, user_id).await
+    }
+}
+
+#[async_trait]
+pub trait BookProgressionWriterPort: Send + Sync {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String>;
+}
+
+#[async_trait]
+impl<T> BookProgressionWriterPort for T
+where
+    T: ProgressWriterPort + ?Sized,
+{
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+        ProgressWriterPort::persist_book_progression(self, input).await
+    }
+}
 
 pub(crate) struct BookProgressionWriteService<'a, R, W>
 where
-    R: BookProgressionReaderPort + ?Sized,
-    W: ProgressWriterPort + ?Sized,
+    R: BookProgressionWriteReaderPort + ?Sized,
+    W: BookProgressionWriterPort + ?Sized,
 {
     reader: &'a R,
     writer: &'a W,
@@ -35,10 +76,13 @@ pub(crate) struct BookProgressionWrite {
 pub(crate) enum BookProgressionWriteSource {
     TotalProgression {
         progression: f64,
+        total_progression: Option<f64>,
         locator: Option<Value>,
     },
     Position {
         progression: f64,
+        position: u64,
+        total_progression: Option<f64>,
         locator: Option<Value>,
     },
 }
@@ -56,8 +100,8 @@ struct ResolvedProgressWrite {
 
 impl<'a, R, W> BookProgressionWriteService<'a, R, W>
 where
-    R: BookProgressionReaderPort + ?Sized,
-    W: ProgressWriterPort + ?Sized,
+    R: BookProgressionWriteReaderPort + ?Sized,
+    W: BookProgressionWriterPort + ?Sized,
 {
     pub(crate) fn new(reader: &'a R, writer: &'a W) -> Self {
         Self { reader, writer }
@@ -79,8 +123,8 @@ where
         let resolved = resolve_progress_write(
             write.page_count,
             write.source.progression(),
-            write.source.prefers_locator_position(),
-            write.source.locator(),
+            write.source.total_progression(),
+            write.source.position(),
         );
 
         self.writer
@@ -115,11 +159,8 @@ where
         else {
             return Ok(false);
         };
-        let Some(existing_modified) = existing_progression.get("modified").and_then(Value::as_str)
+        let Ok(existing_modified) = OffsetDateTime::parse(&existing_progression.modified, &Rfc3339)
         else {
-            return Ok(false);
-        };
-        let Ok(existing_modified) = OffsetDateTime::parse(existing_modified, &Rfc3339) else {
             return Ok(false);
         };
 
@@ -136,11 +177,21 @@ impl BookProgressionWriteSource {
         }
     }
 
-    fn locator(&self) -> Option<&Value> {
+    fn position(&self) -> Option<u64> {
         match self {
-            Self::TotalProgression { locator, .. } | Self::Position { locator, .. } => {
-                locator.as_ref()
+            Self::TotalProgression { .. } => None,
+            Self::Position { position, .. } => Some(*position),
+        }
+    }
+
+    fn total_progression(&self) -> Option<f64> {
+        match self {
+            Self::TotalProgression {
+                total_progression, ..
             }
+            | Self::Position {
+                total_progression, ..
+            } => *total_progression,
         }
     }
 
@@ -149,43 +200,25 @@ impl BookProgressionWriteSource {
             Self::TotalProgression { locator, .. } | Self::Position { locator, .. } => locator,
         }
     }
-
-    fn prefers_locator_position(&self) -> bool {
-        matches!(self, Self::Position { .. })
-    }
 }
 
 fn resolve_progress_write(
     page_count: u64,
     progression: f64,
-    prefers_locator_position: bool,
-    locator: Option<&Value>,
+    total_progression: Option<f64>,
+    position: Option<u64>,
 ) -> ResolvedProgressWrite {
     let page_count = page_count.max(1);
-    let effective_progression = locator
-        .and_then(locator_total_progression)
-        .unwrap_or(progression);
+    let effective_progression = total_progression.unwrap_or(progression);
     let page_from_progression = (effective_progression * page_count as f64)
         .round()
         .clamp(0.0, page_count as f64) as u64;
-    let page = if prefers_locator_position {
-        locator
-            .and_then(super::book_progression::locator_position)
-            .filter(|value| *value >= 1)
-            .unwrap_or(page_from_progression)
-    } else {
-        page_from_progression
-    };
+    let page = position
+        .filter(|value| *value >= 1)
+        .unwrap_or(page_from_progression);
 
     ResolvedProgressWrite {
         page,
         completed: effective_progression >= 0.99,
     }
-}
-
-fn locator_total_progression(locator: &Value) -> Option<f64> {
-    locator
-        .get("locations")
-        .and_then(|value| value.get("totalProgression"))
-        .and_then(Value::as_f64)
 }

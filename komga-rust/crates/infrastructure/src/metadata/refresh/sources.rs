@@ -1,7 +1,9 @@
-use axum::http::Uri;
 use serde::Deserialize;
+use std::io::ErrorKind;
 use std::path::Path;
+use url::Url;
 
+use komga_application::discovery::SeriesReadingDirection;
 use komga_application::media_assets::{BookMetadataAuthor, BookMetadataLink};
 
 use super::readlist::ComicInfoReadListEntry;
@@ -98,13 +100,12 @@ fn extract_comicinfo_links(xml: &str) -> Option<Vec<BookMetadataLink>> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .filter_map(|value| {
-            let uri = value.parse::<Uri>().ok()?;
-            let scheme = uri.scheme_str()?;
-            if !matches!(scheme, "http" | "https") {
+            let url = Url::parse(value).ok()?;
+            if !matches!(url.scheme(), "http" | "https") {
                 return None;
             }
             Some(BookMetadataLink {
-                label: uri.host()?.to_string(),
+                label: url.host_str()?.to_string(),
                 url: value.to_string(),
             })
         })
@@ -214,11 +215,27 @@ fn mylar_age_rating_value(value: MylarAgeRating) -> u32 {
     }
 }
 
-pub(super) fn load_mylar_series_patch(series_dir: &Path) -> Option<SeriesMetadataImportPatch> {
+pub(super) fn load_mylar_series_patch(
+    series_dir: &Path,
+) -> Result<Option<SeriesMetadataImportPatch>, String> {
     let series_json_path = series_dir.join("series.json");
-    let json = std::fs::read_to_string(&series_json_path).ok()?;
+    let json = match std::fs::read_to_string(&series_json_path) {
+        Ok(json) => json,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "failed to read Mylar series.json '{}': {error}",
+                series_json_path.display()
+            ));
+        }
+    };
     let metadata = serde_json::from_str::<MylarSeriesFile>(&json)
-        .ok()?
+        .map_err(|error| {
+            format!(
+                "failed to parse Mylar series.json '{}': {error}",
+                series_json_path.display()
+            )
+        })?
         .metadata;
     let title = if metadata.volume.is_none() || metadata.volume == Some(1) {
         metadata.name
@@ -226,7 +243,7 @@ pub(super) fn load_mylar_series_patch(series_dir: &Path) -> Option<SeriesMetadat
         format!("{} ({})", metadata.name, metadata.year)
     };
 
-    Some(SeriesMetadataImportPatch {
+    Ok(Some(SeriesMetadataImportPatch {
         title: Some(title.clone()),
         title_sort: Some(title),
         status: Some(match metadata.status {
@@ -244,7 +261,7 @@ pub(super) fn load_mylar_series_patch(series_dir: &Path) -> Option<SeriesMetadat
         genres: None,
         total_book_count: u32::try_from(metadata.total_issues).ok(),
         collections: Vec::new(),
-    })
+    }))
 }
 
 pub(super) fn extract_comicinfo_series_patch(
@@ -274,8 +291,8 @@ pub(super) fn extract_comicinfo_series_patch(
             .to_ascii_lowercase()
             .as_str()
         {
-            "no" => Some("LEFT_TO_RIGHT".to_string()),
-            "yesandrighttoleft" => Some("RIGHT_TO_LEFT".to_string()),
+            "no" => Some(SeriesReadingDirection::LeftToRight),
+            "yesandrighttoleft" => Some(SeriesReadingDirection::RightToLeft),
             _ => None,
         },
         publisher: extract_xml_tag(xml, "Publisher"),

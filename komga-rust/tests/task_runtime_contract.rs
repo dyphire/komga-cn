@@ -1,20 +1,21 @@
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use komga_application::task_processing::TaskQueueRecord;
+use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventLog, RuntimeSseEventSink};
+use komga_application::task_processing::{CleanupEmptySetsPolicy, TaskQueueRecord};
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
-use komga_infrastructure::database_handle::DatabaseHandle;
-use komga_infrastructure::search::analyzer_profiles::search_analyzer_version;
-use komga_infrastructure::search::index_lifecycle::{SearchEntityType, SearchIndexLifecycle};
-use komga_infrastructure::sqlite::{
-    connect_task_pool, connect_task_write_pool, connect_test_pool, default_read_max_connections,
+use komga_infrastructure::{
+    DatabaseHandle, SearchEntityType, SearchIndexLifecycle, search_analyzer_version,
 };
-use komga_infrastructure::task_queue::queue_scheduler::TaskQueueScheduler;
-use komga_infrastructure::task_queue::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
+use komga_infrastructure::{TaskQueueScheduler, TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
+use komga_infrastructure::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
 use serde_json::{Value, json};
 use sqlx::Row;
 use std::fs;
+use std::sync::Arc;
 use tower::util::ServiceExt;
 
 mod support;
@@ -23,6 +24,7 @@ use support::fixture::TestFixture;
 use support::runtime_router_contract_support::{
     RuntimeDbPaths, log_capture::*, media_file_fixtures::*, response_helpers::*,
 };
+use support::sqlite::connect_test_pool;
 
 mod task_runtime_contract_cases;
 
@@ -46,6 +48,24 @@ async fn runtime_task_context(paths: &RuntimeDbPaths) -> TaskRuntimeContext {
         task_write_pool,
         task_read_pool,
     )
+}
+
+async fn runtime_task_context_with_runtime_events(
+    paths: &RuntimeDbPaths,
+    runtime_events: Arc<dyn RuntimeSseEventSink>,
+) -> TaskRuntimeContext {
+    runtime_task_context(paths)
+        .await
+        .with_runtime_events(runtime_events)
+}
+
+async fn runtime_task_context_with_cleanup_policy(
+    paths: &RuntimeDbPaths,
+    cleanup_policy: CleanupEmptySetsPolicy,
+) -> TaskRuntimeContext {
+    runtime_task_context(paths)
+        .await
+        .with_cleanup_empty_sets_policy(cleanup_policy)
 }
 
 async fn runtime_task_context_with_overrides(

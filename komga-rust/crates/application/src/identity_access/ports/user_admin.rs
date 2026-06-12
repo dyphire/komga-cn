@@ -7,7 +7,7 @@ use super::super::user_models::{AuthUser, PersistedApiKey};
 
 #[async_trait]
 pub trait UserAdminPort: Send + Sync {
-    async fn persisted_users(&self) -> Option<Vec<AuthUser>>;
+    async fn persisted_users(&self) -> Result<Vec<AuthUser>, String>;
 
     async fn create_auth_user(
         &self,
@@ -26,7 +26,7 @@ pub trait UserAdminPort: Send + Sync {
         &self,
         user_id: &str,
         password: &str,
-    ) -> Option<bool>;
+    ) -> Result<bool, String>;
 
     async fn ensure_oauth_user(
         &self,
@@ -38,12 +38,19 @@ pub trait UserAdminPort: Send + Sync {
         &self,
         user_id: &str,
         comment: &str,
-    ) -> Option<PersistedApiKey>;
+    ) -> Result<PersistedApiKey, String>;
 
-    async fn persisted_api_key_comment_exists(&self, user_id: &str, comment: &str) -> Option<bool>;
+    async fn persisted_api_key_comment_exists(
+        &self,
+        user_id: &str,
+        comment: &str,
+    ) -> Result<bool, String>;
 
-    async fn persisted_list_api_keys(&self, user_id: &str) -> Option<Vec<PersistedApiKey>>;
+    async fn persisted_list_api_keys(&self, user_id: &str) -> Result<Vec<PersistedApiKey>, String>;
 
-    async fn persisted_delete_api_key_by_id(&self, user_id: &str, api_key_id: &str)
-    -> Option<bool>;
+    async fn persisted_delete_api_key_by_id(
+        &self,
+        user_id: &str,
+        api_key_id: &str,
+    ) -> Result<bool, String>;
 }

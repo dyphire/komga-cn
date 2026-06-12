@@ -1,6 +1,8 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-pub async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
+use sqlx::{Row, SqlitePool};
+
+pub(super) async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
         r#"SELECT LIBRARY_ID AS ID
          FROM (
@@ -24,7 +26,7 @@ pub async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<String>
         .collect())
 }
 
-pub async fn load_collection_memberships(
+pub(super) async fn load_collection_memberships(
     pool: &SqlitePool,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let rows = sqlx::query(
@@ -45,7 +47,7 @@ pub async fn load_collection_memberships(
     Ok(memberships)
 }
 
-pub async fn load_collection_ordering(
+pub(super) async fn load_collection_ordering(
     pool: &SqlitePool,
     collection_id: &str,
 ) -> Result<HashMap<String, i64>, String> {
@@ -70,7 +72,7 @@ pub async fn load_collection_ordering(
     Ok(ordering)
 }
 
-pub async fn load_readlist_memberships(
+pub(super) async fn load_readlist_memberships(
     pool: &SqlitePool,
 ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     let rows = sqlx::query(
@@ -91,7 +93,7 @@ pub async fn load_readlist_memberships(
     Ok(memberships)
 }
 
-pub async fn load_readlist_ordering(
+pub(super) async fn load_readlist_ordering(
     pool: &SqlitePool,
     readlist_id: &str,
 ) -> Result<HashMap<String, i64>, String> {

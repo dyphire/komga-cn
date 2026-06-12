@@ -436,6 +436,16 @@ enum OidcTokenSignature {
     Unsigned,
 }
 
+#[derive(Clone, Copy)]
+enum OidcUserInfoResponse {
+    Claims,
+    Raw {
+        status_code: u16,
+        content_type: &'static str,
+        body: &'static str,
+    },
+}
+
 struct OidcProviderServer {
     url: String,
     nonce: Arc<Mutex<Option<String>>>,
@@ -456,6 +466,24 @@ async fn spawn_oidc_provider_server(
     email: Option<&str>,
     email_verified: Option<bool>,
     include_user_info_endpoint: bool,
+    token_signature: OidcTokenSignature,
+) -> OidcProviderServer {
+    let user_info_response = include_user_info_endpoint.then_some(OidcUserInfoResponse::Claims);
+    spawn_oidc_provider_server_with_userinfo_response(
+        registration_id,
+        email,
+        email_verified,
+        user_info_response,
+        token_signature,
+    )
+    .await
+}
+
+async fn spawn_oidc_provider_server_with_userinfo_response(
+    registration_id: &str,
+    email: Option<&str>,
+    email_verified: Option<bool>,
+    user_info_response: Option<OidcUserInfoResponse>,
     token_signature: OidcTokenSignature,
 ) -> OidcProviderServer {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -502,7 +530,7 @@ async fn spawn_oidc_provider_server(
                         "subject_types_supported": ["public"],
                         "id_token_signing_alg_values_supported": ["HS256"],
                     });
-                    if include_user_info_endpoint {
+                    if user_info_response.is_some() {
                         metadata["userinfo_endpoint"] =
                             Value::String(format!("{task_issuer}/oauth/userinfo"));
                     }
@@ -535,16 +563,29 @@ async fn spawn_oidc_provider_server(
                     };
                     (200, "application/json", body)
                 }
-                "/oauth/userinfo" if include_user_info_endpoint => {
-                    let mut claims = serde_json::Map::new();
-                    if let Some(email) = email.as_deref() {
-                        claims.insert("email".to_string(), Value::String(email.to_string()));
+                "/oauth/userinfo" => match user_info_response {
+                    Some(OidcUserInfoResponse::Claims) => {
+                        let mut claims = serde_json::Map::new();
+                        if let Some(email) = email.as_deref() {
+                            claims.insert("email".to_string(), Value::String(email.to_string()));
+                        }
+                        if let Some(email_verified) = email_verified {
+                            claims
+                                .insert("email_verified".to_string(), Value::Bool(email_verified));
+                        }
+                        (200, "application/json", Value::Object(claims).to_string())
                     }
-                    if let Some(email_verified) = email_verified {
-                        claims.insert("email_verified".to_string(), Value::Bool(email_verified));
-                    }
-                    (200, "application/json", Value::Object(claims).to_string())
-                }
+                    Some(OidcUserInfoResponse::Raw {
+                        status_code,
+                        content_type,
+                        body,
+                    }) => (status_code, content_type, body.to_string()),
+                    None => (
+                        404,
+                        "application/json",
+                        r#"{"error":"not_found"}"#.to_string(),
+                    ),
+                },
                 _ => (
                     404,
                     "application/json",
@@ -1222,6 +1263,40 @@ async fn router_oauth2_callback_rejects_preferred_username_for_non_oidc() {
 }
 
 #[tokio::test]
+async fn router_oauth2_callback_reports_malformed_userinfo_response() {
+    let ctx = TestFixture::new("router-oauth2-callback-malformed-userinfo").await;
+
+    let server = spawn_path_response_server(&[
+        (
+            "/oauth/token",
+            200,
+            "application/json",
+            r#"{"access_token":"oauth-token","token_type":"Bearer"}"#,
+        ),
+        ("/oauth/userinfo", 200, "application/json", r#"{"email":"#),
+    ])
+    .await;
+    let config =
+        oauth2_runtime_config_for_base_url(ctx.paths(), "generic", server.url.as_str(), "profile");
+
+    let response = oauth2_callback_response_for_config(&config, "generic").await;
+
+    server
+        .join
+        .await
+        .expect("oauth2 path response server should finish");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=oauth2_token_invalid_response")
+    );
+}
+
+#[tokio::test]
 async fn router_github_oauth2_callback_rejects_unverified_primary_email() {
     let ctx = TestFixture::new("router-github-oauth2-callback-rejects-unverified-email").await;
 
@@ -1484,6 +1559,42 @@ async fn router_oidc_callback_accepts_id_token_claims_without_user_info_endpoint
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok()),
         Some("/?server_redirect=Y")
+    );
+}
+
+#[tokio::test]
+async fn router_oidc_callback_reports_malformed_userinfo_response() {
+    let ctx = TestFixture::new("router-oidc-callback-malformed-userinfo").await;
+
+    let provider = spawn_oidc_provider_server_with_userinfo_response(
+        "oidc",
+        None,
+        None,
+        Some(OidcUserInfoResponse::Raw {
+            status_code: 200,
+            content_type: "application/json",
+            body: r#"{"email":"#,
+        }),
+        OidcTokenSignature::Signed,
+    )
+    .await;
+    let config =
+        oidc_runtime_config_for_provider(ctx.paths(), "oidc", provider.url.as_str(), false);
+
+    let response = oidc_callback_response_for_provider(&config, "oidc", &provider).await;
+
+    provider
+        .join
+        .await
+        .expect("oidc provider mock server should finish");
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?server_redirect=Y&error=oauth2_token_invalid_response")
     );
 }
 

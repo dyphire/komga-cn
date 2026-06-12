@@ -1,6 +1,6 @@
-use komga_infrastructure::context::SqlitePersistenceContext;
-use komga_infrastructure::sqlite::{
-    connect_main_write_context, connect_test_pool, connect_write_pool, setup,
+use komga_infrastructure::SqlitePersistenceContext;
+use komga_infrastructure::{
+    bootstrap_pool, bootstrap_tasks_pool, connect_main_write_context, connect_write_pool,
 };
 use sqlx::Row;
 use std::path::Path;
@@ -8,6 +8,7 @@ use std::path::Path;
 mod support;
 use support::fixture::TestDbFixture;
 use support::persistence_contract_fixture;
+use support::sqlite::connect_test_pool;
 
 #[tokio::test]
 async fn bootstrap_fresh_install() {
@@ -17,14 +18,14 @@ async fn bootstrap_fresh_install() {
     let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("fresh main sqlite db should open");
-    setup::bootstrap_pool(&main_pool)
+    bootstrap_pool(&main_pool)
         .await
         .expect("fresh install main db should be accepted");
 
     let tasks_pool = connect_test_pool(&ctx.paths().tasks_db, 1)
         .await
         .expect("fresh tasks sqlite db should open");
-    setup::bootstrap_tasks_pool(&tasks_pool)
+    bootstrap_tasks_pool(&tasks_pool)
         .await
         .expect("fresh install tasks db should be bootstrapped");
 
@@ -79,14 +80,14 @@ async fn open_current_schema_db() {
     let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("current main sqlite db should open");
-    setup::bootstrap_pool(&main_pool)
+    bootstrap_pool(&main_pool)
         .await
         .expect("current main sqlite db should pass schema gate without rewrite");
 
     let tasks_pool = connect_test_pool(&ctx.paths().tasks_db, 1)
         .await
         .expect("current tasks sqlite db should open");
-    setup::bootstrap_tasks_pool(&tasks_pool)
+    bootstrap_tasks_pool(&tasks_pool)
         .await
         .expect("current tasks sqlite db should pass schema gate without rewrite");
 
@@ -135,7 +136,7 @@ async fn repair_historyless_tasks_schema_to_latest_inventory() {
     .await
     .expect("partial historyless tasks schema should be created");
 
-    setup::bootstrap_tasks_pool(&tasks_pool)
+    bootstrap_tasks_pool(&tasks_pool)
         .await
         .expect("historyless tasks sqlite db should be repaired by rust runtime");
 
@@ -168,7 +169,7 @@ async fn repair_historyless_main_schema_with_missing_index_to_latest_inventory()
         .await
         .expect("current historyless main schema fixture should drop title index");
 
-    setup::bootstrap_pool(&main_pool)
+    bootstrap_pool(&main_pool)
         .await
         .expect("historyless main sqlite db with missing index should be repaired by rust runtime");
 
@@ -201,7 +202,7 @@ async fn repair_historyless_main_schema_with_missing_trigger_to_latest_inventory
         .await
         .expect("current historyless main schema fixture should drop trailing trigger");
 
-    setup::bootstrap_pool(&main_pool).await.expect(
+    bootstrap_pool(&main_pool).await.expect(
         "historyless main sqlite db with missing trigger should be repaired by rust runtime",
     );
 
@@ -235,7 +236,7 @@ async fn reject_outdated_schema() {
         .await
         .expect("schema fixture should be created");
 
-    let error = setup::bootstrap_pool(&pool)
+    let error = bootstrap_pool(&pool)
         .await
         .expect_err("outdated schema should be rejected");
     let message = error.to_string();
@@ -276,7 +277,7 @@ async fn migrate_legacy_main_schema_to_latest_inventory() {
     let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
-    setup::bootstrap_pool(&main_pool)
+    bootstrap_pool(&main_pool)
         .await
         .expect("legacy main sqlite db should be migrated by rust runtime");
 
@@ -315,7 +316,7 @@ async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory()
     let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
         .await
         .expect("legacy main sqlite db should open");
-    setup::bootstrap_pool(&main_pool)
+    bootstrap_pool(&main_pool)
         .await
         .expect("legacy main sqlite db without flyway history should be migrated by rust runtime");
 
@@ -366,7 +367,7 @@ async fn migrate_historyless_kotlin_main_schema_checkpoints_to_latest_inventory(
         let main_pool = connect_test_pool(&ctx.paths().main_db, 1)
             .await
             .expect("historyless prefix main sqlite db should open");
-        setup::bootstrap_pool(&main_pool)
+        bootstrap_pool(&main_pool)
             .await
             .unwrap_or_else(|error| {
                 panic!(
@@ -400,7 +401,7 @@ async fn sqlite_connect_layer_bootstraps_main_database_and_tasks_setup_bootstrap
     let tasks_pool = connect_write_pool(&ctx.paths().tasks_db)
         .await
         .expect("tasks sqlite db should open through the write pool");
-    setup::bootstrap_tasks_pool(&tasks_pool)
+    bootstrap_tasks_pool(&tasks_pool)
         .await
         .expect("tasks setup bootstrap should provision tasks sqlite schema");
 

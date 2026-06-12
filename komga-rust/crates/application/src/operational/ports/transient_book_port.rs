@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use komga_domain::discovery::MediaStatus;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -14,9 +15,15 @@ pub struct TransientBookFileMetadata {
     pub size_bytes: u64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransientBookSeriesInference {
+    pub series_id: Option<String>,
+    pub number: Option<f64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct TransientBookAnalysis {
-    pub status: String,
+    pub status: MediaStatus,
     pub media_type: String,
     pub page_count: u32,
     pub pages: Vec<TransientBookPage>,
@@ -36,22 +43,34 @@ pub struct TransientBookPage {
     pub size_bytes: Option<u64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransientBookPageContent {
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
 #[async_trait]
 pub trait TransientBookPort: Send + Sync {
-    fn analyze_transient_book(&self, path: &str) -> TransientBookAnalysis;
+    fn analyze_transient_book(&self, path: &str) -> Result<TransientBookAnalysis, String>;
     async fn infer_transient_series_and_number(
         &self,
         transient_name: &str,
-    ) -> (Option<String>, Option<f64>);
-    fn list_transient_book_entries(&self, root: &Path) -> Vec<TransientBookScanEntry>;
+    ) -> Result<TransientBookSeriesInference, String>;
+    fn list_transient_book_entries(
+        &self,
+        root: &Path,
+    ) -> Result<Vec<TransientBookScanEntry>, String>;
     async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String>;
-    fn load_transient_book_file_metadata(&self, path: &str) -> Option<TransientBookFileMetadata>;
-    fn transient_book_exists(&self, path: &str) -> bool;
+    fn load_transient_book_file_metadata(
+        &self,
+        path: &str,
+    ) -> Result<TransientBookFileMetadata, String>;
+    fn transient_book_exists(&self, path: &str) -> Result<bool, String>;
     fn transient_book_page_content(
         &self,
         path: &str,
         media_type: &str,
         pages: &[TransientBookPage],
         page_number: u32,
-    ) -> Option<(String, Vec<u8>)>;
+    ) -> Result<Option<TransientBookPageContent>, String>;
 }

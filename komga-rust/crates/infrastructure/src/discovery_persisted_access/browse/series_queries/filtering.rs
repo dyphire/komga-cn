@@ -1,18 +1,19 @@
 use std::collections::HashMap;
 
-use komga_application::discovery::browse_engine::{
-    self,
-    models::{
-        AgeRestrictionKind as EngineAgeRestrictionKind, BrowseContext, BrowseRestrictions,
-        SeriesBrowseQuery, SeriesEvaluationContext, SeriesRow, SeriesSortMode,
-    },
+use komga_application::discovery::{
+    BrowseContext, SeriesBrowseQuery, SeriesEvaluationContext, SeriesReadingDirection, SeriesRow,
+    SeriesSortMode, collect_series_release_date_offsets, filter_and_paginate_series,
+    series_condition_needs_collection_memberships, series_condition_needs_read_progress,
+    series_condition_needs_total_book_counts,
 };
 use komga_domain::discovery::{
-    InclusionCondition, PageEnvelope, SeriesCondition, SeriesValueCondition,
+    InclusionCondition, PageEnvelope, SeriesCondition, SeriesStatus, SeriesValueCondition,
 };
 
-use super::models::{PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary};
-use super::{DiscoveryQueryContext, PersistedDiscoveryBrowseDataSource};
+use super::super::models::{
+    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
+};
+use super::super::{DiscoveryQueryContext, PersistedDiscoveryBrowseDataSource};
 
 fn first_collection_sort_id(condition: Option<&SeriesCondition>) -> Option<&str> {
     fn visit(condition: &SeriesCondition) -> Option<&str> {
@@ -28,7 +29,7 @@ fn first_collection_sort_id(condition: Option<&SeriesCondition>) -> Option<&str>
     condition.and_then(visit)
 }
 
-pub(crate) async fn load_persisted_series_page(
+pub(in crate::discovery_persisted_access::browse) async fn load_persisted_series_page(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
@@ -45,12 +46,12 @@ pub(crate) async fn load_persisted_series_page(
             .await?;
         // PLACEHOLDER_LOAD_CONTINUE
         let candidate_ids: Vec<String> =
-            ranked_candidates.iter().map(|(_, id)| id.clone()).collect();
+            ranked_candidates.iter().map(|hit| hit.id.clone()).collect();
         if !candidate_ids.is_empty() {
             relevance_ranks = ranked_candidates
                 .iter()
                 .enumerate()
-                .map(|(index, (_, id))| (id.clone(), index))
+                .map(|(index, hit)| (hit.id.clone(), index))
                 .collect();
             series = backend
                 .load_persisted_series_summaries_by_ids(&candidate_ids)
@@ -126,8 +127,7 @@ pub(crate) async fn load_persisted_series_page(
         collection_order,
     };
 
-    let page =
-        browse_engine::filter_and_paginate_series(rows, &browse_ctx, engine_query, eval_ctx)?;
+    let page = filter_and_paginate_series(rows, &browse_ctx, engine_query, eval_ctx)?;
 
     // Enrich read progress counts on the paginated result
     let mut content: Vec<PersistedSeriesSummary> = page
@@ -139,10 +139,9 @@ pub(crate) async fn load_persisted_series_page(
     if let Some(user_id) = context.user_id.as_deref() {
         let read_progress = backend.load_series_read_progress_counts(user_id).await?;
         for row in &mut content {
-            let (read_count, in_progress_count) =
-                read_progress.get(&row.id).copied().unwrap_or_default();
-            row.books_read_count = read_count.max(0) as u64;
-            row.books_in_progress_count = in_progress_count.max(0) as u64;
+            let counts = read_progress.get(&row.id).copied().unwrap_or_default();
+            row.books_read_count = counts.read_count.max(0) as u64;
+            row.books_in_progress_count = counts.in_progress_count.max(0) as u64;
             row.books_unread_count = row
                 .books_count
                 .saturating_sub(row.books_read_count + row.books_in_progress_count);
@@ -164,54 +163,40 @@ async fn build_series_eval_context(
     condition: Option<&SeriesCondition>,
     read_dates: Option<HashMap<String, String>>,
 ) -> Result<SeriesEvaluationContext, String> {
-    let (collection_memberships, read_progress, total_book_counts, release_date_cutoffs) =
-        match condition {
-            Some(condition) => {
-                let collection_memberships =
-                    if browse_engine::series_condition_needs_collection_memberships(condition) {
-                        Some(backend.load_collection_memberships().await?)
-                    } else {
-                        None
-                    };
-                let read_progress =
-                    if browse_engine::series_condition_needs_read_progress(condition) {
-                        if let Some(user_id) = context.user_id.as_deref() {
-                            Some(backend.load_series_read_progress_counts(user_id).await?)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                let total_book_counts =
-                    if browse_engine::series_condition_needs_total_book_counts(condition) {
-                        Some(backend.load_series_total_book_counts().await?)
-                    } else {
-                        None
-                    };
-                let offsets = browse_engine::collect_series_release_date_offsets(condition);
-                let mut cutoffs = HashMap::new();
-                for days in offsets {
-                    cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
-                }
-                (
-                    collection_memberships,
-                    read_progress,
-                    total_book_counts,
-                    cutoffs,
-                )
-            }
-            None => (None, None, None, HashMap::new()),
-        };
-
-    Ok(SeriesEvaluationContext {
+    let mut eval_context = SeriesEvaluationContext {
         user_id_present: context.user_id.is_some(),
-        collection_memberships,
-        read_progress,
-        total_book_counts,
+        collection_memberships: None,
+        read_progress: None,
+        total_book_counts: None,
         read_dates,
-        release_date_cutoffs,
-    })
+        release_date_cutoffs: HashMap::new(),
+    };
+
+    let Some(condition) = condition else {
+        return Ok(eval_context);
+    };
+
+    if series_condition_needs_collection_memberships(condition) {
+        eval_context.collection_memberships = Some(backend.load_collection_memberships().await?);
+    }
+
+    if series_condition_needs_read_progress(condition)
+        && let Some(user_id) = context.user_id.as_deref()
+    {
+        eval_context.read_progress = Some(backend.load_series_read_progress_counts(user_id).await?);
+    }
+
+    if series_condition_needs_total_book_counts(condition) {
+        eval_context.total_book_counts = Some(backend.load_series_total_book_counts().await?);
+    }
+
+    for days in collect_series_release_date_offsets(condition) {
+        eval_context
+            .release_date_cutoffs
+            .insert(days, backend.persisted_utc_date_minus_days(days).await?);
+    }
+
+    Ok(eval_context)
 }
 
 fn to_browse_context(context: &DiscoveryQueryContext) -> BrowseContext {
@@ -219,19 +204,7 @@ fn to_browse_context(context: &DiscoveryQueryContext) -> BrowseContext {
         user_id: context.user_id.clone(),
         is_admin: context.is_admin,
         authorized_library_ids: context.authorized_library_ids.clone(),
-        restrictions: context.restrictions.as_ref().map(|r| BrowseRestrictions {
-            age: r.age,
-            age_restriction: r.age_restriction.map(|kind| match kind {
-                komga_domain::discovery::AgeRestrictionKind::Exclude => {
-                    EngineAgeRestrictionKind::Exclude
-                }
-                komga_domain::discovery::AgeRestrictionKind::AllowOnly => {
-                    EngineAgeRestrictionKind::AllowOnly
-                }
-            }),
-            labels_allow: r.labels_allow.clone(),
-            labels_exclude: r.labels_exclude.clone(),
-        }),
+        restrictions: context.restrictions.clone(),
     }
 }
 // PLACEHOLDER_MAPPINGS
@@ -251,9 +224,9 @@ fn to_series_row(row: PersistedSeriesSummary) -> SeriesRow {
         books_read_count: row.books_read_count,
         books_unread_count: row.books_unread_count,
         books_in_progress_count: row.books_in_progress_count,
-        status: row.status,
+        status: SeriesStatus::parse(&row.status).unwrap_or(SeriesStatus::Ongoing),
         summary: row.summary,
-        reading_direction: row.reading_direction,
+        reading_direction: SeriesReadingDirection::parse(&row.reading_direction),
         publisher: row.publisher,
         age_rating: row.age_rating,
         language: row.language,
@@ -289,9 +262,12 @@ fn series_row_to_persisted(row: SeriesRow) -> PersistedSeriesSummary {
         books_read_count: row.books_read_count,
         books_unread_count: row.books_unread_count,
         books_in_progress_count: row.books_in_progress_count,
-        status: row.status,
+        status: row.status.persisted_name().to_string(),
         summary: row.summary,
-        reading_direction: row.reading_direction,
+        reading_direction: row
+            .reading_direction
+            .map(|value| value.persisted_name().to_string())
+            .unwrap_or_default(),
         publisher: row.publisher,
         age_rating: row.age_rating,
         language: row.language,

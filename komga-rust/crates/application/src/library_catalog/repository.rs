@@ -3,7 +3,17 @@ use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::LibraryRecord;
 
-type LibrarySeriesAndBookIds = Option<(Vec<String>, Vec<(String, String)>)>;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibraryBookSeriesRecord {
+    pub book_id: String,
+    pub series_id: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LibrarySeriesAndBookIds {
+    pub series_ids: Vec<String>,
+    pub books: Vec<LibraryBookSeriesRecord>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LibraryCatalogMutationError {
@@ -53,12 +63,12 @@ pub trait LibraryCatalogMutationPort: Send + Sync {
     async fn library_books_with_mismatched_extensions(
         &self,
         library_id: &str,
-    ) -> Result<Vec<(String, String)>, String>;
+    ) -> Result<Vec<LibraryBookSeriesRecord>, String>;
 
     async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String>;
 
     async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> Result<LibrarySeriesAndBookIds, String>;
+    ) -> Result<Option<LibrarySeriesAndBookIds>, String>;
 }

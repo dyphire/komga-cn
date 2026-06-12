@@ -2,16 +2,30 @@ use std::net::{IpAddr, SocketAddr};
 
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request, header};
+use komga_application::identity_access::AuthenticationActivityApiKey;
 
 use crate::state::AuthenticationActivityWriteInput;
 
 #[derive(Clone, Debug, Default)]
-pub struct AuthenticationActivityRequestMetadata {
-    pub ip: Option<String>,
-    pub user_agent: Option<String>,
+pub(crate) struct AuthenticationActivityRequestMetadata {
+    pub(crate) ip: Option<String>,
+    pub(crate) user_agent: Option<String>,
 }
 
-pub fn authentication_activity_request_metadata<B>(
+struct ForwardedHeaderSegment<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+impl<'a> ForwardedHeaderSegment<'a> {
+    fn parse(segment: &'a str) -> Option<Self> {
+        segment
+            .split_once('=')
+            .map(|(name, value)| Self { name, value })
+    }
+}
+
+pub(crate) fn authentication_activity_request_metadata<B>(
     request: &Request<B>,
 ) -> AuthenticationActivityRequestMetadata {
     authentication_activity_headers_metadata_with_remote_addr(
@@ -20,7 +34,7 @@ pub fn authentication_activity_request_metadata<B>(
     )
 }
 
-pub fn authentication_activity_headers_metadata_with_remote_addr(
+pub(crate) fn authentication_activity_headers_metadata_with_remote_addr(
     headers: &HeaderMap,
     remote_addr: Option<SocketAddr>,
 ) -> AuthenticationActivityRequestMetadata {
@@ -30,16 +44,15 @@ pub fn authentication_activity_headers_metadata_with_remote_addr(
     }
 }
 
-pub fn authentication_activity_write_input(
+pub(crate) fn authentication_activity_write_input(
     metadata: &AuthenticationActivityRequestMetadata,
     source: &str,
-    api_key_id: Option<&str>,
-    api_key_comment: Option<&str>,
+    api_key: AuthenticationActivityApiKey<'_>,
 ) -> AuthenticationActivityWriteInput {
     AuthenticationActivityWriteInput {
         source: source.to_string(),
-        api_key_id: api_key_id.map(ToString::to_string),
-        api_key_comment: api_key_comment.map(ToString::to_string),
+        api_key_id: api_key.id.map(ToString::to_string),
+        api_key_comment: api_key.comment.map(ToString::to_string),
         ip: metadata.ip.clone(),
         user_agent: metadata.user_agent.clone(),
     }
@@ -66,11 +79,11 @@ fn connect_info_ip<B>(request: &Request<B>) -> Option<SocketAddr> {
 fn parse_forwarded_header_for(value: &str) -> Option<String> {
     value.split(',').find_map(|entry| {
         entry.split(';').find_map(|segment| {
-            let (name, candidate) = segment.split_once('=')?;
-            if !name.trim().eq_ignore_ascii_case("for") {
+            let segment = ForwardedHeaderSegment::parse(segment)?;
+            if !segment.name.trim().eq_ignore_ascii_case("for") {
                 return None;
             }
-            normalize_forwarded_ip_candidate(candidate)
+            normalize_forwarded_ip_candidate(segment.value)
         })
     })
 }
@@ -180,8 +193,10 @@ mod tests {
                 user_agent: Some("koreader".to_string()),
             },
             "API_KEY",
-            Some("api-key-1"),
-            Some("KOReader"),
+            AuthenticationActivityApiKey {
+                id: Some("api-key-1"),
+                comment: Some("KOReader"),
+            },
         );
 
         assert_eq!(input.source, "API_KEY");

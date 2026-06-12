@@ -6,11 +6,11 @@ pub trait SessionResolverPort: Send + Sync {
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Option<AuthUser>;
+    ) -> Result<Option<AuthUser>, String>;
 
     fn resolve_auth_token(
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Option<ResolvedAuthToken>;
+    ) -> Result<Option<ResolvedAuthToken>, String>;
 }

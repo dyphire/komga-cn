@@ -1,31 +1,32 @@
+use komga_application::discovery::SeriesReadingDirection;
 use komga_application::media_assets::{BookMetadata, BookMetadataAuthor, BookMetadataLink};
 
 #[derive(Default)]
 pub(super) struct BookMetadataImportPatch {
-    pub title: Option<String>,
-    pub summary: Option<String>,
-    pub number: Option<String>,
-    pub number_sort: Option<f64>,
-    pub release_date: Option<String>,
-    pub authors: Option<Vec<BookMetadataAuthor>>,
-    pub tags: Option<Vec<String>>,
-    pub isbn: Option<String>,
-    pub links: Option<Vec<BookMetadataLink>>,
+    pub(super) title: Option<String>,
+    pub(super) summary: Option<String>,
+    pub(super) number: Option<String>,
+    pub(super) number_sort: Option<f64>,
+    pub(super) release_date: Option<String>,
+    pub(super) authors: Option<Vec<BookMetadataAuthor>>,
+    pub(super) tags: Option<Vec<String>>,
+    pub(super) isbn: Option<String>,
+    pub(super) links: Option<Vec<BookMetadataLink>>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct SeriesMetadataImportPatch {
-    pub title: Option<String>,
-    pub title_sort: Option<String>,
-    pub status: Option<String>,
-    pub summary: Option<String>,
-    pub reading_direction: Option<String>,
-    pub publisher: Option<String>,
-    pub age_rating: Option<u32>,
-    pub language: Option<String>,
-    pub genres: Option<Vec<String>>,
-    pub total_book_count: Option<u32>,
-    pub collections: Vec<String>,
+    pub(super) title: Option<String>,
+    pub(super) title_sort: Option<String>,
+    pub(super) status: Option<String>,
+    pub(super) summary: Option<String>,
+    pub(super) reading_direction: Option<SeriesReadingDirection>,
+    pub(super) publisher: Option<String>,
+    pub(super) age_rating: Option<u32>,
+    pub(super) language: Option<String>,
+    pub(super) genres: Option<Vec<String>>,
+    pub(super) total_book_count: Option<u32>,
+    pub(super) collections: Vec<String>,
 }
 
 /// Apply a metadata import patch to existing book metadata, respecting field locks.

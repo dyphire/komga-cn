@@ -6,9 +6,10 @@ use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::Duration;
 
-use super::{AuthUser, user_payload_json};
+use crate::identity_access::user_payload_json;
+use komga_application::identity_access::AuthUser;
 
-pub fn bootstrap_user(user: AuthUser, token: String) -> Response {
+pub(crate) fn bootstrap_user(user: AuthUser, token: String) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", token.clone()))
         .path("/")
         .http_only(true)
@@ -35,7 +36,7 @@ pub fn bootstrap_user(user: AuthUser, token: String) -> Response {
         .into_response()
 }
 
-pub fn bootstrap_user_with_remember_me_cookies(
+pub(crate) fn bootstrap_user_with_remember_me_cookies(
     user: AuthUser,
     session_token: String,
     remember_me_token: String,
@@ -71,7 +72,7 @@ pub fn bootstrap_user_with_remember_me_cookies(
     response
 }
 
-pub fn bootstrap_user_with_remember_me_token(
+pub(crate) fn bootstrap_user_with_remember_me_token(
     user: AuthUser,
     token: String,
     remember_me_token: String,
@@ -99,7 +100,7 @@ pub fn bootstrap_user_with_remember_me_token(
     response
 }
 
-pub fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response {
+pub(crate) fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response {
     let session_cookie = Cookie::build(("KOMGA-SESSION", token))
         .path("/")
         .http_only(true)
@@ -117,7 +118,7 @@ pub fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response {
     response
 }
 
-pub fn unauthorized_json_response(path: &str) -> Response {
+pub(crate) fn unauthorized_json_response(path: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({
@@ -138,10 +139,10 @@ fn now_epoch_millis() -> u128 {
         .as_millis()
 }
 
-pub fn expired_session_cookie() -> HeaderValue {
+pub(crate) fn expired_session_cookie() -> HeaderValue {
     HeaderValue::from_static("KOMGA-SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }
 
-pub fn expired_remember_me_cookie() -> HeaderValue {
+pub(crate) fn expired_remember_me_cookie() -> HeaderValue {
     HeaderValue::from_static("komga-remember-me=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }

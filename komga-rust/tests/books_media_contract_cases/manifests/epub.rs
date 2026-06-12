@@ -298,6 +298,63 @@ async fn router_book_manifest_routes_accept_basic_auth_like_kotlin_clients() {
 }
 
 #[tokio::test]
+async fn router_book_manifest_requires_page_streaming_role_even_for_admins() {
+    let ctx = TestFixture::new("router-book-manifest-page-streaming-role").await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
+    seed_epub_manifest_media(
+        ctx.paths(),
+        "main db should open for manifest role seed",
+        false,
+    )
+    .await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should reopen for manifest role user seed");
+    let password = "router-contract-manifest-admin-only-123";
+    sqlx::query(
+        "INSERT INTO USER (ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind("manifest-admin-only")
+    .bind("manifest-admin-only@example.org")
+    .bind(hash_router_contract_password(password))
+    .bind(true)
+    .execute(&pool)
+    .await
+    .expect("manifest admin-only user should be inserted");
+    for role in ["USER", "ADMIN"] {
+        sqlx::query("INSERT INTO USER_ROLE (USER_ID, ROLE) VALUES (?, ?)")
+            .bind("manifest-admin-only")
+            .bind(role)
+            .execute(&pool)
+            .await
+            .expect("manifest admin-only role should be inserted");
+    }
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest")
+                .header(
+                    header::AUTHORIZATION,
+                    basic_authorization_header_value("manifest-admin-only@example.org", password),
+                )
+                .header("x-auth-token", "")
+                .body(Body::empty())
+                .expect("admin-only manifest request should build"),
+        )
+        .await
+        .expect("admin-only manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn router_book_manifest_dispatches_to_epub_profile_payload() {
     let ctx = TestFixture::new("router-book-manifest-default-uses-epub-profile").await;
     write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");

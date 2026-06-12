@@ -1,8 +1,8 @@
 mod version;
 
-pub mod infrastructure;
-pub mod interfaces;
-pub mod server;
+mod infrastructure;
+mod interfaces;
+mod server;
 
 pub use infrastructure::configure_infrastructure_build;
 pub use interfaces::configure_interfaces_build;

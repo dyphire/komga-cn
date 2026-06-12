@@ -11,7 +11,7 @@ use openidconnect::core::{
 };
 use openidconnect::{
     AccessTokenHash, EmptyAdditionalProviderMetadata, IssuerUrl, JsonWebKeySetUrl, Nonce,
-    ResponseTypes, SubjectIdentifier, TokenResponse as _, UserInfoUrl,
+    ResponseTypes, SubjectIdentifier, TokenResponse as _, UserInfoError, UserInfoUrl,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -204,7 +204,7 @@ async fn complete_oauth2_callback(
         return Err(OAuthLoginError::MissingAccessToken);
     }
 
-    let email = resolve_oauth2_email(config, access_token).await;
+    let email = resolve_oauth2_email(config, access_token).await?;
     let Some(email) = email else {
         return Err(OAuthLoginError::MissingEmail);
     };
@@ -267,7 +267,7 @@ async fn complete_oidc_callback(
         token.access_token().to_owned(),
         subject,
     )
-    .await
+    .await?
     {
         if let Some(value) = userinfo_claims.email() {
             email = Some(value.as_str().to_string());
@@ -292,11 +292,16 @@ async fn resolve_oidc_userinfo(
     http_client: &reqwest::Client,
     access_token: openidconnect::AccessToken,
     subject: SubjectIdentifier,
-) -> Option<openidconnect::core::CoreUserInfoClaims> {
+) -> Result<Option<openidconnect::core::CoreUserInfoClaims>, OAuthLoginError> {
     let Ok(request) = client.user_info(access_token, Some(subject)) else {
-        return None;
+        return Ok(None);
     };
-    request.request_async(http_client).await.ok()
+    match request.request_async(http_client).await {
+        Ok(claims) => Ok(Some(claims)),
+        Err(UserInfoError::Request(_)) => Ok(None),
+        Err(UserInfoError::Response(status, _, _)) if !status.is_success() => Ok(None),
+        Err(_) => Err(OAuthLoginError::TokenInvalidResponse),
+    }
 }
 
 async fn oidc_client(
@@ -450,8 +455,11 @@ fn redirect_uri_for_client(
     Ok(value)
 }
 
-async fn resolve_oauth2_email(config: &OAuthClientConfig, access_token: &str) -> Option<String> {
-    let http_client = http_client().ok()?;
+async fn resolve_oauth2_email(
+    config: &OAuthClientConfig,
+    access_token: &str,
+) -> Result<Option<String>, OAuthLoginError> {
+    let http_client = http_client()?;
     for candidate in userinfo_candidates(config) {
         let Ok(response) = http_client
             .get(candidate.endpoint.as_str())
@@ -466,21 +474,21 @@ async fn resolve_oauth2_email(config: &OAuthClientConfig, access_token: &str) ->
         if !response.status().is_success() {
             continue;
         }
-        let Ok(body) = response.bytes().await else {
-            continue;
-        };
-        let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-            continue;
-        };
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| OAuthLoginError::TokenInvalidResponse)?;
+        let payload = serde_json::from_slice::<Value>(&body)
+            .map_err(|_| OAuthLoginError::TokenInvalidResponse)?;
         let email = match candidate.kind {
             UserinfoKind::Standard => extract_standard_email(&payload),
             UserinfoKind::GithubEmails => extract_github_email(&payload),
         };
         if email.is_some() {
-            return email;
+            return Ok(email);
         }
     }
-    None
+    Ok(None)
 }
 
 #[derive(Clone, Copy)]
