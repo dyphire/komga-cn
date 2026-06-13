@@ -538,7 +538,6 @@ fn generated_collection_id() -> String {
 mod tests {
     use std::{collections::HashMap, sync::Mutex};
 
-    use async_trait::async_trait;
     use komga_domain::common_ids::LibraryId;
     use komga_domain::discovery::DiscoveryQueryContext;
 
@@ -826,7 +825,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl CollectionProjectionPort for TestCollectionPorts {
         async fn persisted_collections_exist(&self) -> Result<bool, String> {
             Ok(!self.collections.is_empty())
@@ -861,7 +860,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl CollectionMutationPort for TestCollectionPorts {
         async fn load_persisted_collections(
             &self,
@@ -956,7 +955,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl CollectionSeriesPort for TestCollectionPorts {
         async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
             Ok(self.series_libraries.get(series_id).cloned())
@@ -973,7 +972,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl CollectionSearchPort for TestCollectionPorts {
         async fn search_collection_ids(
             &self,

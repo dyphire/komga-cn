@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use komga_application::opds::{
     OpdsCollectionDetailPersistedPort, OpdsCollectionVisibilityPersistedPort,
     OpdsLibraryPersistedPort, OpdsPersistedUnifiedSearchRecords, OpdsPublisherPersistedPort,
@@ -52,7 +51,7 @@ impl OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsLibraryPersistedPort for OpdsPersistedAccess {
     async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
         load_libraries(self.db.read_pool())
@@ -70,7 +69,7 @@ impl OpdsLibraryPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsReadlistVisibilityPersistedPort for OpdsPersistedAccess {
     async fn load_readlists_for_library(
         &self,
@@ -97,7 +96,7 @@ impl OpdsReadlistVisibilityPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsCollectionVisibilityPersistedPort for OpdsPersistedAccess {
     async fn load_collections(
         &self,
@@ -119,7 +118,7 @@ impl OpdsCollectionVisibilityPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsSeriesPersistedPort for OpdsPersistedAccess {
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
         load_series(self.db.read_pool(), series_id)
@@ -146,7 +145,7 @@ impl OpdsSeriesPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsReadlistDetailPersistedPort for OpdsPersistedAccess {
     async fn load_readlist(
         &self,
@@ -167,7 +166,7 @@ impl OpdsReadlistDetailPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsSearchPersistedPort for OpdsPersistedAccess {
     async fn load_unified_search_results(
         &self,
@@ -225,7 +224,7 @@ impl OpdsSearchPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsPublisherPersistedPort for OpdsPersistedAccess {
     async fn load_publishers(
         &self,
@@ -237,7 +236,7 @@ impl OpdsPublisherPersistedPort for OpdsPersistedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsCollectionDetailPersistedPort for OpdsPersistedAccess {
     async fn load_collection(
         &self,

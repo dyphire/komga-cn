@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::{AuthUser, AuthUserRole};
@@ -247,7 +246,7 @@ struct FakeTaskQueue<F> {
     apply: F,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<F> TaskQueue for FakeTaskQueue<F>
 where
     F: Fn(usize) -> Result<(), String> + Send + Sync,
@@ -271,7 +270,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<F> TaskQueueAdmin for FakeTaskQueue<F>
 where
     F: Fn(usize) -> Result<(), String> + Send + Sync,

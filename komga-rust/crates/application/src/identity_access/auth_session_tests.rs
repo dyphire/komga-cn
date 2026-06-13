@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-
 use super::{
     AuthActivityPort, AuthOutcome, AuthSessionActivityContext, AuthSessionError,
     AuthSessionRequest, AuthSessionResponseMode, AuthSessionService, AuthTokenRequest,
@@ -343,7 +341,7 @@ impl AuthSessionPorts {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl AuthenticationPort for AuthSessionPorts {
     async fn authenticate_basic(
         &self,
@@ -460,7 +458,7 @@ impl SessionLifecyclePort for AuthSessionPorts {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl AuthActivityPort for AuthSessionPorts {
     async fn persisted_list_authentication_activity(
         &self,

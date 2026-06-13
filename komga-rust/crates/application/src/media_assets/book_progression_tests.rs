@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::identity_access::{AuthUser, AuthUserRole};
@@ -194,7 +193,7 @@ struct TestProgressionReader {
     restriction_error: Option<String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionReaderPort for TestProgressionReader {
     async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
         Ok(self.media.clone())
@@ -219,7 +218,7 @@ impl BookProgressionReaderPort for TestProgressionReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationExtensionReaderPort for TestProgressionReader {
     async fn epub_extension_blob(
         &self,
@@ -229,7 +228,7 @@ impl EpubNavigationExtensionReaderPort for TestProgressionReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationReaderPort for TestProgressionReader {
     async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
         Ok(self.media_files.clone())
@@ -254,7 +253,7 @@ struct TestProgressWriter {
     persisted: Mutex<Vec<BookProgressionInput>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
     async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
         self.persisted.lock().unwrap().push(input);

@@ -12,7 +12,7 @@ use crate::media_assets::{
     EpubNavigationLink, EpubNavigationLoadError, ManifestBookRecord, PersistedMediaFileRecord,
     load_book_epub_navigation_extension,
 };
-use async_trait::async_trait;
+
 use komga_domain::discovery::{QueryRestrictions, content_allowed_by_restrictions};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -130,7 +130,7 @@ pub struct PersistedManifest {
     pub series_id: Option<String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ManifestReaderPort: EpubNavigationExtensionReaderPort + Send + Sync {
     async fn manifest_book(&self, book_id: &str) -> Result<Option<ManifestBookRecord>, String>;
 
@@ -149,7 +149,7 @@ pub trait ManifestReaderPort: EpubNavigationExtensionReaderPort + Send + Sync {
     ) -> Result<Vec<PersistedMediaFileRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ManifestContentPort: EpubNavigationContentPort {
     async fn archive_page_rows(
         &self,
@@ -162,7 +162,7 @@ pub trait ManifestContentPort: EpubNavigationContentPort {
     ) -> Result<Vec<BookPageRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ManifestContentPort for T
 where
     T: ContentResolverPort + Send + Sync + ?Sized,
@@ -182,7 +182,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ManifestMetadataPort: Send + Sync {
     async fn manifest_book_detail(&self, book_id: &str) -> Result<Option<BookReadModel>, String>;
 
@@ -192,7 +192,7 @@ pub trait ManifestMetadataPort: Send + Sync {
     ) -> Result<Option<PersistedSeriesDetailRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ManifestMetadataPort for T
 where
     T: BookDetailPort + SeriesDetailPort + Send + Sync + ?Sized,
@@ -209,7 +209,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ManifestReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + Send + Sync + ?Sized,

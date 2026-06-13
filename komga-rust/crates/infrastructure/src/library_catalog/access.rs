@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::library_catalog::{
     CreateLibraryResult, LibraryCatalogCommandService, LibraryCatalogMutationError,
     LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryDetailAccess,
@@ -28,7 +27,7 @@ impl LibraryCatalogAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryCatalogPort for LibraryCatalogAccess {
     async fn list_libraries(
         &self,

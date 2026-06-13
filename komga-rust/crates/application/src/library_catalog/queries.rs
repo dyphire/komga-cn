@@ -69,7 +69,7 @@ fn unrestricted_query_context() -> DiscoveryQueryContext {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
+
     use komga_domain::common_ids::{LibraryId, UserId};
     use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
@@ -132,7 +132,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl LibraryCatalogReadPort for TestLibraryPort {
         async fn list_libraries(
             &self,

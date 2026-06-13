@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -7,7 +6,7 @@ use super::{
     BookProgressionInput, BookProgressionReaderPort, BookProgressionRecord, ProgressWriterPort,
 };
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookProgressionWriteReaderPort: Send + Sync {
     async fn book_progression(
         &self,
@@ -16,7 +15,7 @@ pub trait BookProgressionWriteReaderPort: Send + Sync {
     ) -> Result<Option<BookProgressionRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> BookProgressionWriteReaderPort for T
 where
     T: BookProgressionReaderPort + ?Sized,
@@ -30,12 +29,12 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookProgressionWriterPort: Send + Sync {
     async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> BookProgressionWriterPort for T
 where
     T: ProgressWriterPort + ?Sized,

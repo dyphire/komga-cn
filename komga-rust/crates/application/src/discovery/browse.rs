@@ -1,5 +1,5 @@
 use super::read_models::{BookReadModel, SeriesReadModel};
-use async_trait::async_trait;
+
 use komga_domain::discovery::{
     BookFilter, BookSort, DiscoveryError, DiscoveryQueryContext, PageEnvelope, SeriesFilter,
     SeriesSort,
@@ -89,7 +89,7 @@ pub enum BookTagScope {
     ReadList(String),
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait DiscoveryBrowseService: Send + Sync {
     async fn list_series(
         &self,
@@ -134,7 +134,7 @@ pub struct FacetScope {
     pub collection_id: Option<String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait DiscoveryFacetService: Send + Sync {
     async fn list_facet_values(
         &self,

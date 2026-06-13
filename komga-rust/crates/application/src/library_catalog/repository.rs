@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::LibraryRecord;
@@ -28,7 +27,7 @@ impl LibraryCatalogMutationError {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait LibraryCatalogReadPort: Send + Sync {
     async fn list_libraries(
         &self,
@@ -42,7 +41,7 @@ pub trait LibraryCatalogReadPort: Send + Sync {
     ) -> Result<Option<LibraryRecord>, DiscoveryError>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait LibraryCatalogMutationPort: Send + Sync {
     async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String>;
 

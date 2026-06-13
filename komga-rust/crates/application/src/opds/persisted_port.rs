@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use async_trait::async_trait;
-
 use super::records::{
     PersistedBookFeedRecord, PersistedBookSearchRecord, PersistedLibraryRecord,
     PersistedNamedRecord, PersistedReadlistBookRecord, PersistedReadlistRecord,
@@ -17,7 +15,7 @@ pub struct OpdsPersistedUnifiedSearchRecords {
 }
 
 /// Persisted library lookup used by OPDS composition services.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsLibraryPersistedPort: Send + Sync {
     async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String>;
 
@@ -28,7 +26,7 @@ pub trait OpdsLibraryPersistedPort: Send + Sync {
 }
 
 /// Persisted readlist visibility data used by OPDS browse and feed composition.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsReadlistVisibilityPersistedPort: Send + Sync {
     async fn load_readlists_for_library(
         &self,
@@ -44,7 +42,7 @@ pub trait OpdsReadlistVisibilityPersistedPort: Send + Sync {
 }
 
 /// Persisted collection visibility data used by OPDS browse and feed composition.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsCollectionVisibilityPersistedPort: Send + Sync {
     async fn load_collections(
         &self,
@@ -74,7 +72,7 @@ impl<T> OpdsFeedPersistedPort for T where
 {
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsPublisherPersistedPort: Send + Sync {
     async fn load_publishers(
         &self,
@@ -82,7 +80,7 @@ pub trait OpdsPublisherPersistedPort: Send + Sync {
     ) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsCollectionDetailPersistedPort: Send + Sync {
     async fn load_collection(
         &self,
@@ -101,7 +99,7 @@ pub trait OpdsCollectionDetailPersistedPort: Send + Sync {
     ) -> Result<Vec<PersistedSeriesRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsReadlistDetailPersistedPort: Send + Sync {
     async fn load_readlist(
         &self,
@@ -114,7 +112,7 @@ pub trait OpdsReadlistDetailPersistedPort: Send + Sync {
     ) -> Result<Vec<PersistedReadlistBookRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsSeriesPersistedPort: Send + Sync {
     async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String>;
 
@@ -129,7 +127,7 @@ pub trait OpdsSeriesPersistedPort: Send + Sync {
     async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsSearchPersistedPort: Send + Sync {
     async fn load_unified_search_results(
         &self,

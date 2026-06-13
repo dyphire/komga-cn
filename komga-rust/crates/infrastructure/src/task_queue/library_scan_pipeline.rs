@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use async_trait::async_trait;
-
 use super::JobRuntime;
 use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventStore};
 use komga_application::task_processing::{
@@ -215,7 +213,7 @@ impl Default for SqliteFilesystemLibraryScanPipeline {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryScanPipeline for SqliteFilesystemLibraryScanPipeline {
     async fn schedule(
         &self,

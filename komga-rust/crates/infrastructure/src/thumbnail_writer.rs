@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::media_assets::{
     CollectionThumbnailRecord, EntityThumbnailRecord, ReadlistThumbnailRecord,
     SeriesThumbnailRecord, ThumbnailWriterPort,
@@ -27,7 +26,7 @@ impl ThumbnailWriter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ThumbnailWriterPort for ThumbnailWriter {
     // --- Book ---
 

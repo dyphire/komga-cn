@@ -1,6 +1,5 @@
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use serde_json::json;
 
@@ -203,7 +202,7 @@ impl TestSyncState {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboSyncStatePort for TestSyncState {
     async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
         self.requests.lock().unwrap().push(request);
@@ -284,7 +283,7 @@ impl TestStoreSync {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboStoreSyncPort for TestStoreSync {
     async fn sync_store_library(
         &self,

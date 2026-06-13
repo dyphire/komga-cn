@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use serde_json::Value;
 use serde_json::json;
 
@@ -382,7 +381,7 @@ struct TestDeviceSync {
     read_progress: Option<PersistedReadProgressRecord>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DeviceSyncPort for TestDeviceSync {
     async fn load_book_created_timestamp(&self, _book_id: &str) -> Result<Option<String>, String> {
         Ok(None)
@@ -427,7 +426,7 @@ struct TestProgressWriter {
     persisted: Mutex<Vec<BookProgressionInput>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
     async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
         self.persisted.lock().unwrap().push(input);
@@ -462,7 +461,7 @@ struct NoopMediaReader {
     page_count: Option<u64>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationExtensionReaderPort for NoopMediaReader {
     async fn epub_extension_blob(
         &self,
@@ -472,7 +471,7 @@ impl EpubNavigationExtensionReaderPort for NoopMediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationReaderPort for NoopMediaReader {
     async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
         if let Some(error) = &self.book_media_files_error {
@@ -482,7 +481,7 @@ impl EpubNavigationReaderPort for NoopMediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionWriteReaderPort for NoopMediaReader {
     async fn book_progression(
         &self,
@@ -493,7 +492,7 @@ impl BookProgressionWriteReaderPort for NoopMediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DeviceProgressPageCountPort for NoopMediaReader {
     async fn book_page_count(&self, _book_id: &str) -> Result<Option<u64>, String> {
         Ok(self.page_count)

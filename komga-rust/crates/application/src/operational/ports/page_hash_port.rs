@@ -1,12 +1,10 @@
-use async_trait::async_trait;
-
 use crate::operational::{
     PageHashDeleteTarget, PageHashKnownEntry, PageHashKnownQuery, PageHashMatchEntry,
     PageHashMatchesQuery, PageHashPage, PageHashThumbnail, PageHashUnknownEntry,
     PageHashUnknownQuery, PageHashUpsertCommand,
 };
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait PageHashPort: Send + Sync {
     async fn load_page_hash_matches_page(
         &self,

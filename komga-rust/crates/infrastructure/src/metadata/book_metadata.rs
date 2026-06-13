@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::media_assets::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPort,
 };
@@ -19,7 +18,7 @@ impl SqliteBookMetadataPort {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookMetadataPort for SqliteBookMetadataPort {
     async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
         load_book_metadata(&self.read_pool, book_id).await

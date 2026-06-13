@@ -3,9 +3,8 @@ use std::sync::Arc;
 use super::{
     ProgressWriterPort, ReadProgressSurfacePort, ReadlistTachiyomiCounters, SeriesTachiyomiProgress,
 };
-use async_trait::async_trait;
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait SeriesReadProgressWriterPort: Send + Sync {
     async fn persist_read_progress(
         &self,
@@ -30,7 +29,7 @@ pub trait SeriesReadProgressWriterPort: Send + Sync {
     ) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> SeriesReadProgressWriterPort for T
 where
     T: ProgressWriterPort + ?Sized,
@@ -228,8 +227,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use async_trait::async_trait;
-
     use super::*;
     use crate::media_assets::{SeriesBookNumberSort, SeriesTachiyomiProgressBook};
 
@@ -240,7 +237,7 @@ mod tests {
         page_count_by_book: HashMap<String, Option<u64>>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadProgressSurfacePort for TestReadProgressSurface {
         async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
             Ok(self
@@ -331,7 +328,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl SeriesReadProgressWriterPort for TestProgressWriter {
         async fn persist_read_progress(
             &self,

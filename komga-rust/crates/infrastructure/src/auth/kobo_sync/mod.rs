@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::identity_access::{
     AuthUser, KoboProxyRequest, KoboProxyResponse, KoboSyncBookState, KoboSyncPage,
     KoboSyncPageRequest, KoboSyncPointBook, KoboSyncStatePort, random_uuid_like, user_id,
@@ -31,7 +30,7 @@ impl<'a> SqliteKoboSyncState<'a> {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboSyncStatePort for SqliteKoboSyncState<'_> {
     async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
         let user_id_value = user_id(&request.user);

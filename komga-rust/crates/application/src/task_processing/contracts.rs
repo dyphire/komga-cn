@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use async_trait::async_trait;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskQueueRecord {
     pub id: String,
@@ -110,7 +108,7 @@ pub struct TaskExecutionResult {
     pub outcome: Result<TaskExecutionOutcome, TaskProcessingError>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait TaskExecutionFinalizationPort: Sync {
     async fn enqueue_follow_up_task(
         &self,
@@ -322,7 +320,7 @@ impl TaskQueueOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
+
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -330,7 +328,7 @@ mod tests {
         events: Mutex<Vec<String>>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl TaskExecutionFinalizationPort for RecordingFinalizationPort {
         async fn enqueue_follow_up_task(
             &self,

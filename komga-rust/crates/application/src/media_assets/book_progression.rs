@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::identity_access::{AuthUser, user_id};
@@ -127,7 +126,7 @@ impl<T> BookProgressionSurfacePort for T where
 {
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookProgressionReaderPort: Send + Sync {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
 
@@ -143,7 +142,7 @@ pub trait BookProgressionReaderPort: Send + Sync {
     ) -> Result<Option<BookProgressionRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> BookProgressionReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + ReadProgressReadPort + ?Sized,

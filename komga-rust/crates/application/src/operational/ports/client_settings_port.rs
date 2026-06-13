@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::collections::BTreeMap;
 
 pub type ClientGlobalSettings = BTreeMap<String, ClientGlobalSetting>;
@@ -15,7 +14,7 @@ pub struct ClientUserSetting {
     pub value: String,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ClientSettingsPort: Send + Sync {
     async fn load_client_settings_global(
         &self,

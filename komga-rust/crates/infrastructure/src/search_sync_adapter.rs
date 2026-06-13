@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use komga_application::media_assets::SearchSyncPort;
 use sqlx::SqlitePool;
 
@@ -19,7 +18,7 @@ impl SearchSyncAdapter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SearchSyncPort for SearchSyncAdapter {
     async fn sync_book(&self, book_id: &str) -> Result<(), String> {
         self.search.upsert_book(book_id).await.map(|_| ())

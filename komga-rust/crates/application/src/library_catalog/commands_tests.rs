@@ -2,7 +2,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-use async_trait::async_trait;
 use serde_json::Value;
 
 use super::{
@@ -114,7 +113,7 @@ struct TestPort {
     library_series_and_book_ids: Option<LibrarySeriesAndBookIds>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryCatalogMutationPort for TestPort {
     async fn load_library(&self, _library_id: &str) -> Result<Option<LibraryRecord>, String> {
         Ok(self.library.clone())

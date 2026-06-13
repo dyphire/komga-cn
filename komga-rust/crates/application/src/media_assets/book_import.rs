@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-
 use crate::runtime_sse::RuntimeSseEventSink;
 use crate::task_processing::{ImportBookPayload, SubmitUrgency, TaskQueue, TaskQueueRecord};
 
@@ -46,7 +44,7 @@ pub struct BookImportSubmissionFailure {
     pub error: String,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookImportPort: Send + Sync {
     async fn import_book(
         &self,

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use async_trait::async_trait;
-
 use crate::library_catalog::LibraryScanInterval;
 
 use super::contracts::{TaskProcessingError, TaskQueueRecord};
@@ -132,7 +130,7 @@ impl ScanOneLibraryResult {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait LibraryScanPipeline: Send + Sync {
     async fn schedule(
         &self,

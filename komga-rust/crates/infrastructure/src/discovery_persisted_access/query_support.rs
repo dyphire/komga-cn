@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use komga_application::discovery::{
     AuthorFacetPort, BookSpecialListPort, CollectionSearchPort, LibraryIdMappingPort,
     PersistedAuthorEntry, PersistedAuthorsScope, PersistedBookBrowseEntry, ReadlistSearchPort,
@@ -35,7 +34,7 @@ fn persisted_book_browse_entry(row: models::BookBrowseEntry) -> PersistedBookBro
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl AuthorFacetPort for DiscoveryQuerySupportAccess {
     async fn load_author_names(
         &self,
@@ -81,14 +80,14 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryIdMappingPort for DiscoveryQuerySupportAccess {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
         library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookSpecialListPort for DiscoveryQuerySupportAccess {
     async fn load_ondeck_books(
         &self,
@@ -106,7 +105,7 @@ impl BookSpecialListPort for DiscoveryQuerySupportAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl CollectionSearchPort for DiscoveryQuerySupportAccess {
     async fn search_collection_ids(
         &self,
@@ -118,7 +117,7 @@ impl CollectionSearchPort for DiscoveryQuerySupportAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
     async fn search_readlist_scored_ids(
         &self,

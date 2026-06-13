@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::task_processing::TaskQueueRecord;
 
 use super::metadata_update::{
@@ -9,12 +7,12 @@ use super::metadata_update::{
 
 // --- Side-effect ports (trait only where polymorphism is needed for testing) ---
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait SearchSyncPort: Send + Sync {
     async fn sync_book(&self, book_id: &str) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait TaskEnqueuePort: Send + Sync {
     async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String>;
 }
@@ -157,7 +155,6 @@ impl MetadataWriter {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
 
     use std::sync::{Arc, Mutex};
 
@@ -293,7 +290,7 @@ mod tests {
 
     struct EventContextFailingMetadataPort;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl BookMetadataPort for EventContextFailingMetadataPort {
         async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
             Ok(Some(sample_metadata()))
@@ -318,7 +315,7 @@ mod tests {
 
     struct EventContextMissingMetadataPort;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl BookMetadataPort for EventContextMissingMetadataPort {
         async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
             Ok(Some(sample_metadata()))
@@ -343,7 +340,7 @@ mod tests {
 
     struct SelectiveBatchMetadataPort;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl BookMetadataPort for SelectiveBatchMetadataPort {
         async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
             match book_id {
@@ -379,7 +376,7 @@ mod tests {
 
     struct NoopSearchSyncPort;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl SearchSyncPort for NoopSearchSyncPort {
         async fn sync_book(&self, _book_id: &str) -> Result<(), String> {
             Ok(())
@@ -388,7 +385,7 @@ mod tests {
 
     struct NoopTaskEnqueuePort;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl TaskEnqueuePort for NoopTaskEnqueuePort {
         async fn enqueue(&self, _records: Vec<TaskQueueRecord>) -> Result<(), String> {
             Ok(())
@@ -399,7 +396,7 @@ mod tests {
         records: Arc<Mutex<Vec<TaskQueueRecord>>>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl TaskEnqueuePort for RecordingTaskEnqueuePort {
         async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String> {
             self.records.lock().unwrap().extend(records);

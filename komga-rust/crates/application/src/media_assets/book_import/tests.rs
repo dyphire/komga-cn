@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-use async_trait::async_trait;
-
 use crate::runtime_sse::{RuntimeSseEvent, RuntimeSseEventLog, RuntimeSseEventStore};
 use crate::task_processing::{ImportBookPayload, TaskKind, TaskQueueRecord, TaskRequest};
 
@@ -36,7 +34,7 @@ struct StubImportPort {
     result: Result<Option<ImportBookOutcome>, String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookImportPort for StubImportPort {
     async fn import_book(
         &self,
@@ -61,7 +59,7 @@ struct RecordingTaskQueue {
     persisted_ids: std::sync::Mutex<Vec<String>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl crate::task_processing::TaskQueue for RecordingTaskQueue {
     async fn enqueue(&self, _kind: TaskKind, _target_id: &str) {}
 

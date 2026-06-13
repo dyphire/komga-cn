@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use axum::http::{HeaderMap, StatusCode};
 use komga_application::operational::{
     PersistedServerSettings, ServerSettingChange, ServerSettingsPort,
@@ -45,7 +44,7 @@ async fn kobo_request_base_url_propagates_settings_load_errors() {
 
 struct FailingServerSettings;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ServerSettingsPort for FailingServerSettings {
     async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
         Err("settings failed".to_string())

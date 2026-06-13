@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use super::super::user_models::{
     AuthUser, PersistedApiKeyMetadata, PersistedAuthenticationActivity,
 };
@@ -25,7 +23,7 @@ impl<'a> AuthenticationActivityApiKey<'a> {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait AuthActivityPort: Send + Sync {
     async fn persisted_list_authentication_activity(
         &self,

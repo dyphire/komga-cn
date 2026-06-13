@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use komga_application::discovery::{
     BookDetailPort, BookReadModel, CollectionCreateResult, CollectionListQuery,
     CollectionMutationError, CollectionMutationInput, CollectionMutationService, CollectionPort,
@@ -56,7 +55,7 @@ impl DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedSetVisibilityService for DiscoveryDetailAccess {
     async fn visible_collection_series_ids(
         &self,
@@ -79,7 +78,7 @@ impl PersistedSetVisibilityService for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedSetService for DiscoveryDetailAccess {
     async fn list_collections(
         &self,
@@ -280,7 +279,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl CollectionSearchPort for DiscoveryDetailAccess {
     async fn search_collection_ids(
         &self,
@@ -292,7 +291,7 @@ impl CollectionSearchPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadlistSearchPort for DiscoveryDetailAccess {
     async fn search_readlist_scored_ids(
         &self,
@@ -311,7 +310,7 @@ impl ReadlistSearchPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookDetailPort for DiscoveryDetailAccess {
     async fn load_persisted_book_resource(
         &self,
@@ -337,7 +336,7 @@ impl BookDetailPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedBookIdResolverPort for DiscoveryDetailAccess {
     async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String> {
         books::load_persisted_book_resource(self.db.read_pool(), book_id)
@@ -353,7 +352,7 @@ impl PersistedBookIdResolverPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SeriesDetailPort for DiscoveryDetailAccess {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
         collections::load_series_library_id(self.db.read_pool(), series_id).await
@@ -410,7 +409,7 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedSeriesIdResolverPort for DiscoveryDetailAccess {
     async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String> {
         series::load_persisted_series_resource(self.db.read_pool(), series_id)
@@ -426,7 +425,7 @@ impl PersistedSeriesIdResolverPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SeriesMetadataWritePort for DiscoveryDetailAccess {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
         collections::load_series_library_id(self.db.read_pool(), series_id).await
@@ -459,7 +458,7 @@ impl SeriesMetadataWritePort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl CollectionPort for DiscoveryDetailAccess {
     async fn persisted_collections_exist(&self) -> Result<bool, String> {
         collections::persisted_collections_exist(self.db.read_pool()).await
@@ -532,7 +531,7 @@ impl CollectionPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadlistProjectionPort for DiscoveryDetailAccess {
     async fn load_persisted_readlists(
         &self,
@@ -555,7 +554,7 @@ impl ReadlistProjectionPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadlistComicRackMatchPort for DiscoveryDetailAccess {
     async fn load_persisted_readlists(
         &self,
@@ -570,7 +569,7 @@ impl ReadlistComicRackMatchPort for DiscoveryDetailAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadlistMutationPort for DiscoveryDetailAccess {
     async fn persist_readlist_create(
         &self,

@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
-
 /// Snapshot of a database connection pool's state.
 #[derive(Clone, Debug)]
 pub struct DatabasePoolSnapshot {
@@ -27,7 +25,7 @@ pub struct LibraryMetricValue {
 }
 
 /// Port for reading operational metrics (library counts, task stats, pool state).
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OperationalMetricsPort: Send + Sync {
     async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String>;
 

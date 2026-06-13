@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 #[derive(Clone, Debug)]
 pub struct CreatedClaimedUser {
     pub id: String,
@@ -12,7 +10,7 @@ pub enum ClaimInitialAdminUserResult {
     AlreadyClaimed,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ClaimPort: Send + Sync {
     async fn load_claim_status(&self) -> Result<bool, String>;
     async fn claim_initial_admin_user(

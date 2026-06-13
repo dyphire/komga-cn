@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::media_assets::{
@@ -11,12 +10,12 @@ use crate::media_assets::{
 
 use super::DeviceSyncPort;
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait DeviceProgressPageCountPort: Send + Sync {
     async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> DeviceProgressPageCountPort for T
 where
     T: ReadProgressReadPort + ?Sized,

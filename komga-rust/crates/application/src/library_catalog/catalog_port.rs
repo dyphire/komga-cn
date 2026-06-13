@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 
 use super::{
@@ -7,7 +6,7 @@ use super::{
 };
 
 /// Port for library catalog operations (CRUD + task triggers).
-#[async_trait]
+#[async_trait::async_trait]
 pub trait LibraryCatalogPort: Send + Sync {
     async fn list_libraries(
         &self,

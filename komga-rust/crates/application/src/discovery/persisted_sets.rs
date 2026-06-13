@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::discovery::{DiscoveryQueryContext, PageEnvelope};
 
 use super::{
@@ -8,7 +7,7 @@ use super::{
     ReadlistCreateResult, ReadlistMutationError, ReadlistMutationInput,
 };
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait PersistedSetVisibilityService: Send + Sync {
     async fn visible_collection_series_ids(
         &self,
@@ -23,7 +22,7 @@ pub trait PersistedSetVisibilityService: Send + Sync {
     ) -> Result<Option<Vec<String>>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait PersistedSetService: PersistedSetVisibilityService {
     async fn list_collections(
         &self,

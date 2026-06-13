@@ -127,7 +127,6 @@ pub(super) async fn visible_collection_series_ids_for_user(
 mod tests {
     use std::path::PathBuf;
 
-    use async_trait::async_trait;
     use komga_application::identity_access::AuthUserRole;
     use komga_application::media_assets::{
         BookAccessRestrictions, BookMediaRecord, BookPageRecord, EntityThumbnailBinary,
@@ -139,7 +138,7 @@ mod tests {
         restrictions: Result<Option<BookAccessRestrictions>, String>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl BookMediaReaderPort for TestBookMediaReader {
         async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
             Ok(None)

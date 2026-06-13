@@ -4,7 +4,6 @@ use std::hash::{Hash, Hasher};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use async_trait::async_trait;
 use komga_application::media_assets::{
     BookImportPort, BooksImportEntry, ImportBookOutcome, ImportCopyMode,
 };
@@ -30,7 +29,7 @@ impl FilesystemBookImport {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookImportPort for FilesystemBookImport {
     async fn import_book(
         &self,

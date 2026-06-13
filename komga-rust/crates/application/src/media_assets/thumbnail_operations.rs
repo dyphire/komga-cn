@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::media_assets::ThumbnailType;
 
 use super::{
@@ -62,7 +61,7 @@ pub struct CollectionThumbnailRecord {
     pub thumbnail: Vec<u8>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ThumbnailReaderPort: Send + Sync {
     async fn selected_book_thumbnail(
         &self,
@@ -116,7 +115,7 @@ pub trait ThumbnailReaderPort: Send + Sync {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ThumbnailReaderPort for T
 where
     T: ThumbnailReadPort

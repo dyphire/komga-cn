@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use async_trait::async_trait;
-
 use super::{
     PersistedBookIdResolverPort, PersistedSeriesIdResolverPort, resolve_persisted_book_id,
     resolve_persisted_series_id,
@@ -13,7 +11,7 @@ struct RecordingBookIdResolver {
     sorted_ids: HashMap<usize, String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedBookIdResolverPort for RecordingBookIdResolver {
     async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String> {
         Ok(self.existing.get(book_id).copied().unwrap_or(false))
@@ -33,7 +31,7 @@ struct RecordingSeriesIdResolver {
     sorted_ids: HashMap<usize, String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedSeriesIdResolverPort for RecordingSeriesIdResolver {
     async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String> {
         Ok(self.existing.get(series_id).copied().unwrap_or(false))

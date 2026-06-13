@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use komga_application::operational::{
     PersistedServerSettings, ServerSettingChange, ServerSettingsPort,
 };
@@ -44,7 +43,7 @@ impl ServerSettingsStore {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ServerSettingsPort for ServerSettingsStore {
     async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
         let context = self

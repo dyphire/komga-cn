@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use async_trait::async_trait;
-
 use super::{
     ArchiveEntry, BookMediaPort, BookMediaRecord, ContentAccessPort, ContentResolverPort,
     SeriesArchiveEntries,
@@ -37,7 +35,7 @@ where
     builder: &'a B,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ArchiveReaderPort: Send + Sync {
     async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String>;
 
@@ -49,7 +47,7 @@ pub trait ArchiveReaderPort: Send + Sync {
     ) -> Result<Option<SeriesArchiveEntries>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ArchiveReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + Send + Sync + ?Sized,
@@ -70,12 +68,12 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ArchiveContentPort: Send + Sync {
     async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ArchiveContentPort for T
 where
     T: ContentResolverPort + Send + Sync + ?Sized,

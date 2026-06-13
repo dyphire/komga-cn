@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use komga_application::identity_access::{
     AuthActivityPort, AuthOutcome, AuthUser, AuthenticationActivityApiKey, AuthenticationPort,
     CreateAuthUserInput, DeviceSyncPort, DeviceThumbnailBinary, KoboMetadataRecord, KoboProxyPort,
@@ -72,7 +71,7 @@ impl SessionResolverPort for IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl AuthenticationPort for IdentityAccess {
     async fn authenticate_basic(
         &self,
@@ -166,7 +165,7 @@ impl SessionLifecyclePort for IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl UserAdminPort for IdentityAccess {
     async fn persisted_users(&self) -> Result<Vec<AuthUser>, String> {
         auth_identity::persisted_users(self.db.read_pool()).await
@@ -246,7 +245,7 @@ impl UserAdminPort for IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl AuthActivityPort for IdentityAccess {
     async fn persisted_list_authentication_activity(
         &self,
@@ -298,7 +297,7 @@ impl AuthActivityPort for IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DeviceSyncPort for IdentityAccess {
     async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String> {
         device_auth::load_book_created_timestamp(self.db.read_pool(), book_id)
@@ -383,7 +382,7 @@ impl IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboSyncStatePort for IdentityAccess {
     async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
         kobo_sync::SqliteKoboSyncState::new(self.db.write_pool())
@@ -408,7 +407,7 @@ impl KoboSyncStatePort for IdentityAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboProxyPort for IdentityAccess {
     async fn proxy_kobo_request(
         &self,

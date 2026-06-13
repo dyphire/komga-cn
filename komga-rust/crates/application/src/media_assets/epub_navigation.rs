@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::{
@@ -49,13 +48,13 @@ impl NormalizedEpubLocator {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait EpubNavigationExtensionReaderPort: Send + Sync {
     async fn epub_extension_blob(&self, book_id: &str)
     -> Result<Option<EpubExtensionBlob>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> EpubNavigationExtensionReaderPort for T
 where
     T: BookMediaPort + ?Sized,
@@ -68,12 +67,12 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait EpubNavigationReaderPort: EpubNavigationExtensionReaderPort {
     async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> EpubNavigationReaderPort for T
 where
     T: BookMediaPort + ?Sized,

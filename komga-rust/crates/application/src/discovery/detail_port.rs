@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::discovery::SeriesStatus;
 use std::collections::HashMap;
 
@@ -187,7 +186,7 @@ pub struct SeriesMetadataUpdateRecord {
 
 // --- Port traits ---
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadlistBookPort: Send + Sync {
     async fn load_persisted_book_resource(
         &self,
@@ -201,7 +200,7 @@ pub trait ReadlistBookPort: Send + Sync {
     ) -> Result<Option<BookReadModel>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookDetailPort: Send + Sync {
     async fn load_persisted_book_resource(
         &self,
@@ -221,7 +220,7 @@ pub trait BookDetailPort: Send + Sync {
     ) -> Result<Option<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait PersistedBookIdResolverPort: Send + Sync {
     async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String>;
 
@@ -259,7 +258,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ReadlistBookPort for T
 where
     T: BookDetailPort + ?Sized,
@@ -280,7 +279,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait SeriesDetailPort: Send + Sync {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
 
@@ -319,7 +318,7 @@ pub trait SeriesDetailPort: Send + Sync {
     ) -> Result<Option<ExistingSeriesMetadataRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait PersistedSeriesIdResolverPort: Send + Sync {
     async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String>;
 
@@ -359,7 +358,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait CollectionSeriesPort: Send + Sync {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
 
@@ -369,7 +368,7 @@ pub trait CollectionSeriesPort: Send + Sync {
     ) -> Result<PersistedSeriesRestrictionRecord, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> CollectionSeriesPort for T
 where
     T: SeriesDetailPort + ?Sized,
@@ -386,7 +385,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait CollectionPort: Send + Sync {
     async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
@@ -427,7 +426,7 @@ pub trait CollectionPort: Send + Sync {
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait CollectionProjectionPort: Send + Sync {
     async fn persisted_collections_exist(&self) -> Result<bool, String>;
 
@@ -446,7 +445,7 @@ pub trait CollectionProjectionPort: Send + Sync {
     ) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> CollectionProjectionPort for T
 where
     T: CollectionPort + ?Sized,
@@ -476,7 +475,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait CollectionMutationPort: Send + Sync {
     async fn load_persisted_collections(
         &self,
@@ -515,7 +514,7 @@ pub trait CollectionMutationPort: Send + Sync {
     async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> CollectionMutationPort for T
 where
     T: CollectionPort + ?Sized,
@@ -575,7 +574,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadlistProjectionPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
@@ -592,7 +591,7 @@ pub trait ReadlistProjectionPort: Send + Sync {
     ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadlistComicRackMatchPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
@@ -603,7 +602,7 @@ pub trait ReadlistComicRackMatchPort: Send + Sync {
     ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadlistMutationPort: ReadlistProjectionPort {
     async fn persist_readlist_create(
         &self,

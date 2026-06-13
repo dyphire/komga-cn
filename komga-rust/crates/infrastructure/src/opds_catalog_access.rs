@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
 
 use crate::database_handle::DatabaseHandle;
@@ -23,7 +22,7 @@ impl OpdsCatalogAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsFeedCatalogPort for OpdsCatalogAccess {
     async fn load_book_feed_page(
         &self,
@@ -53,7 +52,7 @@ impl OpdsFeedCatalogPort for OpdsCatalogAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
     async fn load_browse_series_navigation_entries(
         &self,

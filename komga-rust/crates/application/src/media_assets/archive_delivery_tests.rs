@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
 use super::{
     ArchiveBuilderPort, ArchiveContentPort, ArchiveDelivery, ArchiveDeliveryService, ArchiveEntry,
     ArchiveFileEntry, ArchiveReaderPort, BookMediaRecord, SeriesArchiveEntries,
@@ -16,7 +14,7 @@ struct TestArchiveReader {
     series_by_id: HashMap<String, SeriesArchiveEntries>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ArchiveReaderPort for TestArchiveReader {
     async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String> {
         Ok(self.readlist_names.get(readlist_id).cloned())
@@ -39,7 +37,7 @@ struct TestArchiveContent {
     bytes_by_path: HashMap<PathBuf, Result<Option<Vec<u8>>, String>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ArchiveContentPort for TestArchiveContent {
     async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String> {
         self.bytes_by_path.get(path).cloned().unwrap_or(Ok(None))

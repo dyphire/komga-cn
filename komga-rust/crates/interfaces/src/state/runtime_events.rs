@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use komga_application::runtime_sse::{
     RuntimeSseEvent, RuntimeSseEventBatch, RuntimeSseEventLog, RuntimeSseEventSink,
     RuntimeSseEventSource, RuntimeSseEventStore, RuntimeSseEventSubscription,
@@ -57,7 +56,7 @@ struct RuntimeSseEventHubSubscription {
     updates: watch::Receiver<u64>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl RuntimeSseEventSubscription for RuntimeSseEventHubSubscription {
     async fn changed(&mut self) -> bool {
         self.updates.changed().await.is_ok()

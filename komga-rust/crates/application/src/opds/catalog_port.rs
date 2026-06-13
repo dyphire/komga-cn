@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use async_trait::async_trait;
-
 use super::feed_context::{OpdsFeedUserContext, OpdsPagedBooks, OpdsPagedSeries};
 use super::records::{BrowsePublisherEntry, BrowseSeriesNavigationEntry, OpdsSeriesEntry};
 
@@ -46,7 +44,7 @@ pub struct BrowseSeriesNavigationPage {
 }
 
 /// Port for OPDS feed queries.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsFeedCatalogPort: Send + Sync {
     async fn load_book_feed_page(
         &self,
@@ -65,7 +63,7 @@ pub trait OpdsFeedCatalogPort: Send + Sync {
 }
 
 /// Port for OPDS catalog browsing operations.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait OpdsBrowseCatalogPort: Send + Sync {
     async fn load_browse_series_navigation_entries(
         &self,

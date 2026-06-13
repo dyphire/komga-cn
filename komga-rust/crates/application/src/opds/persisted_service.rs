@@ -554,7 +554,6 @@ fn readlist_book_is_visible(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use async_trait::async_trait;
     use komga_domain::discovery::{AgeRestrictionKind, QueryRestrictions};
 
     use super::*;
@@ -638,7 +637,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsCollectionVisibilityPersistedPort for TestPersistedPort {
         async fn load_collections(
             &self,
@@ -656,7 +655,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsReadlistVisibilityPersistedPort for TestPersistedPort {
         async fn load_readlists_for_library(
             &self,
@@ -677,7 +676,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsReadlistDetailPersistedPort for TestPersistedPort {
         async fn load_readlist(
             &self,
@@ -694,7 +693,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsSeriesPersistedPort for TestPersistedPort {
         async fn load_series(
             &self,
@@ -722,7 +721,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsSearchPersistedPort for TestPersistedPort {
         async fn load_unified_search_results(
             &self,

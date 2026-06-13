@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::media_assets::{BookProgressionInput, ProgressWriterPort};
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use serde_json::Value;
@@ -25,7 +24,7 @@ impl ProgressWriter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ProgressWriterPort for ProgressWriter {
     async fn persist_read_progress(
         &self,

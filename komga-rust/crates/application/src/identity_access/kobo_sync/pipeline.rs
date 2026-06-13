@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use async_trait::async_trait;
-
 use crate::identity_access::user_id;
 
 use super::lifecycle::KoboSyncLifecycle;
@@ -16,7 +14,7 @@ pub struct KoboLibrarySyncService<'a> {
     store: &'a dyn KoboStoreSyncPort,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait KoboSyncStatePort: Send + Sync {
     async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String>;
 
@@ -29,7 +27,7 @@ pub trait KoboSyncStatePort: Send + Sync {
     async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait KoboStoreSyncPort: Send + Sync {
     async fn sync_store_library(
         &self,

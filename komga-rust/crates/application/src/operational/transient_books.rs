@@ -313,7 +313,6 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use async_trait::async_trait;
     use komga_domain::discovery::MediaStatus;
 
     use super::{
@@ -559,7 +558,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl TransientBookPort for TestTransientBookPort {
         fn analyze_transient_book(&self, _path: &str) -> Result<TransientBookAnalysis, String> {
             self.analysis.clone()

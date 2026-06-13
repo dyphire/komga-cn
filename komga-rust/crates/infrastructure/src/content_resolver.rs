@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::filesystem::media_access::epub;
 use crate::filesystem::media_access::page_content;
-use async_trait::async_trait;
+
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, ContentResolverPort, EpubCoverImage, EpubNavigationExtension,
     MediaImageDimensions,
@@ -12,7 +12,7 @@ use komga_application::media_assets::{
 #[derive(Clone, Default)]
 pub struct ContentResolver;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ContentResolverPort for ContentResolver {
     // --- Page content ---
 

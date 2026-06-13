@@ -1182,7 +1182,7 @@ fn generated_readlist_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
+
     use komga_domain::common_ids::LibraryId;
     use komga_domain::discovery::{DiscoveryQueryContext, MediaStatus, ReadStatus};
     use std::{collections::HashMap, sync::Mutex};
@@ -1605,7 +1605,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadlistProjectionPort for TestReadlistPorts {
         async fn load_persisted_readlists(
             &self,
@@ -1636,7 +1636,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadlistMutationPort for TestReadlistPorts {
         async fn persist_readlist_create(
             &self,
@@ -1699,7 +1699,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadlistBookPort for TestReadlistPorts {
         async fn load_persisted_book_resource(
             &self,
@@ -1717,7 +1717,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadlistSearchPort for TestReadlistPorts {
         async fn search_readlist_scored_ids(
             &self,
@@ -1728,7 +1728,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl ReadlistComicRackMatchPort for TestReadlistPorts {
         async fn load_persisted_readlists(
             &self,

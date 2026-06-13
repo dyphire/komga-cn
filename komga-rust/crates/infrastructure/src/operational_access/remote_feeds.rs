@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use async_trait::async_trait;
 use komga_application::operational::{
     RemoteAnnouncementAuthor, RemoteAnnouncementItem, RemoteAnnouncementsFeed, RemoteFeedPort,
     RemoteRelease,
@@ -42,7 +41,7 @@ impl Default for RemoteFeedAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl RemoteFeedPort for RemoteFeedAccess {
     async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String> {
         let bytes = Client::new()

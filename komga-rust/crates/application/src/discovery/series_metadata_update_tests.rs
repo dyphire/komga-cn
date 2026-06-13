@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use komga_domain::discovery::SeriesStatus;
 
 use super::{
@@ -50,7 +49,7 @@ impl SeriesEventEmitter for RecordingSeriesEventEmitter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SeriesMetadataWritePort for RecordingSeriesMetadataPort {
     async fn load_series_library_id(&self, _series_id: &str) -> Result<Option<String>, String> {
         self.steps

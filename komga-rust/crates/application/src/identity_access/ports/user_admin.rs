@@ -1,11 +1,9 @@
-use async_trait::async_trait;
-
 use super::super::mutation_models::{
     CreateAuthUserInput, UpdateAuthUserInput, UpdateAuthUserResult,
 };
 use super::super::user_models::{AuthUser, PersistedApiKey};
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait UserAdminPort: Send + Sync {
     async fn persisted_users(&self) -> Result<Vec<AuthUser>, String>;
 

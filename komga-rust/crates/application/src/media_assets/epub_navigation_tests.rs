@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::{
@@ -175,7 +174,7 @@ struct TestEpubNavigationReader {
     extension_blob: Option<EpubExtensionBlob>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationExtensionReaderPort for TestEpubNavigationReader {
     async fn epub_extension_blob(
         &self,
@@ -185,7 +184,7 @@ impl EpubNavigationExtensionReaderPort for TestEpubNavigationReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EpubNavigationReaderPort for TestEpubNavigationReader {
     async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
         Ok(self.media_files.clone())

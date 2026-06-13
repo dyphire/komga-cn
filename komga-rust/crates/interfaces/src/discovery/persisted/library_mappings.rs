@@ -54,13 +54,12 @@ pub(in crate::discovery) async fn remap_requested_library_ids_for_persisted(
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
 
     use super::*;
 
     struct FailingLibraryIdMapping;
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl LibraryIdMappingPort for FailingLibraryIdMapping {
         async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
             Err("library lookup failed".to_string())

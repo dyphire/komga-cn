@@ -2,12 +2,11 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use time::OffsetDateTime;
 
 use super::AnnouncementPort;
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait RemoteFeedPort: Send + Sync {
     async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String>;
     async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String>;
@@ -219,7 +218,6 @@ fn now_epoch_seconds() -> u64 {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use async_trait::async_trait;
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
@@ -238,7 +236,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl RemoteFeedPort for StubRemoteFeedPort {
         async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String> {
             self.announcements
@@ -261,7 +259,7 @@ mod tests {
         saved_ids: Mutex<Vec<String>>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl AnnouncementPort for StubAnnouncementPort {
         async fn load_announcement_read_ids(&self, _user_id: &str) -> Result<Vec<String>, String> {
             Ok(self

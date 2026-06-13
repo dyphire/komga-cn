@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 
-use async_trait::async_trait;
-
 use super::PersistedServerSettings;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,7 +25,7 @@ impl ServerSettingChange {
 }
 
 /// Port for reading and writing server settings.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ServerSettingsPort: Send + Sync {
     async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String>;
 

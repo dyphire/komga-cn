@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,7 +99,7 @@ pub struct HistoryEvent {
     pub properties: BTreeMap<String, String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait HistoryPort: Send + Sync {
     async fn load_history_page(
         &self,

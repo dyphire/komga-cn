@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::library_catalog::{
     LibraryBookSeriesRecord, LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
     LibraryScanInterval, LibrarySeriesAndBookIds, LibrarySeriesCover,
@@ -40,7 +39,7 @@ impl SqliteLibraryCatalogAdapter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
     async fn list_libraries(
         &self,
@@ -67,7 +66,7 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String> {
         let library = load_persisted_library_write_model(&self.read_pool, library_id)

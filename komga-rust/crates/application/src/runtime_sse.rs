@@ -1,8 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
 const MAX_RUNTIME_SSE_EVENTS: usize = 1024;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -193,7 +191,7 @@ pub trait RuntimeSseEventLog: Send + Sync {
     ) -> RuntimeSseEventBatch;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait RuntimeSseEventSubscription: Send {
     async fn changed(&mut self) -> bool;
 }

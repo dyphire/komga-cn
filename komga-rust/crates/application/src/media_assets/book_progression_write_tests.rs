@@ -1,6 +1,5 @@
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use serde_json::json;
 
 use super::{
@@ -53,7 +52,7 @@ struct TestProgressionReader {
     book_progression: Option<BookProgressionRecord>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionReaderPort for TestProgressionReader {
     async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
         Ok(None)
@@ -80,7 +79,7 @@ struct TestProgressWriter {
     persisted: Mutex<Vec<BookProgressionInput>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
     async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
         self.persisted.lock().unwrap().push(input);

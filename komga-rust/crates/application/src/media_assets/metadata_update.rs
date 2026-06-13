@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::validation::is_valid_isbn13;
 use std::fmt;
 use url::Url;
@@ -101,7 +100,7 @@ impl fmt::Display for BookMetadataUpdateError {
 
 impl std::error::Error for BookMetadataUpdateError {}
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookMetadataPort: Send + Sync {
     async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String>;
     async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String>;
@@ -383,7 +382,6 @@ fn validate_book_metadata_links(links: &[BookMetadataLink]) -> Result<(), BookMe
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
 
     use super::{
         BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPatch, BookMetadataPort,
@@ -536,7 +534,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl BookMetadataPort for TestBookMetadataPort {
         async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
             Ok(self.metadata.clone())

@@ -1,6 +1,5 @@
 use std::sync::Mutex;
 
-use async_trait::async_trait;
 use serde_json::json;
 
 use super::{
@@ -169,7 +168,7 @@ struct RecordingKoboProxy {
     requests: Mutex<Vec<KoboProxyRequest>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboProxyPort for RecordingKoboProxy {
     async fn proxy_kobo_request(
         &self,
@@ -192,7 +191,7 @@ impl KoboProxyPort for RecordingKoboProxy {
 
 struct NonArrayStoreProxy;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl KoboProxyPort for NonArrayStoreProxy {
     async fn proxy_kobo_request(
         &self,

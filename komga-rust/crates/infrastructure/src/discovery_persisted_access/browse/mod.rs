@@ -7,7 +7,7 @@ use crate::discovery_persisted_access::{
 };
 use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
-use async_trait::async_trait;
+
 use komga_application::discovery::{
     BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
     FacetKind, FacetScope, LatestBooksRequest, ScoredSearchHit, SeriesAlphabeticalGroup,
@@ -39,7 +39,7 @@ struct DiscoveryQueryContext {
     restrictions: Option<QueryRestrictions>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 trait PersistedDiscoveryBrowseDataSource: Send + Sync {
     async fn load_book_poster_summaries(
         &self,
@@ -377,7 +377,7 @@ fn persisted_series_summary(row: persisted_models::SeriesSummary) -> PersistedSe
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_book_poster_summaries(
         &self,
@@ -511,7 +511,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
     async fn list_series(
         &self,
@@ -596,7 +596,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
     async fn list_facet_values(
         &self,

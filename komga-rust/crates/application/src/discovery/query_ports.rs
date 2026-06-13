@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 #[derive(Clone)]
 pub struct PersistedBookBrowseEntry {
     pub id: String,
@@ -29,13 +27,13 @@ pub struct ScoredSearchHit {
     pub id: String,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait CollectionSearchPort: Send + Sync {
     async fn search_collection_ids(&self, query: &str, limit: usize)
     -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadlistSearchPort: Send + Sync {
     async fn search_readlist_scored_ids(
         &self,
@@ -44,7 +42,7 @@ pub trait ReadlistSearchPort: Send + Sync {
     ) -> Result<Vec<ScoredSearchHit>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait AuthorFacetPort: Send + Sync {
     async fn load_author_names(
         &self,
@@ -64,12 +62,12 @@ pub trait AuthorFacetPort: Send + Sync {
     ) -> Result<Vec<PersistedAuthorEntry>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait LibraryIdMappingPort: Send + Sync {
     async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookSpecialListPort: Send + Sync {
     async fn load_ondeck_books(
         &self,

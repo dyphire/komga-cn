@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use serde_json::Value;
 
 use super::{
@@ -217,7 +216,7 @@ pub struct BookProgressionRecord {
 }
 
 /// Write operations for read progress (book and series level).
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ProgressWriterPort: Send + Sync {
     async fn persist_read_progress(
         &self,
@@ -246,7 +245,7 @@ pub trait ProgressWriterPort: Send + Sync {
 }
 
 /// Write operations for thumbnails across all entity types.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ThumbnailWriterPort: Send + Sync {
     async fn insert_book(
         &self,
@@ -310,7 +309,7 @@ pub trait ThumbnailWriterPort: Send + Sync {
 }
 
 /// Stateless filesystem I/O for resolving page/resource content from archives and PDFs.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ContentResolverPort: Send + Sync {
     async fn resolve_page_bytes(
         &self,
@@ -430,7 +429,7 @@ pub struct MediaImageDimensions {
 }
 
 /// Read access to book media metadata.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookMediaPort: Send + Sync {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
     async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
@@ -456,7 +455,7 @@ pub struct SeriesBookNumberSort {
     pub number_sort: f64,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait SeriesRelationPort: Send + Sync {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
     async fn series_book_number_sorts(
@@ -467,7 +466,7 @@ pub trait SeriesRelationPort: Send + Sync {
 }
 
 /// Existence checks for entities.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait EntityExistencePort: Send + Sync {
     async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
     async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
@@ -482,7 +481,7 @@ pub struct BookAccessRestrictions {
     pub labels: Vec<String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ContentAccessPort: Send + Sync {
     async fn book_restrictions(
         &self,
@@ -497,7 +496,7 @@ pub trait ContentAccessPort: Send + Sync {
 }
 
 /// Read access to thumbnails across all entity types.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ThumbnailReadPort: Send + Sync {
     async fn selected_book_thumbnail(
         &self,
@@ -531,7 +530,7 @@ pub trait ThumbnailReadPort: Send + Sync {
 }
 
 /// Read access to reading progress data.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadProgressReadPort: Send + Sync {
     async fn book_progression(
         &self,
@@ -557,7 +556,7 @@ pub trait ReadProgressReadPort: Send + Sync {
 }
 
 /// Read access needed by read-progress orchestration.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadProgressSurfacePort: Send + Sync {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
     async fn series_book_number_sorts(
@@ -583,14 +582,14 @@ pub trait ReadProgressSurfacePort: Send + Sync {
 }
 
 /// Read access needed by direct read-progress routes.
-#[async_trait]
+#[async_trait::async_trait]
 pub trait ReadProgressReaderPort: Send + Sync {
     async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
     async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
     async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ReadProgressReaderPort for T
 where
     T: EntityExistencePort + ReadProgressReadPort + Send + Sync,
@@ -608,7 +607,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> ReadProgressSurfacePort for T
 where
     T: ReadProgressReadPort + SeriesRelationPort + Send + Sync,

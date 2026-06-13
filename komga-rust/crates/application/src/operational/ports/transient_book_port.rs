@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_domain::discovery::MediaStatus;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -49,7 +48,7 @@ pub struct TransientBookPageContent {
     pub bytes: Vec<u8>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait TransientBookPort: Send + Sync {
     fn analyze_transient_book(&self, path: &str) -> Result<TransientBookAnalysis, String>;
     async fn infer_transient_series_and_number(

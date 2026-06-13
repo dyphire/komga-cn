@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use async_trait::async_trait;
-
 use crate::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
 use crate::identity_access::{AuthUser, AuthUserRole, user_has_role};
 
@@ -74,7 +72,7 @@ where
     book_ids: &'a B,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookMediaReaderPort: Send + Sync {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
 
@@ -99,7 +97,7 @@ pub trait BookMediaReaderPort: Send + Sync {
     ) -> Result<Option<EntityThumbnailBinary>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> BookMediaReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + ThumbnailReadPort + Send + Sync + ?Sized,
@@ -139,7 +137,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait BookMediaContentPort: Send + Sync {
     async fn resolve_page_bytes(
         &self,
@@ -213,7 +211,7 @@ pub trait BookMediaContentPort: Send + Sync {
     ) -> Result<Option<EpubCoverImage>, String>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> BookMediaContentPort for T
 where
     T: ContentResolverPort + Send + Sync + ?Sized,

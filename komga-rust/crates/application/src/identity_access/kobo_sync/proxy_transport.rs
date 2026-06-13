@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde_json::Value;
 
 use super::{KoboStoreSyncMergeResult, KoboStoreSyncPort, decode_or_passthrough_sync_token};
@@ -44,7 +43,7 @@ pub enum KoboProxyRequestBodyError {
     InvalidBody,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait KoboProxyPort: Send + Sync {
     async fn proxy_kobo_request(
         &self,
@@ -69,7 +68,7 @@ pub fn build_kobo_proxy_request(
     })
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<T> KoboStoreSyncPort for T
 where
     T: KoboProxyPort + Send + Sync + ?Sized,

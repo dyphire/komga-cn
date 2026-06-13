@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use async_trait::async_trait;
-
 use crate::discovery::PersistedBookIdResolverPort;
 use crate::identity_access::{AuthUser, AuthUserRole};
 
@@ -21,7 +19,7 @@ struct TestBookMediaReader {
     selected_thumbnail_error: Option<String>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookMediaReaderPort for TestBookMediaReader {
     async fn book_media(&self, book_id: &str) -> Result<Option<super::BookMediaRecord>, String> {
         Ok(self.media_by_book.get(book_id).cloned())
@@ -102,7 +100,7 @@ impl Default for TestBookMediaContent {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookMediaContentPort for TestBookMediaContent {
     async fn resolve_page_bytes(
         &self,
@@ -209,7 +207,7 @@ impl BookMediaContentPort for TestBookMediaContent {
 
 struct IdentityBookIdResolver;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl PersistedBookIdResolverPort for IdentityBookIdResolver {
     async fn persisted_book_resource_exists(&self, _book_id: &str) -> Result<bool, String> {
         Ok(true)

@@ -332,7 +332,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
-    use async_trait::async_trait;
     use komga_domain::discovery::QueryRestrictions;
 
     use super::*;
@@ -361,7 +360,7 @@ mod tests {
         latest_series_error: Option<String>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsFeedCatalogPort for TestCatalog {
         async fn load_book_feed_page(
             &self,
@@ -457,7 +456,7 @@ mod tests {
         readlist_visibility_error: Option<String>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsLibraryPersistedPort for TestPersisted {
         async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
             Ok(self.libraries.values().cloned().collect())
@@ -475,7 +474,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsReadlistVisibilityPersistedPort for TestPersisted {
         async fn load_readlists_for_library(
             &self,
@@ -502,7 +501,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsCollectionVisibilityPersistedPort for TestPersisted {
         async fn load_collections(
             &self,

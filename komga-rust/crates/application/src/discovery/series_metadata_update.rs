@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use language_tags::LanguageTag;
 use std::fmt;
 use url::Url;
@@ -81,7 +80,7 @@ pub trait SeriesEventEmitter: Send + Sync {
     fn emit_series_changed(&self, series_id: &str, library_id: &str);
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait SeriesMetadataWritePort: Send + Sync {
     async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
 

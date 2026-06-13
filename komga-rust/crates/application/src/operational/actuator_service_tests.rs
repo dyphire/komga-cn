@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use async_trait::async_trait;
-
 use super::*;
 
 struct FakeActuatorSnapshots {
@@ -31,7 +29,7 @@ struct FakeOperationalMetrics {
     requested_pool_paths: Mutex<Vec<PathBuf>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OperationalMetricsPort for FakeOperationalMetrics {
     async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String> {
         Ok(Vec::new())

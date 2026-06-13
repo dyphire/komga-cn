@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use super::super::device_records::{
     KoboMetadataRecord, KoreaderBookLookupError, KoreaderBookTarget, PersistedReadProgressRecord,
 };
@@ -10,7 +8,7 @@ pub struct DeviceThumbnailBinary {
     pub bytes: Vec<u8>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait DeviceSyncPort: Send + Sync {
     async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String>;
 

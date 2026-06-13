@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use komga_application::operational::{
     DatabasePoolSnapshot, LibraryMetricValue, OperationalMetricsPort, TaskExecutionMetricValue,
 };
@@ -21,7 +20,7 @@ impl OperationalMetricsAccess {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl OperationalMetricsPort for OperationalMetricsAccess {
     async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String> {
         load_task_execution_values(self.tasks_db.read_pool()).await

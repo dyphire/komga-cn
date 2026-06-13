@@ -156,7 +156,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Mutex;
 
-    use async_trait::async_trait;
     use komga_domain::discovery::{AgeRestrictionKind, QueryRestrictions};
 
     use super::*;
@@ -196,7 +195,7 @@ mod tests {
         library_series_calls: Mutex<Vec<LibrarySeriesCall>>,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl OpdsFeedCatalogPort for TestCatalog {
         async fn load_book_feed_page(
             &self,

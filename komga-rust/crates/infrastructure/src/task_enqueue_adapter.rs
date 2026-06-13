@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use komga_application::media_assets::TaskEnqueuePort;
 use komga_application::task_processing::{SubmitUrgency, TaskQueueAdmin, TaskQueueRecord};
 
@@ -15,7 +14,7 @@ impl TaskEnqueueAdapter {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl TaskEnqueuePort for TaskEnqueueAdapter {
     async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String> {
         self.queue

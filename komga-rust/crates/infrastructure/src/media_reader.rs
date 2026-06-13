@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use komga_application::media_assets::{
     BookAccessRestrictions, BookMediaPort, BookMediaRecord, BookPageRecord, BookProgressionRecord,
     CollectionThumbnailRecord, ContentAccessPort, EntityExistencePort, EntityThumbnailBinary,
@@ -25,7 +24,7 @@ impl MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl BookMediaPort for MediaReader {
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
         db_queries::load_persisted_book_media(&self.read_pool, book_id).await
@@ -76,7 +75,7 @@ impl BookMediaPort for MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SeriesRelationPort for MediaReader {
     async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
         db_queries::load_series_book_ids(&self.read_pool, series_id).await
@@ -94,7 +93,7 @@ impl SeriesRelationPort for MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl EntityExistencePort for MediaReader {
     async fn book_exists(&self, book_id: &str) -> Result<bool, String> {
         db_queries::persisted_book_exists(&self.read_pool, book_id).await
@@ -113,7 +112,7 @@ impl EntityExistencePort for MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ContentAccessPort for MediaReader {
     async fn book_restrictions(
         &self,
@@ -138,7 +137,7 @@ impl ContentAccessPort for MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ThumbnailReadPort for MediaReader {
     async fn selected_book_thumbnail(
         &self,
@@ -194,7 +193,7 @@ impl ThumbnailReadPort for MediaReader {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ReadProgressReadPort for MediaReader {
     async fn book_progression(
         &self,
