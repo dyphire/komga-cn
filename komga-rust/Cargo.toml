@@ -45,7 +45,7 @@ tantivy = "0.26.0"
 tar = "0.4.45"
 zip = "9.0.0-pre2"
 flate2 = "1.1.9"
-lopdf = "0.40.0"
+lopdf = "0.41.0"
 quick-xml = "0.40.1"
 time = { version = "0.3.44", features = ["formatting", "parsing", "local-offset"] }
 tsid = "0.3.4"

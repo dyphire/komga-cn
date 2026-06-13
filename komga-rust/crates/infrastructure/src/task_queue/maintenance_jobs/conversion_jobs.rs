@@ -67,6 +67,21 @@ mod tests {
             .join(file_name)
     }
 
+    fn file_updated_unix_seconds_for_test(path: &std::path::Path) -> i64 {
+        let metadata = std::fs::metadata(path).expect("test fixture metadata should be readable");
+        [metadata.created().ok(), metadata.modified().ok()]
+            .into_iter()
+            .flatten()
+            .map(|timestamp| {
+                timestamp
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("test fixture timestamp should be after unix epoch")
+                    .as_secs() as i64
+            })
+            .max()
+            .expect("test fixture should expose created or modified timestamp")
+    }
+
     fn page_media_type_for_test(file_name: &str) -> &'static str {
         match std::path::Path::new(file_name)
             .extension()
@@ -282,13 +297,7 @@ mod tests {
         std::fs::write(&source_path, b"not-a-real-rar")
             .expect("convert-book last-modified source should be written");
 
-        let actual_last_modified = std::fs::metadata(&source_path)
-            .expect("convert-book last-modified source metadata should be readable")
-            .modified()
-            .expect("convert-book last-modified source modified time should be readable")
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("convert-book last-modified source time should be after unix epoch")
-            .as_secs() as i64;
+        let actual_last_modified = file_updated_unix_seconds_for_test(&source_path);
 
         let pool = fixture.main_pool().await;
         sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
@@ -437,13 +446,7 @@ mod tests {
         std::fs::write(&source_path, b"not-a-real-rar")
             .expect("convert-book failed-cache source should be written");
 
-        let actual_last_modified = std::fs::metadata(&source_path)
-            .expect("convert-book failed-cache source metadata should be readable")
-            .modified()
-            .expect("convert-book failed-cache source modified time should be readable")
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("convert-book failed-cache source time should be after unix epoch")
-            .as_secs() as i64;
+        let actual_last_modified = file_updated_unix_seconds_for_test(&source_path);
 
         let pool = fixture.main_pool().await;
         sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")
@@ -507,12 +510,7 @@ mod tests {
             .expect("convert-book failed-cache source should be replaced with a valid RAR");
         let repaired_metadata = std::fs::metadata(&source_path)
             .expect("convert-book repaired source metadata should be readable");
-        let repaired_last_modified = repaired_metadata
-            .modified()
-            .expect("convert-book repaired source modified time should be readable")
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("convert-book repaired source time should be after unix epoch")
-            .as_secs() as i64;
+        let repaired_last_modified = file_updated_unix_seconds_for_test(&source_path);
         let pool = connect_test_pool(fixture.database_file.as_path(), 1)
             .await
             .expect("convert-book failed-cache db should reopen for repaired source metadata");
@@ -566,17 +564,7 @@ mod tests {
                 .expect("convert-book success rar fixture should contain an image page");
         let preserved_page_hash = "existing-page-hash-1";
 
-        let source_metadata = std::fs::metadata(&source_path)
-            .expect("convert-book success source metadata should be readable");
-        let actual_last_modified = source_metadata
-            .created()
-            .ok()
-            .into_iter()
-            .chain(source_metadata.modified().ok())
-            .max()
-            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|value| value.as_secs() as i64)
-            .unwrap_or_default();
+        let actual_last_modified = file_updated_unix_seconds_for_test(&source_path);
 
         let pool = fixture.main_pool().await;
         sqlx::query("INSERT INTO LIBRARY (ID, NAME, ROOT, CONVERT_TO_CBZ) VALUES (?, ?, ?, ?)")

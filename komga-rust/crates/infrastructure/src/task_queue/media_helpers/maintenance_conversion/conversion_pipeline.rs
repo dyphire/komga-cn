@@ -21,6 +21,7 @@ use super::super::media_updates::{
     BookPageHashWrite, persist_book_conversion, persist_book_conversion_events,
     persist_book_page_hashes,
 };
+use crate::filesystem::remove_file_after_release;
 use crate::{resolve_library_item_path, resolve_stored_path};
 
 struct PreparedBookConversion {
@@ -216,9 +217,11 @@ pub(in crate::task_queue) async fn convert_book(
     }
 
     let source_path_for_delete = conversion.source_path.clone();
-    let source_deleted = tokio::fs::remove_file(&source_path_for_delete)
-        .await
-        .is_ok();
+    let source_deleted = tokio::task::spawn_blocking(move || {
+        remove_file_after_release(&source_path_for_delete).unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false);
     persist_book_conversion_events(
         runtime.database().write_pool(),
         &book_id,
