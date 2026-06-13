@@ -830,6 +830,7 @@ mod tests {
         let _ = fs::remove_file(fixture_path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn persisted_analysis_reports_filesystem_probe_errors_before_missing_file_status() {
         let parent_file = unique_temp_path("probe-parent-file", "tmp");

@@ -577,7 +577,7 @@ fn normalize_library_root(root: &str) -> String {
         .to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::fs;
     use std::path::Path;

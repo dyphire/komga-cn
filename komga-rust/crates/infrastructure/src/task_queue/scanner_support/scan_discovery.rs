@@ -318,4 +318,31 @@ mod tests {
             );
         }
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn scanner_path_helpers_reject_supported_book_paths_without_utf8_file_stems() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let path =
+            PathBuf::from("/library/Series 1").join(OsString::from_vec(b"\xff.cbz".to_vec()));
+        let scan_config = LibraryScanConfig {
+            root: "/library".to_string(),
+            scan_cbx: true,
+            scan_pdf: true,
+            scan_epub: true,
+            scan_force_modified_time: false,
+            oneshots_directory: None,
+            scan_directory_exclusions: Vec::new(),
+        };
+
+        assert!(
+            is_supported_book_file(path.as_path(), &scan_config),
+            "fixture should still be a supported CBZ path before UTF-8 name extraction",
+        );
+        let error = path_file_stem_utf8(path.as_path())
+            .expect_err("scanner should reject non-UTF-8 book stems");
+        assert!(error.contains("valid UTF-8 file stem"), "{error}");
+    }
 }

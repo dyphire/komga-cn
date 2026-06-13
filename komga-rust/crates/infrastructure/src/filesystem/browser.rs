@@ -174,9 +174,9 @@ fn entry_is_hidden(_entry: &fs::DirEntry, name: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{browse_directory, list_directory_entries};
-    use komga_application::operational::{
-        FilesystemBrowseError, FilesystemBrowseRequest, FilesystemEntryType,
-    };
+    #[cfg(unix)]
+    use komga_application::operational::FilesystemBrowseError;
+    use komga_application::operational::{FilesystemBrowseRequest, FilesystemEntryType};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -205,6 +205,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn browse_directory_propagates_path_metadata_errors() {
         let parent_file = unique_temp_path("komga-browser-parent-file");

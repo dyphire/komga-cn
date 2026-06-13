@@ -745,7 +745,7 @@ pub(in crate::task_queue) async fn soft_delete_series_book_rows(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

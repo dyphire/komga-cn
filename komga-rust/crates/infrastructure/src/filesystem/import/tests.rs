@@ -80,6 +80,7 @@ async fn import_book_returns_error_when_source_file_is_missing() {
     pool.close().await;
 }
 
+#[cfg(unix)]
 #[test]
 fn import_copy_mode_reports_source_metadata_errors() {
     let root = unique_temp_dir("copy-source-metadata-error");
@@ -103,6 +104,7 @@ fn import_copy_mode_reports_source_metadata_errors() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
 #[test]
 fn source_inside_library_roots_reports_library_root_probe_errors() {
     let root = unique_temp_dir("library-root-probe-error");

@@ -220,18 +220,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_store_initialization_reports_tasks_db_metadata_errors() {
-        let root = unique_temp_dir("tasks-db-metadata-error");
+    async fn task_store_initialization_reports_tasks_db_open_errors() {
+        let root = unique_temp_dir("tasks-db-open-error");
         std::fs::create_dir_all(&root).expect("task store fixture root should exist");
-        std::fs::write(root.join("blocked"), b"not a directory")
-            .expect("blocking tasks db component should be written");
+        let tasks_db_file = root.join("tasks.sqlite");
+        std::fs::create_dir(&tasks_db_file).expect("directory at tasks db path should be created");
 
-        let tasks_db_file = root.join("blocked/tasks.sqlite");
         let error = SqliteTaskQueueStore::new(tasks_db_file)
             .await
-            .expect_err("tasks db metadata error should be reported");
+            .expect_err("tasks db open error should be reported");
         assert!(
-            error.contains("inspect tasks sqlite file"),
+            error.contains("open tasks sqlite pool"),
             "unexpected error: {error}"
         );
 

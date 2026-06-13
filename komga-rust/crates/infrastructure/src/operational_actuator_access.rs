@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use komga_application::operational::{
@@ -10,6 +9,8 @@ use komga_application::operational::{
 
 #[cfg(unix)]
 use std::ffi::CString;
+#[cfg(target_os = "linux")]
+use std::fs;
 #[cfg(windows)]
 use std::iter::once;
 #[cfg(windows)]

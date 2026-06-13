@@ -843,6 +843,7 @@ mod tests {
         assert!(analysis.files.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn analyze_transient_book_propagates_existence_probe_errors() {
         let parent_file = unique_temp_path("probe-parent-file", "tmp");

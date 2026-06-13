@@ -639,6 +639,7 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn book_thumbnail_housekeeping_propagates_sidecar_metadata_errors() {
         let fixture = BootstrappedBookFixture::open("thumbnail-housekeeping-metadata-error").await;

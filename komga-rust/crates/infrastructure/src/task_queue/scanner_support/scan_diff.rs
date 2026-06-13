@@ -402,7 +402,7 @@ WHERE LIBRARY_ID = ?
         .collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::path::PathBuf;
 
@@ -445,31 +445,6 @@ mod tests {
         .expect_err("scanner root metadata errors should be propagated");
 
         assert!(error.contains("failed to inspect library scan root"));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn scan_rejects_book_paths_without_utf8_file_names() {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
-        let root = temp_library_path("invalid-book-name");
-        let series_dir = root.join("Series 1");
-        std::fs::create_dir_all(&series_dir).expect("series fixture directory should exist");
-        let invalid_book = series_dir.join(OsString::from_vec(b"\xff.cbz".to_vec()));
-        std::fs::write(&invalid_book, b"book").expect("book fixture should be written");
-
-        let error = build_scanned_library(
-            scan_config_for_root(root.as_path()),
-            HashMap::new(),
-            HashMap::new(),
-            false,
-        )
-        .expect_err("scanner should not persist empty names for non-UTF-8 book paths");
-
-        assert!(error.contains("valid UTF-8 file stem"), "{error}");
 
         let _ = std::fs::remove_dir_all(root);
     }

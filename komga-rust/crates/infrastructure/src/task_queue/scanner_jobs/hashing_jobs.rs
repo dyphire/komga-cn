@@ -684,6 +684,7 @@ mod tests {
         fixture.runtime_fixture.cleanup().await;
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn remove_hashed_pages_propagates_source_metadata_errors() {
         let fixture = create_remove_hashed_pages_failure_fixture(

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+#[cfg(unix)]
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -162,6 +163,7 @@ fn query_bootstrap_refuses_missing_index_without_creating_state() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn query_bootstrap_propagates_index_path_probe_errors() {
     let root = temp_index_dir("query-bootstrap-propagates-path-probe-errors");

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use komga_application::task_processing::TaskProcessingError;
 
-use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
+use crate::rar_support::read_rar_entries_bytes;
 
 pub(in crate::task_queue) fn normalize_library_relative_url(
     library_root: &PathBuf,
@@ -28,24 +28,17 @@ pub(in crate::task_queue) struct StoredArchiveEntry {
 pub(in crate::task_queue) fn load_rar_entries_for_conversion(
     source_path: &Path,
 ) -> Result<Vec<StoredArchiveEntry>, TaskProcessingError> {
-    let mut entries = Vec::new();
-    for entry in list_rar_entries(source_path).map_err(TaskProcessingError::runtime)? {
-        let bytes = read_rar_entry_bytes(source_path, &entry.file_name)
-            .map_err(TaskProcessingError::runtime)?
-            .ok_or_else(|| {
-                TaskProcessingError::runtime(format!(
-                    "rar entry '{}' was not found in '{}'",
-                    entry.file_name,
-                    source_path.display()
-                ))
-            })?;
-        entries.push(StoredArchiveEntry {
-            file_name: entry.file_name,
-            bytes,
-        });
-    }
-
-    Ok(entries)
+    read_rar_entries_bytes(source_path)
+        .map_err(TaskProcessingError::runtime)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| StoredArchiveEntry {
+                    file_name: entry.file_name,
+                    bytes: entry.bytes,
+                })
+                .collect()
+        })
 }
 
 pub(in crate::task_queue) fn build_stored_zip_archive(

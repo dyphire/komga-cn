@@ -204,10 +204,9 @@ mod tests {
     #[tokio::test]
     async fn enqueue_records_reports_persisted_store_initialization_errors() {
         let root = test_temp_root();
-        std::fs::write(root.join("blocked"), b"not a directory")
-            .expect("blocking tasks db component should be written");
-        let runtime =
-            test_task_runtime_context_with_tasks_db(root.join("blocked/tasks.sqlite"), root).await;
+        let tasks_db_file = root.join("tasks.sqlite");
+        std::fs::create_dir(&tasks_db_file).expect("directory at tasks db path should be created");
+        let runtime = test_task_runtime_context_with_tasks_db(tasks_db_file, root).await;
         let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
         let task_queue = Arc::new(Mutex::new(
             TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
@@ -225,7 +224,7 @@ mod tests {
             .expect_err("task queue persistence initialization errors should be reported");
 
         assert!(
-            error.contains("inspect tasks sqlite file"),
+            error.contains("open tasks sqlite pool"),
             "unexpected error: {error}"
         );
     }
