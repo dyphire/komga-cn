@@ -10,7 +10,7 @@ pub(super) use actuator::{
     actuator_health, actuator_info, actuator_logfile, actuator_metric_detail,
     actuator_metrics_index, actuator_root, actuator_shutdown,
 };
-pub(super) use cors::dev_cors_middleware;
+pub(super) use cors::{DEV_FRONTEND_ORIGIN, dev_cors_layer};
 pub(super) use settings::{
     delete_client_settings_global, delete_client_settings_user, delete_syncpoints_me, delete_tasks,
     get_announcements, get_claim_status, get_client_settings_global, get_client_settings_user,

@@ -1,12 +1,13 @@
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, Method, Uri};
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
 use komga_application::operational::HttpServerRequestsState;
 use std::sync::Arc;
+use tower_http::csrf::CsrfLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::access_log;
@@ -674,7 +675,7 @@ pub fn build_router(app: HttpAppState) -> Router {
         .route("/{*webui_path}", get(operational::webui_asset));
 
     let router = if dev_cors_enabled {
-        router.layer(middleware::from_fn(operational::dev_cors_middleware))
+        router.layer(operational::dev_cors_layer())
     } else {
         router
     };
@@ -699,7 +700,9 @@ pub fn build_router(app: HttpAppState) -> Router {
     };
 
     let router = with_access_logging(
-        router.route_layer(middleware::from_fn(cache::cache_workflow_middleware)),
+        router
+            .layer(csrf_layer(dev_cors_enabled))
+            .route_layer(middleware::from_fn(cache::cache_workflow_middleware)),
         app.operational.http_server_requests.clone(),
     )
     .with_state(app);
@@ -743,6 +746,26 @@ fn mounted_runtime_context_path(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "/")
         .map(str::to_string)
+}
+
+fn csrf_layer(dev_cors_enabled: bool) -> CsrfLayer {
+    let layer = CsrfLayer::new().with_insecure_bypass(non_browser_client_protocol_path);
+
+    if dev_cors_enabled {
+        layer
+            .add_trusted_origin(operational::DEV_FRONTEND_ORIGIN)
+            .expect("dev frontend origin should be a valid CSRF trusted origin")
+    } else {
+        layer
+    }
+}
+
+fn non_browser_client_protocol_path(_method: &Method, uri: &Uri) -> bool {
+    let path = uri.path();
+    matches!(path, "/kobo" | "/koreader" | "/opds")
+        || path.starts_with("/kobo/")
+        || path.starts_with("/koreader/")
+        || path.starts_with("/opds/")
 }
 
 async fn inject_runtime_context_path(
