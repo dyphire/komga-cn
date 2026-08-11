@@ -1,5 +1,4 @@
 import nu.studer.gradle.jooq.JooqGenerate
-import org.apache.tools.ant.taskdefs.condition.Os
 import org.flywaydb.gradle.task.FlywayMigrateTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.util.prefixIfNot
@@ -11,11 +10,11 @@ plugins {
   kotlin("kapt")
   id("org.springframework.boot") version libs.versions.springboot.get()
   alias(libs.plugins.gradleGitProperties)
-  id("nu.studer.jooq") version "10.1"
-  id("org.flywaydb.flyway") version "11.7.2"
+  id("nu.studer.jooq") version "10.2.1"
+  id("org.flywaydb.flyway") version "13.1.0"
   id("com.github.johnrengelman.processes") version "0.5.0"
   id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
-  id("com.google.devtools.ksp") version "2.2.0-2.0.2"
+  id("com.google.devtools.ksp") version "2.3.1"
   jacoco
 }
 
@@ -27,12 +26,30 @@ val benchmarkSourceSet =
     }
   }
 
-val benchmarkImplementation by configurations.getting {
-  extendsFrom(configurations.testImplementation.get())
+sourceSets {
+  // add a flyway sourceSet
+  val flyway =
+    create("flyway") {
+      compileClasspath += sourceSets.main.get().compileClasspath
+      runtimeClasspath += sourceSets.main.get().runtimeClasspath
+    }
+  // main sourceSet depends on the output of flyway sourceSet, and generated jooq classes
+  main {
+    java {
+      output.dir(flyway.output)
+      srcDir("build/generated-src/jooq/tasks")
+    }
+  }
 }
-val kaptBenchmark by configurations.getting {
-  extendsFrom(configurations.kaptTest.get())
-}
+
+val benchmarkImplementation =
+  configurations.getByName("benchmarkImplementation") {
+    extendsFrom(configurations.testImplementation.get())
+  }
+val kaptBenchmark =
+  configurations.getByName("kaptBenchmark") {
+    extendsFrom(configurations.kaptTest.get())
+  }
 
 dependencies {
   implementation(kotlin("stdlib"))
@@ -56,35 +73,34 @@ dependencies {
 
   implementation("org.flywaydb:flyway-core")
 
-  api("io.github.oshai:kotlin-logging-jvm:7.0.7")
+  api("io.github.oshai:kotlin-logging-jvm:8.0.4")
 
   implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.9")
 
   implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
   implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-xml")
 
-  implementation("commons-io:commons-io:2.19.0")
-  implementation("org.apache.commons:commons-lang3:3.18.0")
-  implementation("commons-validator:commons-validator:1.10.0")
+  implementation("commons-io:commons-io:2.22.0")
+  implementation("org.apache.commons:commons-lang3:3.20.0")
+  implementation("commons-validator:commons-validator:1.11.0")
 
   implementation("org.apache.lucene:lucene-core:${libs.versions.lucene.get()}")
   implementation("org.apache.lucene:lucene-analysis-common:${libs.versions.lucene.get()}")
   implementation("org.apache.lucene:lucene-queryparser:${libs.versions.lucene.get()}")
   implementation("org.apache.lucene:lucene-backward-codecs:${libs.versions.lucene.get()}")
 
-  implementation("com.ibm.icu:icu4j:77.1")
+  implementation("com.ibm.icu:icu4j:78.3")
 
   implementation("com.appmattus.crypto:cryptohash:1.0.2")
 
-  implementation("org.apache.tika:tika-core:2.9.1")
-  implementation("org.apache.commons:commons-compress:1.27.1")
-  implementation("com.github.junrar:junrar:7.6.0")
-  implementation("com.github.gotson.nightcompress:nightcompress:1.1.1")
-  implementation("org.apache.pdfbox:pdfbox:3.0.5")
+  implementation("org.apache.tika:tika-core:3.3.2")
+  implementation("org.apache.commons:commons-compress:1.28.0")
+  implementation("com.github.junrar:junrar:8.1.0")
+  implementation("org.apache.pdfbox:pdfbox:3.0.8")
   implementation("net.grey-panther:natural-comparator:1.1")
-  implementation("org.jsoup:jsoup:1.21.1")
+  implementation("org.jsoup:jsoup:1.23.1")
 
-  implementation("net.coobird:thumbnailator:0.4.20")
+  implementation("net.coobird:thumbnailator:0.4.21")
   runtimeOnly("com.twelvemonkeys.imageio:imageio-jpeg:${libs.versions.twelvemonkeys.get()}")
   runtimeOnly("com.twelvemonkeys.imageio:imageio-tiff:${libs.versions.twelvemonkeys.get()}")
   runtimeOnly("com.twelvemonkeys.imageio:imageio-webp:${libs.versions.twelvemonkeys.get()}")
@@ -93,10 +109,10 @@ dependencies {
   runtimeOnly("com.github.gotson.nightmonkeys:imageio-webp:${libs.versions.nightmonkeys.get()}")
   // support for jpeg2000
   runtimeOnly("com.github.jai-imageio:jai-imageio-jpeg2000:1.4.0")
-  runtimeOnly("org.apache.pdfbox:jbig2-imageio:3.0.4")
+  runtimeOnly("org.apache.pdfbox:jbig2-imageio:3.0.5")
 
   // barcode scanning
-  implementation("com.google.zxing:core:3.5.3")
+  implementation("com.google.zxing:core:3.5.4")
 
   implementation("com.jakewharton.byteunits:byteunits:0.9.1")
 
@@ -115,13 +131,13 @@ dependencies {
     exclude(module = "mockito-core")
   }
   testImplementation("org.springframework.security:spring-security-test")
-  testImplementation("com.ninja-squad:springmockk:4.0.2")
-  testImplementation("io.mockk:mockk:1.14.4")
+  testImplementation("com.ninja-squad:springmockk:4.0.2") // v5 needs Spring Framework v7
+  testImplementation("io.mockk:mockk:1.14.11")
   testImplementation("com.google.jimfs:jimfs:1.3.1")
 
-  testImplementation("com.tngtech.archunit:archunit-junit5:1.4.1")
+  testImplementation("com.tngtech.archunit:archunit-junit5:1.5.0")
 
-  benchmarkImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+  benchmarkImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
   benchmarkImplementation("org.openjdk.jmh:jmh-core:1.37")
   kaptBenchmark("org.openjdk.jmh:jmh-generator-annprocess:1.37")
   kaptBenchmark("org.springframework.boot:spring-boot-configuration-processor:${libs.versions.springboot.get()}")
@@ -137,12 +153,12 @@ kotlin {
         "-Xjsr305=strict",
         "-Xemit-jvm-type-annotations",
         "-opt-in=kotlin.time.ExperimentalTime",
-        "-Xannotation-default-target=param-property",
       )
   }
 }
 
 val webui = "$rootDir/komga-webui"
+val nextui = "$rootDir/next-ui"
 tasks {
   withType<JavaCompile> {
     sourceCompatibility = "17"
@@ -165,50 +181,17 @@ tasks {
     enabled = true
   }
 
-  register<Exec>("npmInstall") {
+  register<Sync>("webuiCopyDist") {
+    description = "Copies the WebUI build into resources/public"
     group = "web"
-    workingDir(webui)
-    inputs.file("$webui/package.json")
-    outputs.dir("$webui/node_modules")
-    commandLine(
-      if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-        "npm.cmd"
-      } else {
-        "npm"
-      },
-      "install",
-    )
-  }
-
-  register<Exec>("npmBuild") {
-    group = "web"
-    dependsOn("npmInstall")
-    workingDir(webui)
-    inputs.dir(webui)
-    outputs.dir("$webui/dist")
-    commandLine(
-      if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-        "npm.cmd"
-      } else {
-        "npm"
-      },
-      "run",
-      "build",
-    )
-  }
-
-  // copy the webui build into public
-  register<Sync>("copyWebDist") {
-    group = "web"
-    dependsOn("npmBuild")
     from("$webui/dist/")
     into("$projectDir/src/main/resources/public/")
   }
 
-  // modifies index.html to inject ThymeLeaf th: tags
-  register<Copy>("prepareThymeLeaf") {
+  register<Copy>("webuiCopyIndex") {
+    description = "Copies the WebUI index.html into resources/public and injects Thymeleaf tags"
     group = "web"
-    dependsOn("copyWebDist")
+    dependsOn("webuiCopyDist")
     from("$webui/dist/index.html")
     into("$projectDir/src/main/resources/public/")
     filter { line ->
@@ -218,11 +201,40 @@ tasks {
     }
   }
 
+  register<Copy>("nextuiCopyDist") {
+    description = "Copies the nextUI build into resources/public"
+    group = "web"
+    from("$nextui/dist/")
+    into("$projectDir/src/main/resources/public/")
+    excludes.add("index.html") // will be copied by 'nextuiCopyIndex'
+    mustRunAfter(getByName("webuiCopyDist"))
+  }
+
+  // modifies index.html to inject ThymeLeaf th: tags
+  register<Copy>("nextuiCopyIndex") {
+    description = "Copies the nextUI index.html into resources/public/index-next.html and injects Thymeleaf tags"
+    group = "web"
+    dependsOn("nextuiCopyDist")
+    from("$nextui/dist/index.html")
+    into("$projectDir/src/main/resources/public/")
+    filter { line ->
+      line.replace("((?:src|content|href)=\")([\\w]*/.*?)(\")".toRegex()) {
+        it.groups[0]?.value + " th:" + it.groups[1]?.value + "@{" + it.groups[2]?.value?.prefixIfNot("/") + "}" + it.groups[3]?.value
+      }
+    }
+    rename("index.html", "index-next.html")
+  }
+
   withType<ProcessResources> {
     filesMatching("application*.yml") {
-      expand(project.properties)
+      expand(
+        mapOf(
+          "version" to project.version.toString(),
+          "rootDir" to project.rootDir.absolutePath,
+        ),
+      )
     }
-    mustRunAfter(getByName("prepareThymeLeaf"))
+    mustRunAfter(getByName("webuiCopyIndex"), getByName("nextuiCopyIndex"))
   }
 
   register<Test>("benchmark") {
@@ -364,20 +376,6 @@ tasks.whenTaskAdded {
   }
 }
 
-sourceSets {
-  // add a flyway sourceSet
-  val flyway by creating {
-    compileClasspath += sourceSets.main.get().compileClasspath
-    runtimeClasspath += sourceSets.main.get().runtimeClasspath
-  }
-  // main sourceSet depends on the output of flyway sourceSet, and generated jooq classes
-  main {
-    java {
-      output.dir(flyway.output)
-      srcDir("build/generated-src/jooq/tasks")
-    }
-  }
-}
 tasks.runKtlintFormatOverMainSourceSet {
   dependsOn("generateTasksJooq")
 }
@@ -394,6 +392,7 @@ openApi {
     args.add("--spring.profiles.active=claim,generate-openapi")
     args.add("--server.port=8080")
   }
+  waitTimeInSeconds.set(60)
 }
 
 tasks.jacocoTestReport {
