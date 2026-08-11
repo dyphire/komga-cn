@@ -63,7 +63,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: 'komga-webui/.nvmrc'
           cache: 'npm'
@@ -84,7 +84,7 @@ jobs:
           path: komga-webui/dist/**
           if-no-files-found: error
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: 'next-ui/.nvmrc'
           cache: 'npm'

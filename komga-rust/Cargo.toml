@@ -17,55 +17,55 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-axum = "0.8.6"
+axum = "0.8.9"
 axum-extra = { version = "0.12.5", features = ["cookie", "multipart"] }
-base64 = "0.22.1"
-bcrypt = "0.19.1"
-config = "0.15.23"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+base64 = "0.23.1"
+bcrypt = "0.19.3"
+config = "0.15.25"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 sha2 = "0.11.0"
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "io-uring", "sync"] }
-tokio-stream = "0.1.17"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "io-uring", "sync"] }
+tokio-stream = "0.1.19"
 sqlx = { version = "0.9.0", features = ["sqlite", "runtime-tokio", "migrate"] }
-tracing = "0.1.41"
-http-body = "1.0.1"
-tracing-appender = "0.2.3"
+tracing = "0.1.44"
+http-body = "1.1.0"
+tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter", "json", "time"] }
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
-regex = "1.12.3"
-rxing = "0.9.0"
-toml = "1.1.2"
+regex = "1.13.1"
+rxing = "0.9.2"
+toml = "1.1.4"
 tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["cors", "csrf", "trace"] }
 tower-sessions = "0.15.0"
 oauth2 = "5.0.0"
 openidconnect = "4.0.1"
-tantivy = "0.26.0"
-tar = "0.4.45"
-zip = "9.0.0-pre2"
+tantivy = "0.26.1"
+tar = "0.4.46"
+zip = "9.0.0-pre3"
 flate2 = "1.1.9"
-lopdf = "0.42.0"
-quick-xml = "0.40.1"
-time = { version = "0.3.44", features = ["formatting", "parsing", "local-offset"] }
+lopdf = "0.44.0"
+quick-xml = "0.41.0"
+time = { version = "0.3.55", features = ["formatting", "parsing", "local-offset"] }
 tsid = "0.3.4"
-futures-util = "0.3.31"
-async-trait = "0.1.89"
+futures-util = "0.3.34"
+async-trait = "0.1.92"
 image = "0.25.8"
 mime_guess = "2.0.5"
-rust-embed = { version = "8.11.0", features = ["debug-embed"] }
+rust-embed = { version = "8.12.0", features = ["debug-embed"] }
 getrandom = "0.4.3"
 language-tags = "0.3.2"
 rusqlite = "0.39.0"
-pdfium-render = { version = "0.9.1", features = ["thread_safe"] }
+pdfium-render = { version = "0.9.3", features = ["thread_safe"] }
 unrar = "0.5.8"
-unicode-normalization = "0.1.24"
-icu = "2.0"
-libc = "0.2.186"
-mimalloc = "0.1.50"
+unicode-normalization = "0.1.25"
+icu = "2.2.0"
+libc = "0.2.189"
+mimalloc = "0.1.52"
 windows-sys = "0.61.2"
-chrono = "0.4.42"
+chrono = "0.4.45"
 url = "2.5.8"
 
 [profile.release]
@@ -111,12 +111,12 @@ zip.workspace = true
 sha2.workspace = true
 lopdf.workspace = true
 tantivy.workspace = true
-tempfile = "3.23.0"
+tempfile = "3.27.0"
 image.workspace = true
 icu.workspace = true
 time.workspace = true
 http-body.workspace = true
-http-body-util = "0.1.3"
+http-body-util = "0.1.4"
 async-trait.workspace = true
 openidconnect.workspace = true
 chrono.workspace = true

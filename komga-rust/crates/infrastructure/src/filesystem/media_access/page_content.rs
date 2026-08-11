@@ -161,15 +161,7 @@ fn read_pdf_page_bytes(
     let Some(object_id) = pages.get(&(page_number as u32)).copied() else {
         return Ok(None);
     };
-    document
-        .get_page_content(object_id)
-        .map(Some)
-        .map_err(|error| {
-            format!(
-                "read pdf page {page_number} from '{}': {error}",
-                media.file_path.display()
-            )
-        })
+    Ok(Some(document.get_page_content(object_id)))
 }
 
 pub(crate) fn read_pdf_page_as_single_page_pdf(
