@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
 
+use super::nextui_assets::NextUiAssets;
 use super::webui_assets::WebUiAssets;
 
 const RESOURCE_BASE_URL_TEMPLATE_MARKER: &str =
@@ -56,6 +57,11 @@ pub(crate) async fn webui_entrypoint(headers: HeaderMap) -> Response {
     serve_webui_asset("", resource_base_url.as_str())
 }
 
+pub(crate) async fn nextui_entrypoint(headers: HeaderMap) -> Response {
+    let resource_base_url = request_scoped_resource_base_url(&headers);
+    serve_nextui_asset("index.html", resource_base_url.as_str())
+}
+
 pub(crate) async fn webui_asset(
     AxumPath(webui_path): AxumPath<String>,
     headers: HeaderMap,
@@ -64,7 +70,52 @@ pub(crate) async fn webui_asset(
         return StatusCode::NOT_FOUND.into_response();
     }
     let resource_base_url = request_scoped_resource_base_url(&headers);
+    if webui_path == "layers.css" || webui_path.starts_with("assets/") {
+        return serve_nextui_asset(webui_path.as_str(), resource_base_url.as_str());
+    }
     serve_webui_asset(webui_path.as_str(), resource_base_url.as_str())
+}
+
+fn serve_nextui_asset(asset_path: &str, resource_base_url: &str) -> Response {
+    let Some(asset_data) = NextUiAssets::get(asset_path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let body = if asset_path == "index.html" {
+        Bytes::from(rewrite_nextui_index_html(
+            asset_data.as_ref(),
+            resource_base_url,
+        ))
+    } else {
+        Bytes::copy_from_slice(asset_data.as_ref())
+    };
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                content_type_for(Path::new(asset_path)),
+            ),
+            (
+                header::CACHE_CONTROL,
+                cache_control_for(asset_path).to_string(),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn rewrite_nextui_index_html(asset_data: &[u8], resource_base_url: &str) -> Vec<u8> {
+    let html = remove_legacy_thymeleaf_scaffolding(String::from_utf8_lossy(asset_data).replace(
+        RESOURCE_BASE_URL_TEMPLATE_MARKER,
+        format!("'{resource_base_url}'").as_str(),
+    ));
+    if resource_base_url == "/" {
+        return html.into_bytes();
+    }
+
+    html.replace("src=\"/", format!("src=\"{resource_base_url}").as_str())
+        .replace("href=\"/", format!("href=\"{resource_base_url}").as_str())
+        .into_bytes()
 }
 
 fn serve_webui_asset(webui_path: &str, resource_base_url: &str) -> Response {
@@ -254,7 +305,8 @@ fn cache_control_for(asset_path: &str) -> &'static str {
         | "apple-touch-icon-180x180.png"
         | "android-chrome-192x192.png"
         | "android-chrome-512x512.png"
-        | "manifest.json" => "no-store",
+        | "manifest.json"
+        | "layers.css" => "no-store",
         _ => "max-age=31536000, public",
     }
 }

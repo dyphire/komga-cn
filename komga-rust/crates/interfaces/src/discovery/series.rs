@@ -11,7 +11,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::discovery::SeriesAlphabeticalGroup;
+use komga_application::discovery::{SeriesAlphabeticalGroup, SeriesAlphabeticalGroupsRequest};
 use komga_domain::discovery::{DiscoveryError, PageEnvelope, SeriesSort};
 use serde_json::{Value, json};
 
@@ -155,9 +155,42 @@ pub(crate) async fn series_alphabetical_groups(
         Err(error) => return error.into_response(),
     };
 
+    series_alphabetical_groups_response(app, headers, None, resolved.request).await
+}
+
+pub(crate) async fn series_alphabetical_groups_deprecated_get(
+    State(app): State<DiscoveryState>,
+    _: Authenticated,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let query = uri.query().unwrap_or_default();
+    let requested_library_ids = requested_query_values(query, "library_id");
+    let resolved = match super::query::resolve_deprecated_series_request(&uri) {
+        Ok(resolved) => resolved,
+        Err(error) => return error.into_response(),
+    };
+    let request = SeriesAlphabeticalGroupsRequest {
+        filter: resolved.request.filter,
+        search: resolved.request.search,
+    };
+
+    series_alphabetical_groups_response(&app, headers, requested_library_ids, request).await
+}
+
+async fn series_alphabetical_groups_response(
+    app: &DiscoveryState,
+    headers: HeaderMap,
+    requested_library_ids: Option<Vec<String>>,
+    request: SeriesAlphabeticalGroupsRequest,
+) -> Response {
     let interfaces_context = match app
         .discovery_auth
-        .resolve_query_context_with_persistence(&app.identity, &headers, None)
+        .resolve_query_context_with_persistence(
+            &app.identity,
+            &headers,
+            requested_library_ids.as_deref(),
+        )
         .await
     {
         Ok(Some(context)) => context,
@@ -168,7 +201,7 @@ pub(crate) async fn series_alphabetical_groups(
 
     match app
         .discovery_browse
-        .list_series_alphabetical_groups(&context, resolved.request)
+        .list_series_alphabetical_groups(&context, request)
         .await
     {
         Ok(groups) => Json(Value::Array(

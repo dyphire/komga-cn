@@ -116,7 +116,6 @@ pub(crate) async fn series_thumbnail_by_id(
         if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
             return response;
         }
-
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
             Ok(false) => return StatusCode::FORBIDDEN.into_response(),
@@ -129,12 +128,21 @@ pub(crate) async fn series_thumbnail_by_id(
         .series_thumbnail_by_id(&thumbnail_id)
         .await
     {
-        Ok(Some(thumbnail)) => asset_ok_response(
-            thumbnail.media_type.as_str(),
-            thumbnail.thumbnail,
-            None,
-            None,
-        ),
+        Ok(Some(thumbnail)) => {
+            if !unrestricted_all_libraries {
+                match user_can_access_series_media(&app, &thumbnail.owner_id, &user).await {
+                    Ok(true) => {}
+                    Ok(false) => return StatusCode::FORBIDDEN.into_response(),
+                    Err(error) => return internal_error_response(error),
+                }
+            }
+            asset_ok_response(
+                thumbnail.media_type.as_str(),
+                thumbnail.thumbnail,
+                None,
+                None,
+            )
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -204,6 +212,21 @@ pub(crate) async fn series_thumbnail_select(
 ) -> Response {
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+        return response;
+    }
+    match app
+        .thumbnail_reader
+        .series_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.owner_id != resolved_series_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
     match app
         .thumbnails
         .select_series(&resolved_series_id, &thumbnail_id)
@@ -222,12 +245,18 @@ pub(crate) async fn series_thumbnail_delete(
 ) -> Response {
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
+    if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
+        return response;
+    }
     let thumbnail = match app
         .thumbnail_reader
-        .series_thumbnails(&resolved_series_id)
+        .series_thumbnail_by_id(&thumbnail_id)
         .await
     {
-        Ok(rows) => rows.into_iter().find(|row| row.id == thumbnail_id),
+        Ok(Some(thumbnail)) if thumbnail.owner_id != resolved_series_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(thumbnail) => thumbnail,
         Err(error) => return internal_error_response(error),
     };
     let Some(thumbnail) = thumbnail else {

@@ -291,6 +291,50 @@ async fn router_api_library_patch_accepts_null_scan_directory_exclusions_as_clea
 }
 
 #[tokio::test]
+async fn router_api_library_deprecated_put_updates_library() {
+    let ctx = TestFixture::new("router-api-library-deprecated-put").await;
+    let auth_token = ctx.login_admin().await;
+
+    let put_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "name": "Updated through deprecated PUT" }).to_string(),
+                ))
+                .expect("deprecated library PUT request should build"),
+        )
+        .await
+        .expect("deprecated library PUT request should complete");
+    assert_eq!(put_response.status(), StatusCode::NO_CONTENT);
+
+    let get_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("updated library detail request should build"),
+        )
+        .await
+        .expect("updated library detail request should complete");
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let payload = response_json(get_response).await;
+    assert_eq!(
+        payload.get("name"),
+        Some(&json!("Updated through deprecated PUT"))
+    );
+}
+
+#[tokio::test]
 async fn router_api_library_create_and_scan_enqueue_expected_scan_tasks() {
     let ctx = TestFixture::builder("router-api-library-create-enqueues-scan")
         .without_runtime_workers()
@@ -628,29 +672,6 @@ async fn router_api_library_delete_rejects_invalid_access_paths() {
             "unexpected status for {fixture_name}"
         );
     }
-}
-
-#[tokio::test]
-async fn router_api_library_put_route_is_removed() {
-    let ctx = TestFixture::new("router-api-library-put-route-removed").await;
-    let auth_token = ctx.login_admin().await;
-
-    let response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/v1/libraries/library-1")
-                .header("x-auth-token", &auth_token)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(json!({ "name": "Library 1" }).to_string()))
-                .expect("removed library put request should build"),
-        )
-        .await
-        .expect("removed library put request should complete");
-
-    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]

@@ -16,5 +16,5 @@ pub(in crate::identity_access::device_auth) use proxy::execute_kobo_proxy_reques
 pub(crate) use reading_state::{kobo_library_book_state, kobo_library_book_state_update};
 pub(crate) use thumbnails::{kobo_book_thumbnail, kobo_book_thumbnail_with_quality};
 
-use common::resolved_kobo_request_api_key_metadata;
+use common::{ensure_kobo_book_access, resolved_kobo_request_api_key_metadata};
 use proxy::proxied_missing_kobo_book_response;

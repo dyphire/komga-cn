@@ -6,7 +6,10 @@ use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::DeviceSyncPort;
 use serde_json::Value;
 
-use super::{proxied_missing_kobo_book_response, wire::build_kobo_book_metadata_payload};
+use super::{
+    ensure_kobo_book_access, proxied_missing_kobo_book_response,
+    wire::build_kobo_book_metadata_payload,
+};
 use crate::access_log::RequestConnectionInfo;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::identity_access::device_auth::kobo_request_base_url;
@@ -29,7 +32,7 @@ pub(crate) async fn kobo_library_book_metadata(
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Err(status) = required_kobo_user(
+    let current_user = match required_kobo_user(
         &app.identity,
         auth_token.as_str(),
         &headers,
@@ -37,8 +40,9 @@ pub(crate) async fn kobo_library_book_metadata(
     )
     .await
     {
-        return status.into_response();
-    }
+        Ok(user) => user,
+        Err(status) => return status.into_response(),
+    };
 
     let device_sync = app.identity.device_sync();
     let metadata = match device_sync.load_kobo_metadata_record(&book_id).await {
@@ -70,6 +74,10 @@ pub(crate) async fn kobo_library_book_metadata(
         }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
+
+    if let Err(status) = ensure_kobo_book_access(&app, &current_user, &book_id).await {
+        return status.into_response();
+    }
 
     let base_url = match kobo_request_base_url(
         app.server_settings.as_ref(),

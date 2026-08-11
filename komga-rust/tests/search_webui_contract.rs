@@ -161,6 +161,37 @@ fn assert_logs_omit_values(logs: &str, values: &[&str], context: &str) {
     }
 }
 
+#[tokio::test]
+async fn router_next_serves_the_embedded_next_ui_entrypoint() {
+    let ctx = TestFixture::new("router-next-ui-entrypoint").await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/next")
+                .body(Body::empty())
+                .expect("next-ui entrypoint request should build"),
+        )
+        .await
+        .expect("next-ui entrypoint request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("next-ui entrypoint body should be readable");
+    let html = String::from_utf8_lossy(&body);
+    assert!(
+        html.contains("/assets/"),
+        "unexpected next-ui index: {html}"
+    );
+    assert!(
+        html.contains("/layers.css"),
+        "unexpected next-ui index: {html}"
+    );
+}
+
 #[test]
 fn router_access_log_tracks_user_identity_and_redacts_sensitive_inputs() {
     {

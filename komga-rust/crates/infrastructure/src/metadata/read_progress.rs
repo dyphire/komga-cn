@@ -289,11 +289,7 @@ pub(crate) async fn load_book_progression(
         .try_get::<String, _>("READ_DATE")
         .or_else(|_| row.try_get::<String, _>("read_date"))
         .map_err(|error| format!("read persisted book progression read_date: {error}"))?;
-    let modified = if read_date.contains('T') {
-        read_date
-    } else {
-        read_date.replace(' ', "T") + "Z"
-    };
+    let modified = progression_modified_utc(read_date);
     Ok(Some(BookProgressionRecord {
         modified,
         device_id: row
@@ -306,6 +302,18 @@ pub(crate) async fn load_book_progression(
             .map_err(|error| format!("read persisted book progression device_name: {error}"))?,
         locator,
     }))
+}
+
+fn progression_modified_utc(read_date: String) -> String {
+    let normalized = read_date.replace(' ', "T");
+    let has_explicit_offset = normalized
+        .split_once('T')
+        .is_some_and(|(_, time)| time.contains('+') || time.contains('-'));
+    if normalized.ends_with('Z') || has_explicit_offset {
+        normalized
+    } else {
+        normalized + "Z"
+    }
 }
 
 fn decode_book_progression_locator(locator: Option<&[u8]>) -> Result<Value, String> {

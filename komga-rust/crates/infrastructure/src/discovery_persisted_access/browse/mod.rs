@@ -10,9 +10,9 @@ use crate::search::index_lifecycle::SearchEntityType;
 
 use komga_application::discovery::{
     BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
-    FacetKind, FacetScope, LatestBooksRequest, ScoredSearchHit, SeriesAlphabeticalGroup,
-    SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest, SeriesReadModel,
-    SeriesReadProgressCounts, SeriesReadingDirection,
+    FacetKind, FacetScope, LatestBooksRequest, ReferentialTagsInclude, ReferentialTagsScope,
+    ScoredSearchHit, SeriesAlphabeticalGroup, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest,
+    SeriesReadModel, SeriesReadProgressCounts, SeriesReadingDirection,
 };
 use komga_domain::discovery::{
     BookSort, DiscoveryError, DiscoveryQueryContext as DomainDiscoveryQueryContext, PageEnvelope,
@@ -606,30 +606,30 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
     ) -> Result<Vec<String>, DiscoveryError> {
         let db = self.db.read_pool();
         let library_ids = scope.library_ids.as_deref();
-        let collection_id = scope.collection_id.as_deref();
+        let collection_ids = scope.collection_ids.as_deref();
 
         match kind {
             FacetKind::Genres => {
-                facets::load_persisted_genres(db, library_ids, collection_id).await
+                facets::load_persisted_genres(db, library_ids, collection_ids).await
             }
-            FacetKind::Tags => facets::load_persisted_tags(db, library_ids, collection_id).await,
+            FacetKind::Tags => facets::load_persisted_tags(db, library_ids, collection_ids).await,
             FacetKind::Languages => {
-                facets::load_persisted_languages(db, library_ids, collection_id).await
+                facets::load_persisted_languages(db, library_ids, collection_ids).await
             }
             FacetKind::Publishers => {
-                facets::load_persisted_publishers(db, library_ids, collection_id).await
+                facets::load_persisted_publishers(db, library_ids, collection_ids).await
             }
             FacetKind::AgeRatings => {
-                facets::load_persisted_age_ratings(db, library_ids, collection_id).await
+                facets::load_persisted_age_ratings(db, library_ids, collection_ids).await
             }
             FacetKind::SharingLabels => {
-                facets::load_persisted_sharing_labels(db, library_ids, collection_id).await
+                facets::load_persisted_sharing_labels(db, library_ids, collection_ids).await
             }
             FacetKind::SeriesTags => {
-                facets::load_persisted_series_tags(db, library_ids, collection_id).await
+                facets::load_persisted_series_tags(db, library_ids, collection_ids).await
             }
             FacetKind::SeriesReleaseDates => {
-                facets::load_persisted_series_release_dates(db, library_ids, collection_id).await
+                facets::load_persisted_series_release_dates(db, library_ids, collection_ids).await
             }
         }
         .map_err(DiscoveryError::Persistence)
@@ -652,6 +652,23 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
             self.db.read_pool(),
             scope.as_ref(),
             library_ids.as_deref(),
+        )
+        .await
+        .map_err(DiscoveryError::Persistence)
+    }
+
+    async fn list_referential_tags(
+        &self,
+        _context: &DomainDiscoveryQueryContext,
+        scope: ReferentialTagsScope,
+        include: ReferentialTagsInclude,
+        authorized_library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, DiscoveryError> {
+        facets::load_persisted_referential_tags(
+            self.db.read_pool(),
+            &scope,
+            include,
+            authorized_library_ids.as_deref(),
         )
         .await
         .map_err(DiscoveryError::Persistence)
@@ -1276,7 +1293,7 @@ mod tests {
             FacetKind::Genres,
             FacetScope {
                 library_ids: Some(vec!["library-1".to_string()]),
-                collection_id: None,
+                collection_ids: None,
             },
         )
         .await

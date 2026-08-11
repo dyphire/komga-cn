@@ -9,7 +9,7 @@ pub(super) fn parse_group_concat_values(raw: &str) -> Vec<String> {
 
 pub(super) struct ScopedStringQuery<'a> {
     pub library_ids: Option<&'a [String]>,
-    pub collection_id: Option<&'a str>,
+    pub collection_ids: Option<&'a [String]>,
     pub label: &'a str,
     pub base_sql: &'a str,
     pub collection_join: &'a str,
@@ -31,10 +31,17 @@ pub(super) async fn load_persisted_scoped_strings(
     let mut builder = QueryBuilder::<Sqlite>::new(query.base_sql);
     let mut has_where = false;
 
-    if let Some(collection_id) = query.collection_id {
+    if let Some(collection_ids) = query.collection_ids {
+        if collection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         builder.push(query.collection_join);
-        builder.push(" WHERE cs.COLLECTION_ID = ");
-        builder.push_bind(collection_id);
+        builder.push(" WHERE cs.COLLECTION_ID IN (");
+        let mut separated = builder.separated(",");
+        for collection_id in collection_ids {
+            separated.push_bind(collection_id);
+        }
+        separated.push_unseparated(")");
         has_where = true;
     }
 

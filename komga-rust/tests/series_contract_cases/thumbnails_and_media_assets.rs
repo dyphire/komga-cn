@@ -20,6 +20,65 @@ async fn seed_book_thumbnail_bytes(
 }
 
 #[tokio::test]
+async fn router_series_thumbnail_mutations_reject_cross_parent_thumbnail_ids() {
+    let ctx = TestFixture::builder("router-series-thumbnail-cross-parent")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("series thumbnail ownership db should open");
+            sqlx::query(
+                "INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind("series-2")
+            .bind(0_i64)
+            .bind("Series 2")
+            .bind("series/series-2")
+            .bind("library-1")
+            .execute(&pool)
+            .await
+            .expect("secondary series should be inserted");
+            sqlx::query(
+                "INSERT INTO THUMBNAIL_SERIES (ID, SELECTED, THUMBNAIL, TYPE, SERIES_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("series-thumbnail-cross-parent")
+            .bind(false)
+            .bind(fixture_png_bytes())
+            .bind("USER_UPLOADED")
+            .bind("series-1")
+            .bind("image/png")
+            .bind(67_i64)
+            .bind(1_i64)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("series thumbnail should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    for (method, suffix) in [("PUT", "/selected"), ("DELETE", "")] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(format!(
+                        "/api/v1/series/series-2/thumbnails/series-thumbnail-cross-parent{suffix}"
+                    ))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("series cross-parent thumbnail request should build"),
+            )
+            .await
+            .expect("series cross-parent thumbnail request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+#[tokio::test]
 async fn router_series_thumbnail_returns_internal_error_when_existence_check_fails() {
     let ctx = TestFixture::new("router-series-thumbnail-existence-check-error").await;
     let auth_token = ctx.login_admin().await;

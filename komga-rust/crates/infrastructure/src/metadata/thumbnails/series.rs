@@ -46,7 +46,7 @@ pub(crate) async fn load_selected_series_thumbnail(
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
+        SELECT ts.SERIES_ID, ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
         FROM THUMBNAIL_SERIES ts
         JOIN SERIES s ON s.ID = ts.SERIES_ID
         JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
@@ -74,6 +74,7 @@ pub(crate) async fn load_selected_series_thumbnail(
     )?;
 
     Ok(thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        owner_id: series_id.to_string(),
         thumbnail_type,
         media_type,
         thumbnail,
@@ -86,7 +87,7 @@ pub(crate) async fn load_series_thumbnail_by_id(
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
+        SELECT ts.SERIES_ID, ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
         FROM THUMBNAIL_SERIES ts
         LEFT JOIN SERIES s ON s.ID = ts.SERIES_ID
         LEFT JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
@@ -113,6 +114,7 @@ pub(crate) async fn load_series_thumbnail_by_id(
     )?;
 
     Ok(maybe_thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        owner_id: row.get::<String, _>("SERIES_ID"),
         thumbnail_type,
         media_type,
         thumbnail,

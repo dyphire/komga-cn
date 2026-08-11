@@ -129,22 +129,43 @@ pub(super) async fn load_persisted_authors_by_scope(
             }
             separated.push_unseparated(")");
         }
-        AuthorsScope::Collection(collection_id) => {
+        AuthorsScope::Collections(collection_ids) => {
+            if collection_ids.is_empty() {
+                return Ok(Vec::new());
+            }
             query.push(r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID"#);
             push_condition(&mut query);
-            query.push(r#"cs.COLLECTION_ID = "#);
-            query.push_bind(collection_id);
+            query.push(r#"cs.COLLECTION_ID IN ("#);
+            let mut separated = query.separated(",");
+            for collection_id in collection_ids {
+                separated.push_bind(collection_id);
+            }
+            separated.push_unseparated(")");
         }
-        AuthorsScope::Series(series_id) => {
+        AuthorsScope::Series(series_ids) => {
+            if series_ids.is_empty() {
+                return Ok(Vec::new());
+            }
             push_condition(&mut query);
-            query.push(r#"b.SERIES_ID = "#);
-            query.push_bind(series_id);
+            query.push(r#"b.SERIES_ID IN ("#);
+            let mut separated = query.separated(",");
+            for series_id in series_ids {
+                separated.push_bind(series_id);
+            }
+            separated.push_unseparated(")");
         }
-        AuthorsScope::ReadList(readlist_id) => {
+        AuthorsScope::ReadLists(readlist_ids) => {
+            if readlist_ids.is_empty() {
+                return Ok(Vec::new());
+            }
             query.push(r#" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID"#);
             push_condition(&mut query);
-            query.push(r#"rb.READLIST_ID = "#);
-            query.push_bind(readlist_id);
+            query.push(r#"rb.READLIST_ID IN ("#);
+            let mut separated = query.separated(",");
+            for readlist_id in readlist_ids {
+                separated.push_bind(readlist_id);
+            }
+            separated.push_unseparated(")");
         }
     }
 

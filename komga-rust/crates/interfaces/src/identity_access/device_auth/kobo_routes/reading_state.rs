@@ -10,7 +10,10 @@ use komga_application::identity_access::{
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{proxied_missing_kobo_book_response, resolved_kobo_request_api_key_metadata};
+use super::{
+    ensure_kobo_book_access, proxied_missing_kobo_book_response,
+    resolved_kobo_request_api_key_metadata,
+};
 use crate::access_log::RequestConnectionInfo;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::identity_access::device_auth::device_progress_service;
@@ -111,6 +114,9 @@ pub(crate) async fn kobo_library_book_state(
         }
 
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(status) = ensure_kobo_book_access(&app, &current_user, &book_id).await {
+        return status.into_response();
     }
 
     let user_id_value = user_id(&current_user);
@@ -234,6 +240,9 @@ pub(crate) async fn kobo_library_book_state_update(
         }
 
         return StatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(status) = ensure_kobo_book_access(&app, &current_user, &book_id).await {
+        return status.into_response();
     }
 
     let Some(state) = payload.reading_states.first() else {

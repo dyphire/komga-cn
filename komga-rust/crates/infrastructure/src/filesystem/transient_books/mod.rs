@@ -943,6 +943,35 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[test]
+    fn analyze_transient_book_detects_svg_wrapped_epub_image_as_divina() {
+        let path = unique_temp_path("svg-wrapped-divina-image", "epub");
+        let image = png_bytes(2, 3);
+        let page = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><image xlink:href="page.png"/></svg></body></html>"#;
+        assert_eq!(
+            epub::parse_transient_epub_divina_image_href(page, "OEBPS/page.xhtml")
+                .expect("SVG spine page should parse"),
+            Some("OEBPS/page.png".to_string())
+        );
+        write_epub_with_package_and_entries(
+            &path,
+            r#"<package><manifest><item id="main" href="page.xhtml" media-type="application/xhtml+xml"/><item id="image" href="page.png" media-type="image/png"/></manifest><spine><itemref idref="main"/></spine></package>"#,
+            &[
+                ("OEBPS/page.xhtml", page),
+                ("OEBPS/page.png", image.as_slice()),
+            ],
+        );
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("SVG-wrapped EPUB should produce an analysis result");
+
+        assert_eq!(analysis.status, MediaStatus::Ready, "{}", analysis.comment);
+        assert_eq!(analysis.pages.len(), 1);
+        assert_eq!(analysis.pages[0].file_name, "OEBPS/page.png");
+
+        let _ = fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn infer_transient_series_and_number_propagates_series_lookup_errors() {
         let fixture = BootstrappedBookFixture::open("transient-infer-series-query-error").await;

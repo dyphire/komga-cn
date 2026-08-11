@@ -128,10 +128,26 @@ pub enum FacetKind {
     SeriesReleaseDates,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReferentialTagsScope {
+    All,
+    Libraries(Vec<String>),
+    Collections(Vec<String>),
+    Series(Vec<String>),
+    ReadLists(Vec<String>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReferentialTagsInclude {
+    Series,
+    Book,
+    Both,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FacetScope {
     pub library_ids: Option<Vec<String>>,
-    pub collection_id: Option<String>,
+    pub collection_ids: Option<Vec<String>>,
 }
 
 #[async_trait::async_trait]
@@ -148,5 +164,13 @@ pub trait DiscoveryFacetService: Send + Sync {
         context: &DiscoveryQueryContext,
         scope: Option<BookTagScope>,
         library_ids: Option<Vec<String>>,
+    ) -> Result<Vec<String>, DiscoveryError>;
+
+    async fn list_referential_tags(
+        &self,
+        context: &DiscoveryQueryContext,
+        scope: ReferentialTagsScope,
+        include: ReferentialTagsInclude,
+        authorized_library_ids: Option<Vec<String>>,
     ) -> Result<Vec<String>, DiscoveryError>;
 }

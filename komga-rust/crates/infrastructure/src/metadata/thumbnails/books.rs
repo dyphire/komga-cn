@@ -45,7 +45,7 @@ pub(crate) async fn load_selected_book_thumbnail(
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
+        SELECT tb.BOOK_ID, tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
         FROM THUMBNAIL_BOOK tb
         JOIN BOOK b ON b.ID = tb.BOOK_ID
         JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
@@ -73,6 +73,7 @@ pub(crate) async fn load_selected_book_thumbnail(
     )?;
 
     Ok(thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        owner_id: book_id.to_string(),
         thumbnail_type,
         media_type,
         thumbnail,
@@ -85,7 +86,7 @@ pub(crate) async fn load_book_thumbnail_by_id(
 ) -> Result<Option<EntityThumbnailBinary>, String> {
     let row = sqlx::query(
         r#"
-        SELECT tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
+        SELECT tb.BOOK_ID, tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
         FROM THUMBNAIL_BOOK tb
         LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID
         LEFT JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
@@ -112,6 +113,7 @@ pub(crate) async fn load_book_thumbnail_by_id(
     )?;
 
     Ok(thumbnail.map(|thumbnail| EntityThumbnailBinary {
+        owner_id: row.get::<String, _>("BOOK_ID"),
         thumbnail_type,
         media_type,
         thumbnail,

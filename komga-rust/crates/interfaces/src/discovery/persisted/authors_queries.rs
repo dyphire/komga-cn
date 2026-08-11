@@ -8,7 +8,21 @@ pub(in crate::discovery) fn authors_v2_page_payload(
     size: usize,
     unpaged: bool,
 ) -> Value {
-    let total_elements = authors.len();
+    paged_values_payload(
+        authors.into_iter().map(|author| json!(author)).collect(),
+        page,
+        size,
+        unpaged,
+    )
+}
+
+pub(in crate::discovery) fn paged_values_payload(
+    values: Vec<Value>,
+    page: usize,
+    size: usize,
+    unpaged: bool,
+) -> Value {
+    let total_elements = values.len();
     let page_size = if unpaged {
         total_elements.max(20)
     } else {
@@ -21,11 +35,11 @@ pub(in crate::discovery) fn authors_v2_page_payload(
     };
 
     let content = if unpaged {
-        authors
+        values
     } else if offset >= total_elements {
         vec![]
     } else {
-        authors.into_iter().skip(offset).take(page_size).collect()
+        values.into_iter().skip(offset).take(page_size).collect()
     };
 
     let total_pages = if total_elements == 0 {
@@ -37,7 +51,7 @@ pub(in crate::discovery) fn authors_v2_page_payload(
     };
 
     page_payload(
-        content.into_iter().map(|author| json!(author)).collect(),
+        content,
         PagePayloadMetadata {
             page: if unpaged { 0 } else { page },
             size: page_size,

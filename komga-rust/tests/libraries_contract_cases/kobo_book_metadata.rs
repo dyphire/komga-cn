@@ -1,12 +1,107 @@
 #![allow(clippy::await_holding_lock)]
 
 use super::*;
+use crate::support::runtime_router_contract_support::media_file_fixtures::fixture_png_bytes;
 
 fn fixed_layout_extension_blob() -> Vec<u8> {
     vec![
         31, 139, 8, 0, 100, 225, 210, 105, 2, 255, 171, 86, 202, 44, 118, 203, 172, 72, 77, 241,
         73, 172, 204, 47, 45, 81, 178, 42, 41, 42, 77, 173, 5, 0, 254, 47, 201, 165, 22, 0, 0, 0,
     ]
+}
+
+#[tokio::test]
+async fn router_kobo_book_metadata_and_state_enforce_content_restrictions() {
+    let ctx = TestFixture::builder("router-kobo-book-metadata-content-restriction")
+        .with_seed(|paths| async move {
+            seed_router_age_exclude_user_with_roles(
+                &paths,
+                "kobo-restricted-user",
+                "kobo-restricted@example.org",
+                "router-contract-kobo-restricted-123",
+                13,
+                &["USER", "KOBO_SYNC"],
+            )
+            .await;
+            seed_kobo_sync_api_key(&paths, "restricted-token", "kobo-restricted-user").await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("kobo metadata restriction db should open");
+            sqlx::query("UPDATE SERIES_METADATA SET AGE_RATING = ? WHERE SERIES_ID = ?")
+                .bind(18_i64)
+                .bind("series-1")
+                .execute(&pool)
+                .await
+                .expect("series age rating should update for metadata restriction");
+            sqlx::query("UPDATE THUMBNAIL_BOOK SET THUMBNAIL = ?, MEDIA_TYPE = ? WHERE ID = ?")
+                .bind(fixture_png_bytes())
+                .bind("image/png")
+                .bind("thumb-book-1")
+                .execute(&pool)
+                .await
+                .expect("kobo restricted thumbnail bytes should update");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx
+        .login_with_credentials(
+            "kobo-restricted@example.org",
+            "router-contract-kobo-restricted-123",
+        )
+        .await;
+
+    for (method, route, body) in [
+        (
+            "GET",
+            "/kobo/restricted-token/v1/library/book-1/metadata",
+            Body::empty(),
+        ),
+        (
+            "GET",
+            "/kobo/restricted-token/v1/library/book-1/state",
+            Body::empty(),
+        ),
+        (
+            "GET",
+            "/kobo/restricted-token/v1/books/thumb-book-1/thumbnail/300/400/false/image.jpg",
+            Body::empty(),
+        ),
+        (
+            "PUT",
+            "/kobo/restricted-token/v1/library/book-1/state",
+            Body::from(
+                json!({
+                    "ReadingStates": [{
+                        "LastModified": "2024-01-01T00:00:00Z",
+                        "CurrentBookmark": {
+                            "ContentSourceProgressPercent": 0.5,
+                            "Location": {"Source": "book.xhtml", "Type": "KoboSpan", "Value": "kobo.1.1"}
+                        },
+                        "StatusInfo": {"Status": "Reading"}
+                    }]
+                })
+                .to_string(),
+            ),
+        ),
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .expect("restricted kobo request should build"),
+            )
+            .await
+            .expect("restricted kobo request should complete");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "route: {route}");
+    }
 }
 
 #[tokio::test]

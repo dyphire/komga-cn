@@ -60,9 +60,9 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
         let mapped_scope = match scope {
             PersistedAuthorsScope::All => models::AuthorsScope::All,
             PersistedAuthorsScope::Libraries(ids) => models::AuthorsScope::Libraries(ids),
-            PersistedAuthorsScope::Collection(id) => models::AuthorsScope::Collection(id),
-            PersistedAuthorsScope::Series(id) => models::AuthorsScope::Series(id),
-            PersistedAuthorsScope::ReadList(id) => models::AuthorsScope::ReadList(id),
+            PersistedAuthorsScope::Collections(ids) => models::AuthorsScope::Collections(ids),
+            PersistedAuthorsScope::Series(ids) => models::AuthorsScope::Series(ids),
+            PersistedAuthorsScope::ReadLists(ids) => models::AuthorsScope::ReadLists(ids),
         };
         let rows = authors::load_persisted_authors_by_scope(
             self.db.read_pool(),

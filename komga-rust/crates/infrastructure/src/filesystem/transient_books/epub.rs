@@ -313,7 +313,7 @@ pub(super) fn parse_transient_epub_spine_items(
 
 // PLACEHOLDER_DIVINA_IMAGE_HREF
 
-fn parse_transient_epub_divina_image_href(
+pub(super) fn parse_transient_epub_divina_image_href(
     resource_bytes: &[u8],
     page_href: &str,
 ) -> Result<Option<String>, String> {
@@ -394,15 +394,21 @@ fn collect_transient_epub_divina_image_source(
     inside_body: bool,
     image_sources: &mut Vec<String>,
 ) -> Result<(), String> {
-    if !inside_body || !transient_xml_name_matches(event.name().as_ref(), b"img") {
+    if !inside_body {
         return Ok(());
     }
 
-    if let Some(src) =
+    let source = if transient_xml_name_matches(event.name().as_ref(), b"img") {
         transient_xml_attribute_value_checked(event, b"src", "transient EPUB spine resource")?
-        && !src.trim().is_empty()
+    } else if transient_xml_name_matches(event.name().as_ref(), b"image") {
+        transient_xml_attribute_value_checked(event, b"href", "transient EPUB spine resource")?
+    } else {
+        None
+    };
+    if let Some(source) = source
+        && !source.trim().is_empty()
     {
-        image_sources.push(src);
+        image_sources.push(source);
     }
     Ok(())
 }

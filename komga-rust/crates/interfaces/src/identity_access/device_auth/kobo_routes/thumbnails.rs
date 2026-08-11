@@ -9,9 +9,10 @@ use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::identity_access::device_auth::load_kobo_proxy_enabled;
 use crate::state::{IdentityAccessState, IdentityState};
 
+use super::ensure_kobo_book_access;
+
 struct KoboThumbnailRequest<'a> {
-    identity: &'a IdentityState,
-    server_settings: &'a dyn komga_application::operational::ServerSettingsPort,
+    app: &'a IdentityAccessState,
     auth_token: &'a str,
     headers: &'a HeaderMap,
     remote_addr: Option<SocketAddr>,
@@ -33,8 +34,7 @@ pub(crate) async fn kobo_book_thumbnail(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(KoboThumbnailRequest {
-        identity: &app.identity,
-        server_settings: app.server_settings.as_ref(),
+        app: &app,
         auth_token: auth_token.as_str(),
         headers: &headers,
         remote_addr: connection_info.remote_addr(),
@@ -59,8 +59,7 @@ pub(crate) async fn kobo_book_thumbnail_with_quality(
     headers: HeaderMap,
 ) -> Response {
     kobo_book_thumbnail_response(KoboThumbnailRequest {
-        identity: &app.identity,
-        server_settings: app.server_settings.as_ref(),
+        app: &app,
         auth_token: auth_token.as_str(),
         headers: &headers,
         remote_addr: connection_info.remote_addr(),
@@ -72,14 +71,25 @@ pub(crate) async fn kobo_book_thumbnail_with_quality(
 }
 
 async fn kobo_book_thumbnail_response(req: KoboThumbnailRequest<'_>) -> Response {
-    if let Err(status) =
-        required_kobo_user(req.identity, req.auth_token, req.headers, req.remote_addr).await
+    let current_user = match required_kobo_user(
+        &req.app.identity,
+        req.auth_token,
+        req.headers,
+        req.remote_addr,
+    )
+    .await
     {
-        return status.into_response();
-    }
+        Ok(user) => user,
+        Err(status) => return status.into_response(),
+    };
 
-    match load_thumbnail_by_id(req.identity, req.thumbnail_id).await {
+    match load_thumbnail_by_id(&req.app.identity, req.thumbnail_id).await {
         Ok(Some(thumbnail)) => {
+            if let Err(status) =
+                ensure_kobo_book_access(req.app, &current_user, &thumbnail.book_id).await
+            {
+                return status.into_response();
+            }
             let jpeg_bytes = if thumbnail.media_type.eq_ignore_ascii_case("image/jpeg") {
                 thumbnail.bytes
             } else {
@@ -97,10 +107,11 @@ async fn kobo_book_thumbnail_response(req: KoboThumbnailRequest<'_>) -> Response
                 .into_response()
         }
         Ok(None) => {
-            let proxy_enabled = match load_kobo_proxy_enabled(req.server_settings).await {
-                Ok(enabled) => enabled,
-                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            };
+            let proxy_enabled =
+                match load_kobo_proxy_enabled(req.app.server_settings.as_ref()).await {
+                    Ok(enabled) => enabled,
+                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                };
             if proxy_enabled {
                 let location = format!(
                     "https://cdn.kobo.com/book-images/{}/{}/{}/false/image.jpg",

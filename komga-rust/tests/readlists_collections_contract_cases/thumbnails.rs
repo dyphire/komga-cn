@@ -1,6 +1,110 @@
 use super::*;
 
 #[tokio::test]
+async fn router_readlist_and_collection_thumbnail_ids_reject_cross_parent_access_and_mutation() {
+    let ctx = TestFixture::builder("router-thumbnail-cross-parent-ownership")
+        .with_seed(|paths| async move {
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("thumbnail ownership db should open");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT) VALUES (?, ?, ?)")
+                .bind("readlist-2")
+                .bind("Readlist 2")
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("secondary readlist should be inserted");
+            sqlx::query(
+                "INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("readlist-2")
+            .bind("book-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("secondary readlist book should be inserted");
+            sqlx::query("INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)")
+                .bind("collection-2")
+                .bind("Collection 2")
+                .bind(false)
+                .bind(1_i64)
+                .execute(&pool)
+                .await
+                .expect("secondary collection should be inserted");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-2")
+            .bind("series-1")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("secondary collection series should be inserted");
+            sqlx::query(
+                "INSERT INTO THUMBNAIL_READLIST (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("readlist-thumbnail-cross-parent")
+            .bind(false)
+            .bind(fixture_png_bytes())
+            .bind("USER_UPLOADED")
+            .bind("readlist-1")
+            .bind("image/png")
+            .bind(67_i64)
+            .bind(1_i64)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("cross-parent readlist thumbnail should be inserted");
+            sqlx::query(
+                "INSERT INTO THUMBNAIL_COLLECTION (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("collection-thumbnail-cross-parent")
+            .bind(false)
+            .bind(fixture_png_bytes())
+            .bind("USER_UPLOADED")
+            .bind("collection-1")
+            .bind("image/png")
+            .bind(67_i64)
+            .bind(1_i64)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("cross-parent collection thumbnail should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    for (parent_route, thumbnail_id) in [
+        ("readlists/readlist-2", "readlist-thumbnail-cross-parent"),
+        (
+            "collections/collection-2",
+            "collection-thumbnail-cross-parent",
+        ),
+    ] {
+        for (method, suffix) in [("GET", ""), ("PUT", "/selected"), ("DELETE", "")] {
+            let response = ctx
+                .app()
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(format!(
+                            "/api/v1/{parent_route}/thumbnails/{thumbnail_id}{suffix}"
+                        ))
+                        .header("x-auth-token", &auth_token)
+                        .body(Body::empty())
+                        .expect("cross-parent thumbnail request should build"),
+                )
+                .await
+                .expect("cross-parent thumbnail request should complete");
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+    }
+}
+
+#[tokio::test]
 async fn router_readlist_and_collection_thumbnails_return_internal_error_when_existence_check_fails()
  {
     let ctx = TestFixture::new("router-list-collection-thumbnail-existence-check-error").await;

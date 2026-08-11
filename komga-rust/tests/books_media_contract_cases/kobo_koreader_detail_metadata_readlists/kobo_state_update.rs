@@ -141,7 +141,7 @@ async fn router_kobo_state_update_uses_path_api_key_identity_for_valid_epub_upda
                 "kobo-state-user",
                 "kobo-state@example.org",
                 "router-contract-kobo-state-123",
-                0,
+                99,
                 &["USER", "KOBO_SYNC"],
             )
             .await;

@@ -500,9 +500,9 @@ fn page_hash_known_sort_property(value: &str) -> Option<PageHashKnownSortPropert
         "matchCount" => Some(PageHashKnownSortProperty::MatchCount),
         "deleteCount" => Some(PageHashKnownSortProperty::DeleteCount),
         "deleteSize" => Some(PageHashKnownSortProperty::DeleteSize),
-        "fileSize" => Some(PageHashKnownSortProperty::FileSize),
-        "createdDate" => Some(PageHashKnownSortProperty::CreatedDate),
-        "lastModifiedDate" => Some(PageHashKnownSortProperty::LastModifiedDate),
+        "fileSize" | "size" => Some(PageHashKnownSortProperty::FileSize),
+        "createdDate" | "created" => Some(PageHashKnownSortProperty::CreatedDate),
+        "lastModifiedDate" | "lastModified" => Some(PageHashKnownSortProperty::LastModifiedDate),
         _ => None,
     }
 }
@@ -510,7 +510,7 @@ fn page_hash_known_sort_property(value: &str) -> Option<PageHashKnownSortPropert
 fn page_hash_unknown_sort_property(value: &str) -> Option<PageHashUnknownSortProperty> {
     match value {
         "hash" => Some(PageHashUnknownSortProperty::Hash),
-        "fileSize" => Some(PageHashUnknownSortProperty::FileSize),
+        "fileSize" | "size" => Some(PageHashUnknownSortProperty::FileSize),
         "matchCount" => Some(PageHashUnknownSortProperty::MatchCount),
         "totalSize" => Some(PageHashUnknownSortProperty::TotalSize),
         "url" => Some(PageHashUnknownSortProperty::Url),
@@ -544,6 +544,28 @@ mod tests {
         assert_eq!(sorts.len(), 1);
         assert_eq!(sorts[0].property, PageHashKnownSortProperty::MatchCount);
         assert_eq!(sorts[0].direction, PageHashSortDirection::Desc);
+    }
+
+    #[test]
+    fn page_hash_sorts_accept_current_size_and_timestamp_aliases() {
+        let known = page_hash_known_sorts("sort=size,desc&sort=created,asc&sort=lastModified,desc");
+        let unknown = page_hash_unknown_sorts("sort=size,asc");
+
+        assert_eq!(
+            known.iter().map(|sort| sort.property).collect::<Vec<_>>(),
+            vec![
+                PageHashKnownSortProperty::FileSize,
+                PageHashKnownSortProperty::CreatedDate,
+                PageHashKnownSortProperty::LastModifiedDate,
+            ]
+        );
+        assert_eq!(known[0].direction, PageHashSortDirection::Desc);
+        assert_eq!(known[1].direction, PageHashSortDirection::Asc);
+        assert_eq!(known[2].direction, PageHashSortDirection::Desc);
+        assert_eq!(
+            unknown.iter().map(|sort| sort.property).collect::<Vec<_>>(),
+            vec![PageHashUnknownSortProperty::FileSize]
+        );
     }
 
     #[test]

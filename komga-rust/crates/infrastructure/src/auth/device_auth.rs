@@ -118,7 +118,7 @@ pub(crate) async fn load_thumbnail_by_id(
     thumbnail_id: &str,
 ) -> Result<Option<DeviceThumbnailBinary>, String> {
     let row = sqlx::query(
-        r#"SELECT tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
+        r#"SELECT tb.BOOK_ID, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
  FROM THUMBNAIL_BOOK tb
  LEFT JOIN BOOK b ON b.ID = tb.BOOK_ID
  LEFT JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
@@ -135,8 +135,10 @@ pub(crate) async fn load_thumbnail_by_id(
     };
 
     let media_type = row.get::<String, _>("MEDIA_TYPE");
+    let book_id = row.get::<String, _>("BOOK_ID");
     if let Some(thumbnail) = row.get::<Option<Vec<u8>>, _>("THUMBNAIL") {
         return Ok(Some(DeviceThumbnailBinary {
+            book_id,
             media_type,
             bytes: thumbnail,
         }));
@@ -157,7 +159,11 @@ pub(crate) async fn load_thumbnail_by_id(
             sidecar_path.display()
         )
     })?;
-    Ok(Some(DeviceThumbnailBinary { media_type, bytes }))
+    Ok(Some(DeviceThumbnailBinary {
+        book_id,
+        media_type,
+        bytes,
+    }))
 }
 
 pub(crate) async fn persisted_book_exists(

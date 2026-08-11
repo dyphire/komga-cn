@@ -278,6 +278,53 @@ async fn router_book_progression_get_rejects_invalid_persisted_locator_shape() {
 }
 
 #[tokio::test]
+async fn router_book_progression_get_marks_offsetless_iso_read_date_as_utc() {
+    let ctx = TestFixture::new("router-book-progression-get-offsetless-utc").await;
+    let auth_token = ctx.login_admin().await;
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for offsetless progression seed");
+    sqlx::query(
+        "INSERT INTO READ_PROGRESS (BOOK_ID, USER_ID, PAGE, COMPLETED, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("admin-user")
+    .bind(1_i64)
+    .bind(false)
+    .bind("2024-01-03T04:05:06")
+    .bind("reader-1")
+    .bind("KOReader")
+    .bind(serde_json::to_vec(&json!({})).expect("empty locator should serialize"))
+    .execute(&pool)
+    .await
+    .expect("offsetless read progress row should insert");
+    pool.close().await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/progression")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("offsetless progression get request should build"),
+        )
+        .await
+        .expect("offsetless progression get request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("modified"),
+        Some(&json!("2024-01-03T04:05:06Z"))
+    );
+}
+
+#[tokio::test]
 async fn router_book_progression_put_roundtrips_on_opds_v2_route() {
     let ctx = TestFixture::new("router-book-progression-opds-v2-roundtrip").await;
 

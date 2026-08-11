@@ -10,9 +10,9 @@ pub struct PersistedBookBrowseEntry {
 pub enum PersistedAuthorsScope {
     All,
     Libraries(Vec<String>),
-    Collection(String),
-    Series(String),
-    ReadList(String),
+    Collections(Vec<String>),
+    Series(Vec<String>),
+    ReadLists(Vec<String>),
 }
 
 #[derive(Clone, serde::Serialize)]

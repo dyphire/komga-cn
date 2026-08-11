@@ -1,4 +1,4 @@
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use komga_application::identity_access::{AuthOutcome, AuthUser, PersistedApiKeyMetadata, user_id};
 
 use crate::identity_access::auth::{
@@ -6,7 +6,26 @@ use crate::identity_access::auth::{
 };
 use crate::identity_access::device_auth::auth_resolvers::valid_kobo_path_token;
 use crate::identity_access::device_auth::helpers::api_key_metadata_by_token;
-use crate::state::IdentityState;
+use crate::media_assets::access_control::user_can_access_book_media;
+use crate::state::{IdentityAccessState, IdentityState};
+
+pub(super) async fn ensure_kobo_book_access(
+    app: &IdentityAccessState,
+    user: &AuthUser,
+    book_id: &str,
+) -> Result<(), StatusCode> {
+    let media = app
+        .book_media_reader
+        .book_media(book_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    match user_can_access_book_media(app.book_media_reader.as_ref(), book_id, user, &media).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(StatusCode::FORBIDDEN),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
 
 pub(super) async fn resolved_kobo_request_api_key_metadata(
     identity: &IdentityState,

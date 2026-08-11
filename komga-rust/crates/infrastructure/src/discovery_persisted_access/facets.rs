@@ -1,17 +1,147 @@
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
+use komga_application::discovery::{ReferentialTagsInclude, ReferentialTagsScope};
+
 use super::common;
+
+fn push_ids(query: &mut QueryBuilder<Sqlite>, ids: &[String]) {
+    let mut separated = query.separated(",");
+    for id in ids {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+}
+
+fn push_referential_tag_select(
+    query: &mut QueryBuilder<Sqlite>,
+    scope: &ReferentialTagsScope,
+    authorized_library_ids: Option<&[String]>,
+    series_tags: bool,
+) {
+    if series_tags {
+        query.push(
+            "SELECT st.TAG AS TAG FROM SERIES_METADATA_TAG st JOIN SERIES s ON s.ID = st.SERIES_ID",
+        );
+    } else {
+        query.push(
+            "SELECT bt.TAG AS TAG FROM BOOK_METADATA_TAG bt JOIN BOOK b ON b.ID = bt.BOOK_ID",
+        );
+    }
+
+    match scope {
+        ReferentialTagsScope::Collections(_) => query.push(if series_tags {
+            " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"
+        } else {
+            " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID"
+        }),
+        ReferentialTagsScope::ReadLists(_) if series_tags => query
+            .push(" JOIN BOOK b ON b.SERIES_ID = s.ID JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID"),
+        ReferentialTagsScope::ReadLists(_) => {
+            query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID")
+        }
+        _ => query,
+    };
+
+    let mut has_where = false;
+    let mut condition = |query: &mut QueryBuilder<Sqlite>| {
+        query.push(if has_where { " AND " } else { " WHERE " });
+        has_where = true;
+    };
+    match scope {
+        ReferentialTagsScope::All => {}
+        ReferentialTagsScope::Libraries(ids) => {
+            condition(query);
+            query.push(if series_tags {
+                "s.LIBRARY_ID IN ("
+            } else {
+                "b.LIBRARY_ID IN ("
+            });
+            push_ids(query, ids);
+        }
+        ReferentialTagsScope::Collections(ids) => {
+            condition(query);
+            query.push("cs.COLLECTION_ID IN (");
+            push_ids(query, ids);
+        }
+        ReferentialTagsScope::Series(ids) => {
+            condition(query);
+            query.push(if series_tags {
+                "s.ID IN ("
+            } else {
+                "b.SERIES_ID IN ("
+            });
+            push_ids(query, ids);
+        }
+        ReferentialTagsScope::ReadLists(ids) => {
+            condition(query);
+            query.push("rb.READLIST_ID IN (");
+            push_ids(query, ids);
+        }
+    }
+    if let Some(library_ids) = authorized_library_ids {
+        condition(query);
+        query.push(if series_tags {
+            "s.LIBRARY_ID IN ("
+        } else {
+            "b.LIBRARY_ID IN ("
+        });
+        push_ids(query, library_ids);
+    }
+}
+
+pub(super) async fn load_persisted_referential_tags(
+    pool: &SqlitePool,
+    scope: &ReferentialTagsScope,
+    include: ReferentialTagsInclude,
+    authorized_library_ids: Option<&[String]>,
+) -> Result<Vec<String>, String> {
+    if authorized_library_ids.is_some_and(<[String]>::is_empty) {
+        return Ok(Vec::new());
+    }
+    if match scope {
+        ReferentialTagsScope::All => false,
+        ReferentialTagsScope::Libraries(ids)
+        | ReferentialTagsScope::Collections(ids)
+        | ReferentialTagsScope::Series(ids)
+        | ReferentialTagsScope::ReadLists(ids) => ids.is_empty(),
+    } {
+        return Ok(Vec::new());
+    }
+
+    let mut query = QueryBuilder::<Sqlite>::new("SELECT DISTINCT TAG FROM (");
+    if include != ReferentialTagsInclude::Book {
+        push_referential_tag_select(&mut query, scope, authorized_library_ids, true);
+    }
+    if include == ReferentialTagsInclude::Both {
+        query.push(" UNION ALL ");
+    }
+    if include != ReferentialTagsInclude::Series {
+        push_referential_tag_select(&mut query, scope, authorized_library_ids, false);
+    }
+    query.push(") ORDER BY lower(TAG), TAG");
+
+    query
+        .build()
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("query persisted referential tags: {error}"))
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| row.get::<String, _>("TAG"))
+                .collect()
+        })
+}
 
 pub(super) async fn load_persisted_genres(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "genres",
             base_sql: r#"SELECT DISTINCT g.GENRE AS VALUE
         FROM SERIES_METADATA_GENRE g
@@ -28,7 +158,7 @@ pub(super) async fn load_persisted_genres(
 pub(super) async fn load_persisted_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     if let Some(library_ids) = library_ids
         && library_ids.is_empty()
@@ -36,7 +166,10 @@ pub(super) async fn load_persisted_tags(
         return Ok(Vec::new());
     }
 
-    let rows = if let Some(collection_id) = collection_id {
+    let rows = if let Some(collection_ids) = collection_ids {
+        if collection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut query = QueryBuilder::<Sqlite>::new(
             r#"SELECT TAG
               FROM (
@@ -44,9 +177,13 @@ pub(super) async fn load_persisted_tags(
                   FROM SERIES_METADATA_TAG st
                   JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID
                   JOIN SERIES s ON s.ID = st.SERIES_ID
-                  WHERE cs.COLLECTION_ID = "#,
+                  WHERE cs.COLLECTION_ID IN ("#,
         );
-        query.push_bind(collection_id);
+        let mut separated = query.separated(",");
+        for collection_id in collection_ids {
+            separated.push_bind(collection_id);
+        }
+        separated.push_unseparated(")");
         if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
             query.push(r#" AND s.LIBRARY_ID IN ("#);
             let mut separated = query.separated(",");
@@ -61,9 +198,13 @@ pub(super) async fn load_persisted_tags(
               FROM BOOK_METADATA_TAG bt
               JOIN BOOK b ON b.ID = bt.BOOK_ID
               JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID
-              WHERE cs.COLLECTION_ID = "#,
+              WHERE cs.COLLECTION_ID IN ("#,
         );
-        query.push_bind(collection_id);
+        let mut separated = query.separated(",");
+        for collection_id in collection_ids {
+            separated.push_bind(collection_id);
+        }
+        separated.push_unseparated(")");
         if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
             query.push(r#" AND b.LIBRARY_ID IN ("#);
             let mut separated = query.separated(",");
@@ -127,13 +268,13 @@ pub(super) async fn load_persisted_tags(
 pub(super) async fn load_persisted_languages(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "languages",
             base_sql: r#"SELECT DISTINCT sm.LANGUAGE AS VALUE
         FROM SERIES_METADATA sm
@@ -150,13 +291,13 @@ pub(super) async fn load_persisted_languages(
 pub(super) async fn load_persisted_publishers(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "publishers",
             base_sql: r#"SELECT DISTINCT sm.PUBLISHER AS VALUE
         FROM SERIES_METADATA sm
@@ -173,7 +314,7 @@ pub(super) async fn load_persisted_publishers(
 pub(super) async fn load_persisted_age_ratings(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     if let Some(library_ids) = library_ids
         && library_ids.is_empty()
@@ -187,10 +328,18 @@ pub(super) async fn load_persisted_age_ratings(
         JOIN SERIES s ON s.ID = sm.SERIES_ID"#,
     );
     let mut has_where = false;
-    if let Some(collection_id) = collection_id {
-        query
-            .push(r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID WHERE cs.COLLECTION_ID = "#);
-        query.push_bind(collection_id);
+    if let Some(collection_ids) = collection_ids {
+        if collection_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        query.push(
+            r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID WHERE cs.COLLECTION_ID IN ("#,
+        );
+        let mut separated = query.separated(",");
+        for collection_id in collection_ids {
+            separated.push_bind(collection_id);
+        }
+        separated.push_unseparated(")");
         has_where = true;
     }
     if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
@@ -222,13 +371,13 @@ pub(super) async fn load_persisted_age_ratings(
 pub(super) async fn load_persisted_sharing_labels(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "sharing-labels",
             base_sql: r#"SELECT DISTINCT sms.LABEL AS VALUE
         FROM SERIES_METADATA_SHARING sms
@@ -245,13 +394,13 @@ pub(super) async fn load_persisted_sharing_labels(
 pub(super) async fn load_persisted_series_release_dates(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     let values = common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "series-release-dates",
             base_sql: r#"SELECT DISTINCT bma.RELEASE_DATE AS VALUE
         FROM BOOK_METADATA_AGGREGATION bma
@@ -282,13 +431,13 @@ pub(super) async fn load_persisted_series_release_dates(
 pub(super) async fn load_persisted_series_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
-    collection_id: Option<&str>,
+    collection_ids: Option<&[String]>,
 ) -> Result<Vec<String>, String> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
             library_ids,
-            collection_id,
+            collection_ids,
             label: "series tags",
             base_sql: r#"SELECT DISTINCT st.TAG AS VALUE
         FROM SERIES_METADATA_TAG st

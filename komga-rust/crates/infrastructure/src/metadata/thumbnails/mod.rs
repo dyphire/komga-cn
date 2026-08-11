@@ -17,12 +17,13 @@ pub(crate) use books::{
     load_persisted_book_thumbnails, load_selected_book_thumbnail, select_book_thumbnail,
 };
 pub(crate) use collections::{
-    delete_collection_thumbnail, insert_collection_thumbnail, load_persisted_collection_thumbnails,
-    persisted_collection_exists, select_collection_thumbnail,
+    delete_collection_thumbnail, insert_collection_thumbnail, load_collection_thumbnail_by_id,
+    load_persisted_collection_thumbnails, persisted_collection_exists, select_collection_thumbnail,
 };
 pub(crate) use readlists::{
     delete_readlist_thumbnail, insert_readlist_thumbnail, load_persisted_readlist_name,
-    load_persisted_readlist_thumbnails, persisted_readlist_exists, select_readlist_thumbnail,
+    load_persisted_readlist_thumbnails, load_readlist_thumbnail_by_id, persisted_readlist_exists,
+    select_readlist_thumbnail,
 };
 pub(crate) use series::{
     delete_series_thumbnail, insert_series_thumbnail, load_persisted_series_thumbnails,

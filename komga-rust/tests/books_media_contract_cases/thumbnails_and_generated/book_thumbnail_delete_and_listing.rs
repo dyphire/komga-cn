@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exists() {
+async fn router_book_thumbnail_by_id_rejects_missing_path_book() {
     let ctx = TestFixture::new("router-book-thumbnail-by-id-missing-path-book").await;
 
     let auth_token = ctx.login_admin().await;
@@ -47,11 +47,11 @@ async fn router_book_thumbnail_by_id_allows_missing_path_book_when_thumbnail_exi
         .await
         .expect("book thumbnail missing path request should complete");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_exists() {
+async fn router_book_thumbnail_delete_rejects_missing_path_book() {
     let ctx = TestFixture::new("router-book-thumbnail-delete-missing-path-book").await;
 
     let auth_token = ctx.login_admin().await;
@@ -97,7 +97,7 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
         .await
         .expect("book thumbnail missing path delete request should complete");
 
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -109,7 +109,61 @@ async fn router_book_thumbnail_delete_allows_missing_path_book_when_thumbnail_ex
         .expect("book thumbnail delete should be queryable")
         .get::<i64, _>("COUNT");
     verify_pool.close().await;
-    assert_eq!(remaining, 0);
+    assert_eq!(remaining, 1);
+}
+
+#[tokio::test]
+async fn router_book_thumbnail_mutations_reject_thumbnail_from_another_book() {
+    let ctx = TestFixture::new("router-book-thumbnail-cross-book-mutation").await;
+    seed_router_primary_series_cbz_book(ctx.paths(), "book-2", "book-2.cbz", "Book 2").await;
+    let auth_token = ctx.login_admin().await;
+    let image_bytes = fixture_png_bytes();
+    let (content_type, body) =
+        multipart_image_upload_body("file", "cover.png", "image/png", false, &image_bytes);
+    let upload = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/books/book-1/thumbnails")
+                .header("x-auth-token", &auth_token)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("cross-book thumbnail upload request should build"),
+        )
+        .await
+        .expect("cross-book thumbnail upload request should complete");
+    let thumbnail_id = response_json(upload)
+        .await
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("cross-book thumbnail upload should return id")
+        .to_string();
+
+    for (method, suffix) in [("PUT", "/selected"), ("DELETE", "")] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(format!(
+                        "/api/v1/books/book-2/thumbnails/{thumbnail_id}{suffix}"
+                    ))
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("cross-book thumbnail mutation request should build"),
+            )
+            .await
+            .expect("cross-book thumbnail mutation request should complete");
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "method: {method}"
+        );
+    }
 }
 
 #[tokio::test]

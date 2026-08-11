@@ -944,8 +944,8 @@ async fn router_discovery_series_list_deleted_filter_handles_deleted_only_librar
 }
 
 #[tokio::test]
-async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_not_found() {
-    let ctx = TestFixture::new("router-discovery-removed-v1-series-routes").await;
+async fn router_discovery_deprecated_series_v1_alphabetical_groups_route_returns_groups() {
+    let ctx = TestFixture::new("router-discovery-deprecated-v1-series-alphabetical-groups").await;
     let auth_token = ctx.login_admin().await;
 
     let route = "/api/v1/series/alphabetical-groups?page=0&size=20";
@@ -958,12 +958,17 @@ async fn router_discovery_removed_series_v1_alphabetical_groups_route_returns_no
                 .uri(route)
                 .header("x-auth-token", &auth_token)
                 .body(Body::empty())
-                .expect("removed series v1 alphabetical-groups request should build"),
+                .expect("deprecated series v1 alphabetical-groups request should build"),
         )
         .await
-        .expect("removed series v1 alphabetical-groups request should complete");
+        .expect("deprecated series v1 alphabetical-groups request should complete");
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND, "route: {route}");
+    assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+    let payload = response_json(response).await;
+    assert!(
+        payload.as_array().is_some_and(|groups| !groups.is_empty()),
+        "deprecated alphabetical-groups route should return groups: {payload}"
+    );
 }
 
 #[tokio::test]

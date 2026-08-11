@@ -131,25 +131,23 @@ pub(crate) async fn readlist_thumbnail_by_id(
         Err(error) => return internal_error_response(error),
     }
 
-    match app.thumbnail_reader.readlist_thumbnails(&readlist_id).await {
-        Ok(rows) => {
-            if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
-                return asset_ok_response(
-                    thumbnail.media_type.as_str(),
-                    thumbnail.thumbnail,
-                    None,
-                    None,
-                );
-            }
-
-            if let Err(response) = readlist_exists(&app, &readlist_id).await {
-                return response;
-            }
+    match app
+        .thumbnail_reader
+        .readlist_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.readlist_id != readlist_id => {
+            StatusCode::BAD_REQUEST.into_response()
         }
-        Err(error) => return internal_error_response(error),
+        Ok(Some(thumbnail)) => asset_ok_response(
+            thumbnail.media_type.as_str(),
+            thumbnail.thumbnail,
+            None,
+            None,
+        ),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
     }
-
-    StatusCode::NOT_FOUND.into_response()
 }
 
 pub(crate) async fn readlist_thumbnail_upload(
@@ -207,6 +205,18 @@ pub(crate) async fn readlist_thumbnail_select(
     }
 
     match app
+        .thumbnail_reader
+        .readlist_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.readlist_id != readlist_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(_) => {}
+        Err(error) => return internal_error_response(error),
+    }
+
+    match app
         .thumbnails
         .select_readlist(&readlist_id, &thumbnail_id)
         .await
@@ -221,6 +231,21 @@ pub(crate) async fn readlist_thumbnail_delete(
     _: Admin,
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
+    if let Err(response) = ensure_readlist_exists(&app, &readlist_id).await {
+        return response;
+    }
+    match app
+        .thumbnail_reader
+        .readlist_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.readlist_id != readlist_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
     match app
         .thumbnails
         .delete_readlist(&readlist_id, &thumbnail_id)

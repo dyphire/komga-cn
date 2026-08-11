@@ -523,10 +523,18 @@ pub trait ThumbnailReadPort: Send + Sync {
         &self,
         readlist_id: &str,
     ) -> Result<Vec<ReadlistThumbnailRecord>, String>;
+    async fn readlist_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<ReadlistThumbnailRecord>, String>;
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionThumbnailRecord>, String>;
+    async fn collection_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<CollectionThumbnailRecord>, String>;
 }
 
 /// Read access to reading progress data.

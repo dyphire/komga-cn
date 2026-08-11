@@ -18,6 +18,7 @@ pub struct EntityThumbnailRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntityThumbnailBinary {
+    pub owner_id: String,
     pub thumbnail_type: ThumbnailType,
     pub media_type: String,
     pub thumbnail: Vec<u8>,
@@ -95,10 +96,20 @@ pub trait ThumbnailReaderPort: Send + Sync {
         readlist_id: &str,
     ) -> Result<Vec<ReadlistThumbnailRecord>, String>;
 
+    async fn readlist_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<ReadlistThumbnailRecord>, String>;
+
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionThumbnailRecord>, String>;
+
+    async fn collection_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<CollectionThumbnailRecord>, String>;
 
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
 
@@ -172,11 +183,25 @@ where
         ThumbnailReadPort::readlist_thumbnails(self, readlist_id).await
     }
 
+    async fn readlist_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<ReadlistThumbnailRecord>, String> {
+        ThumbnailReadPort::readlist_thumbnail_by_id(self, thumbnail_id).await
+    }
+
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionThumbnailRecord>, String> {
         ThumbnailReadPort::collection_thumbnails(self, collection_id).await
+    }
+
+    async fn collection_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<CollectionThumbnailRecord>, String> {
+        ThumbnailReadPort::collection_thumbnail_by_id(self, thumbnail_id).await
     }
 
     async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {

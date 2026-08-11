@@ -58,6 +58,37 @@ pub(crate) async fn load_persisted_collection_thumbnails(
         .collect()
 }
 
+pub(crate) async fn load_collection_thumbnail_by_id(
+    pool: &SqlitePool,
+    thumbnail_id: &str,
+) -> Result<Option<CollectionThumbnailRecord>, String> {
+    sqlx::query(
+        r#"
+        SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
+        FROM THUMBNAIL_COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(thumbnail_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("query single collection thumbnail: {error}"))
+    .map(|row| {
+        row.map(|row| CollectionThumbnailRecord {
+            id: row.get::<String, _>("ID"),
+            collection_id: row.get::<String, _>("COLLECTION_ID"),
+            thumbnail_type: parse_thumbnail_type(&row.get::<String, _>("TYPE")),
+            selected: row.get::<i64, _>("SELECTED") != 0,
+            media_type: row.get::<String, _>("MEDIA_TYPE"),
+            file_size: row.get::<i64, _>("FILE_SIZE"),
+            width: row.get::<i64, _>("WIDTH"),
+            height: row.get::<i64, _>("HEIGHT"),
+            thumbnail: row.get::<Vec<u8>, _>("THUMBNAIL"),
+        })
+    })
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "This persistence boundary writes the thumbnail record fields directly."

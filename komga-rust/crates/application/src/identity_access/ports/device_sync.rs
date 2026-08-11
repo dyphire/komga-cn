@@ -4,6 +4,7 @@ use super::super::device_records::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeviceThumbnailBinary {
+    pub book_id: String,
     pub media_type: String,
     pub bytes: Vec<u8>,
 }

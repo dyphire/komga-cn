@@ -185,11 +185,25 @@ impl ThumbnailReadPort for MediaReader {
         metadata::load_persisted_readlist_thumbnails(&self.read_pool, readlist_id).await
     }
 
+    async fn readlist_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<ReadlistThumbnailRecord>, String> {
+        metadata::load_readlist_thumbnail_by_id(&self.read_pool, thumbnail_id).await
+    }
+
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
     ) -> Result<Vec<CollectionThumbnailRecord>, String> {
         metadata::load_persisted_collection_thumbnails(&self.read_pool, collection_id).await
+    }
+
+    async fn collection_thumbnail_by_id(
+        &self,
+        thumbnail_id: &str,
+    ) -> Result<Option<CollectionThumbnailRecord>, String> {
+        metadata::load_collection_thumbnail_by_id(&self.read_pool, thumbnail_id).await
     }
 }
 

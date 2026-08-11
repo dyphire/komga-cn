@@ -16,9 +16,9 @@ pub(super) struct WebLinkEntry {
 pub(super) enum AuthorsScope {
     All,
     Libraries(Vec<String>),
-    Collection(String),
-    Series(String),
-    ReadList(String),
+    Collections(Vec<String>),
+    Series(Vec<String>),
+    ReadLists(Vec<String>),
 }
 
 #[derive(Clone)]

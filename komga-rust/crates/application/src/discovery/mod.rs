@@ -18,8 +18,8 @@ mod series_metadata_update_tests;
 pub use books::{BookDetailQuery, BookReadlistsQuery, BookSiblingQuery};
 pub use browse::{
     BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService, FacetKind,
-    FacetScope, LatestBooksRequest, PageRequest, SeriesAlphabeticalGroup,
-    SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest,
+    FacetScope, LatestBooksRequest, PageRequest, ReferentialTagsInclude, ReferentialTagsScope,
+    SeriesAlphabeticalGroup, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest,
 };
 pub use browse_engine::{
     AuthorEntry, BookBrowseQuery, BookEvaluationContext, BookPosterRow, BookRow, BookSortMode,

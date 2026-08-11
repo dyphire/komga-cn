@@ -56,7 +56,7 @@ jobs:
           echo "version_next=${{ env.VERSION_NEXT }}" >> "$GITHUB_OUTPUT"
 
   webui_dist:
-    name: Build web UI dist
+    name: Build web UI dists
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version-file: '.nvmrc'
+          node-version-file: 'komga-webui/.nvmrc'
           cache: 'npm'
           cache-dependency-path: komga-webui/package-lock.json
 
@@ -82,6 +82,25 @@ jobs:
         with:
           name: webui-dist
           path: komga-webui/dist/**
+          if-no-files-found: error
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: 'next-ui/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: next-ui/package-lock.json
+
+      - name: Build next UI
+        working-directory: next-ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload next UI dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextui-dist
+          path: next-ui/dist/**
           if-no-files-found: error
 
   binary_release:
@@ -147,10 +166,19 @@ jobs:
           name: webui-dist
           path: komga-webui/dist
 
+      - name: Download next UI dist
+        uses: actions/download-artifact@v8
+        with:
+          name: nextui-dist
+          path: next-ui/dist
+
       - name: Verify cross build inputs
         run: |
           set -euo pipefail
           test -d komga-webui/dist
+          test -f komga-webui/dist/index.html
+          test -d next-ui/dist
+          test -f next-ui/dist/index.html
           test -f komga/src/main/resources/banner.txt
           test -d komga/src/main/resources/embeddedFonts
 

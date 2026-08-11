@@ -188,6 +188,8 @@ pub fn build_router(app: HttpAppState) -> Router {
         .route(
             "/api/v1/libraries/{library_id}",
             get(library_catalog::handlers::library_detail_route)
+                // Deprecated since 1.3.0: use PATCH /api/v1/libraries/{library_id} instead.
+                .put(library_catalog::handlers::library_update_route)
                 .patch(library_catalog::handlers::library_update_route)
                 .delete(library_catalog::handlers::library_delete_route),
         )
@@ -207,24 +209,37 @@ pub fn build_router(app: HttpAppState) -> Router {
             "/api/v1/libraries/{library_id}/empty-trash",
             post(library_catalog::handlers::library_empty_trash_route),
         )
+        // Deprecated since 1.20.0: use GET /api/v2/authors instead.
         .route("/api/v1/authors", get(discovery::facets::authors_deprecated_get))
+        // Deprecated since 1.26.0: use GET /api/v2/authors/names instead.
         .route("/api/v1/authors/names", get(discovery::facets::authors_names))
+        // Deprecated since 1.26.0: use GET /api/v2/authors/roles instead.
         .route("/api/v1/authors/roles", get(discovery::facets::authors_roles))
+        // Deprecated since 1.26.0: use GET /api/v2/genres instead.
         .route("/api/v1/genres", get(discovery::facets::genres))
+        // Deprecated since 1.26.0: use GET /api/v2/tags instead.
         .route("/api/v1/tags", get(discovery::facets::tags))
+        // Deprecated since 1.26.0: use GET /api/v2/tags instead.
         .route("/api/v1/tags/series", get(discovery::facets::series_tags))
+        // Deprecated since 1.26.0: use GET /api/v2/languages instead.
         .route("/api/v1/languages", get(discovery::facets::languages))
+        // Deprecated since 1.26.0: use GET /api/v2/publishers instead.
         .route("/api/v1/publishers", get(discovery::facets::publishers))
+        // Deprecated since 1.26.0: use GET /api/v2/age-ratings instead.
         .route("/api/v1/age-ratings", get(discovery::facets::age_ratings))
+        // Deprecated since 1.26.0: use GET /api/v2/sharing-labels instead.
         .route("/api/v1/sharing-labels", get(discovery::facets::sharing_labels))
+        // Deprecated since 1.19.0: use POST /api/v1/series/list instead.
         .route("/api/v1/series", get(discovery::series::series_deprecated_get))
         .route("/api/v1/series/new", get(discovery::series::series_new))
         .route("/api/v1/series/updated", get(discovery::series::series_updated))
+        // Deprecated since 1.26.0: use GET /api/v2/series/release-years instead.
         .route(
             "/api/v1/series/release-dates",
             get(discovery::facets::series_release_dates),
         )
         .route("/api/v1/series/latest", get(discovery::series::series_latest))
+        // Deprecated since 1.26.0: use GET /api/v2/tags instead.
         .route("/api/v1/tags/book", get(discovery::books::book_tags))
         .route("/api/v1/series/{series_id}", get(discovery::detail::series_detail))
         .route("/api/v1/series/{series_id}/", get(discovery::detail::series_detail))
@@ -232,6 +247,7 @@ pub fn build_router(app: HttpAppState) -> Router {
             "/api/v1/series/{series_id}/collections",
             get(discovery::detail::series_collections),
         )
+        // Deprecated since 1.19.0: use POST /api/v1/books/list instead.
         .route(
             "/api/v1/series/{series_id}/books",
             get(discovery::books::series_books_deprecated),
@@ -274,10 +290,16 @@ pub fn build_router(app: HttpAppState) -> Router {
             get(media_assets::handlers::series_file).delete(media_assets::handlers::series_file_delete),
         )
         .route("/api/v1/series/list", post(discovery::series::series_list))
+        // Deprecated since 1.19.0: use POST /api/v1/series/list/alphabetical-groups instead.
+        .route(
+            "/api/v1/series/alphabetical-groups",
+            get(discovery::series::series_alphabetical_groups_deprecated_get),
+        )
         .route(
             "/api/v1/series/list/alphabetical-groups",
             post(discovery::series::series_alphabetical_groups),
         )
+        // Deprecated since 1.19.0: use POST /api/v1/books/list instead.
         .route("/api/v1/books", get(discovery::books::books_deprecated_get))
         .route("/api/v1/books/list", post(discovery::books::books_list))
         .route("/api/v1/books/latest", get(discovery::books::books_latest))
@@ -519,6 +541,27 @@ pub fn build_router(app: HttpAppState) -> Router {
             patch(identity_access::content_auth::users_by_id_password_route),
         )
         .route("/api/v2/authors", get(discovery::facets::authors_v2))
+        .route(
+            "/api/v2/authors/names",
+            get(discovery::facets::authors_names_v2),
+        )
+        .route(
+            "/api/v2/authors/roles",
+            get(discovery::facets::authors_roles_v2),
+        )
+        .route("/api/v2/genres", get(discovery::facets::genres_v2))
+        .route(
+            "/api/v2/sharing-labels",
+            get(discovery::facets::sharing_labels_v2),
+        )
+        .route("/api/v2/languages", get(discovery::facets::languages_v2))
+        .route("/api/v2/publishers", get(discovery::facets::publishers_v2))
+        .route("/api/v2/tags", get(discovery::facets::tags_v2))
+        .route(
+            "/api/v2/series/release-years",
+            get(discovery::facets::series_release_years_v2),
+        )
+        .route("/api/v2/age-ratings", get(discovery::facets::age_ratings_v2))
         .route("/opds/v1.2/catalog", get(opds::opds_v1_catalog_route))
         .route("/opds/v1.2/search", get(opds::opds_v1_search_route))
         .route("/opds/v1.2/ondeck", get(opds::opds_v1_on_deck_route))
@@ -672,6 +715,7 @@ pub fn build_router(app: HttpAppState) -> Router {
         )
         .route("/sse/v1/events", get(operational::sse_events))
         .route("/", get(operational::webui_entrypoint))
+        .route("/next", get(operational::nextui_entrypoint))
         .route("/{*webui_path}", get(operational::webui_asset));
 
     let router = if dev_cors_enabled {

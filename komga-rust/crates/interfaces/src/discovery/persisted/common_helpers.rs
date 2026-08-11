@@ -73,17 +73,17 @@ pub(in crate::discovery) fn filter_rows<T>(
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::discovery::persisted) struct PagePayloadMetadata {
-    pub(in crate::discovery::persisted) page: usize,
-    pub(in crate::discovery::persisted) size: usize,
-    pub(in crate::discovery::persisted) total_elements: usize,
-    pub(in crate::discovery::persisted) total_pages: usize,
-    pub(in crate::discovery::persisted) paged: bool,
-    pub(in crate::discovery::persisted) sorted: bool,
-    pub(in crate::discovery::persisted) offset: usize,
+pub(in crate::discovery) struct PagePayloadMetadata {
+    pub(in crate::discovery) page: usize,
+    pub(in crate::discovery) size: usize,
+    pub(in crate::discovery) total_elements: usize,
+    pub(in crate::discovery) total_pages: usize,
+    pub(in crate::discovery) paged: bool,
+    pub(in crate::discovery) sorted: bool,
+    pub(in crate::discovery) offset: usize,
 }
 
-pub(in crate::discovery::persisted) fn page_payload(
+pub(in crate::discovery) fn page_payload(
     content: Vec<Value>,
     metadata: PagePayloadMetadata,
 ) -> Value {

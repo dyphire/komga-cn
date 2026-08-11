@@ -73,6 +73,239 @@ async fn router_referential_facets_support_repeated_library_id() {
 }
 
 #[tokio::test]
+async fn router_referential_v2_exposes_paged_scalar_facets() {
+    let ctx = TestFixture::builder("router-referential-v2-scalar-facets")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    let cases = [
+        ("/api/v2/genres?unpaged=true", json!(["Drama", "SciFi"])),
+        (
+            "/api/v2/sharing-labels?unpaged=true",
+            json!(["Family", "Friends"]),
+        ),
+        ("/api/v2/languages?unpaged=true", json!(["EN", "FR"])),
+        (
+            "/api/v2/publishers?unpaged=true",
+            json!(["OtherPub", "PubHouse"]),
+        ),
+        (
+            "/api/v2/tags?unpaged=true",
+            json!([
+                "Favorite",
+                "favorite-tag",
+                "other-book-tag",
+                "other-series-tag"
+            ]),
+        ),
+        (
+            "/api/v2/series/release-years?unpaged=true",
+            json!(["2025", "2024"]),
+        ),
+        ("/api/v2/age-ratings?unpaged=true", json!([12, 16])),
+    ];
+
+    for (route, expected_content) in cases {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("referential v2 request should build"),
+            )
+            .await
+            .expect("referential v2 request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        assert_eq!(
+            payload.get("content"),
+            Some(&expected_content),
+            "route: {route}"
+        );
+        assert_eq!(payload.get("number"), Some(&json!(0)), "route: {route}");
+        let expected_total = json!(expected_content.as_array().map_or(0, Vec::len));
+        assert_eq!(
+            payload.get("totalElements"),
+            Some(&expected_total),
+            "route: {route}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn router_referential_v2_tags_support_include_and_entity_scopes() {
+    let ctx = TestFixture::builder("router-referential-v2-tags-scopes")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    let cases = [
+        (
+            "/api/v2/tags?include=BOOK&series_id=series-1&unpaged=true",
+            json!(["favorite-tag"]),
+        ),
+        (
+            "/api/v2/tags?include=SERIES&library_id=library-1&unpaged=true",
+            json!(["Favorite"]),
+        ),
+        (
+            "/api/v2/tags?include=BOTH&series_id=series-1&series_id=series-2&unpaged=true",
+            json!([
+                "Favorite",
+                "favorite-tag",
+                "other-book-tag",
+                "other-series-tag"
+            ]),
+        ),
+        (
+            "/api/v2/tags?include=BOOK&readlist_id=readlist-1&unpaged=true",
+            json!(["favorite-tag"]),
+        ),
+    ];
+
+    for (route, expected_content) in cases {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("referential v2 tags request should build"),
+            )
+            .await
+            .expect("referential v2 tags request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        assert_eq!(
+            payload.get("content"),
+            Some(&expected_content),
+            "route: {route}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn router_referential_v2_supports_repeated_collection_and_author_scope_ids() {
+    let ctx = TestFixture::builder("router-referential-v2-repeated-entity-scopes")
+        .with_seed(|paths| async move {
+            seed_facet_scope_variants(&paths).await;
+            let pool = connect_test_pool(paths.main_db.as_path(), 1)
+                .await
+                .expect("referential repeated scopes db should open");
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind("collection-2")
+            .bind("Collection 2")
+            .bind(false)
+            .bind(1_i64)
+            .execute(&pool)
+            .await
+            .expect("secondary collection should be inserted");
+            sqlx::query(
+                "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
+            )
+            .bind("collection-2")
+            .bind("series-2")
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("secondary collection series should be inserted");
+            sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+                .bind("book-2")
+                .bind("Other Writer")
+                .bind("writer")
+                .execute(&pool)
+                .await
+                .expect("secondary author should be inserted");
+            pool.close().await;
+        })
+        .build()
+        .await;
+    let auth_token = ctx.login_admin().await;
+
+    for (route, expected_content) in [
+        (
+            "/api/v2/genres?collection_id=collection-1&collection_id=collection-2&unpaged=true",
+            json!(["Drama", "SciFi"]),
+        ),
+        (
+            "/api/v2/authors/names?series_id=series-1&series_id=series-2&unpaged=true",
+            json!(["Jane Writer", "Other Writer"]),
+        ),
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("repeated referential scope request should build"),
+            )
+            .await
+            .expect("repeated referential scope request should complete");
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        assert_eq!(
+            response_json(response).await.get("content"),
+            Some(&expected_content),
+            "route: {route}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn router_referential_v2_exposes_paged_author_names_and_roles() {
+    let ctx = TestFixture::new("router-referential-v2-author-values").await;
+    let auth_token = ctx.login_admin().await;
+
+    for (route, expected_content) in [
+        ("/api/v2/authors/names?unpaged=true", json!(["Jane Writer"])),
+        ("/api/v2/authors/roles?unpaged=true", json!(["writer"])),
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("referential v2 author values request should build"),
+            )
+            .await
+            .expect("referential v2 author values request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let payload = response_json(response).await;
+        assert_eq!(
+            payload.get("content"),
+            Some(&expected_content),
+            "route: {route}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn router_referential_and_tag_facets_accept_basic_auth_like_kotlin_clients() {
     let ctx = TestFixture::builder("router-referential-facets-basic-auth-compat")
         .with_seed(|paths| async move {

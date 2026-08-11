@@ -7,6 +7,7 @@ pub fn configure_interfaces_build(manifest_dir: &Path, fallback_version: &str) {
     emit_version_env(fallback_version);
 
     let webui_dist_dir = manifest_dir.join("../../../komga-webui/dist");
+    let nextui_dist_dir = manifest_dir.join("../../../next-ui/dist");
 
     println!("cargo:rustc-check-cfg=cfg(webui_dist_present)");
     println!(
@@ -17,5 +18,15 @@ pub fn configure_interfaces_build(manifest_dir: &Path, fallback_version: &str) {
 
     if webui_dist_dir.is_dir() {
         println!("cargo:rustc-cfg=webui_dist_present");
+    }
+
+    println!("cargo:rustc-check-cfg=cfg(nextui_dist_present)");
+    println!(
+        "cargo:rustc-env=KOMGA_NEXTUI_DIST_DIR={}",
+        nextui_dist_dir.display()
+    );
+    println!("cargo:rerun-if-changed={}", nextui_dist_dir.display());
+    if nextui_dist_dir.is_dir() {
+        println!("cargo:rustc-cfg=nextui_dist_present");
     }
 }

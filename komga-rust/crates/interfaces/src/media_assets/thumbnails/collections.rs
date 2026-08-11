@@ -131,21 +131,19 @@ pub(crate) async fn collection_thumbnail_by_id(
 
     match app
         .thumbnail_reader
-        .collection_thumbnails(&collection_id)
+        .collection_thumbnail_by_id(&thumbnail_id)
         .await
     {
-        Ok(rows) => {
-            if let Some(thumbnail) = rows.into_iter().find(|row| row.id == thumbnail_id) {
-                asset_ok_response(
-                    thumbnail.media_type.as_str(),
-                    thumbnail.thumbnail,
-                    None,
-                    None,
-                )
-            } else {
-                StatusCode::NOT_FOUND.into_response()
-            }
+        Ok(Some(thumbnail)) if thumbnail.collection_id != collection_id => {
+            StatusCode::BAD_REQUEST.into_response()
         }
+        Ok(Some(thumbnail)) => asset_ok_response(
+            thumbnail.media_type.as_str(),
+            thumbnail.thumbnail,
+            None,
+            None,
+        ),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -204,6 +202,18 @@ pub(crate) async fn collection_thumbnail_select(
         return response;
     }
 
+    match app
+        .thumbnail_reader
+        .collection_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.collection_id != collection_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(_) => {}
+        Err(error) => return internal_error_response(error),
+    }
+
     match app.thumbnails.select_collection(&thumbnail_id).await {
         Ok(_) => StatusCode::ACCEPTED.into_response(),
         Err(error) => internal_error_response(error),
@@ -215,6 +225,21 @@ pub(crate) async fn collection_thumbnail_delete(
     _: Admin,
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
+    if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
+        return response;
+    }
+    match app
+        .thumbnail_reader
+        .collection_thumbnail_by_id(&thumbnail_id)
+        .await
+    {
+        Ok(Some(thumbnail)) if thumbnail.collection_id != collection_id => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error_response(error),
+    }
     match app
         .thumbnails
         .delete_collection(&collection_id, &thumbnail_id)

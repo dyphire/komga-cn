@@ -1,6 +1,7 @@
 mod actuator;
 mod cors;
 mod helpers;
+mod nextui_assets;
 mod settings;
 mod sse;
 mod webui;
@@ -23,4 +24,4 @@ pub(super) use settings::{
     update_server_settings,
 };
 pub(super) use sse::{register_session_expired_event, sse_events};
-pub(super) use webui::{webui_asset, webui_entrypoint};
+pub(super) use webui::{nextui_entrypoint, webui_asset, webui_entrypoint};
