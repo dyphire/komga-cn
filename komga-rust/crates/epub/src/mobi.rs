@@ -588,13 +588,12 @@ fn mobi_page_title(
     {
         return title.clone();
     }
-    if page_count == 1 {
-        if let Some(title) = fallback_titles
+    if page_count == 1
+        && let Some(title) = fallback_titles
             .first()
             .filter(|title| !title.trim().is_empty())
-        {
-            return title.clone();
-        }
+    {
+        return title.clone();
     }
     format!("Page {}", index + 1)
 }

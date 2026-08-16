@@ -168,13 +168,23 @@ pub(super) fn create_scannable_library_root(config_dir: &Path) -> anyhow::Result
 
     fs::create_dir_all(&series_dir)?;
     write_scannable_cbz_fixture(&series_dir.join("Book-001.cbz"), b"default-page")?;
-    fs::write(series_dir.join("Book-001.xml"), b"<ComicInfo></ComicInfo>")?;
-    fs::write(series_dir.join("ComicInfo.xml"), b"<ComicInfo></ComicInfo>")?;
+    fs::write(
+        series_dir.join("series.json"),
+        include_str!("../../sample/mylar/series.json"),
+    )?;
 
     Ok(root)
 }
 
 pub(super) fn write_scannable_cbz_fixture(path: &Path, page_marker: &[u8]) -> anyhow::Result<i64> {
+    write_scannable_cbz_fixture_with_comicinfo(path, page_marker, None)
+}
+
+pub(super) fn write_scannable_cbz_fixture_with_comicinfo(
+    path: &Path,
+    page_marker: &[u8],
+    comicinfo: Option<&[u8]>,
+) -> anyhow::Result<i64> {
     let file = File::create(path)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default()
@@ -184,6 +194,10 @@ pub(super) fn write_scannable_cbz_fixture(path: &Path, page_marker: &[u8]) -> an
 
     zip.start_file("page-1.png", options)?;
     zip.write_all(&page_bytes)?;
+    if let Some(comicinfo) = comicinfo {
+        zip.start_file("ComicInfo.xml", options)?;
+        zip.write_all(comicinfo)?;
+    }
     zip.finish()?;
 
     Ok(i64::try_from(page_bytes.len()).expect("fixture page size should fit into i64"))

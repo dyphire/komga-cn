@@ -1,5 +1,18 @@
 use super::*;
 
+const COMICINFO_ONLY_EPUB_PACKAGE: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">book-1</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="main" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="main"/>
+  </spine>
+</package>"##;
+
 pub(in super::super) fn write_router_epub_with_package_document(
     paths: &RuntimeDbPaths,
     relative_book_path: &str,
@@ -10,6 +23,19 @@ pub(in super::super) fn write_router_epub_with_package_document(
         relative_book_path,
         package_document,
         &[],
+    );
+}
+
+pub(in super::super) fn write_router_epub_with_comicinfo(
+    paths: &RuntimeDbPaths,
+    relative_book_path: &str,
+    comicinfo: &[u8],
+) {
+    write_router_epub_with_package_document_and_entries(
+        paths,
+        relative_book_path,
+        COMICINFO_ONLY_EPUB_PACKAGE,
+        &[("ComicInfo.xml", comicinfo)],
     );
 }
 

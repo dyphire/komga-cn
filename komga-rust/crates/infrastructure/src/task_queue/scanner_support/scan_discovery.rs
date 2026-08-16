@@ -207,10 +207,7 @@ pub(super) fn build_sidecars(
             }
         }
 
-        if include_series_sidecars
-            && (file_name.eq_ignore_ascii_case("ComicInfo.xml")
-                || file_name.eq_ignore_ascii_case("series.json"))
-        {
+        if include_series_sidecars && file_name.eq_ignore_ascii_case("series.json") {
             sidecars.push(ScannedSidecarRow {
                 url: path.to_string_lossy().to_string(),
                 parent_url: series_url.to_string(),
@@ -222,18 +219,6 @@ pub(super) fn build_sidecars(
         }
 
         for book in books {
-            let expected = format!("{}.xml", book.book_name);
-            if file_name.eq_ignore_ascii_case(&expected) {
-                sidecars.push(ScannedSidecarRow {
-                    url: path.to_string_lossy().to_string(),
-                    parent_url: book.book_url.clone(),
-                    last_modified_unix_seconds: metadata_updated_unix_seconds(metadata, path)?,
-                    source: ScannedSidecarSource::Book,
-                    sidecar_type: ScannedSidecarType::Metadata,
-                });
-                continue 'candidate;
-            }
-
             if is_image && is_book_artwork_sidecar(file_stem, &book.book_name) {
                 sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),

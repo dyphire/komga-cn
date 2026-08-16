@@ -1,9 +1,14 @@
 mod book_metadata;
+mod comicinfo;
 mod read_progress;
 mod refresh;
 mod thumbnails;
 
 pub use book_metadata::SqliteBookMetadataPort;
+pub(crate) use comicinfo::{
+    ComicInfoDocument, load_comicinfo_bytes_for_media, load_comicinfo_bytes_from_path,
+    parse_comicinfo_xml,
+};
 pub(crate) use read_progress::{
     delete_persisted_read_progress, load_book_page_count, load_book_progression,
     load_book_read_progress_completed, persist_book_progression, persist_read_progress,

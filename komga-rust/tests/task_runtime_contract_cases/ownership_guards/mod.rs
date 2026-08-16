@@ -21,40 +21,19 @@ mod empty_trash;
 mod main_db_guards;
 
 use metadata_refresh::{
-    write_router_cbz_with_single_page, write_router_epub_with_package_document,
-    write_router_epub_with_package_document_and_entries,
+    write_router_cbz_with_single_page, write_router_epub_with_comicinfo,
+    write_router_epub_with_package_document, write_router_epub_with_package_document_and_entries,
 };
-
-const METADATA_REFRESH_EMPTY_EPUB_PACKAGE: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
-<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="bookid">book-1</dc:identifier>
-  </metadata>
-  <manifest>
-    <item id="main" href="chapter.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine>
-    <itemref idref="main"/>
-  </spine>
-</package>"##;
 
 #[tokio::test]
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
     let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-task").await;
 
-    write_router_epub_with_package_document(
+    write_router_epub_with_comicinfo(
         ctx.paths(),
         "books/book-1.epub",
-        METADATA_REFRESH_EMPTY_EPUB_PACKAGE,
-    );
-
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    std::fs::write(
-        sidecar_dir.join("book-1.xml"),
         br#"<ComicInfo><Title>Kotlin Refresh Title</Title><Summary>Kotlin Refresh Summary</Summary></ComicInfo>"#,
-    )
-    .expect("book metadata sidecar fixture should be written");
+    );
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -66,16 +45,6 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
         .expect(
             "existing book metadata sidecars should be cleared before Kotlin persisted task test",
         );
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/book-1.xml")
-    .bind("books/book-1.epub")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("book metadata sidecar row should be inserted for Kotlin persisted task test");
     pool.close().await;
 
     let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
@@ -268,19 +237,11 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
 async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_default_capabilities() {
     let ctx = TestFixture::new("runtime-executes-kotlin-refresh-book-metadata-defaults").await;
 
-    write_router_epub_with_package_document(
+    write_router_epub_with_comicinfo(
         ctx.paths(),
         "books/book-1.epub",
-        METADATA_REFRESH_EMPTY_EPUB_PACKAGE,
-    );
-
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    std::fs::write(
-        sidecar_dir.join("book-1.xml"),
         br#"<ComicInfo><Title>Kotlin Default Title</Title><Summary>Kotlin Default Summary</Summary></ComicInfo>"#,
-    )
-    .expect("book metadata sidecar fixture should be written for default capability restore");
+    );
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -292,16 +253,6 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
         .expect(
             "existing book metadata sidecars should be cleared before default-capability task test",
         );
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/book-1.xml")
-    .bind("books/book-1.epub")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("book metadata sidecar row should be inserted for default-capability task test");
     pool.close().await;
 
     let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)

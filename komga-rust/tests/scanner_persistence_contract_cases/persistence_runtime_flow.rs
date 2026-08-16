@@ -46,8 +46,8 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         "scanner contract requires scanned archive file names to persist in MEDIA_FILE",
     );
     assert!(
-        snapshot.sidecar_rows >= 2,
-        "scanner contract requires series/book sidecars to persist in SIDECAR with Kotlin-compatible shape",
+        snapshot.sidecar_rows >= 1,
+        "scanner contract requires recognized series sidecars to persist in SIDECAR with Kotlin-compatible shape",
     );
 
     let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
@@ -64,24 +64,12 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
     let expected_series_sidecar = fixture
         .library_root
         .join("Series-A")
-        .join("ComicInfo.xml")
-        .to_string_lossy()
-        .to_string();
-    let expected_book_sidecar = fixture
-        .library_root
-        .join("Series-A")
-        .join("Book-001.xml")
+        .join("series.json")
         .to_string_lossy()
         .to_string();
     let expected_series_parent = fixture
         .library_root
         .join("Series-A")
-        .to_string_lossy()
-        .to_string();
-    let expected_book_parent = fixture
-        .library_root
-        .join("Series-A")
-        .join("Book-001.cbz")
         .to_string_lossy()
         .to_string();
     let sidecar_pairs = persisted_sidecars
@@ -96,11 +84,8 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
 
     assert_eq!(
         sidecar_pairs,
-        vec![
-            (expected_book_sidecar, expected_book_parent),
-            (expected_series_sidecar, expected_series_parent),
-        ],
-        "scanner contract requires the seeded book and series ComicInfo sidecars to persist with Kotlin-compatible URL and parent linkage",
+        vec![(expected_series_sidecar, expected_series_parent)],
+        "scanner contract requires the seeded series metadata sidecar to persist with Kotlin-compatible URL and parent linkage",
     );
 
     fixture.cleanup();
@@ -227,7 +212,7 @@ async fn scanner_persisted_rows_remain_visible_after_runtime_rebuild() {
     assert!(
         before_restart.series_rows >= 1
             && before_restart.book_rows >= 1
-            && before_restart.sidecar_rows >= 2,
+            && before_restart.sidecar_rows >= 1,
         "restart contract requires scanner-derived rows to exist before runtime rebuild; memory-only scanner state is invalid",
     );
     assert_eq!(

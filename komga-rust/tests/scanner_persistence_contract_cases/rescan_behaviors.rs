@@ -431,11 +431,12 @@ async fn scanner_rescan_reapplies_provider_numbering_after_kotlin_like_resort() 
         .await
         .expect("scanner rescan provider-numbering fixture should be created");
 
-    fs::write(
-        fixture.library_root.join("Series-A").join("Book-001.xml"),
-        br#"<ComicInfo><Number>7</Number></ComicInfo>"#,
+    write_scannable_cbz_fixture_with_comicinfo(
+        &fixture.library_root.join("Series-A").join("Book-001.cbz"),
+        b"default-page-with-provider-number",
+        Some(br#"<ComicInfo><Number>7</Number></ComicInfo>"#),
     )
-    .expect("book sidecar with provider number should be written for rescan fixture");
+    .expect("embedded ComicInfo with provider number should be written for rescan fixture");
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
@@ -729,8 +730,8 @@ async fn scanner_rescan_soft_deletes_missing_series_and_deletes_stale_sidecar_ro
 
     let initial_snapshot = load_persistence_snapshot(&fixture.paths.main_db, "library-1").await;
     assert_eq!(
-        initial_snapshot.sidecar_rows, 2,
-        "fixture sanity: initial scan should persist both seeded sidecar rows before removal",
+        initial_snapshot.sidecar_rows, 1,
+        "fixture sanity: initial scan should persist the seeded series sidecar before removal",
     );
 
     fs::remove_dir_all(&series_dir)

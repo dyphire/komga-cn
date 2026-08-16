@@ -1155,7 +1155,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("open transient metadata archive"),
+                .contains("failed to open ComicInfo archive"),
             "unexpected metadata source error: {error}"
         );
 

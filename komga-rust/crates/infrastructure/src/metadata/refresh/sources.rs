@@ -1,43 +1,50 @@
 use serde::Deserialize;
-use std::io::ErrorKind;
 use std::path::Path;
 use url::Url;
 
 use komga_application::discovery::SeriesReadingDirection;
 use komga_application::media_assets::{BookMetadataAuthor, BookMetadataLink};
 
+use crate::metadata::ComicInfoDocument;
+
 use super::readlist::ComicInfoReadListEntry;
 use super::support::{
     canonicalize_string_set, compute_series_from_series_and_volume, dedupe_strings_preserve_order,
-    extract_xml_tag, is_valid_calendar_date, normalize_comicinfo_age_rating, normalize_isbn13,
+    is_valid_calendar_date, normalize_comicinfo_age_rating, normalize_isbn13,
     normalize_optional_bcp47_language, split_comicinfo_list,
 };
 use super::{BookMetadataImportPatch, SeriesMetadataImportPatch};
 
-pub(super) fn extract_comicinfo_book_patch(xml: &str) -> BookMetadataImportPatch {
-    let number = extract_xml_tag(xml, "Number");
+pub(super) fn extract_comicinfo_book_patch(
+    document: &ComicInfoDocument,
+) -> BookMetadataImportPatch {
+    let number = document.number.clone();
 
     BookMetadataImportPatch {
-        title: extract_xml_tag(xml, "Title"),
-        summary: extract_xml_tag(xml, "Summary"),
+        title: document.title.clone(),
+        summary: document.summary.clone(),
         number_sort: number
             .as_deref()
             .and_then(|value| value.parse::<f64>().ok()),
         number,
-        release_date: extract_comicinfo_release_date(xml),
-        authors: extract_comicinfo_authors(xml),
-        tags: extract_comicinfo_tags(xml),
-        isbn: extract_comicinfo_isbn(xml),
-        links: extract_comicinfo_links(xml),
+        release_date: extract_comicinfo_release_date(document),
+        authors: extract_comicinfo_authors(document),
+        tags: extract_comicinfo_tags(document),
+        isbn: extract_comicinfo_isbn(document),
+        links: extract_comicinfo_links(document),
     }
 }
 
-fn extract_comicinfo_release_date(xml: &str) -> Option<String> {
-    let year = extract_xml_tag(xml, "Year")?.parse::<i32>().ok()?;
-    let month = extract_xml_tag(xml, "Month")
+fn extract_comicinfo_release_date(document: &ComicInfoDocument) -> Option<String> {
+    let year = document.year.as_deref()?.parse::<i32>().ok()?;
+    let month = document
+        .month
+        .as_deref()
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(1);
-    let day = extract_xml_tag(xml, "Day")
+    let day = document
+        .day
+        .as_deref()
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(1);
     if !is_valid_calendar_date(year, month, day) {
@@ -47,20 +54,20 @@ fn extract_comicinfo_release_date(xml: &str) -> Option<String> {
     Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
-fn extract_comicinfo_authors(xml: &str) -> Option<Vec<BookMetadataAuthor>> {
+fn extract_comicinfo_authors(document: &ComicInfoDocument) -> Option<Vec<BookMetadataAuthor>> {
     let mut authors = Vec::new();
 
-    for (tag, role) in [
-        ("Writer", "writer"),
-        ("Penciller", "penciller"),
-        ("Inker", "inker"),
-        ("Colorist", "colorist"),
-        ("Letterer", "letterer"),
-        ("CoverArtist", "cover"),
-        ("Editor", "editor"),
-        ("Translator", "translator"),
+    for (value, role) in [
+        (document.writer.as_deref(), "writer"),
+        (document.penciller.as_deref(), "penciller"),
+        (document.inker.as_deref(), "inker"),
+        (document.colorist.as_deref(), "colorist"),
+        (document.letterer.as_deref(), "letterer"),
+        (document.cover_artist.as_deref(), "cover"),
+        (document.editor.as_deref(), "editor"),
+        (document.translator.as_deref(), "translator"),
     ] {
-        if let Some(value) = extract_xml_tag(xml, tag) {
+        if let Some(value) = value {
             authors.extend(
                 value
                     .split(',')
@@ -77,8 +84,10 @@ fn extract_comicinfo_authors(xml: &str) -> Option<Vec<BookMetadataAuthor>> {
     (!authors.is_empty()).then_some(authors)
 }
 
-fn extract_comicinfo_tags(xml: &str) -> Option<Vec<String>> {
-    let mut tags = extract_xml_tag(xml, "Tags")?
+fn extract_comicinfo_tags(document: &ComicInfoDocument) -> Option<Vec<String>> {
+    let mut tags = document
+        .tags
+        .as_deref()?
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -90,12 +99,14 @@ fn extract_comicinfo_tags(xml: &str) -> Option<Vec<String>> {
     (!tags.is_empty()).then_some(tags)
 }
 
-fn extract_comicinfo_isbn(xml: &str) -> Option<String> {
-    normalize_isbn13(&extract_xml_tag(xml, "GTIN")?)
+fn extract_comicinfo_isbn(document: &ComicInfoDocument) -> Option<String> {
+    normalize_isbn13(document.gtin.as_deref()?)
 }
 
-fn extract_comicinfo_links(xml: &str) -> Option<Vec<BookMetadataLink>> {
-    let links = extract_xml_tag(xml, "Web")?
+fn extract_comicinfo_links(document: &ComicInfoDocument) -> Option<Vec<BookMetadataLink>> {
+    let links = document
+        .web
+        .as_deref()?
         .split(' ')
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -114,24 +125,31 @@ fn extract_comicinfo_links(xml: &str) -> Option<Vec<BookMetadataLink>> {
     (!links.is_empty()).then_some(links)
 }
 
-pub(super) fn extract_comicinfo_readlists(xml: &str) -> Vec<ComicInfoReadListEntry> {
+pub(super) fn extract_comicinfo_readlists(
+    document: &ComicInfoDocument,
+) -> Vec<ComicInfoReadListEntry> {
     let mut readlists = Vec::new();
 
-    if let Some(alternate_series) = extract_xml_tag(xml, "AlternateSeries") {
+    if let Some(alternate_series) = document.alternate_series.clone() {
         readlists.push(ComicInfoReadListEntry {
-            number: extract_xml_tag(xml, "AlternateNumber").and_then(|value| value.parse().ok()),
+            number: document
+                .alternate_number
+                .as_deref()
+                .and_then(|value| value.parse().ok()),
             name: alternate_series,
         });
     }
 
-    if let Some(story_arc) = extract_xml_tag(xml, "StoryArc") {
+    if let Some(story_arc) = document.story_arc.as_deref() {
         let arcs = story_arc
             .split(',')
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .collect::<Vec<_>>();
-        let numbers = extract_xml_tag(xml, "StoryArcNumber")
+        let numbers = document
+            .story_arc_number
+            .clone()
             .map(|numbers| {
                 numbers
                     .split(',')
@@ -167,18 +185,30 @@ struct MylarSeriesFile {
 
 #[derive(Deserialize)]
 struct MylarSeriesMetadata {
+    #[serde(rename = "type")]
+    _type: String,
     publisher: String,
+    #[serde(rename = "imprint")]
+    _imprint: Option<String>,
     name: String,
+    #[serde(rename = "comicid", alias = "cid")]
+    _comicid: serde_json::Value,
     year: i64,
     #[serde(rename = "description_text")]
     description_text: Option<String>,
     #[serde(rename = "description_formatted")]
     description_formatted: Option<String>,
     volume: Option<i64>,
+    #[serde(rename = "booktype")]
+    _book_type: String,
     #[serde(rename = "age_rating")]
     age_rating: Option<MylarAgeRating>,
+    #[serde(rename = "comic_image", alias = "ComicImage")]
+    _comic_image: String,
     #[serde(rename = "total_issues")]
     total_issues: i64,
+    #[serde(rename = "publication_run")]
+    _publication_run: String,
     status: MylarStatus,
 }
 
@@ -219,24 +249,13 @@ pub(super) fn load_mylar_series_patch(
     series_dir: &Path,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
     let series_json_path = series_dir.join("series.json");
-    let json = match std::fs::read_to_string(&series_json_path) {
-        Ok(json) => json,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(anyhow::anyhow!(format!(
-                "failed to read Mylar series.json '{}': {error}",
-                series_json_path.display()
-            )));
-        }
+    let Ok(json) = std::fs::read_to_string(&series_json_path) else {
+        return Ok(None);
     };
-    let metadata = serde_json::from_str::<MylarSeriesFile>(&json)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to parse Mylar series.json '{}': ",
-                series_json_path.display()
-            ))
-        })?
-        .metadata;
+    let Ok(metadata) = serde_json::from_str::<MylarSeriesFile>(&json).map(|file| file.metadata)
+    else {
+        return Ok(None);
+    };
     let title = if metadata.volume.is_none() || metadata.volume == Some(1) {
         metadata.name
     } else {
@@ -265,27 +284,32 @@ pub(super) fn load_mylar_series_patch(
 }
 
 pub(super) fn extract_comicinfo_series_patch(
-    xml: &str,
+    document: &ComicInfoDocument,
     append_volume_to_title: bool,
 ) -> SeriesMetadataImportPatch {
     let series = if append_volume_to_title {
         compute_series_from_series_and_volume(
-            extract_xml_tag(xml, "Series"),
-            extract_xml_tag(xml, "Volume").and_then(|value| value.parse::<i64>().ok()),
+            document.series.clone(),
+            document
+                .volume
+                .as_deref()
+                .and_then(|value| value.parse::<i64>().ok()),
         )
     } else {
-        extract_xml_tag(xml, "Series")
+        document.series.clone()
     };
-    let genres = canonicalize_string_set(split_comicinfo_list(extract_xml_tag(xml, "Genre")));
+    let genres = canonicalize_string_set(split_comicinfo_list(document.genre.clone()));
     let collections =
-        dedupe_strings_preserve_order(split_comicinfo_list(extract_xml_tag(xml, "SeriesGroup")));
+        dedupe_strings_preserve_order(split_comicinfo_list(document.series_group.clone()));
 
     SeriesMetadataImportPatch {
         title: series.clone(),
         title_sort: series,
         status: None,
         summary: None,
-        reading_direction: match extract_xml_tag(xml, "Manga")
+        reading_direction: match document
+            .manga
+            .as_deref()
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase()
@@ -295,13 +319,16 @@ pub(super) fn extract_comicinfo_series_patch(
             "yesandrighttoleft" => Some(SeriesReadingDirection::RightToLeft),
             _ => None,
         },
-        publisher: extract_xml_tag(xml, "Publisher"),
-        age_rating: extract_xml_tag(xml, "AgeRating")
+        publisher: document.publisher.clone(),
+        age_rating: document
+            .age_rating
             .as_deref()
             .and_then(normalize_comicinfo_age_rating),
-        language: normalize_optional_bcp47_language(extract_xml_tag(xml, "LanguageISO")),
+        language: normalize_optional_bcp47_language(document.language_iso.clone()),
         genres: (!genres.is_empty()).then_some(genres),
-        total_book_count: extract_xml_tag(xml, "Count")
+        total_book_count: document
+            .count
+            .as_deref()
             .and_then(|value| value.parse::<i64>().ok())
             .and_then(|value| u32::try_from(value).ok()),
         collections,

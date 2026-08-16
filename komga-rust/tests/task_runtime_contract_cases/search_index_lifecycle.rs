@@ -419,13 +419,12 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
         "fixture sanity: readlist should not exist in search before ComicInfo import",
     );
 
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    fs::write(
-        sidecar_dir.join("book-1.xml"),
+    write_router_epub_resource(
+        ctx.paths(),
+        "books/book-1.epub",
+        "ComicInfo.xml",
         br#"<ComicInfo><AlternateSeries>Task Runtime Indexed ReadList</AlternateSeries></ComicInfo>"#,
-    )
-    .expect("book metadata sidecar fixture for readlist search sync should be written");
+    );
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -463,16 +462,6 @@ async fn runtime_refresh_book_metadata_upserts_readlist_search_document_after_co
     .execute(&pool)
     .await
     .expect("library ComicInfo import flags should isolate readlist search sync behavior");
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/book-1.xml")
-    .bind("books/book-1.epub")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("book metadata sidecar row should be inserted for readlist search sync test");
     pool.close().await;
 
     scheduler

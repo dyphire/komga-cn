@@ -55,21 +55,6 @@ fn kobo_epub_file_name(file_name: &str) -> String {
     format!("{}.epub", kobo_epub_base(file_name))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{kobo_epub_file_name, kobo_kepub_file_name};
-
-    #[test]
-    fn normalized_mobi_download_uses_an_epub_file_name() {
-        assert_eq!(kobo_epub_file_name("book.mobi"), "book.epub");
-    }
-
-    #[test]
-    fn normalized_mobi_kepub_download_uses_a_kepub_epub_file_name() {
-        assert_eq!(kobo_kepub_file_name("book.mobi"), "book.kepub.epub");
-    }
-}
-
 pub(crate) async fn kobo_book_file_epub(
     State(app): State<IdentityAccessState>,
     Path((auth_token, book_id)): Path<(String, String)>,
@@ -191,4 +176,19 @@ pub(crate) async fn kobo_book_file_epub(
         body,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{kobo_epub_file_name, kobo_kepub_file_name};
+
+    #[test]
+    fn normalized_mobi_download_uses_an_epub_file_name() {
+        assert_eq!(kobo_epub_file_name("book.mobi"), "book.epub");
+    }
+
+    #[test]
+    fn normalized_mobi_kepub_download_uses_a_kepub_epub_file_name() {
+        assert_eq!(kobo_kepub_file_name("book.mobi"), "book.kepub.epub");
+    }
 }

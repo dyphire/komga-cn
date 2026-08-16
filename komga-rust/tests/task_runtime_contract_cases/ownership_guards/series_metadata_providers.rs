@@ -665,25 +665,7 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     }
     std::fs::write(
         &series_json_path,
-        r#"{
-  "metadata": {
-    "type": "comicSeries",
-    "publisher": "Mylar House",
-    "imprint": null,
-    "name": "Mylar Saga",
-    "cid": "123",
-    "year": 2005,
-    "description_text": "Plain summary",
-    "description_formatted": "Formatted summary",
-    "volume": 2,
-    "booktype": "Print",
-    "age_rating": "17+",
-    "comic_image": "cover.jpg",
-    "total_issues": 13,
-    "publication_run": "2005-present",
-    "status": "Continuing"
-  }
-}"#,
+        include_str!("../../../sample/mylar/series.json"),
     )
     .expect("mylar series sidecar fixture should be written");
 
@@ -748,15 +730,21 @@ async fn runtime_refresh_series_metadata_applies_mylar_series_provider() {
     .expect("series metadata row should be queryable after Mylar refresh");
     verify_pool.close().await;
 
-    assert_eq!(metadata.get::<String, _>("TITLE"), "Mylar Saga (2005)");
-    assert_eq!(metadata.get::<String, _>("TITLE_SORT"), "Mylar Saga (2005)");
+    assert_eq!(metadata.get::<String, _>("TITLE"), "American Vampire 1976");
+    assert_eq!(
+        metadata.get::<String, _>("TITLE_SORT"),
+        "American Vampire 1976"
+    );
     assert_eq!(metadata.get::<String, _>("STATUS"), "ONGOING");
-    assert_eq!(metadata.get::<String, _>("SUMMARY"), "Formatted summary");
-    assert_eq!(metadata.get::<String, _>("PUBLISHER"), "Mylar House");
-    assert_eq!(metadata.get::<Option<i64>, _>("AGE_RATING"), Some(17_i64));
+    assert_eq!(
+        metadata.get::<String, _>("SUMMARY"),
+        "Nine issue mini-series, the closing chapter of American Vampire"
+    );
+    assert_eq!(metadata.get::<String, _>("PUBLISHER"), "DC Comics");
+    assert_eq!(metadata.get::<Option<i64>, _>("AGE_RATING"), Some(18_i64));
     assert_eq!(
         metadata.get::<Option<i64>, _>("TOTAL_BOOK_COUNT"),
-        Some(13_i64)
+        Some(9_i64)
     );
 }
 
@@ -771,25 +759,7 @@ async fn runtime_refresh_series_metadata_ignores_mylar_series_json_when_library_
     }
     std::fs::write(
         &series_json_path,
-        r#"{
-  "metadata": {
-    "type": "comicSeries",
-    "publisher": "Blocked Mylar House",
-    "imprint": null,
-    "name": "Blocked Mylar Saga",
-    "cid": "456",
-    "year": 2010,
-    "description_text": "Blocked summary",
-    "description_formatted": "Blocked formatted summary",
-    "volume": 2,
-    "booktype": "Print",
-    "age_rating": "Adult",
-    "comic_image": "cover.jpg",
-    "total_issues": 22,
-    "publication_run": "2010-present",
-    "status": "Ended"
-  }
-}"#,
+        include_str!("../../../sample/mylar/series.json"),
     )
     .expect("disabled Mylar series sidecar fixture should be written");
 

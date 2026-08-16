@@ -187,16 +187,3 @@ pub(super) fn nonblank_string(value: String) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
-
-pub(super) fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = xml.find(&open)? + open.len();
-    let end = xml[start..].find(&close)? + start;
-    let value = xml[start..end].trim();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
-    }
-}

@@ -3,8 +3,8 @@ use super::*;
 mod provider_formats;
 
 pub(super) use provider_formats::{
-    write_router_cbz_with_single_page, write_router_epub_with_package_document,
-    write_router_epub_with_package_document_and_entries,
+    write_router_cbz_with_single_page, write_router_epub_with_comicinfo,
+    write_router_epub_with_package_document, write_router_epub_with_package_document_and_entries,
 };
 
 async fn isolate_book_metadata_imports(
@@ -39,6 +39,97 @@ async fn isolate_book_metadata_imports(
 }
 
 #[tokio::test]
+async fn runtime_refresh_book_metadata_imports_comicinfo_from_embedded_archive() {
+    let ctx = TestFixture::new("runtime-refresh-book-metadata-embedded-comicinfo").await;
+    let archive_path = ctx.paths().config_dir.join("books/ComicInfo.zip");
+    std::fs::create_dir_all(archive_path.parent().expect("archive parent should exist"))
+        .expect("embedded ComicInfo archive parent should be created");
+    std::fs::write(
+        &archive_path,
+        include_bytes!("../../../../sample/ComicInfo.zip"),
+    )
+    .expect("embedded ComicInfo archive fixture should be written");
+
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for embedded ComicInfo fixture setup");
+    sqlx::query("UPDATE BOOK SET NAME = ?, URL = ?, FILE_SIZE = ? WHERE ID = ?")
+        .bind("ComicInfo.zip")
+        .bind("books/ComicInfo.zip")
+        .bind(archive_path.metadata().expect("archive should exist").len() as i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("book path should point at the embedded ComicInfo archive");
+    sqlx::query("UPDATE MEDIA SET MEDIA_TYPE = ?, STATUS = ?, PAGE_COUNT = ? WHERE BOOK_ID = ?")
+        .bind("application/zip")
+        .bind("ERROR")
+        .bind(0_i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("embedded ComicInfo media row should be configured");
+    sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
+        .bind("books/ComicInfo.zip")
+        .execute(&pool)
+        .await
+        .expect("embedded ComicInfo fixture should not have a sidecar");
+    isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
+    pool.close().await;
+
+    let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
+        .await
+        .expect("tasks db should open for embedded ComicInfo task setup");
+    sqlx::query(
+        "INSERT INTO TASK (ID, PRIORITY, GROUP_ID, CLASS, SIMPLE_TYPE, PAYLOAD, OWNER) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+    )
+    .bind("RefreshBookMetadata_book-1")
+    .bind(80_i64)
+    .bind("series-1")
+    .bind("org.gotson.komga.application.tasks.Task$RefreshBookMetadata")
+    .bind("RefreshBookMetadata")
+    .bind(
+        json!({
+            "bookId": "book-1",
+            "capabilities": ["TITLE", "SUMMARY"],
+            "priority": 80,
+            "groupId": "series-1",
+            "uniqueId": "RefreshBookMetadata_book-1"
+        })
+        .to_string(),
+    )
+    .execute(&tasks_pool)
+    .await
+    .expect("embedded ComicInfo metadata task should be inserted");
+    tasks_pool.close().await;
+
+    let runtime = runtime_task_context(ctx.paths()).await;
+    let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
+    scheduler
+        .process_available(&runtime.job())
+        .await
+        .expect("embedded ComicInfo metadata task should process successfully");
+
+    let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for embedded ComicInfo verification");
+    let metadata = sqlx::query("SELECT TITLE, SUMMARY FROM BOOK_METADATA WHERE BOOK_ID = ?")
+        .bind("book-1")
+        .fetch_one(&verify_pool)
+        .await
+        .expect("embedded ComicInfo book metadata should be queryable");
+    verify_pool.close().await;
+
+    assert_eq!(metadata.get::<String, _>("TITLE"), "v01");
+    assert!(
+        metadata
+            .get::<String, _>("SUMMARY")
+            .contains("Ryouta Sakamoto"),
+        "embedded ComicInfo summary should be imported even when media analysis is ERROR"
+    );
+}
+
+#[tokio::test]
 async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_book_fields() {
     for (fixture_name, xml, readlist_name, expected_number) in [
         (
@@ -56,11 +147,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
     ] {
         let ctx = TestFixture::new(fixture_name).await;
 
-        let sidecar_dir = ctx.paths().config_dir.join("books");
-        std::fs::create_dir_all(&sidecar_dir)
-            .expect("book metadata sidecar directory should exist");
-        std::fs::write(sidecar_dir.join("book-1.xml"), xml)
-            .expect("book metadata sidecar fixture with read list should be written");
+        write_router_epub_with_comicinfo(ctx.paths(), "books/book-1.epub", xml);
 
         let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
             .await
@@ -79,16 +166,6 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
             .execute(&pool)
             .await
             .expect("existing readlists should be cleared before readlist-only test");
-        sqlx::query(
-            "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-        )
-        .bind("books/book-1.xml")
-        .bind("books/book-1.epub")
-        .bind(1_i64)
-        .bind("library-1")
-        .execute(&pool)
-        .await
-        .expect("book metadata sidecar row should be inserted for readlist-only test");
         pool.close().await;
 
         let tasks_pool = connect_test_pool(ctx.paths().tasks_db.as_path(), 1)
@@ -165,13 +242,11 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
 async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_requests_it() {
     let ctx = TestFixture::new("runtime-refresh-book-metadata-applies-comicinfo-number").await;
 
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    std::fs::write(
-        sidecar_dir.join("book-1.xml"),
+    write_router_epub_with_comicinfo(
+        ctx.paths(),
+        "books/book-1.epub",
         br#"<ComicInfo><Number>7</Number></ComicInfo>"#,
-    )
-    .expect("book metadata sidecar fixture with number should be written");
+    );
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -181,16 +256,6 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
         .execute(&pool)
         .await
         .expect("existing book metadata sidecars should be cleared before number capability test");
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/book-1.xml")
-    .bind("books/book-1.epub")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("book metadata sidecar row should be inserted for number capability test");
     isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     pool.close().await;
 
@@ -247,13 +312,11 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
     let ctx =
         TestFixture::new("runtime-refresh-book-metadata-applies-remaining-comicinfo-fields").await;
 
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    std::fs::write(
-        sidecar_dir.join("book-1.xml"),
+    write_router_epub_with_comicinfo(
+        ctx.paths(),
+        "books/book-1.epub",
         br#"<ComicInfo><Year>2025</Year><Month>3</Month><Day>4</Day><Writer>Alice Writer, Bob Writer</Writer><Penciller>Cara Pencil</Penciller><Web>https://example.com/series https://komga.org/docs invalid-url</Web><Tags>Sci-Fi, Adventure, sci-fi</Tags><GTIN>9780306406157</GTIN></ComicInfo>"#,
-    )
-    .expect("book metadata sidecar fixture with remaining ComicInfo fields should be written");
+    );
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -265,16 +328,6 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
         .expect(
             "existing book metadata sidecars should be cleared before remaining ComicInfo test",
         );
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/book-1.xml")
-    .bind("books/book-1.epub")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("book metadata sidecar row should be inserted for remaining ComicInfo test");
     isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     sqlx::query(
         "UPDATE BOOK_METADATA SET RELEASE_DATE = ?, RELEASE_DATE_LOCK = 1, ISBN = ?, ISBN_LOCK = 1, AUTHORS_LOCK = 0, TAGS_LOCK = 0, LINKS_LOCK = 0 WHERE BOOK_ID = ?",
@@ -419,32 +472,9 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
     )
     .await;
 
-    let sidecar_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&sidecar_dir).expect("book metadata sidecar directory should exist");
-    std::fs::write(
-        sidecar_dir.join("comicinfo-gate.xml"),
-        br#"<ComicInfo><Tags>Sci-Fi, Mystery</Tags><GTIN>9780306406157</GTIN></ComicInfo>"#,
-    )
-    .expect("ComicInfo ISBN/tags-only sidecar fixture should be written");
-
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
         .expect("main db should open for ComicInfo gate fixture setup");
-    sqlx::query("DELETE FROM SIDECAR WHERE PARENT_URL = ?")
-        .bind("books/comicinfo-gate.cbz")
-        .execute(&pool)
-        .await
-        .expect("existing ComicInfo gate sidecars should be cleared before test");
-    sqlx::query(
-        "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-    )
-    .bind("books/comicinfo-gate.xml")
-    .bind("books/comicinfo-gate.cbz")
-    .bind(1_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("ComicInfo gate sidecar row should be inserted");
     isolate_book_metadata_imports(&pool, 1, 0, 0, 0).await;
     sqlx::query("UPDATE BOOK_METADATA SET ISBN = ?, ISBN_LOCK = 0 WHERE BOOK_ID = ?")
         .bind("")

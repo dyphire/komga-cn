@@ -1,15 +1,13 @@
-use std::fs;
-use std::io::Read;
 use std::path::Path;
 
 use komga_application::media_assets::{
-    BookMediaRecord, book_media_is_epub, book_media_is_zip_archive,
+    BookMediaRecord, book_media_is_epub, book_media_is_rar_archive, book_media_is_zip_archive,
 };
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
-use zip::result::ZipError;
 
 use crate::filesystem::media_access::epub::load_epub_package_document;
+use crate::metadata::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
 use crate::resolve_rooted_path;
 
 use super::SeriesMetadataImportPatch;
@@ -101,62 +99,25 @@ async fn load_series_books_for_refresh(
         .collect())
 }
 
-fn load_archive_entry_bytes(
-    archive_path: &Path,
-    entry_name: &str,
-) -> anyhow::Result<Option<Vec<u8>>> {
-    let file = fs::File::open(archive_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to open ComicInfo archive '{}': ",
-            archive_path.display()
-        ))
-    })?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to read ComicInfo archive '{}': ",
-            archive_path.display()
-        ))
-    })?;
-    let mut entry = match archive.by_name(entry_name) {
-        Ok(entry) => entry,
-        Err(ZipError::FileNotFound) => return Ok(None),
-        Err(error) => {
-            return Err(anyhow::anyhow!(format!(
-                "failed to read ComicInfo archive entry '{entry_name}' from '{}': {error}",
-                archive_path.display()
-            )));
-        }
-    };
-    let mut bytes = Vec::new();
-    entry.read_to_end(&mut bytes).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to read ComicInfo archive entry '{entry_name}' bytes from '{}': ",
-            archive_path.display()
-        ))
-    })?;
-    Ok(Some(bytes))
-}
-
 fn load_comicinfo_series_patch_for_book(
     source: &SeriesBookRefreshSource,
     append_volume_to_title: bool,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
-    if !book_media_is_zip_archive(&source.media) {
+    if !book_media_is_zip_archive(&source.media) && !book_media_is_rar_archive(&source.media) {
         return Ok(None);
     }
 
-    let Some(xml) = load_archive_entry_bytes(source.media.file_path.as_path(), "ComicInfo.xml")?
-    else {
+    let Some(xml) = load_comicinfo_bytes_for_media(&source.media)? else {
         return Ok(None);
     };
-    let xml = String::from_utf8(xml).map_err(|error| {
+    let document = parse_comicinfo_xml(&xml).map_err(|error| {
         anyhow::anyhow!(error).context(format!(
             "failed to decode ComicInfo.xml from '{}': ",
             source.media.file_path.display()
         ))
     })?;
     Ok(Some(extract_comicinfo_series_patch(
-        &xml,
+        &document,
         append_volume_to_title,
     )))
 }
@@ -880,7 +841,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_mylar_series_import_propagates_malformed_series_json_error() {
+    async fn apply_mylar_series_import_ignores_malformed_series_json_like_kotlin() {
         let fixture = BootstrappedBookFixture::open("series-refresh-bad-mylar-json").await;
         let library_root =
             std::env::temp_dir().join(format!("komga-bad-mylar-json-{}", std::process::id()));
@@ -891,7 +852,7 @@ mod tests {
         fixture.insert_library_series().await;
         fixture.insert_series_metadata().await;
 
-        let error = apply_mylar_series_import(
+        apply_mylar_series_import(
             &fixture.pool,
             "series-1",
             library_root.as_path(),
@@ -900,9 +861,7 @@ mod tests {
             false,
         )
         .await
-        .expect_err("malformed Mylar series.json should fail series metadata import");
-
-        assert!(error.to_string().contains("Mylar series.json"), "{error}");
+        .expect("malformed Mylar series.json should be ignored like Kotlin");
         let _ = fs::remove_dir_all(library_root);
         fixture.close().await;
     }

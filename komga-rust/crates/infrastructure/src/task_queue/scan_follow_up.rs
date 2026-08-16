@@ -264,13 +264,13 @@ mod tests {
                 }],
             }],
             sidecars: vec![ScannedSidecarRow {
-                url: "Series One/ComicInfo.xml".to_string(),
+                url: "Series One/series.json".to_string(),
                 parent_url: "Series One".to_string(),
                 last_modified_unix_seconds: 2,
                 source: ScannedSidecarSource::Series,
                 sidecar_type: ScannedSidecarType::Metadata,
             }],
-            changed_sidecar_urls: vec!["Series One/ComicInfo.xml".to_string()],
+            changed_sidecar_urls: vec!["Series One/series.json".to_string()],
             renumbered_book_ids: vec!["book-1".to_string()],
             changed_series_ids: vec!["series-1".to_string()],
             book_metadata_refreshes: vec![BookMetadataRefreshRequest {
