@@ -34,14 +34,16 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter", "json", "time"] }
 anyhow = "1.0.104"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls"] }
+oauth2-reqwest = { package = "reqwest", version = "0.12.28", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
+rustls = { version = "0.23.43", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 regex = "1.13.1"
 rxing = "0.9.2"
 toml = "1.1.4"
 tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["cors", "csrf", "trace"] }
 tower-sessions = "0.15.0"
-oauth2 = "5.0.0"
-openidconnect = "4.0.1"
+oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest"] }
+openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest"] }
 tantivy = "0.26.1"
 tar = "0.4.46"
 zip = "9.0.0-pre3"
@@ -61,7 +63,7 @@ rusqlite = "0.39.0"
 pdfium-render = { version = "0.9.3", features = ["thread_safe"] }
 unrar = "0.5.8"
 unicode-normalization = "0.1.25"
-icu = "2.2.0"
+icu = "2.3.0"
 libc = "0.2.189"
 mimalloc = "0.1.52"
 windows-sys = "0.61.2"

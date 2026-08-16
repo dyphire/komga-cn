@@ -1,10 +1,10 @@
 use oauth2::basic::BasicClient;
-use oauth2::reqwest;
 use oauth2::{
     AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
     EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
     TokenResponse, TokenUrl,
 };
+use oauth2_reqwest as reqwest;
 use openidconnect::core::{
     CoreAuthenticationFlow, CoreClient, CoreJsonWebKeySet, CoreJwsSigningAlgorithm,
     CoreProviderMetadata, CoreResponseType, CoreSubjectIdentifierType,
@@ -570,6 +570,9 @@ fn extract_github_email(payload: &Value) -> Option<String> {
 }
 
 fn http_client() -> Result<reqwest::Client, OAuthLoginError> {
+    // reqwest 0.12 uses the process-level provider with its no-provider feature.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
@@ -617,6 +620,11 @@ mod tests {
             client_authentication_method: None,
             scopes: vec!["user:email".to_string()],
         }
+    }
+
+    #[test]
+    fn http_client_builds() {
+        http_client().expect("OAuth HTTP client should build");
     }
 
     #[tokio::test]

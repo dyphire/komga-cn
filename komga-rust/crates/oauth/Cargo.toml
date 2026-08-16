@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 oauth2.workspace = true
 openidconnect.workspace = true
+oauth2-reqwest.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
