@@ -1,6 +1,5 @@
 use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
-use komga_epub::MOBI_MEDIA_TYPE;
 use sqlx::SqlitePool;
 
 #[derive(Clone, Debug)]
@@ -26,6 +25,7 @@ pub(super) struct AnalyzedBookPage {
 pub(super) struct AnalyzedBookMedia {
     pub(super) status: MediaStatus,
     pub(super) media_type: String,
+    pub(super) page_count: u64,
     pub(super) pages: Vec<AnalyzedBookPage>,
     pub(super) media_files: Vec<AnalyzedBookMediaFile>,
     pub(super) epub_extension_blob: Option<Vec<u8>>,
@@ -174,7 +174,7 @@ pub(super) async fn persist_book_analysis(
     .bind(book_id)
     .bind(analysis.status.persisted_name())
     .bind(&analysis.media_type)
-    .bind(analysis.pages.len() as i32)
+    .bind(analysis.page_count.min(i32::MAX as u64) as i32)
     .execute(&mut *tx)
     .await
     .context("failed to persist MEDIA analyze state")?;
@@ -195,7 +195,7 @@ pub(super) async fn persist_book_analysis(
             anyhow::anyhow!(error)
                 .context(format!("failed to persist EPUB extension for '{book_id}'"))
         })?;
-    } else if analysis.media_type == MOBI_MEDIA_TYPE {
+    } else {
         sqlx::query(
             r#"UPDATE MEDIA
                SET EXTENSION_CLASS = NULL,

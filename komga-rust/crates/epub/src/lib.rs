@@ -11,9 +11,13 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+mod analysis;
 mod navigation;
 mod parse;
 
+pub use analysis::{
+    EpubAnalysis, EpubAnalysisError, EpubAnalysisFile, EpubAnalysisPage, analyze_epub_file,
+};
 pub use navigation::{EpubNavigation, EpubNavigationLink, decode_epub_navigation_extension};
 pub use parse::{
     EpubManifestItem, EpubParseError, EpubSpineItem, normalize_epub_resource_href,

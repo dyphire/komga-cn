@@ -2,7 +2,7 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use komga_domain::discovery::MediaStatus;
-use komga_epub::{MOBI_MEDIA_TYPE, normalize_mobi};
+use komga_epub::{MOBI_MEDIA_TYPE, analyze_epub_file, normalize_mobi};
 use lopdf::{Document as PdfDocument, Object};
 
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entries_bytes};
@@ -84,6 +84,7 @@ pub(crate) struct AnalyzedMediaPage {
 pub(crate) struct MediaFileAnalysis {
     pub(crate) status: MediaStatus,
     pub(crate) media_type: String,
+    pub(crate) page_count: u64,
     pub(crate) pages: Vec<AnalyzedMediaPage>,
     pub(crate) files: Vec<String>,
     pub(crate) media_files: Vec<AnalyzedMediaFile>,
@@ -102,6 +103,7 @@ pub(crate) struct MediaFileAnalyzer;
 
 #[derive(Default)]
 struct AnalyzedMediaFileContents {
+    page_count: u64,
     pages: Vec<AnalyzedMediaPage>,
     files: Vec<String>,
     media_files: Vec<AnalyzedMediaFile>,
@@ -112,6 +114,7 @@ fn empty_media_analysis(status: MediaStatus, media_type: String) -> MediaFileAna
     MediaFileAnalysis {
         status,
         media_type,
+        page_count: 0,
         pages: Vec::new(),
         files: Vec::new(),
         media_files: Vec::new(),
@@ -145,9 +148,10 @@ impl MediaFileAnalyzer {
                 analyze_single_image(file_path)
             }
             "application/zip" => analyze_zip_media_pages(file_path, false, profile),
-            "application/epub+zip" => {
-                analyze_zip_media_pages(file_path, profile.include_epub_resources(), profile)
+            "application/epub+zip" if profile.include_epub_resources() => {
+                analyze_epub_media_pages(file_path, profile)
             }
+            "application/epub+zip" => analyze_zip_media_pages(file_path, false, profile),
             MOBI_MEDIA_TYPE => analyze_mobi_media_pages(file_path),
             "application/vnd.comicbook-rar"
             | "application/x-rar-compressed"
@@ -166,7 +170,8 @@ impl MediaFileAnalyzer {
             }
             Err(error) => return Err(error),
         };
-        let status = if contents.pages.is_empty() {
+        let page_count = contents.page_count.max(contents.pages.len() as u64);
+        let status = if page_count == 0 {
             MediaStatus::Error
         } else {
             MediaStatus::Ready
@@ -174,6 +179,7 @@ impl MediaFileAnalyzer {
         Ok(MediaFileAnalysis {
             status,
             media_type,
+            page_count,
             pages: contents.pages,
             files: contents.files,
             media_files: contents.media_files,
@@ -492,9 +498,85 @@ fn analyze_zip_media_pages(
 
     files.sort();
     Ok(AnalyzedMediaFileContents {
+        page_count: pages.len() as u64,
         pages,
         files,
         ..Default::default()
+    })
+}
+
+fn analyze_epub_media_pages(
+    file_path: &Path,
+    profile: MediaAnalysisProfile,
+) -> anyhow::Result<AnalyzedMediaFileContents> {
+    let analysis = analyze_epub_file(file_path)
+        .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
+    let pages = analysis
+        .pages
+        .into_iter()
+        .map(|page| {
+            let dimensions = if profile.include_dimensions()
+                && page.media_type.starts_with("image/")
+            {
+                Some(
+                    read_epub_image_dimensions(file_path, &page.file_name)?.ok_or_else(|| {
+                        anyhow::anyhow!(format!(
+                            "decode EPUB image dimensions for '{}'",
+                            page.file_name
+                        ))
+                    })?,
+                )
+            } else {
+                None
+            };
+            let dimensions = analyzed_media_page_dimensions(dimensions);
+            Ok(AnalyzedMediaPage {
+                file_name: page.file_name,
+                media_type: page.media_type,
+                width: dimensions.width,
+                height: dimensions.height,
+                file_size: page.file_size,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let media_files = analysis
+        .media_files
+        .into_iter()
+        .map(|file| AnalyzedMediaFile {
+            file_name: file.file_name,
+            media_type: file.media_type,
+            sub_type: file.sub_type,
+            file_size: file.file_size,
+        })
+        .collect();
+
+    Ok(AnalyzedMediaFileContents {
+        page_count: analysis.page_count,
+        pages,
+        files: analysis.files,
+        media_files,
+        epub_extension_blob: Some(analysis.extension_blob),
+    })
+}
+
+fn read_epub_image_dimensions(
+    file_path: &Path,
+    file_name: &str,
+) -> anyhow::Result<Option<MediaDimensions>> {
+    let file = std::fs::File::open(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open EPUB image '{}': ", file_path.display()))
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "open EPUB image archive '{}': ",
+            file_path.display()
+        ))
+    })?;
+    let mut entry = archive.by_name(file_name).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read EPUB image '{file_name}'"))
+    })?;
+    image_dimensions_from_reader(&mut entry).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read EPUB image dimensions '{file_name}'"))
     })
 }
 
@@ -538,7 +620,7 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
             height: None,
             file_size: 0,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     let mut media_files = publication
         .chapters
@@ -577,6 +659,7 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
     ]);
 
     Ok(AnalyzedMediaFileContents {
+        page_count: pages.len() as u64,
         pages,
         files,
         media_files,
@@ -1076,6 +1159,32 @@ mod tests {
                 .any(|file| file.sub_type == "EPUB_PAGE")
         );
         assert!(analysis.epub_extension_blob.is_some());
+    }
+
+    #[test]
+    fn persisted_epub_analysis_keeps_reflowable_content_as_resources() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/epub/The Incomplete Theft - Ralph Burke.epub");
+
+        let analysis = MediaFileAnalyzer
+            .analyze(
+                &fixture_path,
+                MediaAnalysisProfile::PersistedBook {
+                    include_dimensions: false,
+                },
+            )
+            .expect("EPUB fixture analysis should succeed");
+
+        assert_eq!(analysis.status, MediaStatus::Ready);
+        assert!(
+            analysis.pages.is_empty(),
+            "reflowable EPUB content must not be persisted as image pages"
+        );
+        assert_eq!(analysis.page_count, 14);
+        assert!(
+            analysis.epub_extension_blob.is_some(),
+            "EPUB analysis must persist its extension metadata"
+        );
     }
 
     #[test]

@@ -49,6 +49,7 @@ pub(in crate::task_queue) async fn analyze_book(
     let persisted = AnalyzedBookMedia {
         status: analysis.status,
         media_type: analysis.media_type,
+        page_count: analysis.page_count,
         pages: analysis
             .pages
             .into_iter()
@@ -72,7 +73,7 @@ pub(in crate::task_queue) async fn analyze_book(
             .collect(),
         epub_extension_blob: analysis.epub_extension_blob,
     };
-    let current_page_count = persisted.pages.len() as i64;
+    let current_page_count = persisted.page_count.min(i64::MAX as u64) as i64;
 
     persist_book_analysis(runtime.database().write_pool(), &book_id, &persisted)
         .await

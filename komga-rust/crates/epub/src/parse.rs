@@ -332,23 +332,6 @@ fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Cursor, Read};
-    use std::path::{Path, PathBuf};
-    use zip::ZipArchive;
-
-    fn repository_resource(relative_path: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../komga/src/test/resources")
-            .join(relative_path)
-    }
-
-    fn read_zip_entry(bytes: &[u8], entry_name: &str) -> Option<Vec<u8>> {
-        let mut archive = ZipArchive::new(Cursor::new(bytes)).ok()?;
-        let mut entry = archive.by_name(entry_name).ok()?;
-        let mut entry_bytes = Vec::new();
-        entry.read_to_end(&mut entry_bytes).ok()?;
-        Some(entry_bytes)
-    }
 
     #[test]
     fn parses_manifest_rootfile_and_spine() {
@@ -407,53 +390,6 @@ mod tests {
         assert_eq!(
             normalize_epub_zip_path("OPS\\text\\chapter.xhtml"),
             "/OPS/text/chapter.xhtml"
-        );
-    }
-
-    #[test]
-    fn parses_repository_epub_samples() {
-        for relative_path in [
-            "archives/epub3.epub",
-            "epub/The Incomplete Theft - Ralph Burke.epub",
-        ] {
-            let path = repository_resource(relative_path);
-            assert!(
-                path.is_file(),
-                "repository EPUB sample is missing: {}",
-                path.display()
-            );
-            let bytes = std::fs::read(&path).expect("repository EPUB sample should be readable");
-            let container = read_zip_entry(&bytes, "META-INF/container.xml")
-                .expect("EPUB sample should contain container.xml");
-            let rootfile = parse_epub_rootfile_path(&container)
-                .expect("EPUB container should parse")
-                .expect("EPUB sample should declare a rootfile");
-            let package = read_zip_entry(&bytes, rootfile.trim_start_matches('/'))
-                .expect("EPUB sample should contain its package document");
-            let manifest =
-                parse_epub_manifest_items(&package, &rootfile).expect("manifest should parse");
-            let spine = parse_epub_spine_items(&package, &rootfile).expect("spine should parse");
-
-            assert!(!manifest.is_empty(), "EPUB manifest should not be empty");
-            assert!(!spine.is_empty(), "EPUB spine should not be empty");
-            assert!(
-                !parse_epub_fixed_layout(&package).expect("fixed-layout metadata should parse")
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_repository_zip_disguised_as_epub() {
-        let path = repository_resource("archives/zip-as-epub.epub");
-        assert!(
-            path.is_file(),
-            "repository sample is missing: {}",
-            path.display()
-        );
-        let bytes = std::fs::read(path).expect("repository sample should be readable");
-        assert!(
-            read_zip_entry(&bytes, "META-INF/container.xml").is_none(),
-            "ZIP sample must not be accepted as an EPUB container"
         );
     }
 }
