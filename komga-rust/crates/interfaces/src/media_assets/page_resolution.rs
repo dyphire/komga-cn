@@ -1,10 +1,9 @@
 use komga_application::media_assets::{
     BookMediaContentPort, BookMediaReaderPort, BookMediaRecord, BookPageRecord,
+    content_type_from_filename,
 };
 
-use super::media_helpers::{
-    book_media_is_pdf, book_media_is_single_image, content_type_from_filename,
-};
+use super::media_helpers::{book_media_is_pdf, book_media_is_single_image};
 
 async fn render_book_page_thumbnail(
     content: &dyn BookMediaContentPort,

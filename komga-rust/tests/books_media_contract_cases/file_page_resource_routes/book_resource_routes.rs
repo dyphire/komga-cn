@@ -9,6 +9,22 @@ async fn router_book_resource_supports_not_modified_and_inline_content_dispositi
         "OEBPS/chapter.xhtml",
         br#"<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>Hello</p></body></html>"#,
     );
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for resource media type seed");
+    sqlx::query(
+        "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("OEBPS/chapter.xhtml")
+    .bind("book-1")
+    .bind("application/xhtml+xml")
+    .bind("EPUB_PAGE")
+    .bind(82_i64)
+    .execute(&pool)
+    .await
+    .expect("resource media type should be seeded");
+    pool.close().await;
 
     let auth_token = ctx.login_admin().await;
 
@@ -31,6 +47,14 @@ async fn router_book_resource_supports_not_modified_and_inline_content_dispositi
             .expect("resource request should complete");
 
         assert_eq!(initial.status(), StatusCode::OK, "route: {route}");
+        assert_eq!(
+            initial
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/xhtml+xml"),
+            "route: {route}"
+        );
         let last_modified = initial
             .headers()
             .get(header::LAST_MODIFIED)

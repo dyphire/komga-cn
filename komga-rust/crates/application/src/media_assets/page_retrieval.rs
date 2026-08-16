@@ -44,6 +44,17 @@ pub fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> S
         "gif" => "image/gif".to_string(),
         "webp" => "image/webp".to_string(),
         "avif" => "image/avif".to_string(),
+        "html" | "xhtml" => "application/xhtml+xml".to_string(),
+        "css" => "text/css".to_string(),
+        "svg" => "image/svg+xml".to_string(),
+        "xml" => "application/xml".to_string(),
+        "ncx" => "application/x-dtbncx+xml".to_string(),
+        "opf" => "application/oebps-package+xml".to_string(),
+        "woff" => "font/woff".to_string(),
+        "woff2" => "font/woff2".to_string(),
+        "ttf" => "font/ttf".to_string(),
+        "otf" => "font/otf".to_string(),
+        "eot" => "application/vnd.ms-fontobject".to_string(),
         _ => default_mime_type.to_string(),
     }
 }

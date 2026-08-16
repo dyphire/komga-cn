@@ -9,7 +9,7 @@ use super::access_control::{
     user_can_access_book_media, user_can_access_series_media, visible_readlist_book_ids_for_user,
 };
 use super::http_helpers::{attachment_disposition, inline_disposition, internal_error_response};
-use super::media_helpers::{book_media_is_epub, content_type_from_filename};
+use super::media_helpers::book_media_is_epub;
 use super::types::PersistedBookMedia;
 use crate::cache::file_last_modified_header_value;
 use crate::identity_access::auth::{FileDownload, resolved_request_auth_user};
@@ -18,7 +18,7 @@ use crate::media_responses::BookMediaResponses;
 use crate::opds_auth::opds_catalog_unauthorized_response;
 use crate::state::MediaAssetsState;
 use komga_application::media_assets::{
-    ArchiveDelivery, ArchiveDeliveryAsset, ArchiveDeliveryService,
+    ArchiveDelivery, ArchiveDeliveryAsset, ArchiveDeliveryService, content_type_from_filename,
 };
 
 pub(crate) async fn readlist_file(
@@ -158,7 +158,19 @@ async fn book_protected_resource_response(
         Err(error) => return internal_error_response(error),
     }
 
-    book_resource_response(app, headers, &media, resource_name).await
+    let content_type = match app.manifest_reader.media_file_records(book_id).await {
+        Ok(records) => records
+            .into_iter()
+            .find(|record| record.file_name == resource_name)
+            .map(|record| record.media_type)
+            .filter(|media_type| !media_type.is_empty())
+            .unwrap_or_else(|| {
+                content_type_from_filename(resource_name, "application/octet-stream")
+            }),
+        Err(error) => return internal_error_response(error),
+    };
+
+    book_resource_response(app, headers, &media, resource_name, &content_type).await
 }
 
 async fn load_epub_book_media(
@@ -190,6 +202,7 @@ async fn book_resource_response(
     headers: &HeaderMap,
     media: &PersistedBookMedia,
     resource_name: &str,
+    content_type: &str,
 ) -> Response {
     let bytes = match app
         .content
@@ -209,17 +222,14 @@ async fn book_resource_response(
         .unwrap_or(resource_name);
     let content_disposition = inline_disposition(file_name);
 
-    MediaAssetResponse::new(
-        content_type_from_filename(resource_name, "application/octet-stream").as_str(),
-        bytes,
-    )
-    .with_last_modified(last_modified)
-    .with_content_disposition(Some(content_disposition))
-    .with_header(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("script-src 'none'; object-src 'none';"),
-    )
-    .into_response(Some(headers))
+    MediaAssetResponse::new(content_type, bytes)
+        .with_last_modified(last_modified)
+        .with_content_disposition(Some(content_disposition))
+        .with_header(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("script-src 'none'; object-src 'none';"),
+        )
+        .into_response(Some(headers))
 }
 
 pub(crate) async fn book_file(
