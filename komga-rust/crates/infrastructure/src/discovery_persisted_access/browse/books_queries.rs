@@ -118,7 +118,6 @@ pub(super) async fn load_persisted_books_page(
         page.total_elements,
     ))
 }
-// PLACEHOLDER_HELPERS
 
 async fn build_book_eval_context(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
@@ -253,7 +252,6 @@ fn to_book_row(row: PersistedBookSummary) -> BookRow {
             .collect(),
     }
 }
-// PLACEHOLDER_MAPPINGS
 
 fn book_row_to_read_model(row: BookRow) -> BookReadModel {
     BookReadModel {

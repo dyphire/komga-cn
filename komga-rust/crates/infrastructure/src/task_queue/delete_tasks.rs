@@ -82,6 +82,9 @@ async fn delete_book(runtime: &JobRuntime<'_>, book_id: &str) -> Result<(), Task
         return Ok(());
     }
     delete_file_if_exists(&book_path, "book file").await?;
+    crate::mobi_cache::remove_cached_mobi(&book_path)
+        .await
+        .map_err(TaskProcessingError::runtime)?;
     remove_sidecar_thumbnail_files(&sidecar_thumbnail_paths).await?;
     remove_empty_parent_directory(&book_path).await?;
 

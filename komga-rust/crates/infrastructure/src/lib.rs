@@ -18,6 +18,7 @@ mod filesystem;
 mod library_catalog;
 mod media_reader;
 mod metadata;
+mod mobi_cache;
 mod opds_catalog_access;
 mod opds_persisted_access;
 mod operational_access;
@@ -51,6 +52,7 @@ pub use filesystem::{FilesystemBookImport, remove_file_after_release};
 pub use library_catalog::LibraryCatalogAccess;
 pub use media_reader::MediaReader;
 pub use metadata::{SqliteBookMetadataPort, generate_book_thumbnail};
+pub use mobi_cache::configure_mobi_cache_root;
 pub use opds_catalog_access::OpdsCatalogAccess;
 pub use opds_persisted_access::OpdsPersistedAccess;
 pub use operational_access::{

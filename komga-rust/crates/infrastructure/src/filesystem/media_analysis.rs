@@ -2,6 +2,7 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use komga_domain::discovery::MediaStatus;
+use komga_epub::{MOBI_MEDIA_TYPE, normalize_mobi};
 use lopdf::{Document as PdfDocument, Object};
 
 use crate::rar_support::{detect_rar_media_type, list_rar_entries, read_rar_entries_bytes};
@@ -85,13 +86,37 @@ pub(crate) struct MediaFileAnalysis {
     pub(crate) media_type: String,
     pub(crate) pages: Vec<AnalyzedMediaPage>,
     pub(crate) files: Vec<String>,
+    pub(crate) media_files: Vec<AnalyzedMediaFile>,
+    pub(crate) epub_extension_blob: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AnalyzedMediaFile {
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) sub_type: String,
+    pub(crate) file_size: i64,
 }
 
 pub(crate) struct MediaFileAnalyzer;
 
+#[derive(Default)]
 struct AnalyzedMediaFileContents {
     pages: Vec<AnalyzedMediaPage>,
     files: Vec<String>,
+    media_files: Vec<AnalyzedMediaFile>,
+    epub_extension_blob: Option<Vec<u8>>,
+}
+
+fn empty_media_analysis(status: MediaStatus, media_type: String) -> MediaFileAnalysis {
+    MediaFileAnalysis {
+        status,
+        media_type,
+        pages: Vec::new(),
+        files: Vec::new(),
+        media_files: Vec::new(),
+        epub_extension_blob: None,
+    }
 }
 
 impl MediaFileAnalyzer {
@@ -105,12 +130,7 @@ impl MediaFileAnalyzer {
         match file_path.try_exists() {
             Ok(true) => {}
             Ok(false) => {
-                return Ok(MediaFileAnalysis {
-                    status: MediaStatus::Error,
-                    media_type,
-                    pages: Vec::new(),
-                    files: Vec::new(),
-                });
+                return Ok(empty_media_analysis(MediaStatus::Error, media_type));
             }
             Err(error) => {
                 return Err(anyhow::anyhow!(format!(
@@ -128,6 +148,7 @@ impl MediaFileAnalyzer {
             "application/epub+zip" => {
                 analyze_zip_media_pages(file_path, profile.include_epub_resources(), profile)
             }
+            MOBI_MEDIA_TYPE => analyze_mobi_media_pages(file_path),
             "application/vnd.comicbook-rar"
             | "application/x-rar-compressed"
             | "application/x-rar-compressed; version=4"
@@ -135,25 +156,13 @@ impl MediaFileAnalyzer {
                 analyze_rar_media_pages(file_path, profile)
             }
             "application/pdf" => analyze_pdf_media_pages(file_path, profile),
-            _ => {
-                return Ok(MediaFileAnalysis {
-                    status: MediaStatus::Unsupported,
-                    media_type,
-                    pages: Vec::new(),
-                    files: Vec::new(),
-                });
-            }
+            _ => return Ok(empty_media_analysis(MediaStatus::Unsupported, media_type)),
         };
 
         let contents = match result {
             Ok(result) => result,
             Err(_) if profile.records_analysis_error() => {
-                return Ok(MediaFileAnalysis {
-                    status: MediaStatus::Error,
-                    media_type,
-                    pages: Vec::new(),
-                    files: Vec::new(),
-                });
+                return Ok(empty_media_analysis(MediaStatus::Error, media_type));
             }
             Err(error) => return Err(error),
         };
@@ -167,6 +176,8 @@ impl MediaFileAnalyzer {
             media_type,
             pages: contents.pages,
             files: contents.files,
+            media_files: contents.media_files,
+            epub_extension_blob: contents.epub_extension_blob,
         })
     }
 }
@@ -233,6 +244,7 @@ pub(crate) fn expected_extension_for_media_type(media_type: &str) -> Option<&'st
         "application/zip" => Some("cbz"),
         "application/pdf" => Some("pdf"),
         "application/epub+zip" => Some("epub"),
+        MOBI_MEDIA_TYPE => Some("mobi"),
         _ => None,
     }
 }
@@ -253,6 +265,7 @@ fn transient_media_type_from_file_name(file_name: &str) -> &'static str {
         Some("avif") => "image/avif",
         Some("pdf") => "application/pdf",
         Some("epub") => "application/epub+zip",
+        Some("mobi") => MOBI_MEDIA_TYPE,
         Some("cbz") | Some("zip") => "application/zip",
         Some("cbr") | Some("rar") => "application/vnd.comicbook-rar",
         _ => "application/octet-stream",
@@ -265,6 +278,7 @@ fn persisted_media_type_from_file_name(file_name: &str) -> &'static str {
         Some("cbr") | Some("rar") => "application/vnd.comicbook-rar",
         Some("pdf") => "application/pdf",
         Some("epub") => "application/epub+zip",
+        Some("mobi") => MOBI_MEDIA_TYPE,
         _ => "application/octet-stream",
     }
 }
@@ -404,6 +418,7 @@ fn analyze_single_image(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileCon
             file_size: size_bytes,
         }],
         files: vec![file_name],
+        ..Default::default()
     })
 }
 
@@ -476,7 +491,101 @@ fn analyze_zip_media_pages(
     }
 
     files.sort();
-    Ok(AnalyzedMediaFileContents { pages, files })
+    Ok(AnalyzedMediaFileContents {
+        pages,
+        files,
+        ..Default::default()
+    })
+}
+
+fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileContents> {
+    let bytes = std::fs::read(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read MOBI file '{}': ", file_path.display()))
+    })?;
+    let publication = normalize_mobi(&bytes).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("normalize MOBI file '{}': ", file_path.display()))
+    })?;
+    if let Err(error) = crate::mobi_cache::materialize_cached_mobi_epub(file_path) {
+        tracing::warn!(
+            path = %file_path.display(),
+            error = %error,
+            "failed to materialize MOBI EPUB cache; continuing with in-memory representation"
+        );
+    }
+
+    let mut files = publication
+        .chapters
+        .iter()
+        .map(|chapter| chapter.path.clone())
+        .chain(
+            publication
+                .resources
+                .iter()
+                .map(|resource| resource.path.clone()),
+        )
+        .collect::<Vec<_>>();
+    files.push("OEBPS/content.opf".to_string());
+    files.push("OEBPS/nav.xhtml".to_string());
+    files.sort();
+
+    let pages = publication
+        .chapters
+        .iter()
+        .map(|chapter| AnalyzedMediaPage {
+            file_name: chapter.path.clone(),
+            media_type: "application/xhtml+xml".to_string(),
+            width: None,
+            height: None,
+            file_size: 0,
+        })
+        .collect();
+
+    let mut media_files = publication
+        .chapters
+        .iter()
+        .map(|chapter| AnalyzedMediaFile {
+            file_name: chapter.path.clone(),
+            media_type: "application/xhtml+xml".to_string(),
+            sub_type: "EPUB_PAGE".to_string(),
+            file_size: 0,
+        })
+        .collect::<Vec<_>>();
+    media_files.extend(
+        publication
+            .resources
+            .iter()
+            .map(|resource| AnalyzedMediaFile {
+                file_name: resource.path.clone(),
+                media_type: resource.media_type.clone(),
+                sub_type: "EPUB_ASSET".to_string(),
+                file_size: resource.bytes.len().try_into().unwrap_or(i64::MAX),
+            }),
+    );
+    media_files.extend([
+        AnalyzedMediaFile {
+            file_name: "OEBPS/content.opf".to_string(),
+            media_type: "application/oebps-package+xml".to_string(),
+            sub_type: "EPUB_ASSET".to_string(),
+            file_size: 0,
+        },
+        AnalyzedMediaFile {
+            file_name: "OEBPS/nav.xhtml".to_string(),
+            media_type: "application/xhtml+xml".to_string(),
+            sub_type: "EPUB_ASSET".to_string(),
+            file_size: 0,
+        },
+    ]);
+
+    Ok(AnalyzedMediaFileContents {
+        pages,
+        files,
+        media_files,
+        epub_extension_blob: Some(
+            publication
+                .epub_extension_blob()
+                .map_err(|error| anyhow::anyhow!(error))?,
+        ),
+    })
 }
 
 fn analyze_rar_media_pages(
@@ -518,7 +627,11 @@ fn analyze_rar_media_pages(
             .collect::<Vec<_>>()
     };
 
-    Ok(AnalyzedMediaFileContents { pages, files })
+    Ok(AnalyzedMediaFileContents {
+        pages,
+        files,
+        ..Default::default()
+    })
 }
 
 fn analyze_pdf_media_pages(
@@ -558,7 +671,11 @@ fn analyze_pdf_media_pages(
         .and_then(|value| value.to_str())
         .map(|value| vec![value.to_string()])
         .unwrap_or_default();
-    Ok(AnalyzedMediaFileContents { pages, files })
+    Ok(AnalyzedMediaFileContents {
+        pages,
+        files,
+        ..Default::default()
+    })
 }
 
 fn analyzed_rar_media_page(
@@ -645,9 +762,9 @@ mod tests {
     use zip::{CompressionMethod, ZipWriter};
 
     use super::{
-        MediaAnalysisProfile, MediaDimensions, MediaFileAnalyzer, image_dimensions_from_bytes_i64,
-        image_dimensions_from_reader, is_rar_media_type, persisted_media_type_from_path,
-        transient_media_type_from_path,
+        MOBI_MEDIA_TYPE, MediaAnalysisProfile, MediaDimensions, MediaFileAnalyzer,
+        image_dimensions_from_bytes_i64, image_dimensions_from_reader, is_rar_media_type,
+        persisted_media_type_from_path, transient_media_type_from_path,
     };
 
     struct CountingImageReader {
@@ -908,6 +1025,57 @@ mod tests {
             "application/x-rar-compressed; version=4"
         );
         assert!(!analysis.pages.is_empty());
+    }
+
+    #[test]
+    fn persisted_mobi_analysis_keeps_mobi_media_type_when_payload_is_invalid() {
+        let path = unique_temp_path("invalid-mobi", "mobi");
+        let mut bytes = vec![0_u8; 68];
+        bytes[60..68].copy_from_slice(b"BOOKMOBI");
+        fs::write(&path, bytes).expect("invalid mobi fixture should be written");
+
+        let analysis = MediaFileAnalyzer
+            .analyze(
+                &path,
+                MediaAnalysisProfile::PersistedBook {
+                    include_dimensions: false,
+                },
+            )
+            .expect("invalid mobi should be represented as media error");
+
+        assert_eq!(analysis.media_type, MOBI_MEDIA_TYPE);
+        assert_eq!(analysis.status, MediaStatus::Error);
+        assert!(analysis.pages.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn persisted_mobi_analysis_reads_the_local_sample_when_available() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample/epub3.mobi");
+        if !path.is_file() {
+            return;
+        }
+
+        let analysis = MediaFileAnalyzer
+            .analyze(
+                &path,
+                MediaAnalysisProfile::PersistedBook {
+                    include_dimensions: false,
+                },
+            )
+            .expect("local MOBI sample should analyze");
+
+        assert_eq!(analysis.status, MediaStatus::Ready);
+        assert_eq!(analysis.media_type, MOBI_MEDIA_TYPE);
+        assert!(!analysis.pages.is_empty());
+        assert!(
+            analysis
+                .media_files
+                .iter()
+                .any(|file| file.sub_type == "EPUB_PAGE")
+        );
+        assert!(analysis.epub_extension_blob.is_some());
     }
 
     #[test]

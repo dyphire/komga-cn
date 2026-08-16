@@ -7,6 +7,10 @@ use quick_xml::events::Event as XmlEvent;
 use zip::ZipArchive;
 
 use komga_domain::discovery::MediaStatus;
+use komga_epub::{
+    normalize_epub_resource_href, normalize_epub_zip_path, parse_epub_manifest_items,
+    parse_epub_rootfile_path, parse_epub_spine_itemrefs,
+};
 
 use super::{
     EPUB_DIVINA_LETTER_COUNT_THRESHOLD, TransientBookAnalysis, TransientBookPage,
@@ -50,8 +54,6 @@ pub(super) fn analyze_transient_epub(path: &str) -> Result<TransientBookAnalysis
         series_id: None,
     })
 }
-
-// PLACEHOLDER_REMAINING_FUNCTIONS
 
 fn compute_transient_epub_page_count<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
@@ -108,7 +110,6 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
             else {
                 return Ok(Vec::new());
             };
-            // PLACEHOLDER_DIVINA_CONT
             let Some(image_item) = manifest.values().find(|entry| entry.href == image_href) else {
                 return Ok(Vec::new());
             };
@@ -169,153 +170,45 @@ pub(super) fn read_zip_entry_bytes_normalized<R: Read + std::io::Seek>(
 }
 
 pub(super) fn parse_transient_epub_rootfile_path(container_xml: &[u8]) -> Option<String> {
-    let mut reader = XmlReader::from_reader(container_xml);
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buffer).ok()? {
-            XmlEvent::Start(event) | XmlEvent::Empty(event) => {
-                if !transient_xml_name_matches(event.name().as_ref(), b"rootfile") {
-                    buffer.clear();
-                    continue;
-                }
-                let Some(path) = transient_xml_attribute_value(&event, b"full-path") else {
-                    buffer.clear();
-                    continue;
-                };
-                return Some(normalize_transient_epub_zip_path(&path));
-            }
-            XmlEvent::Eof => break,
-            _ => {}
-        }
-        buffer.clear();
-    }
-    None
+    parse_epub_rootfile_path(container_xml)
+        .ok()
+        .flatten()
+        .map(|path| normalize_transient_epub_zip_path(&path))
 }
-
-// PLACEHOLDER_MANIFEST_SPINE
 
 pub(super) fn parse_transient_epub_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
 ) -> anyhow::Result<HashMap<String, TransientEpubManifestItem>> {
-    let mut reader = XmlReader::from_reader(package_document);
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    let mut manifest = HashMap::new();
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
-                if !transient_xml_name_matches(event.name().as_ref(), b"item") {
-                    buffer.clear();
-                    continue;
-                }
-                let mut id = None::<String>;
-                let mut href = None::<String>;
-                let mut media_type = None::<String>;
-                for attribute in event.attributes() {
-                    let attribute = attribute.map_err(|error| {
-                        anyhow::anyhow!(error)
-                            .context("failed to parse transient EPUB package document attribute: ")
-                    })?;
-                    if transient_xml_name_matches(attribute.key.as_ref(), b"id") {
-                        id = Some(transient_xml_attribute_value_result(
-                            attribute,
-                            "transient EPUB package document",
-                        )?);
-                    } else if transient_xml_name_matches(attribute.key.as_ref(), b"href") {
-                        href = Some(transient_xml_attribute_value_result(
-                            attribute,
-                            "transient EPUB package document",
-                        )?);
-                    } else if transient_xml_name_matches(attribute.key.as_ref(), b"media-type") {
-                        media_type = Some(transient_xml_attribute_value_result(
-                            attribute,
-                            "transient EPUB package document",
-                        )?);
-                    }
-                }
-                let Some(id) = id else {
-                    buffer.clear();
-                    continue;
-                };
-                let Some(href) = href else {
-                    buffer.clear();
-                    continue;
-                };
-                let media_type =
-                    media_type.unwrap_or_else(|| "application/octet-stream".to_string());
-                manifest.insert(
-                    id,
-                    TransientEpubManifestItem {
-                        href: normalize_transient_epub_resource_href(rootfile_path, &href),
-                        media_type,
-                    },
-                );
-            }
-            Ok(XmlEvent::Eof) => break,
-            Err(error) => {
-                return Err(anyhow::anyhow!(format!(
-                    "failed to parse transient EPUB package document: {error}"
-                )));
-            }
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(manifest)
+    parse_epub_manifest_items(package_document, rootfile_path)
+        .map(|manifest| {
+            manifest
+                .into_iter()
+                .map(|(id, item)| {
+                    (
+                        id,
+                        TransientEpubManifestItem {
+                            href: item.href.trim_start_matches('/').to_string(),
+                            media_type: item.media_type,
+                        },
+                    )
+                })
+                .collect()
+        })
+        .map_err(|error| anyhow::anyhow!(error).context("parse transient EPUB manifest"))
 }
 
 pub(super) fn parse_transient_epub_spine_items(
     package_document: &[u8],
     manifest: &HashMap<String, TransientEpubManifestItem>,
 ) -> anyhow::Result<Vec<TransientEpubManifestItem>> {
-    let mut reader = XmlReader::from_reader(package_document);
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    let mut spine = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(XmlEvent::Start(event)) | Ok(XmlEvent::Empty(event)) => {
-                if !transient_xml_name_matches(event.name().as_ref(), b"itemref") {
-                    buffer.clear();
-                    continue;
-                }
-                let mut idref = None::<String>;
-                for attribute in event.attributes() {
-                    let attribute = attribute.map_err(|error| {
-                        anyhow::anyhow!(error)
-                            .context("failed to parse transient EPUB package document attribute: ")
-                    })?;
-                    if transient_xml_name_matches(attribute.key.as_ref(), b"idref") {
-                        idref = Some(transient_xml_attribute_value_result(
-                            attribute,
-                            "transient EPUB package document",
-                        )?);
-                    }
-                }
-                let Some(idref) = idref else {
-                    buffer.clear();
-                    continue;
-                };
-                if let Some(item) = manifest.get(&idref) {
-                    spine.push(item.clone());
-                }
-            }
-            Ok(XmlEvent::Eof) => break,
-            Err(error) => {
-                return Err(anyhow::anyhow!(format!(
-                    "failed to parse transient EPUB package document: {error}"
-                )));
-            }
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(spine)
+    let spine_ids = parse_epub_spine_itemrefs(package_document)
+        .map_err(|error| anyhow::anyhow!(error).context("parse transient EPUB spine"))?;
+    Ok(spine_ids
+        .into_iter()
+        .filter_map(|idref| manifest.get(&idref).cloned())
+        .collect())
 }
-
-// PLACEHOLDER_DIVINA_IMAGE_HREF
 
 pub(super) fn parse_transient_epub_divina_image_href(
     resource_bytes: &[u8],
@@ -438,53 +331,19 @@ fn is_supported_transient_epub_raster_image_media_type(media_type: &str) -> bool
 }
 
 fn normalize_transient_epub_resource_href(rootfile_path: &str, href: &str) -> String {
-    let href = href.split('#').next().unwrap_or_default();
-    if href.starts_with('/') {
-        return normalize_transient_epub_zip_path(href);
-    }
-    let base = rootfile_path
-        .rsplit_once('/')
-        .map(|(parent, _)| parent)
-        .unwrap_or_default();
-    let joined = if base.is_empty() {
-        href.to_string()
-    } else {
-        format!("{base}/{href}")
-    };
-    normalize_transient_epub_zip_path(&joined)
+    normalize_epub_resource_href(rootfile_path, href)
+        .trim_start_matches('/')
+        .to_string()
 }
 
 pub(super) fn normalize_transient_epub_zip_path(path: &str) -> String {
-    let normalized_path = path.replace('\\', "/");
-    let mut normalized_segments = Vec::<&str>::new();
-    for segment in normalized_path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                normalized_segments.pop();
-            }
-            _ => normalized_segments.push(segment),
-        }
-    }
-    normalized_segments.join("/")
+    normalize_epub_zip_path(path)
+        .trim_start_matches('/')
+        .to_string()
 }
 
 fn transient_xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
     actual == expected || actual.ends_with(expected)
-}
-
-fn transient_xml_attribute_value(
-    event: &quick_xml::events::BytesStart<'_>,
-    attribute_name: &[u8],
-) -> Option<String> {
-    event.attributes().flatten().find_map(|attribute| {
-        transient_xml_name_matches(attribute.key.as_ref(), attribute_name).then(|| {
-            attribute
-                .normalized_value(XmlVersion::Implicit1_0)
-                .ok()
-                .map(|value| value.into_owned())
-        })?
-    })
 }
 
 fn transient_xml_attribute_value_checked(

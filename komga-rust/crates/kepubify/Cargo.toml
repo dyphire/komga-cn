@@ -5,5 +5,5 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-quick-xml.workspace = true
+komga-epub = { path = "../epub" }
 zip.workspace = true

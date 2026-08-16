@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::filesystem::media_access::epub;
 use crate::filesystem::media_access::page_content;
+use komga_epub::{normalize_epub_resource_href, parse_epub_fixed_layout};
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, ContentResolverPort, EpubCoverImage, EpubNavigationExtension,
@@ -81,6 +82,13 @@ impl ContentResolverPort for ContentResolver {
         page_content::read_media_file_bytes(path).await
     }
 
+    async fn read_epub_publication_bytes(
+        &self,
+        media: &BookMediaRecord,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        epub::read_epub_publication_bytes(media).await
+    }
+
     async fn read_media_file_size(&self, path: &Path) -> anyhow::Result<Option<i64>> {
         page_content::read_media_file_size(path).await
     }
@@ -133,10 +141,10 @@ impl ContentResolverPort for ContentResolver {
     }
 
     fn epub_fixed_layout(&self, package_document: &[u8]) -> bool {
-        epub::parse_epub_fixed_layout(package_document)
+        parse_epub_fixed_layout(package_document).unwrap_or(false)
     }
 
     fn normalize_epub_resource_href(&self, rootfile_path: &str, href: &str) -> String {
-        epub::normalize_epub_resource_href(rootfile_path, href)
+        normalize_epub_resource_href(rootfile_path, href)
     }
 }

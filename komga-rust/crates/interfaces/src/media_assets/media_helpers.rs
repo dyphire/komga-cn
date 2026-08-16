@@ -12,6 +12,7 @@ pub(crate) fn content_type_from_filename(file_name: &str, default_mime_type: &st
         "cbr" => "application/vnd.comicbook-rar".to_string(),
         "pdf" => "application/pdf".to_string(),
         "epub" => "application/epub+zip".to_string(),
+        "mobi" => "application/x-mobipocket-ebook".to_string(),
         "jpg" | "jpeg" => "image/jpeg".to_string(),
         "png" => "image/png".to_string(),
         "gif" => "image/gif".to_string(),
@@ -30,7 +31,10 @@ pub(crate) fn book_media_is_single_image(media: &PersistedBookMedia) -> bool {
 }
 
 pub(crate) fn book_media_is_epub(media: &PersistedBookMedia) -> bool {
-    content_type_from_filename(&media.file_name, &media.media_type) == "application/epub+zip"
+    matches!(
+        content_type_from_filename(&media.file_name, &media.media_type).as_str(),
+        "application/epub+zip" | "application/x-mobipocket-ebook"
+    )
 }
 
 pub(crate) fn book_media_is_pdf(media: &PersistedBookMedia) -> bool {

@@ -26,6 +26,7 @@ pub(super) fn is_recognized_transient_book_file(path: &Path) -> bool {
                 || extension.eq_ignore_ascii_case("rar")
                 || extension.eq_ignore_ascii_case("pdf")
                 || extension.eq_ignore_ascii_case("epub")
+                || extension.eq_ignore_ascii_case("mobi")
                 || extension.eq_ignore_ascii_case("jpg")
                 || extension.eq_ignore_ascii_case("jpeg")
                 || extension.eq_ignore_ascii_case("png")
@@ -44,6 +45,7 @@ fn known_transient_media_type(media_type: &str) -> &'static str {
         "image/avif" => "image/avif",
         "application/pdf" => "application/pdf",
         "application/epub+zip" => "application/epub+zip",
+        "application/x-mobipocket-ebook" => "application/x-mobipocket-ebook",
         "application/zip" => "application/zip",
         "application/vnd.comicbook-rar" => "application/vnd.comicbook-rar",
         "application/x-rar-compressed" => "application/x-rar-compressed",

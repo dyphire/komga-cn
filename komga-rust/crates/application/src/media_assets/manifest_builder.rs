@@ -286,7 +286,10 @@ impl ManifestUserContext {
 }
 
 fn manifest_profile_from_media_type(media_type: &str) -> ManifestProfile {
-    if media_type == "application/epub+zip" {
+    if matches!(
+        media_type,
+        "application/epub+zip" | "application/x-mobipocket-ebook"
+    ) {
         ManifestProfile::Epub
     } else if media_type == "application/pdf" {
         ManifestProfile::Pdf

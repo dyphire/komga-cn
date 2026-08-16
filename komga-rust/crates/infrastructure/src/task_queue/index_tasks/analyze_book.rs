@@ -2,7 +2,8 @@ use super::super::media_helpers::analyze_book_media_file;
 use super::super::media_helpers::media_updates::adjust_analyzed_book_read_progress;
 use super::super::runtime_context::JobRuntime;
 use super::book_analysis_persistence::{
-    AnalyzedBookMedia, AnalyzedBookPage, analyze_book_input, persist_book_analysis,
+    AnalyzedBookMedia, AnalyzedBookMediaFile, AnalyzedBookPage, analyze_book_input,
+    persist_book_analysis,
 };
 use crate::resolve_library_item_path;
 use komga_application::task_processing::TaskProcessingError;
@@ -59,6 +60,17 @@ pub(in crate::task_queue) async fn analyze_book(
                 file_size: page.file_size,
             })
             .collect(),
+        media_files: analysis
+            .media_files
+            .into_iter()
+            .map(|file| AnalyzedBookMediaFile {
+                file_name: file.file_name,
+                media_type: file.media_type,
+                sub_type: file.sub_type,
+                file_size: file.file_size,
+            })
+            .collect(),
+        epub_extension_blob: analysis.epub_extension_blob,
     };
     let current_page_count = persisted.pages.len() as i64;
 

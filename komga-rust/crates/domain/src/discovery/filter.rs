@@ -138,7 +138,7 @@ impl MediaProfile {
             | "application/x-rar-compressed"
             | "application/x-rar-compressed; version=4"
             | "application/x-rar-compressed; version=5" => Some(Self::Divina),
-            "application/epub+zip" => Some(Self::Epub),
+            "application/epub+zip" | "application/x-mobipocket-ebook" => Some(Self::Epub),
             "application/pdf" => Some(Self::Pdf),
             _ => None,
         }

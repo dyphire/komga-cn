@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_domain::discovery::MediaStatus;
+use komga_epub::{MOBI_MEDIA_TYPE, MobiError, normalize_mobi, read_epub_resource_from_bytes};
 use sqlx::{Row, SqlitePool};
 use zip::ZipArchive;
 
@@ -273,6 +274,8 @@ pub(crate) fn analyze_transient_book(path: &str) -> anyhow::Result<TransientBook
                 transient_analysis_error(MediaStatus::Error, media_type, error_code)
             }),
         );
+    } else if media_type == MOBI_MEDIA_TYPE {
+        return Ok(analyze_transient_mobi(path));
     } else if media_type == "application/zip" {
         analyze_transient_media_file(path).map_err(|_| "ERR_1008")
     } else if matches!(
@@ -322,6 +325,79 @@ pub(crate) fn analyze_transient_book(path: &str) -> anyhow::Result<TransientBook
         number: None,
         series_id: None,
     })
+}
+
+fn analyze_transient_mobi(path: &str) -> TransientBookAnalysis {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return transient_analysis_error(
+                MediaStatus::Error,
+                MOBI_MEDIA_TYPE.to_string(),
+                "ERR_MOBI_INVALID_CONTAINER",
+            );
+        }
+    };
+    let publication = match normalize_mobi(&bytes) {
+        Ok(publication) => publication,
+        Err(error) => {
+            let (status, code) = match error {
+                MobiError::Unsupported(reason) => (
+                    MediaStatus::Unsupported,
+                    match reason {
+                        komga_epub::MobiUnsupportedReason::Drm => "ERR_MOBI_UNSUPPORTED_DRM",
+                        komga_epub::MobiUnsupportedReason::HufCompression => {
+                            "ERR_MOBI_UNSUPPORTED_COMPRESSION"
+                        }
+                        komga_epub::MobiUnsupportedReason::Kf8 => "ERR_MOBI_UNSUPPORTED_KF8",
+                    },
+                ),
+                _ => (MediaStatus::Error, "ERR_MOBI_DERIVATION_FAILED"),
+            };
+            return transient_analysis_error(status, MOBI_MEDIA_TYPE.to_string(), code);
+        }
+    };
+
+    let pages = publication
+        .chapters
+        .iter()
+        .enumerate()
+        .map(|(index, chapter)| TransientBookPage {
+            number: (index as u32) + 1,
+            file_name: chapter.path.clone(),
+            media_type: "application/xhtml+xml".to_string(),
+            width: None,
+            height: None,
+            size_bytes: None,
+        })
+        .collect::<Vec<_>>();
+    let mut files = publication
+        .chapters
+        .iter()
+        .map(|chapter| chapter.path.clone())
+        .chain(
+            publication
+                .resources
+                .iter()
+                .map(|resource| resource.path.clone()),
+        )
+        .collect::<Vec<_>>();
+    files.extend([
+        "OEBPS/content.opf".to_string(),
+        "OEBPS/nav.xhtml".to_string(),
+    ]);
+    files.sort();
+
+    TransientBookAnalysis {
+        status: MediaStatus::Ready,
+        media_type: MOBI_MEDIA_TYPE.to_string(),
+        page_count: pages.len() as u32,
+        pages,
+        files,
+        comment: String::new(),
+        number: None,
+        series_id: None,
+    }
 }
 
 fn analyze_transient_media_file(path: &str) -> anyhow::Result<TransientBookMediaAnalysis> {
@@ -440,6 +516,24 @@ pub(crate) fn transient_book_page_content(
                 page.file_name, path
             ))
         })?;
+        return Ok(Some(TransientBookPageContent {
+            content_type: page.media_type,
+            bytes,
+        }));
+    }
+
+    if content_type == MOBI_MEDIA_TYPE {
+        let mobi_bytes = load_transient_book_media(path)?;
+        let publication = normalize_mobi(&mobi_bytes)
+            .map_err(|error| anyhow::anyhow!(error).context("normalize transient MOBI"))?;
+        let bytes = read_epub_resource_from_bytes(&publication.epub, page.file_name.as_str())
+            .map_err(|error| anyhow::anyhow!(error).context("read transient MOBI chapter"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!(format!(
+                    "read transient MOBI entry '{}' from '{}': entry not found",
+                    page.file_name, path
+                ))
+            })?;
         return Ok(Some(TransientBookPageContent {
             content_type: page.media_type,
             bytes,
@@ -889,6 +983,27 @@ mod tests {
         assert!(analysis.files.is_empty());
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_transient_mobi_reads_the_local_sample_when_available() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample/epub3.mobi");
+        if !path.is_file() {
+            return;
+        }
+
+        let path_string = path.to_string_lossy().to_string();
+        let analysis = analyze_transient_book(&path_string).expect("MOBI analysis should complete");
+        assert_eq!(analysis.status, MediaStatus::Ready);
+        assert_eq!(analysis.media_type, MOBI_MEDIA_TYPE);
+        assert!(analysis.page_count > 0);
+
+        let content =
+            transient_book_page_content(&path_string, &analysis.media_type, &analysis.pages, 1)
+                .expect("MOBI page content should load")
+                .expect("first MOBI page should exist");
+        assert_eq!(content.content_type, "application/xhtml+xml");
+        assert!(String::from_utf8_lossy(&content.bytes).contains("html"));
     }
 
     #[test]

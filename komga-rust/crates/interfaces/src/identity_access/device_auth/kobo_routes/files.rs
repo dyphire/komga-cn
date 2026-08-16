@@ -30,13 +30,44 @@ fn missing_kobo_file_response() -> Response {
         .into_response()
 }
 
-fn kobo_kepub_file_name(file_name: &str) -> String {
+fn kepub_conversion_failed_response() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({ "error": "Kepub conversion failed" })),
+    )
+        .into_response()
+}
+
+fn kobo_epub_base(file_name: &str) -> &str {
     if let Some((base, ext)) = file_name.rsplit_once('.')
-        && ext.eq_ignore_ascii_case("epub")
+        && (ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("mobi"))
     {
-        return format!("{base}.kepub.epub");
+        return base;
     }
-    format!("{file_name}.kepub.epub")
+    file_name
+}
+
+fn kobo_kepub_file_name(file_name: &str) -> String {
+    format!("{}.kepub.epub", kobo_epub_base(file_name))
+}
+
+fn kobo_epub_file_name(file_name: &str) -> String {
+    format!("{}.epub", kobo_epub_base(file_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{kobo_epub_file_name, kobo_kepub_file_name};
+
+    #[test]
+    fn normalized_mobi_download_uses_an_epub_file_name() {
+        assert_eq!(kobo_epub_file_name("book.mobi"), "book.epub");
+    }
+
+    #[test]
+    fn normalized_mobi_kepub_download_uses_a_kepub_epub_file_name() {
+        assert_eq!(kobo_kepub_file_name("book.mobi"), "book.kepub.epub");
+    }
 }
 
 pub(crate) async fn kobo_book_file_epub(
@@ -84,8 +115,9 @@ pub(crate) async fn kobo_book_file_epub(
     let mut file_name = media.file_name.clone();
     let mut media_type = media.media_type.clone();
 
-    let body = if query.convert_kepub.unwrap_or(false) && media.media_type == "application/epub+zip"
-    {
+    let convert_kepub = query.convert_kepub.unwrap_or(false);
+    let media_is_mobi = media.media_type == "application/x-mobipocket-ebook";
+    let body = if convert_kepub && media.media_type == "application/epub+zip" {
         match app.content_resolver.media_file_exists(&media.file_path) {
             Ok(true) => {}
             Ok(false) => return missing_kobo_file_response(),
@@ -99,12 +131,34 @@ pub(crate) async fn kobo_book_file_epub(
                 converted_body
             }
             Err(_) => {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({ "error": "Kepub conversion failed" })),
-                )
-                    .into_response();
+                return kepub_conversion_failed_response();
             }
+        }
+    } else if media_is_mobi {
+        let normalized = match app
+            .content_resolver
+            .read_epub_publication_bytes(&media)
+            .await
+        {
+            Ok(Some(body)) => body,
+            Ok(None) => return missing_kobo_file_response(),
+            Err(error) => return internal_error_response(error),
+        };
+        if convert_kepub {
+            match komga_kepubify::convert_epub_bytes(&normalized) {
+                Ok(converted_body) => {
+                    file_name = kobo_kepub_file_name(media.file_name.as_str());
+                    media_type = "application/epub+zip".to_string();
+                    converted_body
+                }
+                Err(_) => {
+                    return kepub_conversion_failed_response();
+                }
+            }
+        } else {
+            file_name = kobo_epub_file_name(media.file_name.as_str());
+            media_type = "application/epub+zip".to_string();
+            normalized
         }
     } else {
         match app

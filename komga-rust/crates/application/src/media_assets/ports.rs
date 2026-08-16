@@ -364,6 +364,13 @@ pub trait ContentResolverPort: Send + Sync {
 
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>>;
 
+    async fn read_epub_publication_bytes(
+        &self,
+        media: &BookMediaRecord,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.read_media_file_bytes(&media.file_path).await
+    }
+
     async fn read_media_file_size(&self, path: &Path) -> anyhow::Result<Option<i64>>;
 
     async fn read_media_image_dimensions(

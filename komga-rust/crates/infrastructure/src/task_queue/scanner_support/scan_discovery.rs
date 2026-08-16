@@ -76,24 +76,16 @@ pub(super) fn is_hidden_path(path: &Path) -> bool {
 }
 
 pub(super) fn is_supported_book_file(path: &Path, scan_config: &LibraryScanConfig) -> bool {
-    path.extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "cbz" | "zip" | "cbr" | "rar"
-            )
-            .then_some(scan_config.scan_cbx)
-            .unwrap_or_else(|| {
-                matches!(extension.to_ascii_lowercase().as_str(), "pdf")
-                    .then_some(scan_config.scan_pdf)
-                    .or_else(|| {
-                        matches!(extension.to_ascii_lowercase().as_str(), "epub")
-                            .then_some(scan_config.scan_epub)
-                    })
-                    .unwrap_or(false)
-            })
-        })
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+
+    match extension.to_ascii_lowercase().as_str() {
+        "cbz" | "zip" | "cbr" | "rar" => scan_config.scan_cbx,
+        "pdf" => scan_config.scan_pdf,
+        "epub" | "mobi" => scan_config.scan_epub,
+        _ => false,
+    }
 }
 
 pub(super) fn path_file_name_utf8(path: &Path) -> anyhow::Result<&str> {
@@ -364,5 +356,30 @@ mod tests {
             error.to_string().contains("valid UTF-8 file stem"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn scanner_treats_mobi_as_epub_when_scan_epub_is_enabled() {
+        let scan_config = LibraryScanConfig {
+            root: "/library".to_string(),
+            scan_cbx: false,
+            scan_pdf: false,
+            scan_epub: true,
+            scan_force_modified_time: false,
+            oneshots_directory: None,
+            scan_directory_exclusions: Vec::new(),
+        };
+
+        assert!(is_supported_book_file(
+            Path::new("/library/Series/book.MOBI"),
+            &scan_config
+        ));
+
+        let mut disabled = scan_config.clone();
+        disabled.scan_epub = false;
+        assert!(!is_supported_book_file(
+            Path::new("/library/Series/book.mobi"),
+            &disabled
+        ));
     }
 }

@@ -419,7 +419,9 @@ fn device_progress_error_from_write_error(error: BookProgressionWriteError) -> D
 
 fn koreader_media_profile(media_type: &str) -> Option<KoreaderMediaProfile> {
     match media_type {
-        "application/epub+zip" => Some(KoreaderMediaProfile::Epub),
+        "application/epub+zip" | "application/x-mobipocket-ebook" => {
+            Some(KoreaderMediaProfile::Epub)
+        }
         "application/pdf"
         | "application/zip"
         | "application/vnd.comicbook+zip"

@@ -1,5 +1,6 @@
 use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
+use komga_epub::MOBI_MEDIA_TYPE;
 use sqlx::SqlitePool;
 
 #[derive(Clone, Debug)]
@@ -26,6 +27,16 @@ pub(super) struct AnalyzedBookMedia {
     pub(super) status: MediaStatus,
     pub(super) media_type: String,
     pub(super) pages: Vec<AnalyzedBookPage>,
+    pub(super) media_files: Vec<AnalyzedBookMediaFile>,
+    pub(super) epub_extension_blob: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct AnalyzedBookMediaFile {
+    pub(super) file_name: String,
+    pub(super) media_type: String,
+    pub(super) sub_type: String,
+    pub(super) file_size: i64,
 }
 
 pub(super) async fn analyze_book_input(
@@ -112,6 +123,41 @@ pub(super) async fn persist_book_analysis(
         })?;
     }
 
+    sqlx::query("DELETE FROM MEDIA_FILE WHERE BOOK_ID = ? AND SUB_TYPE IS NOT NULL")
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to clear derived MEDIA_FILE rows for '{book_id}'"
+            ))
+        })?;
+
+    for file in &analysis.media_files {
+        sqlx::query(
+            r#"INSERT INTO MEDIA_FILE (
+                FILE_NAME,
+                BOOK_ID,
+                MEDIA_TYPE,
+                SUB_TYPE,
+                FILE_SIZE
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING"#,
+        )
+        .bind(&file.file_name)
+        .bind(book_id)
+        .bind(&file.media_type)
+        .bind(&file.sub_type)
+        .bind(file.file_size)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to insert derived MEDIA_FILE row for '{book_id}'"
+            ))
+        })?;
+    }
+
     sqlx::query(
         r#"INSERT INTO MEDIA (
             BOOK_ID,
@@ -132,6 +178,38 @@ pub(super) async fn persist_book_analysis(
     .execute(&mut *tx)
     .await
     .context("failed to persist MEDIA analyze state")?;
+
+    if let Some(blob) = &analysis.epub_extension_blob {
+        sqlx::query(
+            r#"UPDATE MEDIA
+               SET EXTENSION_CLASS = ?,
+                   EXTENSION_VALUE_BLOB = ?
+             WHERE BOOK_ID = ?"#,
+        )
+        .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
+        .bind(blob)
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to persist EPUB extension for '{book_id}'"))
+        })?;
+    } else if analysis.media_type == MOBI_MEDIA_TYPE {
+        sqlx::query(
+            r#"UPDATE MEDIA
+               SET EXTENSION_CLASS = NULL,
+                   EXTENSION_VALUE_BLOB = NULL
+             WHERE BOOK_ID = ?"#,
+        )
+        .bind(book_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to clear EPUB extension for '{book_id}'"))
+        })?;
+    }
 
     sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
         .bind(book_id)

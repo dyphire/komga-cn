@@ -6,7 +6,7 @@ use std::path::Path;
 use image::GenericImageView;
 use image::imageops::FilterType;
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, MediaImageDimensions, book_media_is_pdf,
+    BookMediaRecord, BookPageRecord, MediaImageDimensions, book_media_is_epub, book_media_is_pdf,
     book_media_is_rar_archive, book_media_is_single_image, book_media_is_zip_archive,
     content_type_from_filename, is_supported_page_image_file_name,
 };
@@ -46,6 +46,9 @@ pub(crate) async fn resolve_book_page_bytes(
         if let Some(bytes) = read_media_file_bytes(&candidate).await? {
             return Ok(Some(bytes));
         }
+    }
+    if book_media_is_epub(media) {
+        return super::epub::read_epub_resource_bytes(&media.file_path, &page.file_name).await;
     }
     if let Some(bytes) = read_zip_archive_page_bytes(media, page, page_number).await? {
         return Ok(Some(bytes));

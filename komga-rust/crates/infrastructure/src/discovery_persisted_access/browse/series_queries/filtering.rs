@@ -44,7 +44,6 @@ pub(in crate::discovery_persisted_access::browse) async fn load_persisted_series
         let ranked_candidates = backend
             .search_series_scored_ids(search, total_count.max(1))
             .await?;
-        // PLACEHOLDER_LOAD_CONTINUE
         let candidate_ids: Vec<String> =
             ranked_candidates.iter().map(|hit| hit.id.clone()).collect();
         if !candidate_ids.is_empty() {
@@ -155,7 +154,6 @@ pub(in crate::discovery_persisted_access::browse) async fn load_persisted_series
         page.total_elements,
     ))
 }
-// PLACEHOLDER_HELPERS
 
 async fn build_series_eval_context(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
@@ -207,7 +205,6 @@ fn to_browse_context(context: &DiscoveryQueryContext) -> BrowseContext {
         restrictions: context.restrictions.clone(),
     }
 }
-// PLACEHOLDER_MAPPINGS
 
 fn to_series_row(row: PersistedSeriesSummary) -> SeriesRow {
     SeriesRow {
