@@ -2756,7 +2756,6 @@ dependencies = [
  "image",
  "quick-xml",
  "serde_json",
- "sha2 0.11.0",
  "zip 9.0.0-pre3",
 ]
 

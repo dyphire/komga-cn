@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_domain::discovery::MediaStatus;
-use komga_epub::{MOBI_MEDIA_TYPE, MobiError, normalize_mobi, read_epub_resource_from_bytes};
+use komga_epub::{MOBI_MEDIA_TYPE, MobiError, normalize_mobi};
 use sqlx::{Row, SqlitePool};
 use zip::ZipArchive;
 
@@ -526,7 +526,8 @@ pub(crate) fn transient_book_page_content(
         let mobi_bytes = load_transient_book_media(path)?;
         let publication = normalize_mobi(&mobi_bytes)
             .map_err(|error| anyhow::anyhow!(error).context("normalize transient MOBI"))?;
-        let bytes = read_epub_resource_from_bytes(&publication.epub, page.file_name.as_str())
+        let bytes = publication
+            .resource_bytes(page.file_name.as_str())
             .map_err(|error| anyhow::anyhow!(error).context("read transient MOBI chapter"))?
             .ok_or_else(|| {
                 anyhow::anyhow!(format!(

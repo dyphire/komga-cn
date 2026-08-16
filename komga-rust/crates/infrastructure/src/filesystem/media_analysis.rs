@@ -587,13 +587,6 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
     let publication = normalize_mobi(&bytes).map_err(|error| {
         anyhow::anyhow!(error).context(format!("normalize MOBI file '{}': ", file_path.display()))
     })?;
-    if let Err(error) = crate::mobi_cache::materialize_cached_mobi_epub(file_path) {
-        tracing::warn!(
-            path = %file_path.display(),
-            error = %error,
-            "failed to materialize MOBI EPUB cache; continuing with in-memory representation"
-        );
-    }
 
     let mut files = publication
         .chapters

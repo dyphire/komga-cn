@@ -10,8 +10,7 @@ pub use analysis::{
 };
 pub use mobi::{
     ADAPTER_VERSION, MOBI_MEDIA_TYPE, MobiError, MobiUnsupportedReason, NormalizedPublication,
-    PublicationChapter, PublicationMetadata, PublicationResource, materialize_mobi_cache,
-    normalize_mobi, read_epub_resource_from_bytes,
+    PublicationChapter, PublicationMetadata, PublicationResource, normalize_mobi,
 };
 pub use navigation::{EpubNavigation, EpubNavigationLink, decode_epub_navigation_extension};
 pub use parse::{

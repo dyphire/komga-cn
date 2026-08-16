@@ -54,12 +54,6 @@ pub(super) fn compose_http_runtime(
     } = runtime;
     let runtime_event_source: Arc<dyn RuntimeSseEventSource> = runtime_events.clone();
     let runtime_event_sink: Arc<dyn RuntimeSseEventSink> = runtime_events;
-    komga_infrastructure::configure_mobi_cache_root(
-        config
-            .config_dir
-            .clone()
-            .map(|path| path.join("mobi-cache")),
-    );
     let content_resolver_access = Arc::new(ContentResolver);
     let epub_navigation_content: Arc<
         dyn komga_application::media_assets::EpubNavigationContentPort,

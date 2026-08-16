@@ -5,7 +5,6 @@ use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_application::task_processing::{CleanupEmptySetsPolicy, ThumbnailRegenerationPolicy};
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::configure_mobi_cache_root;
 use komga_infrastructure::{DatabaseHandle, ServerSettingsStore};
 use komga_infrastructure::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
 use komga_infrastructure::{
@@ -16,12 +15,6 @@ pub(crate) async fn task_runtime_context(
     config: &RuntimeConfig,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
 ) -> TaskRuntimeContext {
-    configure_mobi_cache_root(
-        config
-            .config_dir
-            .clone()
-            .map(|path| path.join("mobi-cache")),
-    );
     let main_db = DatabaseHandle::file_backed(config.database_file.clone())
         .await
         .expect("failed to open main database");

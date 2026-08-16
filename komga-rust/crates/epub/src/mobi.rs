@@ -1,15 +1,12 @@
 use std::fmt;
-use std::io::{Cursor, Read, Write};
-use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::io::{Cursor, Write};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use iepub::prelude::{MobiBook, MobiReader};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, ZipWriter};
 
 use super::EPUB_MEDIA_TYPE;
 
@@ -73,6 +70,7 @@ pub struct PublicationMetadata {
 pub struct PublicationChapter {
     pub title: String,
     pub path: String,
+    document: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -84,7 +82,6 @@ pub struct PublicationResource {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NormalizedPublication {
-    pub epub: Vec<u8>,
     pub metadata: PublicationMetadata,
     pub chapters: Vec<PublicationChapter>,
     pub resources: Vec<PublicationResource>,
@@ -93,6 +90,49 @@ pub struct NormalizedPublication {
 }
 
 impl NormalizedPublication {
+    pub fn resource_bytes(&self, resource_name: &str) -> Result<Option<Vec<u8>>, MobiError> {
+        let resource_name = resource_name.trim_start_matches('/');
+        if resource_name.is_empty() {
+            return Ok(None);
+        }
+
+        match resource_name {
+            "mimetype" => return Ok(Some(EPUB_MEDIA_TYPE.as_bytes().to_vec())),
+            "META-INF/container.xml" => {
+                return Ok(Some(
+                    br#"<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#
+                        .to_vec(),
+                ));
+            }
+            "OEBPS/content.opf" => {
+                return Ok(Some(
+                    opf(&self.metadata, &self.chapters, &self.resources).into_bytes(),
+                ));
+            }
+            "OEBPS/nav.xhtml" => {
+                return Ok(Some(nav(&self.chapters).into_bytes()));
+            }
+            _ => {}
+        }
+
+        if let Some(chapter) = self
+            .chapters
+            .iter()
+            .find(|chapter| chapter.path == resource_name)
+        {
+            return Ok(Some(xhtml_document(&chapter.document).into_bytes()));
+        }
+        Ok(self
+            .resources
+            .iter()
+            .find(|resource| resource.path == resource_name)
+            .map(|resource| resource.bytes.clone()))
+    }
+
+    pub fn epub_bytes(&self) -> Result<Vec<u8>, MobiError> {
+        write_epub(&self.metadata, &self.chapters, &self.resources)
+    }
+
     pub fn epub_extension_blob(&self) -> Result<Vec<u8>, MobiError> {
         let mut positions = Vec::new();
         let mut position = 0_u64;
@@ -127,63 +167,6 @@ impl NormalizedPublication {
         encoder.write_all(&payload)?;
         Ok(encoder.finish()?)
     }
-}
-
-pub fn materialize_mobi_cache(
-    source_path: &Path,
-    cache_root: &Path,
-    cache_key: &str,
-) -> Result<PathBuf, MobiError> {
-    if cache_key.is_empty()
-        || cache_key.contains('/')
-        || cache_key.contains('\\')
-        || cache_key == "."
-        || cache_key == ".."
-    {
-        return Err(MobiError::Invalid("invalid MOBI cache key".to_string()));
-    }
-
-    let source = std::fs::read(source_path)?;
-    let source_metadata = std::fs::metadata(source_path)?;
-    let source_modified = source_metadata
-        .modified()
-        .ok()
-        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-        .map(|value| value.as_nanos())
-        .unwrap_or_default();
-    let source_hash = hex_digest(&source);
-    let cache_dir = cache_root.join(cache_key);
-    let output_path = cache_dir.join("publication.epub");
-    let metadata_path = cache_dir.join("metadata.txt");
-    let fingerprint = format!(
-        "version={ADAPTER_VERSION}\nsize={}\nmodified={source_modified}\nsha256={source_hash}\n",
-        source.len()
-    );
-
-    if output_path.is_file()
-        && std::fs::read_to_string(&metadata_path).ok().as_deref() == Some(fingerprint.as_str())
-    {
-        return Ok(output_path);
-    }
-
-    let publication = normalize_mobi(&source)?;
-    std::fs::create_dir_all(&cache_dir)?;
-    let temporary_path = cache_dir.join(format!(
-        ".publication-{}-{}.tmp",
-        std::process::id(),
-        source_modified
-    ));
-    std::fs::write(&temporary_path, &publication.epub)?;
-    std::fs::rename(&temporary_path, &output_path)?;
-    std::fs::write(&metadata_path, fingerprint)?;
-    Ok(output_path)
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 pub fn normalize_mobi(bytes: &[u8]) -> Result<NormalizedPublication, MobiError> {
@@ -266,29 +249,6 @@ fn validate_mobi_variant(bytes: &[u8]) -> Result<(), MobiError> {
         }
     }
     Ok(())
-}
-
-pub fn read_epub_resource_from_bytes(
-    epub_bytes: &[u8],
-    resource_name: &str,
-) -> Result<Option<Vec<u8>>, MobiError> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(epub_bytes))?;
-    let candidates = [resource_name, resource_name.trim_start_matches('/')];
-    for candidate in candidates {
-        if candidate.is_empty() {
-            continue;
-        }
-        match archive.by_name(candidate) {
-            Ok(mut entry) => {
-                let mut bytes = Vec::new();
-                entry.read_to_end(&mut bytes)?;
-                return Ok(Some(bytes));
-            }
-            Err(zip::result::ZipError::FileNotFound) => {}
-            Err(error) => return Err(MobiError::Zip(error)),
-        }
-    }
-    Ok(None)
 }
 
 fn map_parser_error(message: String) -> MobiError {
@@ -639,16 +599,15 @@ fn mobi_page_title(
     format!("Page {}", index + 1)
 }
 
-fn epub_chapter_page_counts(
-    epub: &[u8],
-    chapters: &[PublicationChapter],
-) -> Result<Vec<u64>, MobiError> {
-    let mut archive = ZipArchive::new(Cursor::new(epub))?;
+fn chapter_page_counts(chapters: &[PublicationChapter]) -> Result<Vec<u64>, MobiError> {
     chapters
         .iter()
         .map(|chapter| {
-            let entry = archive.by_name(&chapter.path)?;
-            Ok(entry.compressed_size().div_ceil(1024))
+            let bytes = xhtml_document(&chapter.document).into_bytes();
+            let mut encoder =
+                flate2::write::DeflateEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&bytes)?;
+            Ok(encoder.finish()?.len().div_ceil(1024) as u64)
         })
         .collect()
 }
@@ -676,18 +635,14 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
         .collect::<Vec<_>>();
 
     let mut chapters = Vec::new();
-    let mut chapter_documents = Vec::new();
 
     if book.cover().is_some() {
         let path = "OEBPS/text/cover.xhtml".to_string();
         chapters.push(PublicationChapter {
             title: "Cover".to_string(),
             path: path.clone(),
+            document: r#"<img src="../images/cover.jpg" alt="Cover"/>"#.to_string(),
         });
-        chapter_documents.push((
-            path,
-            r#"<img src="../images/cover.jpg" alt="Cover"/>"#.to_string(),
-        ));
     }
 
     for (index, page) in page_documents.iter().enumerate() {
@@ -702,8 +657,8 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
         chapters.push(PublicationChapter {
             title: title.clone(),
             path: path.clone(),
+            document: page.document.clone(),
         });
-        chapter_documents.push((path, page.document.clone()));
     }
 
     if chapters.is_empty() {
@@ -713,7 +668,6 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
     }
 
     let mut resources = Vec::new();
-    let mut asset_documents = Vec::new();
     if let Some(cover) = book.cover() {
         let bytes = cover
             .data()
@@ -726,7 +680,6 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
             media_type: media_type.to_string(),
             bytes: bytes.clone(),
         });
-        asset_documents.push((path, media_type.to_string(), bytes));
     }
     for (index, asset) in book.assets().enumerate() {
         let bytes = asset
@@ -743,14 +696,11 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
             media_type: media_type.to_string(),
             bytes: bytes.clone(),
         });
-        asset_documents.push((path, media_type.to_string(), bytes));
     }
 
-    let epub = write_epub(&metadata, &chapters, &chapter_documents, &asset_documents)?;
-    let chapter_page_counts = epub_chapter_page_counts(&epub, &chapters)?;
+    let chapter_page_counts = chapter_page_counts(&chapters)?;
     let page_count = chapter_page_counts.iter().sum();
     Ok(NormalizedPublication {
-        epub,
         metadata,
         chapters,
         resources,
@@ -762,8 +712,7 @@ fn normalize_book(book: MobiBook, text: &str) -> Result<NormalizedPublication, M
 fn write_epub(
     metadata: &PublicationMetadata,
     chapters: &[PublicationChapter],
-    chapter_documents: &[(String, String)],
-    assets: &[(String, String, Vec<u8>)],
+    resources: &[PublicationResource],
 ) -> Result<Vec<u8>, MobiError> {
     let mut cursor = Cursor::new(Vec::new());
     let mut writer = ZipWriter::new(&mut cursor);
@@ -778,17 +727,17 @@ fn write_epub(
     )?;
 
     writer.start_file("OEBPS/content.opf", stored)?;
-    writer.write_all(opf(metadata, chapters, assets).as_bytes())?;
+    writer.write_all(opf(metadata, chapters, resources).as_bytes())?;
     writer.start_file("OEBPS/nav.xhtml", stored)?;
     writer.write_all(nav(chapters).as_bytes())?;
 
-    for (path, document) in chapter_documents {
-        writer.start_file(path, deflated)?;
-        writer.write_all(xhtml_document(document).as_bytes())?;
+    for chapter in chapters {
+        writer.start_file(&chapter.path, deflated)?;
+        writer.write_all(xhtml_document(&chapter.document).as_bytes())?;
     }
-    for (path, _, bytes) in assets {
-        writer.start_file(path, stored)?;
-        writer.write_all(bytes)?;
+    for resource in resources {
+        writer.start_file(&resource.path, stored)?;
+        writer.write_all(&resource.bytes)?;
     }
     writer.finish()?;
     Ok(cursor.into_inner())
@@ -797,7 +746,7 @@ fn write_epub(
 fn opf(
     metadata: &PublicationMetadata,
     chapters: &[PublicationChapter],
-    assets: &[(String, String, Vec<u8>)],
+    resources: &[PublicationResource],
 ) -> String {
     let mut manifest = String::new();
     manifest.push_str(
@@ -810,9 +759,12 @@ fn opf(
             xml_escape(href)
         ));
     }
-    for (index, (path, media_type, _)) in assets.iter().enumerate() {
-        let href = path.strip_prefix("OEBPS/").unwrap_or(path);
-        let properties = if index == 0 && path.contains("/cover.") {
+    for (index, resource) in resources.iter().enumerate() {
+        let href = resource
+            .path
+            .strip_prefix("OEBPS/")
+            .unwrap_or(&resource.path);
+        let properties = if index == 0 && resource.path.contains("/cover.") {
             " properties=\"cover-image\""
         } else {
             ""
@@ -820,7 +772,7 @@ fn opf(
         manifest.push_str(&format!(
             r#"<item id="asset-{index:04}" href="{}" media-type="{}"{} />"#,
             xml_escape(href),
-            xml_escape(media_type),
+            xml_escape(&resource.media_type),
             properties
         ));
     }
@@ -951,6 +903,8 @@ fn image_extension(media_type: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
     use iepub::prelude::{MobiBuilder, MobiHtml};
     use zip::ZipArchive;
@@ -978,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_mobi_to_a_valid_epub_with_stable_chapter_paths() {
+    fn normalizes_mobi_and_generates_epub_on_request_with_matching_page_count() {
         let publication = normalize_mobi(&fixture()).expect("fixture should be supported");
 
         assert_eq!(publication.metadata.title, "Fixture title");
@@ -993,7 +947,12 @@ mod tests {
                 .any(|chapter| chapter.path == "OEBPS/text/chapter-0000.xhtml")
         );
 
-        let mut archive = ZipArchive::new(Cursor::new(publication.epub)).expect("valid EPUB ZIP");
+        let mut archive = ZipArchive::new(Cursor::new(
+            publication
+                .epub_bytes()
+                .expect("valid EPUB should be generated"),
+        ))
+        .expect("valid EPUB ZIP");
         let names = (0..archive.len())
             .map(|index| archive.by_index(index).unwrap().name().unwrap().to_string())
             .collect::<Vec<_>>();
@@ -1006,6 +965,19 @@ mod tests {
                 .any(|name| name == "OEBPS/text/chapter-0000.xhtml")
         );
         assert!(names.iter().any(|name| name == "OEBPS/images/cover.jpg"));
+
+        let archive_page_count: u64 = publication
+            .chapters
+            .iter()
+            .map(|chapter| {
+                archive
+                    .by_name(&chapter.path)
+                    .expect("chapter should be in generated EPUB")
+                    .compressed_size()
+                    .div_ceil(1024)
+            })
+            .sum();
+        assert_eq!(publication.page_count, archive_page_count);
     }
 
     #[test]
@@ -1097,18 +1069,25 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_resource_from_the_normalized_epub_bytes() {
+    fn reads_generated_publication_resources_directly() {
         let publication = normalize_mobi(&fixture()).expect("fixture should be supported");
-        assert!(
+
+        let chapter = publication
+            .resource_bytes("OEBPS/text/chapter-0000.xhtml")
+            .expect("chapter lookup should succeed")
+            .expect("chapter should exist");
+        assert!(String::from_utf8_lossy(&chapter).contains("<html"));
+
+        let package = publication
+            .resource_bytes("/OEBPS/content.opf")
+            .expect("package lookup should succeed")
+            .expect("package should exist");
+        assert!(String::from_utf8_lossy(&package).contains("Fixture title"));
+        assert_eq!(
             publication
-                .chapters
-                .iter()
-                .map(|chapter| {
-                    read_epub_resource_from_bytes(&publication.epub, &chapter.path)
-                        .expect("resource lookup should succeed")
-                        .expect("chapter should exist")
-                })
-                .any(|chapter| String::from_utf8_lossy(&chapter).contains("Hello"))
+                .resource_bytes("OEBPS/missing.xhtml")
+                .expect("missing lookup should succeed"),
+            None
         );
     }
 
@@ -1144,36 +1123,5 @@ mod tests {
                 .iter()
                 .any(|resource| resource.path.contains("cover."))
         );
-    }
-
-    #[test]
-    fn materializes_and_reuses_a_fingerprinted_cache_entry() {
-        let nonce = format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock should be valid")
-                .as_nanos()
-        );
-        let root = std::env::temp_dir().join(format!("komga-epub-cache-{nonce}"));
-        let source = root.join("book.mobi");
-        let cache = root.join("cache");
-        std::fs::create_dir_all(&root).expect("cache fixture directory should be created");
-        std::fs::write(&source, fixture()).expect("cache source should be written");
-
-        let first = materialize_mobi_cache(&source, &cache, "book-1")
-            .expect("first cache materialization should succeed");
-        let first_bytes = std::fs::read(&first).expect("first cache output should be readable");
-        let second = materialize_mobi_cache(&source, &cache, "book-1")
-            .expect("second cache materialization should succeed");
-        assert_eq!(first, second);
-        assert_eq!(
-            first_bytes,
-            std::fs::read(&second).expect("cached output should be readable")
-        );
-        assert!(cache.join("book-1/metadata.txt").is_file());
-
-        let _ = std::fs::remove_dir_all(root);
     }
 }

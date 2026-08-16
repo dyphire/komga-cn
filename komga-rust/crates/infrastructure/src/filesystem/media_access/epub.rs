@@ -1,6 +1,6 @@
 use komga_epub::{
     NormalizedPublication, normalize_mobi, parse_epub_manifest_items, parse_epub_metadata_cover_id,
-    parse_epub_rootfile_path, read_epub_resource_from_bytes,
+    parse_epub_rootfile_path,
 };
 use std::fs::File;
 use std::io::ErrorKind;
@@ -23,9 +23,13 @@ pub(crate) async fn read_epub_publication_bytes(
         return Ok(None);
     }
     if is_mobi_path(media.file_path.as_path()) {
-        return load_mobi_publication(media.file_path.as_path())
-            .await
-            .map(|publication| Some(publication.epub));
+        return with_mobi_publication(media.file_path.as_path(), |publication| {
+            publication
+                .epub_bytes()
+                .map_err(|error| anyhow::anyhow!(error))
+        })
+        .await
+        .map(Some);
     }
     page_content::read_media_file_bytes(&media.file_path).await
 }
@@ -35,22 +39,13 @@ pub(crate) async fn read_epub_resource_bytes(
     resource_name: &str,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if is_mobi_path(epub_path) {
-        match crate::mobi_cache::cached_mobi_epub_path(epub_path).await {
-            Ok(Some(cached_path)) => {
-                return read_epub_resource_from_archive_path(&cached_path, resource_name).await;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                tracing::warn!(
-                    path = %epub_path.display(),
-                    error = %error,
-                    "failed to load MOBI EPUB cache; using in-memory representation"
-                );
-            }
-        }
-        let publication = load_mobi_publication(epub_path).await?;
-        return read_epub_resource_from_bytes(&publication.epub, resource_name)
-            .map_err(|error| anyhow::anyhow!(error));
+        let resource_name = resource_name.to_string();
+        return with_mobi_publication(epub_path, move |publication| {
+            publication
+                .resource_bytes(resource_name.as_str())
+                .map_err(|error| anyhow::anyhow!(error))
+        })
+        .await;
     }
     read_epub_resource_from_archive_path(epub_path, resource_name).await
 }
@@ -134,7 +129,7 @@ pub(crate) async fn load_epub_cover_bytes(
         return Ok(None);
     }
     if is_mobi_path(media.file_path.as_path()) {
-        return load_mobi_cover_bytes(load_mobi_publication(media.file_path.as_path()).await?);
+        return with_mobi_publication(media.file_path.as_path(), load_mobi_cover_bytes).await;
     }
     let path = media.file_path.clone();
     let display_path = path.display().to_string();
@@ -210,9 +205,12 @@ pub(crate) async fn load_epub_package_document(
         return Ok(None);
     }
     if is_mobi_path(media.file_path.as_path()) {
-        let publication = load_mobi_publication(media.file_path.as_path()).await?;
-        return read_epub_resource_from_bytes(&publication.epub, "OEBPS/content.opf")
-            .map_err(|error| anyhow::anyhow!(error));
+        return with_mobi_publication(media.file_path.as_path(), |publication| {
+            publication
+                .resource_bytes("OEBPS/content.opf")
+                .map_err(|error| anyhow::anyhow!(error))
+        })
+        .await;
     }
     let path = media.file_path.clone();
     let display_path = path.display().to_string();
@@ -263,16 +261,21 @@ fn is_mobi_path(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mobi"))
 }
 
-async fn load_mobi_publication(path: &Path) -> anyhow::Result<NormalizedPublication> {
+async fn with_mobi_publication<T, F>(path: &Path, operation: F) -> anyhow::Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce(NormalizedPublication) -> anyhow::Result<T> + Send + 'static,
+{
     let path = path.to_path_buf();
     let display_path = path.display().to_string();
     tokio::task::spawn_blocking(move || {
         let bytes = std::fs::read(&path).map_err(|error| {
             anyhow::anyhow!(error).context(format!("read MOBI source '{}': ", path.display()))
         })?;
-        normalize_mobi(&bytes).map_err(|error| {
+        let publication = normalize_mobi(&bytes).map_err(|error| {
             anyhow::anyhow!(error).context(format!("normalize MOBI source '{}': ", path.display()))
-        })
+        })?;
+        operation(publication)
     })
     .await
     .map_err(|error| anyhow::anyhow!(error).context("join MOBI normalization"))?
@@ -349,7 +352,7 @@ fn read_zip_entry_bytes_normalized_required<R: Read + Seek>(
 mod tests {
     use anyhow::Context;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Cursor, Write};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -358,7 +361,7 @@ mod tests {
     use komga_application::media_assets::BookMediaRecord;
     use serde_json::{Value, json};
     use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
+    use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
     use super::{decode_epub_navigation_extension, load_epub_cover_bytes};
 
@@ -399,6 +402,16 @@ mod tests {
             file_name: "book.epub".to_string(),
             file_path,
             media_type: "application/epub+zip".to_string(),
+            page_count: 0,
+        }
+    }
+
+    fn mobi_media(file_path: PathBuf) -> BookMediaRecord {
+        BookMediaRecord {
+            library_id: "lib".to_string(),
+            file_name: "book.mobi".to_string(),
+            file_path,
+            media_type: "application/x-mobipocket-ebook".to_string(),
             page_count: 0,
         }
     }
@@ -484,6 +497,29 @@ mod tests {
 
         assert_eq!(bytes, None);
         let _ = fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn read_mobi_resources_generates_content_on_request() {
+        let file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sample/epub3.mobi");
+        if !file_path.is_file() {
+            return;
+        }
+
+        let bytes = super::read_epub_resource_bytes(&file_path, "OEBPS/text/chapter-0000.xhtml")
+            .await
+            .expect("MOBI resource should be readable")
+            .expect("MOBI chapter should exist");
+
+        assert!(String::from_utf8_lossy(&bytes).contains("<html"));
+
+        let bytes = super::read_epub_publication_bytes(&mobi_media(file_path))
+            .await
+            .expect("MOBI publication should be readable")
+            .expect("MOBI publication should exist");
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("MOBI EPUB should be valid");
+        assert!(archive.by_name("OEBPS/content.opf").is_ok());
+        assert!(archive.by_name("OEBPS/nav.xhtml").is_ok());
     }
 
     #[tokio::test]

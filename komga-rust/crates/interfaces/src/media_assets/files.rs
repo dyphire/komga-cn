@@ -11,7 +11,9 @@ use super::access_control::{
 use super::http_helpers::{attachment_disposition, inline_disposition, internal_error_response};
 use super::media_helpers::book_media_is_epub;
 use super::types::PersistedBookMedia;
-use crate::cache::file_last_modified_header_value;
+use crate::cache::{
+    asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
+};
 use crate::identity_access::auth::{FileDownload, resolved_request_auth_user};
 use crate::media_response_policy::MediaAssetResponse;
 use crate::media_responses::BookMediaResponses;
@@ -204,6 +206,18 @@ async fn book_resource_response(
     resource_name: &str,
     content_type: &str,
 ) -> Response {
+    let last_modified = file_last_modified_header_value(media.file_path.as_path());
+    if let Some(last_modified) = last_modified.as_deref()
+        && if_modified_since_matches(headers, last_modified)
+    {
+        let mut response = asset_not_modified_response(None, Some(last_modified));
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("script-src 'none'; object-src 'none';"),
+        );
+        return response;
+    }
+
     let bytes = match app
         .content
         .read_epub_resource_bytes(media.file_path.as_path(), resource_name)
@@ -214,7 +228,6 @@ async fn book_resource_response(
         Err(error) => return internal_error_response(error),
     };
 
-    let last_modified = file_last_modified_header_value(media.file_path.as_path());
     let file_name = resource_name
         .rsplit('/')
         .next()
