@@ -51,7 +51,7 @@ impl SeriesEventEmitter for RecordingSeriesEventEmitter {
 
 #[async_trait::async_trait]
 impl SeriesMetadataWritePort for RecordingSeriesMetadataPort {
-    async fn load_series_library_id(&self, _series_id: &str) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, _series_id: &str) -> anyhow::Result<Option<String>> {
         self.steps
             .lock()
             .expect("writer step lock should not be poisoned")
@@ -62,7 +62,7 @@ impl SeriesMetadataWritePort for RecordingSeriesMetadataPort {
     async fn load_existing_series_metadata(
         &self,
         _series_id: &str,
-    ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
+    ) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>> {
         self.steps
             .lock()
             .expect("writer step lock should not be poisoned")
@@ -74,7 +74,7 @@ impl SeriesMetadataWritePort for RecordingSeriesMetadataPort {
         &self,
         series_id: &str,
         update: SeriesMetadataUpdateRecord,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         self.steps
             .lock()
             .expect("writer step lock should not be poisoned")
@@ -92,7 +92,7 @@ impl SeriesMetadataWritePort for RecordingSeriesMetadataPort {
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
         series_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         self.steps
             .lock()
             .expect("writer step lock should not be poisoned")

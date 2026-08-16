@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -18,7 +19,7 @@ pub struct RememberMeRuntimeSettings {
 
 pub(crate) async fn load_server_settings(
     settings_store: &ServerSettingsStore,
-) -> Result<PersistedServerSettings, String> {
+) -> anyhow::Result<PersistedServerSettings> {
     let persisted = settings_store.load_map().await?;
     let normalized = normalize_server_settings(&persisted)?;
 
@@ -33,9 +34,8 @@ pub(crate) async fn load_server_settings(
 
 pub fn load_remember_me_runtime_settings(
     database_file: &Path,
-) -> Result<RememberMeRuntimeSettings, String> {
-    let connection = Connection::open(database_file)
-        .map_err(|error| format!("open server settings sqlite db: {error}"))?;
+) -> anyhow::Result<RememberMeRuntimeSettings> {
+    let connection = Connection::open(database_file).context("open server settings sqlite db")?;
     let rows = load_server_settings_map_sync(&connection)?;
     let normalized = normalize_server_settings(&rows)?;
 
@@ -45,7 +45,7 @@ pub fn load_remember_me_runtime_settings(
                 "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
                 params!["REMEMBER_ME_KEY", generated_key],
             )
-            .map_err(|error| format!("persist generated remember-me key: {error}"))?;
+            .context("persist generated remember-me key")?;
     }
 
     let settings = normalized.settings;
@@ -66,7 +66,7 @@ struct NormalizedServerSettings {
 
 fn normalize_server_settings(
     persisted: &BTreeMap<String, Option<String>>,
-) -> Result<NormalizedServerSettings, String> {
+) -> anyhow::Result<NormalizedServerSettings> {
     let generated_remember_me_key = (!persisted.contains_key("REMEMBER_ME_KEY")
         || persisted
             .get("REMEMBER_ME_KEY")
@@ -95,17 +95,17 @@ fn normalize_server_settings(
 
 fn load_server_settings_map_sync(
     connection: &Connection,
-) -> Result<BTreeMap<String, Option<String>>, String> {
+) -> anyhow::Result<BTreeMap<String, Option<String>>> {
     let mut statement = connection
         .prepare("SELECT KEY, VALUE FROM SERVER_SETTINGS")
-        .map_err(|error| format!("prepare server settings read query: {error}"))?;
+        .context("prepare server settings read query")?;
     let rows = statement
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })
-        .map_err(|error| format!("query server settings rows: {error}"))?;
+        .context("query server settings rows")?;
     rows.collect::<Result<BTreeMap<_, _>, _>>()
-        .map_err(|error| format!("collect server settings rows: {error}"))
+        .context("collect server settings rows")
 }
 
 fn optional_setting<'a>(
@@ -129,15 +129,15 @@ fn parse_positive_u64(
     persisted: &BTreeMap<String, Option<String>>,
     key: &str,
     default: u64,
-) -> Result<u64, String> {
+) -> anyhow::Result<u64> {
     let Some(value) = optional_setting(persisted, key) else {
         return Ok(default);
     };
     let parsed = value
         .parse::<u64>()
-        .map_err(|_| invalid_server_setting(key, value))?;
+        .map_err(|_| anyhow::Error::msg(invalid_server_setting(key, value)))?;
     if parsed == 0 {
-        return Err(invalid_server_setting(key, value));
+        return Err(anyhow::Error::msg(invalid_server_setting(key, value)));
     }
     Ok(parsed)
 }
@@ -145,15 +145,15 @@ fn parse_positive_u64(
 fn parse_port(
     persisted: &BTreeMap<String, Option<String>>,
     key: &str,
-) -> Result<Option<u16>, String> {
+) -> anyhow::Result<Option<u16>> {
     let Some(value) = optional_setting(persisted, key) else {
         return Ok(None);
     };
     let parsed = value
         .parse::<u16>()
-        .map_err(|_| invalid_server_setting(key, value))?;
+        .map_err(|_| anyhow::Error::msg(invalid_server_setting(key, value)))?;
     if parsed == 0 {
-        return Err(invalid_server_setting(key, value));
+        return Err(anyhow::Error::msg(invalid_server_setting(key, value)));
     }
     Ok(Some(parsed))
 }
@@ -161,12 +161,12 @@ fn parse_port(
 fn parse_server_context_path(
     persisted: &BTreeMap<String, Option<String>>,
     key: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let Some(value) = raw_optional_setting(persisted, key) else {
         return Ok(None);
     };
     if !is_valid_server_context_path(value) {
-        return Err(invalid_server_setting(key, value));
+        return Err(anyhow::Error::msg(invalid_server_setting(key, value)));
     }
     Ok(Some(value.to_string()))
 }
@@ -181,9 +181,12 @@ fn parse_non_blank_string(value: Option<&Option<String>>) -> Option<String> {
 fn parse_thumbnail_size(
     persisted: &BTreeMap<String, Option<String>>,
     key: &str,
-) -> Result<Option<ThumbnailSize>, String> {
+) -> anyhow::Result<Option<ThumbnailSize>> {
     optional_setting(persisted, key)
-        .map(|value| ThumbnailSize::parse(value).ok_or_else(|| invalid_server_setting(key, value)))
+        .map(|value| {
+            ThumbnailSize::parse(value)
+                .ok_or_else(|| anyhow::Error::msg(invalid_server_setting(key, value)))
+        })
         .transpose()
 }
 
@@ -191,7 +194,7 @@ fn parse_bool(
     persisted: &BTreeMap<String, Option<String>>,
     key: &str,
     default: bool,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let Some(value) = optional_setting(persisted, key) else {
         return Ok(default);
     };
@@ -207,7 +210,7 @@ fn parse_bool(
     if value == "0" {
         return Ok(false);
     }
-    Err(invalid_server_setting(key, value))
+    Err(anyhow::Error::msg(invalid_server_setting(key, value)))
 }
 
 fn invalid_server_setting(key: &str, value: &str) -> String {
@@ -252,7 +255,7 @@ mod tests {
                 .await
                 .expect_err("invalid persisted setting should fail settings load");
 
-            assert!(error.contains(key), "{error}");
+            assert!(format!("{error:#}").contains(key), "{error:#}");
         }
     }
 
@@ -345,7 +348,7 @@ mod tests {
         case_name: &str,
         key: &str,
         value: &str,
-    ) -> Result<PersistedServerSettings, String> {
+    ) -> anyhow::Result<PersistedServerSettings> {
         let root = unique_fixture_root(case_name);
         std::fs::create_dir_all(&root).expect("fixture root should be created");
         let database_file = root.join("main.db");

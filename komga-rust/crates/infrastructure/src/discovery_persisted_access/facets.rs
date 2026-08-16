@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use komga_application::discovery::{ReferentialTagsInclude, ReferentialTagsScope};
@@ -94,7 +95,7 @@ pub(super) async fn load_persisted_referential_tags(
     scope: &ReferentialTagsScope,
     include: ReferentialTagsInclude,
     authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if authorized_library_ids.is_some_and(<[String]>::is_empty) {
         return Ok(Vec::new());
     }
@@ -124,7 +125,7 @@ pub(super) async fn load_persisted_referential_tags(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted referential tags: {error}"))
+        .context("query persisted referential tags")
         .map(|rows| {
             rows.into_iter()
                 .map(|row| row.get::<String, _>("TAG"))
@@ -136,7 +137,7 @@ pub(super) async fn load_persisted_genres(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
@@ -159,7 +160,7 @@ pub(super) async fn load_persisted_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(library_ids) = library_ids
         && library_ids.is_empty()
     {
@@ -257,7 +258,7 @@ pub(super) async fn load_persisted_tags(
         .fetch_all(pool)
         .await
     }
-    .map_err(|error| format!("query persisted tags: {error}"))?;
+    .context("query persisted tags")?;
 
     Ok(rows
         .into_iter()
@@ -269,7 +270,7 @@ pub(super) async fn load_persisted_languages(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
@@ -292,7 +293,7 @@ pub(super) async fn load_persisted_publishers(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
@@ -315,7 +316,7 @@ pub(super) async fn load_persisted_age_ratings(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(library_ids) = library_ids
         && library_ids.is_empty()
     {
@@ -357,7 +358,7 @@ pub(super) async fn load_persisted_age_ratings(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted age-ratings: {error}"))?;
+        .context("query persisted age-ratings")?;
 
     Ok(rows
         .into_iter()
@@ -372,7 +373,7 @@ pub(super) async fn load_persisted_sharing_labels(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
@@ -395,7 +396,7 @@ pub(super) async fn load_persisted_series_release_dates(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let values = common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {
@@ -432,7 +433,7 @@ pub(super) async fn load_persisted_series_tags(
     pool: &SqlitePool,
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     common::load_persisted_scoped_strings(
         pool,
         &common::ScopedStringQuery {

@@ -24,7 +24,7 @@ impl TransientBookAccess {
 
 #[async_trait::async_trait]
 impl TransientBookPort for TransientBookAccess {
-    fn analyze_transient_book(&self, path: &str) -> Result<AppTransientBookAnalysis, String> {
+    fn analyze_transient_book(&self, path: &str) -> anyhow::Result<AppTransientBookAnalysis> {
         let result = transient_books::analyze_transient_book(path)?;
         Ok(AppTransientBookAnalysis {
             status: result.status,
@@ -45,7 +45,7 @@ impl TransientBookPort for TransientBookAccess {
     async fn infer_transient_series_and_number(
         &self,
         transient_name: &str,
-    ) -> Result<TransientBookSeriesInference, String> {
+    ) -> anyhow::Result<TransientBookSeriesInference> {
         let inference =
             transient_books::infer_transient_series_and_number(self.db.read_pool(), transient_name)
                 .await?;
@@ -58,7 +58,7 @@ impl TransientBookPort for TransientBookAccess {
     fn list_transient_book_entries(
         &self,
         root: &Path,
-    ) -> Result<Vec<TransientBookScanEntry>, String> {
+    ) -> anyhow::Result<Vec<TransientBookScanEntry>> {
         Ok(transient_books::list_transient_book_entries(root)?
             .into_iter()
             .map(|entry| TransientBookScanEntry {
@@ -68,14 +68,14 @@ impl TransientBookPort for TransientBookAccess {
             .collect())
     }
 
-    async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String> {
+    async fn validate_transient_scan_root(&self, path: &str) -> anyhow::Result<()> {
         transient_books::validate_transient_scan_root(self.db.read_pool(), Path::new(path)).await
     }
 
     fn load_transient_book_file_metadata(
         &self,
         path: &str,
-    ) -> Result<AppTransientBookFileMetadata, String> {
+    ) -> anyhow::Result<AppTransientBookFileMetadata> {
         let meta = transient_books::load_transient_book_file_metadata(path)?;
         Ok(AppTransientBookFileMetadata {
             file_last_modified_unix_nanos: meta.file_last_modified_unix_nanos,
@@ -83,7 +83,7 @@ impl TransientBookPort for TransientBookAccess {
         })
     }
 
-    fn transient_book_exists(&self, path: &str) -> Result<bool, String> {
+    fn transient_book_exists(&self, path: &str) -> anyhow::Result<bool> {
         transient_books::transient_book_exists(path)
     }
 
@@ -93,7 +93,7 @@ impl TransientBookPort for TransientBookAccess {
         media_type: &str,
         pages: &[AppTransientBookPage],
         page_number: u32,
-    ) -> Result<Option<AppTransientBookPageContent>, String> {
+    ) -> anyhow::Result<Option<AppTransientBookPageContent>> {
         let infra_pages: Vec<TransientBookPage> = pages
             .iter()
             .map(|p| TransientBookPage {

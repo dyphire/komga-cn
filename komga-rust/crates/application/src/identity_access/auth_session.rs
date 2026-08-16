@@ -190,7 +190,7 @@ impl AuthSessionService {
         Ok(true)
     }
 
-    fn resolve_session_user(&self, request: &AuthTokenRequest) -> Result<Option<AuthUser>, String> {
+    fn resolve_session_user(&self, request: &AuthTokenRequest) -> anyhow::Result<Option<AuthUser>> {
         self.session_resolver.resolve_session_user(
             request.session_token.as_deref(),
             request.remember_me_token.as_deref(),
@@ -200,7 +200,7 @@ impl AuthSessionService {
     fn resolve_auth_token(
         &self,
         request: &AuthSessionRequest,
-    ) -> Result<Option<ResolvedAuthToken>, String> {
+    ) -> anyhow::Result<Option<ResolvedAuthToken>> {
         self.session_resolver.resolve_auth_token(
             request.session_token.as_deref(),
             request.remember_me_token.as_deref(),

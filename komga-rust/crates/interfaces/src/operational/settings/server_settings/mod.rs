@@ -43,7 +43,7 @@ pub(crate) async fn update_server_settings(
 
     let command = match settings_update_command(&payload) {
         Ok(command) => command,
-        Err(message) => return invalid_settings_payload(&message),
+        Err(message) => return invalid_settings_payload(&message.to_string()),
     };
 
     match app.server_settings.update(command).await {
@@ -54,26 +54,27 @@ pub(crate) async fn update_server_settings(
         Err(ServerSettingsUpdateError::Load(error)) => settings_load_error_response(error),
         Err(ServerSettingsUpdateError::Persist(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("failed to persist settings: {error}") })),
+            Json(json!({ "message": format!("failed to persist settings: {error:#}") })),
         )
             .into_response(),
         Err(ServerSettingsUpdateError::ApplyTaskPool(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("failed to process queued tasks: {error}") })),
+            Json(json!({ "message": format!("failed to process queued tasks: {error:#}") })),
         )
             .into_response(),
     }
 }
 
-fn settings_load_error_response(error: String) -> Response {
+fn settings_load_error_response(error: impl std::fmt::Display + std::fmt::Debug) -> Response {
+    tracing::error!(?error, "server settings load error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "message": format!("failed to load settings: {error}") })),
+        Json(json!({ "message": format!("failed to load settings: {error:#}") })),
     )
         .into_response()
 }
 
-fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateCommand, String> {
+fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpdateCommand> {
     let mut command = ServerSettingsUpdateCommand::default();
 
     if let Some(value) = payload.get("deleteEmptyCollections")
@@ -82,7 +83,7 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
         command.delete_empty_collections = Some(
             value
                 .as_bool()
-                .ok_or("deleteEmptyCollections must be a boolean")?,
+                .ok_or_else(|| anyhow::anyhow!("deleteEmptyCollections must be a boolean"))?,
         );
     }
 
@@ -92,18 +93,17 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
         command.delete_empty_read_lists = Some(
             value
                 .as_bool()
-                .ok_or("deleteEmptyReadLists must be a boolean")?,
+                .ok_or_else(|| anyhow::anyhow!("deleteEmptyReadLists must be a boolean"))?,
         );
     }
 
     if let Some(value) = payload.get("rememberMeDurationDays")
         && !value.is_null()
     {
-        command.remember_me_duration_days = Some(
-            value
-                .as_u64()
-                .ok_or("rememberMeDurationDays must be a positive integer")?,
-        );
+        command.remember_me_duration_days =
+            Some(value.as_u64().ok_or_else(|| {
+                anyhow::anyhow!("rememberMeDurationDays must be a positive integer")
+            })?);
     }
 
     if let Some(value) = payload.get("renewRememberMeKey")
@@ -112,16 +112,20 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
         command.renew_remember_me_key = Some(
             value
                 .as_bool()
-                .ok_or("renewRememberMeKey must be a boolean")?,
+                .ok_or_else(|| anyhow::anyhow!("renewRememberMeKey must be a boolean"))?,
         );
     }
 
     if let Some(value) = payload.get("thumbnailSize")
         && !value.is_null()
     {
-        let value = value.as_str().ok_or("thumbnailSize must be a string")?;
-        command.thumbnail_size =
-            Some(ThumbnailSize::parse(value).ok_or("thumbnailSize is invalid")?);
+        let value = value
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("thumbnailSize must be a string"))?;
+        command.thumbnail_size = Some(
+            ThumbnailSize::parse(value)
+                .ok_or_else(|| anyhow::anyhow!("thumbnailSize is invalid"))?,
+        );
     }
 
     if let Some(value) = payload.get("taskPoolSize")
@@ -130,7 +134,7 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
         command.task_pool_size = Some(
             value
                 .as_u64()
-                .ok_or("taskPoolSize must be a positive integer")?,
+                .ok_or_else(|| anyhow::anyhow!("taskPoolSize must be a positive integer"))?,
         );
     }
 
@@ -148,7 +152,11 @@ fn settings_update_command(payload: &Value) -> Result<ServerSettingsUpdateComman
     if let Some(value) = payload.get("koboProxy")
         && !value.is_null()
     {
-        command.kobo_proxy = Some(value.as_bool().ok_or("koboProxy must be a boolean")?);
+        command.kobo_proxy = Some(
+            value
+                .as_bool()
+                .ok_or_else(|| anyhow::anyhow!("koboProxy must be a boolean"))?,
+        );
     }
 
     command.kobo_port = optional_integer_patch(
@@ -164,13 +172,13 @@ fn optional_integer_patch(
     payload: &Value,
     field: &str,
     type_error: &str,
-) -> Result<ServerSettingPatch<u64>, String> {
+) -> anyhow::Result<ServerSettingPatch<u64>> {
     match payload.get(field) {
         Some(Value::Null) => Ok(ServerSettingPatch::Clear),
         Some(value) => value
             .as_u64()
             .map(ServerSettingPatch::Set)
-            .ok_or_else(|| type_error.to_string()),
+            .ok_or_else(|| anyhow::anyhow!("{}", type_error)),
         None => Ok(ServerSettingPatch::Unchanged),
     }
 }
@@ -179,13 +187,13 @@ fn optional_string_patch(
     payload: &Value,
     field: &str,
     type_error: &str,
-) -> Result<ServerSettingPatch<String>, String> {
+) -> anyhow::Result<ServerSettingPatch<String>> {
     match payload.get(field) {
         Some(Value::Null) => Ok(ServerSettingPatch::Clear),
         Some(value) => value
             .as_str()
             .map(|value| ServerSettingPatch::Set(value.to_string()))
-            .ok_or_else(|| type_error.to_string()),
+            .ok_or_else(|| anyhow::anyhow!("{}", type_error)),
         None => Ok(ServerSettingPatch::Unchanged),
     }
 }

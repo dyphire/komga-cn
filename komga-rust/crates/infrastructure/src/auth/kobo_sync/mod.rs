@@ -32,7 +32,7 @@ impl<'a> SqliteKoboSyncState<'a> {
 
 #[async_trait::async_trait]
 impl KoboSyncStatePort for SqliteKoboSyncState<'_> {
-    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
+    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> anyhow::Result<KoboSyncPage> {
         let user_id_value = user_id(&request.user);
         load_kobo_sync_page(
             self.pool,
@@ -44,30 +44,30 @@ impl KoboSyncStatePort for SqliteKoboSyncState<'_> {
             request.limit,
         )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(anyhow::Error::from)
     }
 
     async fn load_sync_book_states(
         &self,
         books: &[KoboSyncPointBook],
         user_id: &str,
-    ) -> Result<Vec<KoboSyncBookState>, String> {
+    ) -> anyhow::Result<Vec<KoboSyncBookState>> {
         load_sync_book_states(self.pool, books, user_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String> {
+    async fn remove_sync_point(&self, sync_point_id: &str) -> anyhow::Result<()> {
         remove_sync_point(self.pool, sync_point_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
 pub(crate) async fn proxy_kobo_request(
     base_url: &str,
     request: KoboProxyRequest,
-) -> Result<KoboProxyResponse, String> {
+) -> anyhow::Result<KoboProxyResponse> {
     proxy::execute_kobo_proxy_request(base_url, request).await
 }
 

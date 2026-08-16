@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::Row;
 
 use crate::parsing::parse_sqlite_group_concat_values;
@@ -20,7 +21,7 @@ fn search_fields(field: SearchField, values: String) -> Vec<SearchFieldEntry> {
 
 pub(super) async fn load_rebuild_search_documents(
     pool: sqlx::SqlitePool,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let mut docs = load_all_book_search_documents(pool.clone()).await?;
     docs.extend(load_all_series_search_documents(pool.clone()).await?);
     docs.extend(load_all_collection_search_documents(pool.clone()).await?);
@@ -31,7 +32,7 @@ pub(super) async fn load_rebuild_search_documents(
 pub(super) async fn load_rebuild_search_documents_for_entities(
     pool: sqlx::SqlitePool,
     entity_types: &[SearchEntityType],
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let mut docs = Vec::new();
     for entity_type in entity_types {
         match entity_type {
@@ -55,7 +56,7 @@ pub(super) async fn load_rebuild_search_documents_for_entities(
 pub(super) async fn load_book_search_document(
     pool: sqlx::SqlitePool,
     book_id: &str,
-) -> Result<Option<SearchDocument>, String> {
+) -> anyhow::Result<Option<SearchDocument>> {
     let row = sqlx::query(
         r#"SELECT
              b.ID AS ID,
@@ -118,7 +119,7 @@ pub(super) async fn load_book_search_document(
     .bind(book_id)
     .fetch_optional(&pool)
     .await
-    .map_err(|error| format!("failed to load BOOK row for search upsert: {error}"))?;
+    .context("failed to load BOOK row for search upsert")?;
 
     Ok(row.map(build_book_document))
 }
@@ -126,7 +127,7 @@ pub(super) async fn load_book_search_document(
 pub(super) async fn load_oneshot_book_search_documents(
     pool: sqlx::SqlitePool,
     series_id: &str,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let rows = sqlx::query(
         r#"SELECT
              b.ID AS ID,
@@ -188,7 +189,7 @@ pub(super) async fn load_oneshot_book_search_documents(
     .bind(series_id)
     .fetch_all(&pool)
     .await
-    .map_err(|error| format!("failed to load oneshot BOOK rows for search upsert: {error}"))?;
+    .context("failed to load oneshot BOOK rows for search upsert")?;
 
     Ok(rows.into_iter().map(build_book_document).collect())
 }
@@ -196,7 +197,7 @@ pub(super) async fn load_oneshot_book_search_documents(
 pub(super) async fn load_series_search_document(
     pool: sqlx::SqlitePool,
     series_id: &str,
-) -> Result<Option<SearchDocument>, String> {
+) -> anyhow::Result<Option<SearchDocument>> {
     let row = sqlx::query(
         r#"SELECT
              s.ID AS ID,
@@ -270,7 +271,7 @@ pub(super) async fn load_series_search_document(
     .bind(series_id)
     .fetch_optional(&pool)
     .await
-    .map_err(|error| format!("failed to load SERIES row for search upsert: {error}"))?;
+    .context("failed to load SERIES row for search upsert")?;
 
     Ok(row.map(build_series_document))
 }
@@ -278,12 +279,12 @@ pub(super) async fn load_series_search_document(
 pub(super) async fn load_collection_search_document(
     pool: sqlx::SqlitePool,
     collection_id: &str,
-) -> Result<Option<SearchDocument>, String> {
+) -> anyhow::Result<Option<SearchDocument>> {
     let row = sqlx::query("SELECT ID, NAME FROM COLLECTION WHERE ID = ? LIMIT 1")
         .bind(collection_id)
         .fetch_optional(&pool)
         .await
-        .map_err(|error| format!("failed to load COLLECTION row for search upsert: {error}"))?;
+        .context("failed to load COLLECTION row for search upsert")?;
 
     Ok(row.map(|row| build_named_document(row, SearchEntityType::Collection)))
 }
@@ -291,19 +292,19 @@ pub(super) async fn load_collection_search_document(
 pub(super) async fn load_readlist_search_document(
     pool: sqlx::SqlitePool,
     readlist_id: &str,
-) -> Result<Option<SearchDocument>, String> {
+) -> anyhow::Result<Option<SearchDocument>> {
     let row = sqlx::query("SELECT ID, NAME FROM READLIST WHERE ID = ? LIMIT 1")
         .bind(readlist_id)
         .fetch_optional(&pool)
         .await
-        .map_err(|error| format!("failed to load READLIST row for search upsert: {error}"))?;
+        .context("failed to load READLIST row for search upsert")?;
 
     Ok(row.map(|row| build_named_document(row, SearchEntityType::ReadList)))
 }
 
 async fn load_all_book_search_documents(
     pool: sqlx::SqlitePool,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let book_rows = sqlx::query(
         r#"SELECT
              b.ID AS ID,
@@ -363,14 +364,14 @@ async fn load_all_book_search_documents(
     )
     .fetch_all(&pool)
     .await
-    .map_err(|error| format!("failed to read BOOK rows for index rebuild: {error}"))?;
+    .context("failed to read BOOK rows for index rebuild")?;
 
     Ok(book_rows.into_iter().map(build_book_document).collect())
 }
 
 async fn load_all_series_search_documents(
     pool: sqlx::SqlitePool,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let series_rows = sqlx::query(
         r#"SELECT
              s.ID AS ID,
@@ -441,18 +442,18 @@ async fn load_all_series_search_documents(
     )
     .fetch_all(&pool)
     .await
-    .map_err(|error| format!("failed to read SERIES rows for index rebuild: {error}"))?;
+    .context("failed to read SERIES rows for index rebuild")?;
 
     Ok(series_rows.into_iter().map(build_series_document).collect())
 }
 
 async fn load_all_collection_search_documents(
     pool: sqlx::SqlitePool,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let rows = sqlx::query("SELECT ID, NAME FROM COLLECTION")
         .fetch_all(&pool)
         .await
-        .map_err(|error| format!("failed to read COLLECTION rows for index rebuild: {error}"))?;
+        .context("failed to read COLLECTION rows for index rebuild: ")?;
 
     Ok(rows
         .into_iter()
@@ -462,11 +463,11 @@ async fn load_all_collection_search_documents(
 
 async fn load_all_readlist_search_documents(
     pool: sqlx::SqlitePool,
-) -> Result<Vec<SearchDocument>, String> {
+) -> anyhow::Result<Vec<SearchDocument>> {
     let rows = sqlx::query("SELECT ID, NAME FROM READLIST")
         .fetch_all(&pool)
         .await
-        .map_err(|error| format!("failed to read READLIST rows for index rebuild: {error}"))?;
+        .context("failed to read READLIST rows for index rebuild")?;
 
     Ok(rows
         .into_iter()

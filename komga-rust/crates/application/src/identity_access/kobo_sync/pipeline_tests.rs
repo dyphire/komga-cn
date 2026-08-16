@@ -204,7 +204,7 @@ impl TestSyncState {
 
 #[async_trait::async_trait]
 impl KoboSyncStatePort for TestSyncState {
-    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
+    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> anyhow::Result<KoboSyncPage> {
         self.requests.lock().unwrap().push(request);
         Ok(self.page.clone())
     }
@@ -213,11 +213,11 @@ impl KoboSyncStatePort for TestSyncState {
         &self,
         _books: &[KoboSyncPointBook],
         _user_id: &str,
-    ) -> Result<Vec<KoboSyncBookState>, String> {
+    ) -> anyhow::Result<Vec<KoboSyncBookState>> {
         Ok(self.book_states.clone())
     }
 
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String> {
+    async fn remove_sync_point(&self, sync_point_id: &str) -> anyhow::Result<()> {
         self.removed_sync_points
             .lock()
             .unwrap()
@@ -290,7 +290,7 @@ impl KoboStoreSyncPort for TestStoreSync {
         _forwarded_headers: &[KoboProxyHeader],
         _query: Option<&str>,
         _raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, String> {
+    ) -> anyhow::Result<KoboStoreSyncMergeResult> {
         *self.calls.lock().unwrap() += 1;
         Ok(self.response.clone())
     }

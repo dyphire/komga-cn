@@ -7,15 +7,15 @@ pub(crate) async fn aggregate_series_metadata(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
     let library_id = {
         let mut tx = pool.begin().await.map_err(|error| {
-            format!(
-                "failed to start series metadata aggregation transaction for '{series_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to start series metadata aggregation transaction for '{series_id}': "
+            ))
         })?;
 
         let row = sqlx::query(
@@ -29,7 +29,11 @@ pub(crate) async fn aggregate_series_metadata(
         .bind(&series_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| format!("failed to load series for aggregation '{series_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to load series for aggregation '{series_id}': "
+            ))
+        })?;
 
         match row {
             // The transaction still owns a pooled connection here. Returning a sentinel keeps
@@ -63,7 +67,9 @@ pub(crate) async fn aggregate_series_metadata(
                 .execute(&mut *tx)
                 .await
                 .map_err(|error| {
-                    format!("failed to upsert BOOK_METADATA_AGGREGATION for '{series_id}': {error}")
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to upsert BOOK_METADATA_AGGREGATION for '{series_id}': "
+                    ))
                 })?;
 
                 sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_AUTHOR WHERE SERIES_ID = ?")
@@ -71,9 +77,9 @@ pub(crate) async fn aggregate_series_metadata(
                     .execute(&mut *tx)
                     .await
                     .map_err(|error| {
-                        format!(
-                            "failed to clear BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
-                        )
+                        anyhow::anyhow!(error).context(format!(
+                            "failed to clear BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': "
+                        ))
                     })?;
 
                 for author in aggregate.authors {
@@ -88,10 +94,9 @@ pub(crate) async fn aggregate_series_metadata(
                     .bind(author.role)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|error| {
-                        format!(
-                            "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': {error}"
-                        )
+                    .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                            "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': "
+                        ))
                     })?;
                 }
 
@@ -100,9 +105,9 @@ pub(crate) async fn aggregate_series_metadata(
                     .execute(&mut *tx)
                     .await
                     .map_err(|error| {
-                        format!(
-                            "failed to clear BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
-                        )
+                        anyhow::anyhow!(error).context(format!(
+                            "failed to clear BOOK_METADATA_AGGREGATION_TAG for '{series_id}': "
+                        ))
                     })?;
 
                 for tag in aggregate.tags {
@@ -117,9 +122,9 @@ pub(crate) async fn aggregate_series_metadata(
                     .execute(&mut *tx)
                     .await
                     .map_err(|error| {
-                        format!(
-                            "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': {error}"
-                        )
+                        anyhow::anyhow!(error).context(format!(
+                            "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': "
+                        ))
                     })?;
                 }
 
@@ -140,13 +145,14 @@ pub(crate) async fn aggregate_series_metadata(
                 .execute(&mut *tx)
                 .await
                 .map_err(|error| {
-                    format!("failed to aggregate SERIES counters for '{series_id}': {error}")
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to aggregate SERIES counters for '{series_id}': "
+                    ))
                 })?;
 
-                tx.commit().await.map_err(|error| {
-                    format!(
-                        "failed to commit series metadata aggregation transaction for '{series_id}': {error}"
-                    )
+                tx.commit().await.map_err(|error| { anyhow::anyhow!(error).context( format!(
+                        "failed to commit series metadata aggregation transaction for '{series_id}': "
+                    ))
                 })?;
 
                 sqlx::query(
@@ -161,9 +167,9 @@ pub(crate) async fn aggregate_series_metadata(
                 .fetch_optional(pool)
                 .await
                 .map_err(|error| {
-                    format!(
-                        "failed to resolve LIBRARY_ID after series aggregation '{series_id}': {error}"
-                    )
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to resolve LIBRARY_ID after series aggregation '{series_id}': "
+                    ))
                 })
                 .map(|row| row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")))?
             }
@@ -196,7 +202,7 @@ struct AggregatedAuthor {
 async fn load_series_book_metadata_aggregate(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     series_id: &str,
-) -> Result<SeriesBookMetadataAggregate, String> {
+) -> anyhow::Result<SeriesBookMetadataAggregate> {
     let metadata_rows = sqlx::query(
         r#"
         SELECT COALESCE(bm.NUMBER, '') AS NUMBER,
@@ -213,7 +219,11 @@ async fn load_series_book_metadata_aggregate(
     .bind(series_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("failed to load book metadata rows for '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load book metadata rows for '{series_id}': "
+        ))
+    })?;
 
     let mut summary = String::new();
     let mut summary_number = String::new();
@@ -250,7 +260,11 @@ async fn load_series_book_metadata_aggregate(
     .bind(series_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("failed to load aggregated authors for '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load aggregated authors for '{series_id}': "
+        ))
+    })?;
 
     let mut authors = Vec::new();
     let mut seen_authors = HashSet::new();
@@ -277,7 +291,11 @@ async fn load_series_book_metadata_aggregate(
     .bind(series_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("failed to load aggregated tags for '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load aggregated tags for '{series_id}': "
+        ))
+    })?;
 
     let mut tags = Vec::new();
     let mut seen_tags = HashSet::new();

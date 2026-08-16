@@ -14,14 +14,14 @@ pub struct ResolvedAuthToken {
 
 pub trait SessionRuntime {
     fn issue_session_token(&self, user: &AuthUser, runtime_key: &str) -> String;
-    fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String>;
+    fn resolve_session_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>>;
     fn invalidate_user_sessions(&self, target_user_id: &str);
     fn invalidate_session_token(&self, token: &str);
 }
 
 pub trait RememberMeRuntime {
     fn issue_remember_me_token(&self, user: &AuthUser, runtime_key: &str) -> Option<String>;
-    fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String>;
+    fn resolve_remember_me_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>>;
     fn invalidate_remember_me_token(&self, token: &str);
 }
 
@@ -30,7 +30,7 @@ pub fn resolve_authenticated_user<S, R>(
     remember_me_runtime: &R,
     session_token: Option<&str>,
     remember_me_token: Option<&str>,
-) -> Result<Option<AuthUser>, String>
+) -> anyhow::Result<Option<AuthUser>>
 where
     S: SessionRuntime + ?Sized,
     R: RememberMeRuntime + ?Sized,
@@ -49,7 +49,7 @@ pub fn resolve_authenticated_token<S, R>(
     remember_me_runtime: &R,
     session_token: Option<&str>,
     remember_me_token: Option<&str>,
-) -> Result<Option<ResolvedAuthToken>, String>
+) -> anyhow::Result<Option<ResolvedAuthToken>>
 where
     S: SessionRuntime + ?Sized,
     R: RememberMeRuntime + ?Sized,
@@ -139,7 +139,7 @@ mod tests {
             format!("session-token:{runtime_key}:{}", user.id)
         }
 
-        fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+        fn resolve_session_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
             if token == "session-token" {
                 Ok(Some(sample_user("session-user")))
             } else {
@@ -161,7 +161,7 @@ mod tests {
             Some(format!("remember-token:{runtime_key}:{}", user.id))
         }
 
-        fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+        fn resolve_remember_me_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
             if token == "remember-token" {
                 Ok(Some(sample_user("remember-user")))
             } else {

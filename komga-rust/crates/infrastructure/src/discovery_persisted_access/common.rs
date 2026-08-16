@@ -21,7 +21,7 @@ pub(super) struct ScopedStringQuery<'a> {
 pub(super) async fn load_persisted_scoped_strings(
     pool: &SqlitePool,
     query: &ScopedStringQuery<'_>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(library_ids) = query.library_ids
         && library_ids.is_empty()
     {
@@ -65,11 +65,9 @@ pub(super) async fn load_persisted_scoped_strings(
     builder.push(" ORDER BY ");
     builder.push(query.order_by);
 
-    let rows = builder
-        .build()
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("query persisted {}: {error}", query.label))?;
+    let rows = builder.build().fetch_all(pool).await.map_err(|error| {
+        anyhow::anyhow!(error).context(format!("query persisted {}: ", query.label))
+    })?;
 
     Ok(rows
         .into_iter()

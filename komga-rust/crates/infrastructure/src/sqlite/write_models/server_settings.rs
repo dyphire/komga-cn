@@ -45,11 +45,11 @@ impl ServerSettingsStore {
 
 #[async_trait::async_trait]
 impl ServerSettingsPort for ServerSettingsStore {
-    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
+    async fn load_map(&self) -> anyhow::Result<BTreeMap<String, Option<String>>> {
         let context = self
             .context()
             .await
-            .map_err(|e| format!("server settings context: {e}"))?;
+            .map_err(|e| anyhow::anyhow!(e).context("server settings context"))?;
         let rows = sqlx::query(
             r#"
             SELECT KEY, VALUE
@@ -58,7 +58,7 @@ impl ServerSettingsPort for ServerSettingsStore {
         )
         .fetch_all(context.pool())
         .await
-        .map_err(|e| format!("load server settings map: {e}"))?
+        .map_err(|e| anyhow::anyhow!(e).context("load server settings map"))?
         .into_iter()
         .map(|row| {
             (
@@ -70,13 +70,13 @@ impl ServerSettingsPort for ServerSettingsStore {
         Ok(rows)
     }
 
-    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
+    async fn load_settings(&self) -> anyhow::Result<PersistedServerSettings> {
         crate::operational_access::load_server_settings(self)
             .await
-            .map_err(|e| format!("load server settings: {e}"))
+            .map_err(|e| anyhow::anyhow!(e).context("load server settings"))
     }
 
-    async fn apply_changes(&self, changes: &[ServerSettingChange]) -> Result<(), String> {
+    async fn apply_changes(&self, changes: &[ServerSettingChange]) -> anyhow::Result<()> {
         if changes.is_empty() {
             return Ok(());
         }
@@ -84,7 +84,7 @@ impl ServerSettingsPort for ServerSettingsStore {
         let context = self
             .context()
             .await
-            .map_err(|e| format!("server settings context: {e}"))?;
+            .map_err(|e| anyhow::anyhow!(e).context("server settings context"))?;
         for change in changes {
             match &change.value {
                 Some(value) => {
@@ -100,7 +100,9 @@ impl ServerSettingsPort for ServerSettingsStore {
                     .bind(value)
                     .execute(context.pool())
                     .await
-                    .map_err(|e| format!("apply server setting {}: {e}", change.key))?;
+                    .map_err(|e| {
+                        anyhow::anyhow!(e).context(format!("apply server setting {}: ", change.key))
+                    })?;
                 }
                 None => {
                     sqlx::query(
@@ -112,7 +114,10 @@ impl ServerSettingsPort for ServerSettingsStore {
                     .bind(&change.key)
                     .execute(context.pool())
                     .await
-                    .map_err(|e| format!("delete server setting {}: {e}", change.key))?;
+                    .map_err(|e| {
+                        anyhow::anyhow!(e)
+                            .context(format!("delete server setting {}: ", change.key))
+                    })?;
                 }
             }
         }

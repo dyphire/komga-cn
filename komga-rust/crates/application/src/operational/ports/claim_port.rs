@@ -12,11 +12,11 @@ pub enum ClaimInitialAdminUserResult {
 
 #[async_trait::async_trait]
 pub trait ClaimPort: Send + Sync {
-    async fn load_claim_status(&self) -> Result<bool, String>;
+    async fn load_claim_status(&self) -> anyhow::Result<bool>;
     async fn claim_initial_admin_user(
         &self,
         user_id: &str,
         email: &str,
         password_hash: &str,
-    ) -> Result<ClaimInitialAdminUserResult, String>;
+    ) -> anyhow::Result<ClaimInitialAdminUserResult>;
 }

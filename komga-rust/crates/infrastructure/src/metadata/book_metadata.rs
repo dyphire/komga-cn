@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     BookMetadata, BookMetadataAuthor, BookMetadataLink, BookMetadataPort,
 };
@@ -20,15 +21,15 @@ impl SqliteBookMetadataPort {
 
 #[async_trait::async_trait]
 impl BookMetadataPort for SqliteBookMetadataPort {
-    async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
+    async fn load_book_metadata(&self, book_id: &str) -> anyhow::Result<Option<BookMetadata>> {
         load_book_metadata(&self.read_pool, book_id).await
     }
 
-    async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String> {
+    async fn load_book_series_id(&self, book_id: &str) -> anyhow::Result<Option<String>> {
         load_book_series_id(&self.read_pool, book_id).await
     }
 
-    async fn load_book_library_id(&self, book_id: &str) -> Result<Option<String>, String> {
+    async fn load_book_library_id(&self, book_id: &str) -> anyhow::Result<Option<String>> {
         load_book_library_id(&self.read_pool, book_id).await
     }
 
@@ -36,7 +37,7 @@ impl BookMetadataPort for SqliteBookMetadataPort {
         &self,
         book_id: &str,
         metadata: &BookMetadata,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         persist_book_metadata(&self.write_pool, book_id, metadata).await
     }
 }
@@ -44,7 +45,7 @@ impl BookMetadataPort for SqliteBookMetadataPort {
 async fn load_book_metadata(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<BookMetadata>, String> {
+) -> anyhow::Result<Option<BookMetadata>> {
     let row = sqlx::query(
         r#"
         SELECT TITLE, TITLE_LOCK, SUMMARY, SUMMARY_LOCK, NUMBER, NUMBER_LOCK, NUMBER_SORT,
@@ -58,7 +59,7 @@ async fn load_book_metadata(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query existing book metadata: {error}"))?;
+    .context("query existing book metadata")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -70,7 +71,7 @@ async fn load_book_metadata(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing book metadata authors: {error}"))?;
+    .context("query existing book metadata authors")?;
 
     let tag_rows = sqlx::query(
         "SELECT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
@@ -78,7 +79,7 @@ async fn load_book_metadata(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing book metadata tags: {error}"))?;
+    .context("query existing book metadata tags")?;
 
     let link_rows = sqlx::query(
         "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
@@ -86,7 +87,7 @@ async fn load_book_metadata(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing book metadata links: {error}"))?;
+    .context("query existing book metadata links")?;
 
     Ok(Some(BookMetadata {
         title: row.get::<String, _>("TITLE"),
@@ -125,22 +126,22 @@ async fn load_book_metadata(
     }))
 }
 
-async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
+async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query book series id: {error}"))?;
+        .context("query book series id")?;
 
     Ok(row.map(|row| row.get::<String, _>("SERIES_ID")))
 }
 
-async fn load_book_library_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
+async fn load_book_library_id(pool: &SqlitePool, book_id: &str) -> anyhow::Result<Option<String>> {
     let row = sqlx::query("SELECT LIBRARY_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query book library id: {error}"))?;
+        .context("query book library id")?;
 
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
@@ -149,22 +150,22 @@ async fn persist_book_metadata(
     pool: &SqlitePool,
     book_id: &str,
     metadata: &BookMetadata,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin book metadata update tx: {error}"))?;
+        .context("begin book metadata update tx")?;
 
     let exists = sqlx::query("SELECT 1 AS FOUND FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| format!("query book metadata existence for update: {error}"))?
+        .context("query book metadata existence for update")?
         .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback book metadata update tx: {error}"))?;
+            .context("rollback book metadata update tx")?;
         return Ok(false);
     }
 
@@ -196,19 +197,19 @@ async fn persist_book_metadata(
     .bind(book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("update book metadata: {error}"))?;
+    .context("update book metadata")?;
 
     sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("touch book last modified after metadata update: {error}"))?;
+        .context("touch book last modified after metadata update")?;
 
     sqlx::query("DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("delete existing book metadata authors: {error}"))?;
+        .context("delete existing book metadata authors")?;
     for author in &metadata.authors {
         sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
             .bind(book_id)
@@ -216,28 +217,28 @@ async fn persist_book_metadata(
             .bind(&author.role)
             .execute(&mut *tx)
             .await
-            .map_err(|error| format!("insert updated book metadata author: {error}"))?;
+            .context("insert updated book metadata author")?;
     }
 
     sqlx::query("DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("delete existing book metadata tags: {error}"))?;
+        .context("delete existing book metadata tags")?;
     for tag in &metadata.tags {
         sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
             .bind(book_id)
             .bind(tag)
             .execute(&mut *tx)
             .await
-            .map_err(|error| format!("insert updated book metadata tag: {error}"))?;
+            .context("insert updated book metadata tag")?;
     }
 
     sqlx::query("DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("delete existing book metadata links: {error}"))?;
+        .context("delete existing book metadata links")?;
     for link in &metadata.links {
         sqlx::query("INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) VALUES (?, ?, ?)")
             .bind(book_id)
@@ -245,11 +246,11 @@ async fn persist_book_metadata(
             .bind(&link.url)
             .execute(&mut *tx)
             .await
-            .map_err(|error| format!("insert updated book metadata link: {error}"))?;
+            .context("insert updated book metadata link")?;
     }
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit book metadata update tx: {error}"))?;
+        .context("commit book metadata update tx")?;
     Ok(true)
 }

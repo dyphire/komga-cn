@@ -410,7 +410,7 @@ pub(in crate::task_queue) struct PersistedDeleteSeriesSseContext {
 pub(in crate::task_queue) async fn load_book_delete_decision(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedDeleteBookDecision>, String> {
+) -> anyhow::Result<Option<PersistedDeleteBookDecision>> {
     let row = sqlx::query(
         r#"
         SELECT SERIES_ID, oneshot AS ONESHOT
@@ -422,7 +422,11 @@ pub(in crate::task_queue) async fn load_book_delete_decision(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to resolve delete-book target for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to resolve delete-book target for '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| PersistedDeleteBookDecision {
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -433,7 +437,7 @@ pub(in crate::task_queue) async fn load_book_delete_decision(
 pub(in crate::task_queue) async fn load_book_delete_sse_context(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedDeleteBookSseContext>, String> {
+) -> anyhow::Result<Option<PersistedDeleteBookSseContext>> {
     let row = sqlx::query(
         r#"
         SELECT SERIES_ID, LIBRARY_ID
@@ -445,7 +449,11 @@ pub(in crate::task_queue) async fn load_book_delete_sse_context(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load book delete SSE context for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load book delete SSE context for '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| PersistedDeleteBookSseContext {
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -456,7 +464,7 @@ pub(in crate::task_queue) async fn load_book_delete_sse_context(
 pub(in crate::task_queue) async fn load_book_delete_work(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedDeleteBookWork>, String> {
+) -> anyhow::Result<Option<PersistedDeleteBookWork>> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -472,7 +480,11 @@ pub(in crate::task_queue) async fn load_book_delete_work(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load book delete target for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load book delete target for '{book_id}': "
+        ))
+    })?;
 
     let sidecar_rows = sqlx::query(
         r#"
@@ -491,7 +503,11 @@ pub(in crate::task_queue) async fn load_book_delete_work(
     .bind(ThumbnailType::Sidecar.persisted_name())
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to load sidecar thumbnails for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load sidecar thumbnails for '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| PersistedDeleteBookWork {
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -515,9 +531,11 @@ pub(in crate::task_queue) async fn soft_delete_book_rows(
     pool: &SqlitePool,
     book_id: &str,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start soft-delete-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start soft-delete-book transaction for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -531,7 +549,9 @@ pub(in crate::task_queue) async fn soft_delete_book_rows(
     .bind(book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("failed to soft-delete BOOK row for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("failed to soft-delete BOOK row for '{book_id}'"))
+    })?;
 
     sqlx::query(
         r#"
@@ -549,14 +569,15 @@ pub(in crate::task_queue) async fn soft_delete_book_rows(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| {
-        format!(
-            "failed to refresh active series count for '{series_id}' while soft-deleting book '{book_id}': {error}"
-        )
+    .map_err(|error| { anyhow::anyhow!(error).context( format!(
+            "failed to refresh active series count for '{series_id}' while soft-deleting book '{book_id}': "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit soft-delete-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit soft-delete-book transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())
@@ -565,7 +586,7 @@ pub(in crate::task_queue) async fn soft_delete_book_rows(
 pub(in crate::task_queue) async fn load_series_delete_sse_context(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<PersistedDeleteSeriesSseContext>, String> {
+) -> anyhow::Result<Option<PersistedDeleteSeriesSseContext>> {
     let row = sqlx::query(
         r#"
         SELECT LIBRARY_ID
@@ -578,7 +599,9 @@ pub(in crate::task_queue) async fn load_series_delete_sse_context(
     .fetch_optional(pool)
     .await
     .map_err(|error| {
-        format!("failed to load series delete SSE context for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load series delete SSE context for '{series_id}': "
+        ))
     })?;
 
     Ok(row.map(|row| PersistedDeleteSeriesSseContext {
@@ -589,7 +612,7 @@ pub(in crate::task_queue) async fn load_series_delete_sse_context(
 pub(in crate::task_queue) async fn load_series_delete_work(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<PersistedDeleteSeriesWork, String> {
+) -> anyhow::Result<PersistedDeleteSeriesWork> {
     let rows = sqlx::query(
         r#"
         SELECT
@@ -604,7 +627,11 @@ pub(in crate::task_queue) async fn load_series_delete_work(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to load series books for delete '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load series books for delete '{series_id}': "
+        ))
+    })?;
 
     let series_row = sqlx::query(
         r#"
@@ -619,7 +646,11 @@ pub(in crate::task_queue) async fn load_series_delete_work(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load series path for delete '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load series path for delete '{series_id}': "
+        ))
+    })?;
 
     let sidecar_rows = sqlx::query(
         r#"
@@ -639,7 +670,9 @@ pub(in crate::task_queue) async fn load_series_delete_work(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to load series sidecar thumbnails for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load series sidecar thumbnails for '{series_id}': "
+        ))
     })?;
 
     Ok(PersistedDeleteSeriesWork {
@@ -668,9 +701,11 @@ pub(in crate::task_queue) async fn load_series_delete_work(
 pub(in crate::task_queue) async fn soft_delete_series_rows(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start soft-delete-series transaction for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start soft-delete-series transaction for '{series_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -684,10 +719,16 @@ pub(in crate::task_queue) async fn soft_delete_series_rows(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("failed to soft-delete SERIES row for '{series_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to soft-delete SERIES row for '{series_id}': "
+        ))
+    })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit soft-delete-series transaction for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit soft-delete-series transaction for '{series_id}': "
+        ))
     })?;
 
     Ok(())
@@ -696,9 +737,11 @@ pub(in crate::task_queue) async fn soft_delete_series_rows(
 pub(in crate::task_queue) async fn soft_delete_series_book_rows(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start soft-delete-series-books transaction for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start soft-delete-series-books transaction for '{series_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -713,7 +756,9 @@ pub(in crate::task_queue) async fn soft_delete_series_book_rows(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to soft-delete BOOK rows for series '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to soft-delete BOOK rows for series '{series_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -732,14 +777,15 @@ pub(in crate::task_queue) async fn soft_delete_series_book_rows(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| {
-        format!(
-            "failed to refresh active series count for '{series_id}' while soft-deleting series books: {error}"
-        )
+    .map_err(|error| { anyhow::anyhow!(error).context( format!(
+            "failed to refresh active series count for '{series_id}' while soft-deleting series books: "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit soft-delete-series-books transaction for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit soft-delete-series-books transaction for '{series_id}': "
+        ))
     })?;
 
     Ok(())

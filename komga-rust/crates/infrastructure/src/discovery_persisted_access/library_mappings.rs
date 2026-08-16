@@ -1,8 +1,9 @@
+use anyhow::Context;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use sqlx::{Row, SqlitePool};
 
-pub(super) async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<String>, String> {
+pub(super) async fn load_persisted_library_ids(pool: &SqlitePool) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"SELECT LIBRARY_ID AS ID
          FROM (
@@ -18,7 +19,7 @@ pub(super) async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted browse-library ids: {error}"))?;
+    .context("query persisted browse-library ids")?;
 
     Ok(rows
         .into_iter()
@@ -28,14 +29,14 @@ pub(super) async fn load_persisted_library_ids(pool: &SqlitePool) -> Result<Vec<
 
 pub(super) async fn load_collection_memberships(
     pool: &SqlitePool,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, COLLECTION_ID
          FROM COLLECTION_SERIES"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series collection memberships: {error}"))?;
+    .context("query series collection memberships")?;
 
     let mut memberships = BTreeMap::<String, BTreeSet<String>>::new();
     for row in rows {
@@ -50,7 +51,7 @@ pub(super) async fn load_collection_memberships(
 pub(super) async fn load_collection_ordering(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<HashMap<String, i64>, String> {
+) -> anyhow::Result<HashMap<String, i64>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, NUMBER
          FROM COLLECTION_SERIES
@@ -59,7 +60,7 @@ pub(super) async fn load_collection_ordering(
     .bind(collection_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query collection ordering: {error}"))?;
+    .context("query collection ordering")?;
 
     let mut ordering = HashMap::new();
     for row in rows {
@@ -74,14 +75,14 @@ pub(super) async fn load_collection_ordering(
 
 pub(super) async fn load_readlist_memberships(
     pool: &SqlitePool,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, READLIST_ID
          FROM READLIST_BOOK"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query readlist memberships: {error}"))?;
+    .context("query readlist memberships")?;
 
     let mut memberships = BTreeMap::<String, BTreeSet<String>>::new();
     for row in rows {
@@ -96,7 +97,7 @@ pub(super) async fn load_readlist_memberships(
 pub(super) async fn load_readlist_ordering(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<HashMap<String, i64>, String> {
+) -> anyhow::Result<HashMap<String, i64>> {
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, NUMBER
          FROM READLIST_BOOK
@@ -105,7 +106,7 @@ pub(super) async fn load_readlist_ordering(
     .bind(readlist_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query readlist ordering: {error}"))?;
+    .context("query readlist ordering")?;
 
     let mut ordering = HashMap::new();
     for row in rows {

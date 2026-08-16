@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::task_processing::{CleanupEmptySetsPolicy, TaskProcessingError};
 use komga_domain::discovery::compare_book_names;
 use sqlx::sqlite::SqliteRow;
@@ -37,18 +38,18 @@ pub(super) async fn cleanup_empty_sets(
 pub(in crate::task_queue) async fn empty_trash_rows(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("failed to start empty-trash transaction: {error}"))?;
+        .context("failed to start empty-trash transaction")?;
 
     let affected_series_ids = load_empty_trash_affected_series_ids(&mut tx, library_id)
         .await
         .map_err(|error| {
-            format!(
-                "failed to load affected series for empty-trash library '{library_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to load affected series for empty-trash library '{library_id}': "
+            ))
         })?;
 
     for sql in EMPTY_TRASH_BOOK_DEPENDENCY_SQL {
@@ -57,9 +58,9 @@ pub(in crate::task_queue) async fn empty_trash_rows(
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to delete empty-trash dependent rows for library '{library_id}': {error}"
-                )
+                anyhow::anyhow!(error).context(format!(
+                    "failed to delete empty-trash dependent rows for library '{library_id}': "
+                ))
             })?;
     }
 
@@ -74,7 +75,9 @@ pub(in crate::task_queue) async fn empty_trash_rows(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to delete trashed BOOK rows for library '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to delete trashed BOOK rows for library '{library_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -92,7 +95,9 @@ pub(in crate::task_queue) async fn empty_trash_rows(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to refresh SERIES book counts for library '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to refresh SERIES book counts for library '{library_id}': "
+        ))
     })?;
 
     for sql in EMPTY_TRASH_SERIES_DEPENDENCY_SQL {
@@ -101,9 +106,9 @@ pub(in crate::task_queue) async fn empty_trash_rows(
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to delete empty-trash SERIES dependents for library '{library_id}': {error}"
-                )
+                anyhow::anyhow!(error).context(format!(
+                    "failed to delete empty-trash SERIES dependents for library '{library_id}': "
+                ))
             })?;
     }
 
@@ -118,19 +123,23 @@ pub(in crate::task_queue) async fn empty_trash_rows(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to delete trashed SERIES rows for library '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to delete trashed SERIES rows for library '{library_id}': "
+        ))
     })?;
 
     resort_empty_trash_affected_series(&mut tx, &affected_series_ids)
         .await
         .map_err(|error| {
-            format!(
-                "failed to resort affected series after empty-trash for library '{library_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to resort affected series after empty-trash for library '{library_id}': "
+            ))
         })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit empty-trash transaction for library '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit empty-trash transaction for library '{library_id}': "
+        ))
     })?;
 
     Ok(())
@@ -139,7 +148,7 @@ pub(in crate::task_queue) async fn empty_trash_rows(
 async fn load_empty_trash_affected_series_ids(
     tx: &mut Transaction<'_, Sqlite>,
     library_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
         SELECT DISTINCT SERIES_ID
@@ -152,7 +161,7 @@ async fn load_empty_trash_affected_series_ids(
     .bind(library_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("query affected series ids: {error}"))?;
+    .context("query affected series ids")?;
 
     Ok(rows
         .into_iter()
@@ -163,7 +172,7 @@ async fn load_empty_trash_affected_series_ids(
 async fn resort_empty_trash_affected_series(
     tx: &mut Transaction<'_, Sqlite>,
     series_ids: &[String],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     for series_id in series_ids {
         let exists = sqlx::query(
             r#"
@@ -177,7 +186,9 @@ async fn resort_empty_trash_affected_series(
         .bind(series_id)
         .fetch_optional(&mut **tx)
         .await
-        .map_err(|error| format!("query affected series existence '{series_id}': {error}"))?
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("query affected series existence '{series_id}'"))
+        })?
         .is_some();
         if !exists {
             continue;
@@ -203,7 +214,9 @@ async fn resort_empty_trash_affected_series(
         .bind(series_id)
         .fetch_all(&mut **tx)
         .await
-        .map_err(|error| format!("query affected series books '{series_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("query affected series books '{series_id}'"))
+        })?;
 
         let mut books = book_rows
             .into_iter()
@@ -216,7 +229,7 @@ async fn resort_empty_trash_affected_series(
                     number: row.get::<i64, _>("BOOK_NUMBER"),
                 })
             })
-            .collect::<Result<Vec<_>, String>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
         books.sort_by(|left, right| {
             compare_book_names(&left.name, &right.name).then_with(|| left.id.cmp(&right.id))
         });
@@ -237,7 +250,9 @@ async fn resort_empty_trash_affected_series(
                 .bind(&book.id)
                 .execute(&mut **tx)
                 .await
-                .map_err(|error| format!("update book order '{}': {error}", book.id))?;
+                .map_err(|error| {
+                    anyhow::anyhow!(error).context(format!("update book order '{}': ", book.id))
+                })?;
             }
 
             if let Some(metadata) = &book.metadata {
@@ -266,7 +281,10 @@ async fn resort_empty_trash_affected_series(
                 .bind(&book.id)
                 .execute(&mut **tx)
                 .await
-                .map_err(|error| format!("update book metadata order '{}': {error}", book.id))?;
+                .map_err(|error| {
+                    anyhow::anyhow!(error)
+                        .context(format!("update book metadata order '{}': ", book.id))
+                })?;
             }
         }
     }
@@ -291,11 +309,13 @@ struct EmptyTrashBookMetadata {
 fn empty_trash_book_metadata(
     row: &SqliteRow,
     book_id: &str,
-) -> Result<Option<EmptyTrashBookMetadata>, String> {
+) -> anyhow::Result<Option<EmptyTrashBookMetadata>> {
     let metadata_exists = row
         .try_get::<Option<String>, _>("BOOK_METADATA_BOOK_ID")
         .map_err(|error| {
-            format!("persisted BOOK_METADATA row marker could not be read for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "persisted BOOK_METADATA row marker could not be read for '{book_id}': "
+            ))
         })?
         .is_some();
     if !metadata_exists {
@@ -306,14 +326,16 @@ fn empty_trash_book_metadata(
         number: row
             .try_get::<Option<String>, _>("METADATA_NUMBER")
             .map_err(|error| {
-                format!("persisted BOOK_METADATA.NUMBER could not be read for '{book_id}': {error}")
+                anyhow::anyhow!(error).context(format!(
+                    "persisted BOOK_METADATA.NUMBER could not be read for '{book_id}': "
+                ))
             })?,
         number_sort: row
             .try_get::<Option<f64>, _>("METADATA_NUMBER_SORT")
             .map_err(|error| {
-                format!(
-                    "persisted BOOK_METADATA.NUMBER_SORT could not be read for '{book_id}': {error}"
-                )
+                anyhow::anyhow!(error).context(format!(
+                    "persisted BOOK_METADATA.NUMBER_SORT could not be read for '{book_id}': "
+                ))
             })?,
         number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
         number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
@@ -323,11 +345,11 @@ fn empty_trash_book_metadata(
 pub(in crate::task_queue) async fn cleanup_empty_sets_rows(
     pool: &SqlitePool,
     policy: CleanupEmptySetsPolicy,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("failed to start cleanup-empty-sets transaction: {error}"))?;
+        .context("failed to start cleanup-empty-sets transaction")?;
 
     let mut deletes = Vec::<&str>::new();
     if policy.delete_empty_collections {
@@ -350,12 +372,12 @@ pub(in crate::task_queue) async fn cleanup_empty_sets_rows(
         sqlx::query(sql)
             .execute(&mut *tx)
             .await
-            .map_err(|error| format!("failed to cleanup empty sets rows: {error}"))?;
+            .context("failed to cleanup empty sets rows")?;
     }
 
     tx.commit()
         .await
-        .map_err(|error| format!("failed to commit cleanup-empty-sets transaction: {error}"))?;
+        .context("failed to commit cleanup-empty-sets transaction")?;
 
     Ok(())
 }

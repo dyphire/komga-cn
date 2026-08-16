@@ -191,13 +191,13 @@ pub trait ReadlistBookPort: Send + Sync {
     async fn load_persisted_book_resource(
         &self,
         book_id: &str,
-    ) -> Result<Option<PersistedBookResourceRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedBookResourceRecord>>;
 
     async fn load_persisted_book_detail(
         &self,
         book_id: &str,
         user_id: Option<&str>,
-    ) -> Result<Option<BookReadModel>, String>;
+    ) -> anyhow::Result<Option<BookReadModel>>;
 }
 
 #[async_trait::async_trait]
@@ -205,27 +205,27 @@ pub trait BookDetailPort: Send + Sync {
     async fn load_persisted_book_resource(
         &self,
         book_id: &str,
-    ) -> Result<Option<PersistedBookResourceRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedBookResourceRecord>>;
 
     async fn load_persisted_book_detail(
         &self,
         book_id: &str,
         user_id: Option<&str>,
-    ) -> Result<Option<BookReadModel>, String>;
+    ) -> anyhow::Result<Option<BookReadModel>>;
 
     async fn load_persisted_book_sibling_id(
         &self,
         book_id: &str,
         direction: PersistedBookSiblingDirectionRecord,
-    ) -> Result<Option<String>, String>;
+    ) -> anyhow::Result<Option<String>>;
 }
 
 #[async_trait::async_trait]
 pub trait PersistedBookIdResolverPort: Send + Sync {
-    async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String>;
+    async fn persisted_book_resource_exists(&self, book_id: &str) -> anyhow::Result<bool>;
 
     async fn load_book_id_by_sorted_position(&self, index: usize)
-    -> Result<Option<String>, String>;
+    -> anyhow::Result<Option<String>>;
 }
 
 pub async fn resolve_persisted_book_id<B>(book_ids: &B, requested_book_id: &str) -> String
@@ -266,7 +266,7 @@ where
     async fn load_persisted_book_resource(
         &self,
         book_id: &str,
-    ) -> Result<Option<PersistedBookResourceRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedBookResourceRecord>> {
         BookDetailPort::load_persisted_book_resource(self, book_id).await
     }
 
@@ -274,58 +274,58 @@ where
         &self,
         book_id: &str,
         user_id: Option<&str>,
-    ) -> Result<Option<BookReadModel>, String> {
+    ) -> anyhow::Result<Option<BookReadModel>> {
         BookDetailPort::load_persisted_book_detail(self, book_id, user_id).await
     }
 }
 
 #[async_trait::async_trait]
 pub trait SeriesDetailPort: Send + Sync {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>>;
 
     async fn load_series_restrictions(
         &self,
         series_id: &str,
-    ) -> Result<PersistedSeriesRestrictionRecord, String>;
+    ) -> anyhow::Result<PersistedSeriesRestrictionRecord>;
 
     async fn load_persisted_series_resource(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesResourceRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedSeriesResourceRecord>>;
 
     async fn load_persisted_series_detail(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesDetailRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedSeriesDetailRecord>>;
 
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesReadModel>, String>;
+    async fn load_persisted_series_summaries(&self) -> anyhow::Result<Vec<SeriesReadModel>>;
 
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
+    async fn load_series_total_book_counts(&self) -> anyhow::Result<HashMap<String, i64>>;
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String>;
+    ) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>>;
 
     async fn load_persisted_series_collections(
         &self,
         series_id: &str,
-    ) -> Result<Vec<PersistedSeriesCollectionRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedSeriesCollectionRecord>>;
 
     async fn load_existing_series_metadata(
         &self,
         series_id: &str,
-    ) -> Result<Option<ExistingSeriesMetadataRecord>, String>;
+    ) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>>;
 }
 
 #[async_trait::async_trait]
 pub trait PersistedSeriesIdResolverPort: Send + Sync {
-    async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String>;
+    async fn persisted_series_resource_exists(&self, series_id: &str) -> anyhow::Result<bool>;
 
     async fn load_series_id_by_sorted_position(
         &self,
         index: usize,
-    ) -> Result<Option<String>, String>;
+    ) -> anyhow::Result<Option<String>>;
 }
 
 pub async fn resolve_persisted_series_id<S>(series_ids: &S, requested_series_id: &str) -> String
@@ -360,12 +360,12 @@ where
 
 #[async_trait::async_trait]
 pub trait CollectionSeriesPort: Send + Sync {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>>;
 
     async fn load_series_restrictions(
         &self,
         series_id: &str,
-    ) -> Result<PersistedSeriesRestrictionRecord, String>;
+    ) -> anyhow::Result<PersistedSeriesRestrictionRecord>;
 }
 
 #[async_trait::async_trait]
@@ -373,35 +373,35 @@ impl<T> CollectionSeriesPort for T
 where
     T: SeriesDetailPort + ?Sized,
 {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>> {
         SeriesDetailPort::load_series_library_id(self, series_id).await
     }
 
     async fn load_series_restrictions(
         &self,
         series_id: &str,
-    ) -> Result<PersistedSeriesRestrictionRecord, String> {
+    ) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
         SeriesDetailPort::load_series_restrictions(self, series_id).await
     }
 }
 
 #[async_trait::async_trait]
 pub trait CollectionPort: Send + Sync {
-    async fn persisted_collections_exist(&self) -> Result<bool, String>;
+    async fn persisted_collections_exist(&self) -> anyhow::Result<bool>;
 
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>>;
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>>;
 
     async fn persist_collection_create(
         &self,
@@ -409,7 +409,7 @@ pub trait CollectionPort: Send + Sync {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
     async fn persist_collection_update(
         &self,
@@ -417,32 +417,32 @@ pub trait CollectionPort: Send + Sync {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String>;
+    async fn delete_persisted_collection(&self, collection_id: &str) -> anyhow::Result<bool>;
 
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+    async fn delete_collection_search_document(&self, collection_id: &str) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait CollectionProjectionPort: Send + Sync {
-    async fn persisted_collections_exist(&self) -> Result<bool, String>;
+    async fn persisted_collections_exist(&self) -> anyhow::Result<bool>;
 
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>>;
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>>;
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -450,27 +450,27 @@ impl<T> CollectionProjectionPort for T
 where
     T: CollectionPort + ?Sized,
 {
-    async fn persisted_collections_exist(&self) -> Result<bool, String> {
+    async fn persisted_collections_exist(&self) -> anyhow::Result<bool> {
         CollectionPort::persisted_collections_exist(self).await
     }
 
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
         CollectionPort::load_persisted_collections(self).await
     }
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
     }
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
         CollectionPort::load_persisted_collection_detail(self, collection_id).await
     }
 }
@@ -479,17 +479,17 @@ where
 pub trait CollectionMutationPort: Send + Sync {
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>>;
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>>;
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn persist_collection_create(
         &self,
@@ -497,7 +497,7 @@ pub trait CollectionMutationPort: Send + Sync {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
     async fn persist_collection_update(
         &self,
@@ -505,13 +505,13 @@ pub trait CollectionMutationPort: Send + Sync {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String>;
+    async fn delete_persisted_collection(&self, collection_id: &str) -> anyhow::Result<bool>;
 
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String>;
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String>;
+    async fn delete_collection_search_document(&self, collection_id: &str) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -521,21 +521,21 @@ where
 {
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
         CollectionPort::load_persisted_collections(self).await
     }
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
         CollectionPort::load_persisted_collection_detail(self, collection_id).await
     }
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
     }
 
@@ -545,7 +545,7 @@ where
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         CollectionPort::persist_collection_create(self, collection_id, name, ordered, series_ids)
             .await
     }
@@ -556,20 +556,20 @@ where
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         CollectionPort::persist_collection_update(self, collection_id, name, ordered, series_ids)
             .await
     }
 
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+    async fn delete_persisted_collection(&self, collection_id: &str) -> anyhow::Result<bool> {
         CollectionPort::delete_persisted_collection(self, collection_id).await
     }
 
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> anyhow::Result<bool> {
         CollectionPort::upsert_collection_search_document(self, collection_id).await
     }
 
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
+    async fn delete_collection_search_document(&self, collection_id: &str) -> anyhow::Result<()> {
         CollectionPort::delete_collection_search_document(self, collection_id).await
     }
 }
@@ -578,28 +578,28 @@ where
 pub trait ReadlistProjectionPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>>;
 
     async fn load_persisted_readlist_detail(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String>;
+    ) -> anyhow::Result<Option<DiscoveryPersistedReadlistRecord>>;
 
     async fn load_persisted_readlist_book_rows(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String>;
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>>;
 }
 
 #[async_trait::async_trait]
 pub trait ReadlistComicRackMatchPort: Send + Sync {
     async fn load_persisted_readlists(
         &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String>;
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>>;
 
     async fn load_comicrack_match_candidates(
         &self,
-    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedComicrackMatchCandidateRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -611,7 +611,7 @@ pub trait ReadlistMutationPort: ReadlistProjectionPort {
         summary: &str,
         ordered: bool,
         book_ids: &[String],
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
     async fn persist_readlist_update(
         &self,
@@ -620,11 +620,11 @@ pub trait ReadlistMutationPort: ReadlistProjectionPort {
         summary: &str,
         ordered: bool,
         book_ids: &[String],
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 
-    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String>;
+    async fn delete_persisted_readlist(&self, readlist_id: &str) -> anyhow::Result<bool>;
 
-    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String>;
+    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String>;
+    async fn delete_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<()>;
 }

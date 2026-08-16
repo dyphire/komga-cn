@@ -65,7 +65,7 @@ fn kobo_library_sync_service<'a>(
     KoboLibrarySyncService::new(state, store_sync)
 }
 
-async fn load_kobo_proxy_enabled(server_settings: &dyn ServerSettingsPort) -> Result<bool, String> {
+async fn load_kobo_proxy_enabled(server_settings: &dyn ServerSettingsPort) -> anyhow::Result<bool> {
     server_settings
         .load_settings()
         .await
@@ -75,7 +75,7 @@ async fn load_kobo_proxy_enabled(server_settings: &dyn ServerSettingsPort) -> Re
 async fn effective_kobo_port(
     server_settings: &dyn ServerSettingsPort,
     runtime: &RuntimeState,
-) -> Result<u16, String> {
+) -> anyhow::Result<u16> {
     server_settings.load_settings().await.map(|settings| {
         settings
             .kobo_port
@@ -87,7 +87,7 @@ async fn kobo_request_base_url(
     server_settings: &dyn ServerSettingsPort,
     runtime: &RuntimeState,
     headers: &HeaderMap,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     Ok(format!(
         "{}{}",
         request_base_url_with_port(

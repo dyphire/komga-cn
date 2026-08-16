@@ -33,8 +33,10 @@ fn settings_update_command_parses_thumbnail_size_at_transport_boundary() {
 
     assert_eq!(command.thumbnail_size, Some(ThumbnailSize::XLarge));
     assert_eq!(
-        settings_update_command(&json!({ "thumbnailSize": "small" })),
-        Err("thumbnailSize is invalid".to_string()),
+        settings_update_command(&json!({ "thumbnailSize": "small" }))
+            .expect_err("invalid thumbnail size should fail")
+            .to_string(),
+        "thumbnailSize is invalid"
     );
 }
 
@@ -249,7 +251,7 @@ struct FakeTaskQueue<F> {
 #[async_trait::async_trait]
 impl<F> TaskQueue for FakeTaskQueue<F>
 where
-    F: Fn(usize) -> Result<(), String> + Send + Sync,
+    F: Fn(usize) -> anyhow::Result<()> + Send + Sync,
 {
     async fn enqueue(&self, _kind: TaskKind, _target_id: &str) {}
 
@@ -261,11 +263,11 @@ where
         &self,
         _records: Vec<TaskQueueRecord>,
         _urgency: SubmitUrgency,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
-    async fn status(&self) -> Result<QueueStatus, String> {
+    async fn status(&self) -> anyhow::Result<QueueStatus> {
         Ok(QueueStatus::default())
     }
 }
@@ -273,13 +275,13 @@ where
 #[async_trait::async_trait]
 impl<F> TaskQueueAdmin for FakeTaskQueue<F>
 where
-    F: Fn(usize) -> Result<(), String> + Send + Sync,
+    F: Fn(usize) -> anyhow::Result<()> + Send + Sync,
 {
-    async fn clear_unowned_tasks(&self) -> Result<usize, String> {
+    async fn clear_unowned_tasks(&self) -> anyhow::Result<usize> {
         Ok(0)
     }
 
-    async fn apply_pool_size(&self, value: usize) -> Result<(), String> {
+    async fn apply_pool_size(&self, value: usize) -> anyhow::Result<()> {
         (self.apply)(value)
     }
 

@@ -8,8 +8,8 @@ use super::AnnouncementPort;
 
 #[async_trait::async_trait]
 pub trait RemoteFeedPort: Send + Sync {
-    async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String>;
-    async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String>;
+    async fn load_announcements_feed(&self) -> anyhow::Result<Option<RemoteAnnouncementsFeed>>;
+    async fn load_releases(&self) -> anyhow::Result<Vec<RemoteRelease>>;
 }
 
 const CACHE_TTL_SECONDS: u64 = 60 * 60;
@@ -79,7 +79,7 @@ impl RemoteFeedService {
         &self,
         user_id: &str,
         ids: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let ids = deduplicate_announcement_ids(ids);
         self.announcements
             .save_announcements_read(user_id, &ids)
@@ -89,7 +89,7 @@ impl RemoteFeedService {
     pub async fn announcements_for_user(
         &self,
         user_id: &str,
-    ) -> Result<Option<RemoteAnnouncementsFeed>, String> {
+    ) -> anyhow::Result<Option<RemoteAnnouncementsFeed>> {
         let feed = match self.load_cached_announcements_feed().await? {
             Some(feed) => feed,
             None => return Ok(None),
@@ -101,13 +101,13 @@ impl RemoteFeedService {
         Ok(Some(apply_announcement_read_projection(feed, &read_ids)))
     }
 
-    pub async fn releases(&self) -> Result<Vec<RemoteRelease>, String> {
+    pub async fn releases(&self) -> anyhow::Result<Vec<RemoteRelease>> {
         self.load_cached_releases().await
     }
 
     async fn load_cached_announcements_feed(
         &self,
-    ) -> Result<Option<RemoteAnnouncementsFeed>, String> {
+    ) -> anyhow::Result<Option<RemoteAnnouncementsFeed>> {
         let now = now_epoch_seconds();
         {
             let mut cache = self
@@ -128,7 +128,7 @@ impl RemoteFeedService {
         Ok(Some(feed))
     }
 
-    async fn load_cached_releases(&self) -> Result<Vec<RemoteRelease>, String> {
+    async fn load_cached_releases(&self) -> anyhow::Result<Vec<RemoteRelease>> {
         let now = now_epoch_seconds();
         {
             let mut cache = self
@@ -222,6 +222,10 @@ mod tests {
 
     use super::*;
 
+    fn clone_result<T: Clone>(result: &Result<T, String>) -> anyhow::Result<T> {
+        result.clone().map_err(anyhow::Error::msg)
+    }
+
     struct StubRemoteFeedPort {
         announcements: Mutex<Result<Option<RemoteAnnouncementsFeed>, String>>,
         releases: Mutex<Result<Vec<RemoteRelease>, String>>,
@@ -238,18 +242,22 @@ mod tests {
 
     #[async_trait::async_trait]
     impl RemoteFeedPort for StubRemoteFeedPort {
-        async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String> {
-            self.announcements
-                .lock()
-                .expect("announcements stub should not be poisoned")
-                .clone()
+        async fn load_announcements_feed(&self) -> anyhow::Result<Option<RemoteAnnouncementsFeed>> {
+            clone_result(
+                &self
+                    .announcements
+                    .lock()
+                    .expect("announcements stub should not be poisoned"),
+            )
         }
 
-        async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String> {
-            self.releases
-                .lock()
-                .expect("releases stub should not be poisoned")
-                .clone()
+        async fn load_releases(&self) -> anyhow::Result<Vec<RemoteRelease>> {
+            clone_result(
+                &self
+                    .releases
+                    .lock()
+                    .expect("releases stub should not be poisoned"),
+            )
         }
     }
 
@@ -261,7 +269,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AnnouncementPort for StubAnnouncementPort {
-        async fn load_announcement_read_ids(&self, _user_id: &str) -> Result<Vec<String>, String> {
+        async fn load_announcement_read_ids(&self, _user_id: &str) -> anyhow::Result<Vec<String>> {
             Ok(self
                 .read_ids
                 .lock()
@@ -273,7 +281,7 @@ mod tests {
             &self,
             _user_id: &str,
             ids: &[String],
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             *self
                 .saved_ids
                 .lock()

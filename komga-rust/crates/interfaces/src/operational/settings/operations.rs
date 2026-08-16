@@ -194,7 +194,7 @@ pub(crate) async fn delete_tasks(State(app): State<OperationalApiState>, _: Admi
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "message": format!("failed to delete tasks: {error}") })),
+                Json(json!({ "message": format!("failed to delete tasks: {error:#}") })),
             )
                 .into_response();
         }

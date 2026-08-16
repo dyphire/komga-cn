@@ -274,7 +274,7 @@ pub(super) async fn authenticated_user(
     headers: &HeaderMap,
     connection_info: RequestConnectionInfo,
     app: &IdentityAccessState,
-) -> Result<Option<AuthUser>, String> {
+) -> anyhow::Result<Option<AuthUser>> {
     let identity = &app.identity;
     let request_metadata = authentication_activity_headers_metadata_with_remote_addr(
         headers,

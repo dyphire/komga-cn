@@ -29,7 +29,6 @@ fn block_on_ready<F: Future>(future: F) -> F::Output {
     }
 }
 
-#[derive(Clone)]
 struct StubImportPort {
     result: Result<Option<ImportBookOutcome>, String>,
 }
@@ -40,8 +39,8 @@ impl BookImportPort for StubImportPort {
         &self,
         _copy_mode: ImportCopyMode,
         _book: BooksImportEntry,
-    ) -> Result<Option<ImportBookOutcome>, String> {
-        self.result.clone()
+    ) -> anyhow::Result<Option<ImportBookOutcome>> {
+        self.result.clone().map_err(anyhow::Error::msg)
     }
 }
 
@@ -71,18 +70,18 @@ impl crate::task_processing::TaskQueue for RecordingTaskQueue {
         &self,
         records: Vec<TaskQueueRecord>,
         urgency: crate::task_processing::SubmitUrgency,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         assert_eq!(urgency, crate::task_processing::SubmitUrgency::Immediate);
         let task_record = records.into_iter().next().expect("task should exist");
         if task_record.id == "ImportBook_series-1_/tmp/book-a.cbz" {
-            Err("first enqueue failed".to_string())
+            Err(anyhow::anyhow!("first enqueue failed"))
         } else {
             self.persisted_ids.lock().unwrap().push(task_record.id);
             Ok(())
         }
     }
 
-    async fn status(&self) -> Result<crate::task_processing::QueueStatus, String> {
+    async fn status(&self) -> anyhow::Result<crate::task_processing::QueueStatus> {
         Ok(crate::task_processing::QueueStatus::default())
     }
 }
@@ -296,7 +295,7 @@ fn process_books_payload_registers_failed_import_runtime_event() {
     ))
     .expect_err("failed import should return the port error");
 
-    assert_eq!(error, "source file does not exist");
+    assert_eq!(error.to_string(), "source file does not exist");
     let import_events = pending_runtime_book_import_events(runtime_events.as_ref(), cursor).events;
     assert!(import_events.iter().any(|event| {
         event.book_id.is_none()

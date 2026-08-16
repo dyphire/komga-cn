@@ -9,12 +9,12 @@ use super::metadata_update::{
 
 #[async_trait::async_trait]
 pub trait SearchSyncPort: Send + Sync {
-    async fn sync_book(&self, book_id: &str) -> Result<(), String>;
+    async fn sync_book(&self, book_id: &str) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait TaskEnqueuePort: Send + Sync {
-    async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String>;
+    async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> anyhow::Result<()>;
 }
 
 pub trait BookEventEmitter: Send + Sync {
@@ -132,7 +132,7 @@ impl MetadataWriter {
             .await
             .map_err(BookMetadataUpdateError::persistence)?
             .ok_or_else(|| {
-                BookMetadataUpdateError::persistence(format!(
+                BookMetadataUpdateError::persistence(anyhow::anyhow!(
                     "book event series context missing for '{book_id}'"
                 ))
             })?;
@@ -143,7 +143,7 @@ impl MetadataWriter {
             .await
             .map_err(BookMetadataUpdateError::persistence)?
             .ok_or_else(|| {
-                BookMetadataUpdateError::persistence(format!(
+                BookMetadataUpdateError::persistence(anyhow::anyhow!(
                     "book event library context missing for '{book_id}'"
                 ))
             })?;
@@ -192,7 +192,7 @@ mod tests {
 
         assert_eq!(
             error,
-            BookMetadataUpdateError::Persistence("library lookup failed".to_string()),
+            BookMetadataUpdateError::Persistence(anyhow::anyhow!("library lookup failed")),
         );
     }
 
@@ -220,9 +220,9 @@ mod tests {
 
         assert_eq!(
             error,
-            BookMetadataUpdateError::Persistence(
-                "book event series context missing for 'book-1'".to_string(),
-            ),
+            BookMetadataUpdateError::Persistence(anyhow::anyhow!(
+                "book event series context missing for 'book-1'"
+            ),),
         );
     }
 
@@ -292,23 +292,23 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BookMetadataPort for EventContextFailingMetadataPort {
-        async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
+        async fn load_book_metadata(&self, _book_id: &str) -> anyhow::Result<Option<BookMetadata>> {
             Ok(Some(sample_metadata()))
         }
 
-        async fn load_book_series_id(&self, _book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_series_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("series-1".to_string()))
         }
 
-        async fn load_book_library_id(&self, _book_id: &str) -> Result<Option<String>, String> {
-            Err("library lookup failed".to_string())
+        async fn load_book_library_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
+            Err(anyhow::anyhow!("library lookup failed"))
         }
 
         async fn persist_book_metadata(
             &self,
             _book_id: &str,
             _metadata: &BookMetadata,
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             Ok(true)
         }
     }
@@ -317,15 +317,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BookMetadataPort for EventContextMissingMetadataPort {
-        async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
+        async fn load_book_metadata(&self, _book_id: &str) -> anyhow::Result<Option<BookMetadata>> {
             Ok(Some(sample_metadata()))
         }
 
-        async fn load_book_series_id(&self, _book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_series_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
             Ok(None)
         }
 
-        async fn load_book_library_id(&self, _book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_library_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("library-1".to_string()))
         }
 
@@ -333,7 +333,7 @@ mod tests {
             &self,
             _book_id: &str,
             _metadata: &BookMetadata,
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             Ok(true)
         }
     }
@@ -342,14 +342,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BookMetadataPort for SelectiveBatchMetadataPort {
-        async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String> {
+        async fn load_book_metadata(&self, book_id: &str) -> anyhow::Result<Option<BookMetadata>> {
             match book_id {
                 "book-1" | "stale-book" => Ok(Some(sample_metadata())),
                 _ => Ok(None),
             }
         }
 
-        async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_series_id(&self, book_id: &str) -> anyhow::Result<Option<String>> {
             match book_id {
                 "book-1" => Ok(Some("series-1".to_string())),
                 "stale-book" => Ok(Some("series-stale".to_string())),
@@ -357,7 +357,7 @@ mod tests {
             }
         }
 
-        async fn load_book_library_id(&self, book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_library_id(&self, book_id: &str) -> anyhow::Result<Option<String>> {
             match book_id {
                 "book-1" => Ok(Some("library-1".to_string())),
                 "stale-book" => Ok(Some("library-stale".to_string())),
@@ -369,7 +369,7 @@ mod tests {
             &self,
             book_id: &str,
             _metadata: &BookMetadata,
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             Ok(book_id == "book-1")
         }
     }
@@ -378,7 +378,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SearchSyncPort for NoopSearchSyncPort {
-        async fn sync_book(&self, _book_id: &str) -> Result<(), String> {
+        async fn sync_book(&self, _book_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -387,7 +387,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TaskEnqueuePort for NoopTaskEnqueuePort {
-        async fn enqueue(&self, _records: Vec<TaskQueueRecord>) -> Result<(), String> {
+        async fn enqueue(&self, _records: Vec<TaskQueueRecord>) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -398,7 +398,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TaskEnqueuePort for RecordingTaskEnqueuePort {
-        async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String> {
+        async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> anyhow::Result<()> {
             self.records.lock().unwrap().extend(records);
             Ok(())
         }

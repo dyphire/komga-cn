@@ -50,7 +50,7 @@ pub trait BookImportPort: Send + Sync {
         &self,
         copy_mode: ImportCopyMode,
         book: BooksImportEntry,
-    ) -> Result<Option<ImportBookOutcome>, String>;
+    ) -> anyhow::Result<Option<ImportBookOutcome>>;
 }
 
 pub struct BookImportService {
@@ -73,7 +73,7 @@ impl BookImportService {
         &self,
         payload: BooksImportPayload,
         next_task_id: impl FnMut() -> String,
-    ) -> Result<Vec<TaskQueueRecord>, String> {
+    ) -> anyhow::Result<Vec<TaskQueueRecord>> {
         build_import_task_records(payload, next_task_id)
     }
 
@@ -99,7 +99,7 @@ impl BookImportService {
                 .and_then(|mut task_records| {
                     task_records
                         .pop()
-                        .ok_or_else(|| "import task generation returned no task".to_string())
+                        .ok_or_else(|| anyhow::anyhow!("import task generation returned no task"))
                 }) {
                 Ok(task_record) => task_record,
                 Err(error) => {
@@ -107,7 +107,7 @@ impl BookImportService {
                         kind: BookImportSubmissionFailureKind::CreateTask,
                         series_id,
                         source_file,
-                        error,
+                        error: error.to_string(),
                     });
                     continue;
                 }
@@ -121,7 +121,7 @@ impl BookImportService {
                     kind: BookImportSubmissionFailureKind::EnqueueTask,
                     series_id,
                     source_file,
-                    error,
+                    error: error.to_string(),
                 });
             }
         }
@@ -133,7 +133,7 @@ impl BookImportService {
         &self,
         payload: BooksImportPayload,
         import_priority: i32,
-    ) -> Result<Vec<TaskQueueRecord>, String> {
+    ) -> anyhow::Result<Vec<TaskQueueRecord>> {
         let mut follow_up_tasks = Vec::new();
 
         for book in payload.books {
@@ -148,7 +148,7 @@ impl BookImportService {
                         None,
                         source_file,
                         false,
-                        Some(error.clone()),
+                        Some(error.to_string()),
                     );
                     return Err(error);
                 }
@@ -189,7 +189,7 @@ impl BookImportService {
         &self,
         payload: ImportBookPayload,
         import_priority: i32,
-    ) -> Result<Vec<TaskQueueRecord>, String> {
+    ) -> anyhow::Result<Vec<TaskQueueRecord>> {
         self.process_books_payload(
             BooksImportPayload {
                 copy_mode: payload.copy_mode,

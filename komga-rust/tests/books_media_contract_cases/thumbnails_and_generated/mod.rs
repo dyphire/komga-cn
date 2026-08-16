@@ -24,7 +24,7 @@ async fn seed_book_thumbnail_bytes(
 async fn generate_book_thumbnail_with_isolated_events(
     pool: &sqlx::SqlitePool,
     book_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let runtime_events = RuntimeSseEventStore::default();
     generate_book_thumbnail(
         pool,

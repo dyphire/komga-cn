@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     EntityThumbnailBinary, SeriesThumbnailRecord, ThumbnailType,
 };
@@ -10,7 +11,7 @@ use crate::parsing::parse_thumbnail_type;
 pub(crate) async fn load_persisted_series_thumbnails(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Vec<SeriesThumbnailRecord>, String> {
+) -> anyhow::Result<Vec<SeriesThumbnailRecord>> {
     let rows = sqlx::query(
         r#"
         SELECT ID, SERIES_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT
@@ -22,7 +23,7 @@ pub(crate) async fn load_persisted_series_thumbnails(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted series thumbnails: {error}"))?;
+    .context("query persisted series thumbnails")?;
 
     rows.into_iter()
         .map(|row| {
@@ -43,7 +44,7 @@ pub(crate) async fn load_persisted_series_thumbnails(
 pub(crate) async fn load_selected_series_thumbnail(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<EntityThumbnailBinary>, String> {
+) -> anyhow::Result<Option<EntityThumbnailBinary>> {
     let row = sqlx::query(
         r#"
         SELECT ts.SERIES_ID, ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
@@ -58,7 +59,7 @@ pub(crate) async fn load_selected_series_thumbnail(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query selected series thumbnail: {error}"))?;
+    .context("query selected series thumbnail")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -84,7 +85,7 @@ pub(crate) async fn load_selected_series_thumbnail(
 pub(crate) async fn load_series_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<EntityThumbnailBinary>, String> {
+) -> anyhow::Result<Option<EntityThumbnailBinary>> {
     let row = sqlx::query(
         r#"
         SELECT ts.SERIES_ID, ts.TYPE, ts.MEDIA_TYPE, ts.THUMBNAIL, ts.URL, l.ROOT AS LIBRARY_ROOT
@@ -98,7 +99,7 @@ pub(crate) async fn load_series_thumbnail_by_id(
     .bind(thumbnail_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query single series thumbnail: {error}"))?;
+    .context("query single series thumbnail")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -134,11 +135,11 @@ pub(crate) async fn insert_series_thumbnail(
     width: i64,
     height: i64,
     selected: bool,
-) -> Result<SeriesThumbnailRecord, String> {
+) -> anyhow::Result<SeriesThumbnailRecord> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin series thumbnail create tx: {error}"))?;
+        .context("begin series thumbnail create tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -151,13 +152,13 @@ pub(crate) async fn insert_series_thumbnail(
     .bind(series_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query series existence for thumbnail create: {error}"))?
+    .context("query series existence for thumbnail create")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail create tx: {error}"))?;
-        return Err("series does not exist".to_string());
+            .context("rollback series thumbnail create tx")?;
+        return Err(anyhow::anyhow!("series does not exist"));
     }
 
     if selected {
@@ -171,7 +172,7 @@ pub(crate) async fn insert_series_thumbnail(
         .bind(series_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("clear selected series thumbnails: {error}"))?;
+        .context("clear selected series thumbnails")?;
     }
 
     let id = generated_thumbnail_id("thumbnail-series");
@@ -193,11 +194,11 @@ pub(crate) async fn insert_series_thumbnail(
     .bind(height)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert series thumbnail: {error}"))?;
+    .context("insert series thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit series thumbnail create tx: {error}"))?;
+        .context("commit series thumbnail create tx")?;
 
     let record = SeriesThumbnailRecord {
         id,
@@ -218,11 +219,11 @@ pub(crate) async fn select_series_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin series thumbnail select tx: {error}"))?;
+        .context("begin series thumbnail select tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -235,12 +236,12 @@ pub(crate) async fn select_series_thumbnail(
     .bind(series_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query series existence for thumbnail select: {error}"))?
+    .context("query series existence for thumbnail select")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail select tx: {error}"))?;
+            .context("rollback series thumbnail select tx")?;
         return Ok(false);
     }
 
@@ -255,12 +256,12 @@ pub(crate) async fn select_series_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query target series thumbnail for select: {error}"))?
+    .context("query target series thumbnail for select")?
     .map(|row| row.get::<String, _>("SERIES_ID"));
     let Some(target_series_id) = target_series_id else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail select tx: {error}"))?;
+            .context("rollback series thumbnail select tx")?;
         return Ok(false);
     };
 
@@ -274,7 +275,7 @@ pub(crate) async fn select_series_thumbnail(
     .bind(&target_series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("clear selected series thumbnails for select: {error}"))?;
+    .context("clear selected series thumbnails for select")?;
     sqlx::query(
         r#"
         UPDATE THUMBNAIL_SERIES
@@ -285,11 +286,11 @@ pub(crate) async fn select_series_thumbnail(
     .bind(thumbnail_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("mark selected series thumbnail: {error}"))?;
+    .context("mark selected series thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit series thumbnail select tx: {error}"))?;
+        .context("commit series thumbnail select tx")?;
     emit_thumbnail_series_event(runtime_events, &target_series_id, true, true);
     Ok(true)
 }
@@ -299,11 +300,11 @@ pub(crate) async fn delete_series_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin series thumbnail delete tx: {error}"))?;
+        .context("begin series thumbnail delete tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -316,12 +317,12 @@ pub(crate) async fn delete_series_thumbnail(
     .bind(series_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query series existence for thumbnail delete: {error}"))?
+    .context("query series existence for thumbnail delete")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+            .context("rollback series thumbnail delete tx")?;
         return Ok(false);
     }
 
@@ -337,11 +338,11 @@ pub(crate) async fn delete_series_thumbnail(
     .bind(series_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query series thumbnail delete target: {error}"))?;
+    .context("query series thumbnail delete target")?;
     let Some(target) = target else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+            .context("rollback series thumbnail delete tx")?;
         return Ok(false);
     };
     let deleted_selected = target.get::<bool, _>("SELECTED");
@@ -356,19 +357,19 @@ pub(crate) async fn delete_series_thumbnail(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete series thumbnail: {error}"))?
+    .context("delete series thumbnail")?
     .rows_affected()
         > 0;
     if !deleted {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series thumbnail delete tx: {error}"))?;
+            .context("rollback series thumbnail delete tx")?;
         return Ok(false);
     }
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit series thumbnail delete tx: {error}"))?;
+        .context("commit series thumbnail delete tx")?;
     emit_thumbnail_series_event(runtime_events, series_id, deleted_selected, false);
     Ok(true)
 }

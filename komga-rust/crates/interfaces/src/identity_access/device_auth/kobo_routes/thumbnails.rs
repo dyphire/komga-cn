@@ -146,7 +146,7 @@ fn encode_kobo_thumbnail_as_jpeg(bytes: &[u8]) -> Option<Vec<u8>> {
 async fn load_thumbnail_by_id(
     identity: &IdentityState,
     thumbnail_id: &str,
-) -> Result<Option<DeviceThumbnailBinary>, String> {
+) -> anyhow::Result<Option<DeviceThumbnailBinary>> {
     identity
         .device_sync()
         .load_thumbnail_by_id(thumbnail_id)

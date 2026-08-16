@@ -30,7 +30,7 @@ async fn kobo_proxy_enabled_propagates_settings_load_errors() {
         .await
         .expect_err("settings load failure should be propagated");
 
-    assert_eq!(error, "settings failed");
+    assert_eq!(error.to_string(), "settings failed");
 }
 
 #[tokio::test]
@@ -39,22 +39,22 @@ async fn kobo_request_base_url_propagates_settings_load_errors() {
         .await
         .expect_err("settings load failure should be propagated");
 
-    assert_eq!(error, "settings failed");
+    assert_eq!(error.to_string(), "settings failed");
 }
 
 struct FailingServerSettings;
 
 #[async_trait::async_trait]
 impl ServerSettingsPort for FailingServerSettings {
-    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String> {
-        Err("settings failed".to_string())
+    async fn load_map(&self) -> anyhow::Result<BTreeMap<String, Option<String>>> {
+        Err(anyhow::anyhow!("settings failed"))
     }
 
-    async fn load_settings(&self) -> Result<PersistedServerSettings, String> {
-        Err("settings failed".to_string())
+    async fn load_settings(&self) -> anyhow::Result<PersistedServerSettings> {
+        Err(anyhow::anyhow!("settings failed"))
     }
 
-    async fn apply_changes(&self, _changes: &[ServerSettingChange]) -> Result<(), String> {
+    async fn apply_changes(&self, _changes: &[ServerSettingChange]) -> anyhow::Result<()> {
         Ok(())
     }
 }

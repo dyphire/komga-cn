@@ -48,7 +48,7 @@ pub trait KoboProxyPort: Send + Sync {
     async fn proxy_kobo_request(
         &self,
         request: KoboProxyRequest,
-    ) -> Result<KoboProxyResponse, String>;
+    ) -> anyhow::Result<KoboProxyResponse>;
 }
 
 pub fn build_kobo_proxy_request(
@@ -78,7 +78,7 @@ where
         forwarded_headers: &[KoboProxyHeader],
         query: Option<&str>,
         raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, String> {
+    ) -> anyhow::Result<KoboStoreSyncMergeResult> {
         let response = self
             .proxy_kobo_request(kobo_store_sync_proxy_request(
                 forwarded_headers,
@@ -87,14 +87,14 @@ where
             ))
             .await?;
         if !(200..=299).contains(&response.status) {
-            return Err("kobo store sync proxy failed".to_string());
+            return Err(anyhow::anyhow!("kobo store sync proxy failed"));
         }
 
         let events = match response.body {
             Some(body) => body
                 .as_array()
                 .cloned()
-                .ok_or_else(|| "kobo store sync proxy body must be an array".to_string())?,
+                .ok_or_else(|| anyhow::anyhow!("kobo store sync proxy body must be an array"))?,
             None => Vec::new(),
         };
         let should_continue = response

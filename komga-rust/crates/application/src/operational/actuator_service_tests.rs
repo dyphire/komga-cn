@@ -31,48 +31,48 @@ struct FakeOperationalMetrics {
 
 #[async_trait::async_trait]
 impl OperationalMetricsPort for FakeOperationalMetrics {
-    async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String> {
+    async fn load_task_execution_values(&self) -> anyhow::Result<Vec<TaskExecutionMetricValue>> {
         Ok(Vec::new())
     }
 
-    async fn load_libraries_count(&self) -> Result<f64, String> {
+    async fn load_libraries_count(&self) -> anyhow::Result<f64> {
         Ok(0.0)
     }
 
-    async fn load_series_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
+    async fn load_series_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>> {
         Ok(Vec::new())
     }
 
-    async fn load_books_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
+    async fn load_books_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>> {
         Ok(Vec::new())
     }
 
     async fn load_books_filesize_grouped_by_library(
         &self,
-    ) -> Result<Vec<LibraryMetricValue>, String> {
+    ) -> anyhow::Result<Vec<LibraryMetricValue>> {
         Ok(Vec::new())
     }
 
-    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String> {
+    async fn load_sidecars_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>> {
         Ok(Vec::new())
     }
 
-    async fn load_collections_count(&self) -> Result<f64, String> {
+    async fn load_collections_count(&self) -> anyhow::Result<f64> {
         Ok(0.0)
     }
 
-    async fn load_readlists_count(&self) -> Result<f64, String> {
+    async fn load_readlists_count(&self) -> anyhow::Result<f64> {
         Ok(0.0)
     }
 
-    async fn load_task_failure_count(&self) -> Result<f64, String> {
+    async fn load_task_failure_count(&self) -> anyhow::Result<f64> {
         Ok(0.0)
     }
 
     async fn load_database_pool_snapshots(
         &self,
         paths: &[PathBuf],
-    ) -> Result<Vec<DatabasePoolSnapshot>, String> {
+    ) -> anyhow::Result<Vec<DatabasePoolSnapshot>> {
         *self
             .requested_pool_paths
             .lock()

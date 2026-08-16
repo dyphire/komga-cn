@@ -16,7 +16,7 @@ impl TaskEnqueueAdapter {
 
 #[async_trait::async_trait]
 impl TaskEnqueuePort for TaskEnqueueAdapter {
-    async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> Result<(), String> {
+    async fn enqueue(&self, records: Vec<TaskQueueRecord>) -> anyhow::Result<()> {
         self.queue
             .enqueue_records(records, SubmitUrgency::Immediate)
             .await

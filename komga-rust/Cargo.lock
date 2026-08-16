@@ -2575,6 +2575,7 @@ dependencies = [
 name = "komga-application"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -2624,6 +2625,7 @@ dependencies = [
 name = "komga-infrastructure"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.23.1",
  "bcrypt",
@@ -2664,6 +2666,7 @@ dependencies = [
 name = "komga-interfaces"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "axum",
  "axum-extra",
@@ -2705,6 +2708,7 @@ dependencies = [
 name = "komga-kepubify"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "quick-xml",
  "zip",
 ]

@@ -27,28 +27,28 @@ impl OpdsFeedCatalogPort for OpdsCatalogAccess {
     async fn load_book_feed_page(
         &self,
         query: OpdsBookFeedQuery<'_>,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         load_book_feed_page(self.db.read_pool(), query)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_latest_series_feed_page(
         &self,
         query: OpdsLatestSeriesFeedQuery<'_>,
-    ) -> Result<OpdsPagedSeries, String> {
+    ) -> anyhow::Result<OpdsPagedSeries> {
         load_latest_series_feed_page(self.db.read_pool(), query)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_library_series_feed_page(
         &self,
         query: OpdsLibrarySeriesQuery<'_>,
-    ) -> Result<OpdsSeriesFeedPage, String> {
+    ) -> anyhow::Result<OpdsSeriesFeedPage> {
         load_library_series_feed_page(self.db.read_pool(), query)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -61,7 +61,7 @@ impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
         publishers: &[String],
         page: usize,
         size: usize,
-    ) -> Result<BrowseSeriesNavigationPage, String> {
+    ) -> anyhow::Result<BrowseSeriesNavigationPage> {
         load_browse_series_navigation_entries(
             self.db.read_pool(),
             allowed_library_ids,
@@ -71,17 +71,17 @@ impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
             size,
         )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(anyhow::Error::from)
     }
 
     async fn load_browse_publisher_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         library_id: Option<&str>,
-    ) -> Result<Vec<BrowsePublisherEntry>, String> {
+    ) -> anyhow::Result<Vec<BrowsePublisherEntry>> {
         load_browse_publisher_entries(self.db.read_pool(), allowed_library_ids, library_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_series_page(
@@ -91,7 +91,7 @@ impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
         publishers: &[String],
         offset: i64,
         limit: i64,
-    ) -> Result<Vec<OpdsSeriesEntry>, String> {
+    ) -> anyhow::Result<Vec<OpdsSeriesEntry>> {
         load_series_page(
             self.db.read_pool(),
             allowed_library_ids,
@@ -101,7 +101,7 @@ impl OpdsBrowseCatalogPort for OpdsCatalogAccess {
             limit,
         )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(anyhow::Error::from)
     }
 }
 

@@ -12,21 +12,21 @@ pub trait SeriesReadProgressWriterPort: Send + Sync {
         user_id: &str,
         page: u64,
         completed: bool,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
-    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String>;
+    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> anyhow::Result<()>;
 
     async fn refresh_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
     async fn delete_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -40,12 +40,12 @@ where
         user_id: &str,
         page: u64,
         completed: bool,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         ProgressWriterPort::persist_read_progress(self, book_id, user_id, page, completed, None)
             .await
     }
 
-    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {
+    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> anyhow::Result<()> {
         ProgressWriterPort::delete_read_progress(self, book_id, user_id).await
     }
 
@@ -53,7 +53,7 @@ where
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         ProgressWriterPort::refresh_series_read_progress(self, series_id, user_id).await
     }
 
@@ -61,7 +61,7 @@ where
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         ProgressWriterPort::delete_series_read_progress(self, series_id, user_id).await
     }
 }
@@ -79,7 +79,7 @@ impl ReadProgressService {
         Self { reader, writer }
     }
 
-    pub async fn mark_series_complete(&self, series_id: &str, user_id: &str) -> Result<(), String> {
+    pub async fn mark_series_complete(&self, series_id: &str, user_id: &str) -> anyhow::Result<()> {
         let book_ids = self.reader.series_book_ids(series_id).await?;
         self.mark_books_complete(book_ids, user_id).await?;
         self.writer
@@ -91,7 +91,7 @@ impl ReadProgressService {
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let book_ids = self.reader.series_book_ids(series_id).await?;
         for book_id in book_ids {
             self.writer.delete_read_progress(&book_id, user_id).await?;
@@ -106,7 +106,7 @@ impl ReadProgressService {
         series_id: &str,
         user_id: &str,
         last_number_sort_read: f64,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let book_ids = self
             .reader
             .series_book_number_sorts(series_id)
@@ -127,7 +127,7 @@ impl ReadProgressService {
         ordered_book_ids: &[String],
         user_id: &str,
         last_book_read: usize,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let book_ids = ordered_book_ids
             .iter()
             .take(last_book_read)
@@ -141,7 +141,7 @@ impl ReadProgressService {
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
-    ) -> Result<ReadlistTachiyomiCounters, String> {
+    ) -> anyhow::Result<ReadlistTachiyomiCounters> {
         let completed_states = self
             .reader
             .read_progress_completed_by_book_ids(ordered_book_ids, user_id)
@@ -183,7 +183,7 @@ impl ReadProgressService {
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<SeriesTachiyomiProgress, String> {
+    ) -> anyhow::Result<SeriesTachiyomiProgress> {
         let books = self
             .reader
             .series_tachiyomi_progress_books(series_id, user_id)
@@ -196,7 +196,7 @@ impl ReadProgressService {
         &self,
         book_ids: Vec<String>,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         for book_id in book_ids {
             if self
                 .reader
@@ -239,7 +239,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ReadProgressSurfacePort for TestReadProgressSurface {
-        async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
+        async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>> {
             Ok(self
                 .series_book_numbers
                 .get(series_id)
@@ -253,7 +253,7 @@ mod tests {
         async fn series_book_number_sorts(
             &self,
             series_id: &str,
-        ) -> Result<Vec<SeriesBookNumberSort>, String> {
+        ) -> anyhow::Result<Vec<SeriesBookNumberSort>> {
             Ok(self
                 .series_book_numbers
                 .get(series_id)
@@ -265,7 +265,7 @@ mod tests {
             &self,
             series_id: &str,
             _user_id: &str,
-        ) -> Result<Vec<SeriesTachiyomiProgressBook>, String> {
+        ) -> anyhow::Result<Vec<SeriesTachiyomiProgressBook>> {
             Ok(self
                 .series_book_numbers
                 .get(series_id)
@@ -283,7 +283,7 @@ mod tests {
             &self,
             book_id: &str,
             _user_id: &str,
-        ) -> Result<Option<bool>, String> {
+        ) -> anyhow::Result<Option<bool>> {
             Ok(self.completed_by_book.get(book_id).copied().flatten())
         }
 
@@ -291,14 +291,14 @@ mod tests {
             &self,
             ordered_book_ids: &[String],
             _user_id: &str,
-        ) -> Result<Vec<Option<bool>>, String> {
+        ) -> anyhow::Result<Vec<Option<bool>>> {
             Ok(ordered_book_ids
                 .iter()
                 .map(|book_id| self.completed_by_book.get(book_id).copied().flatten())
                 .collect())
         }
 
-        async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+        async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>> {
             Ok(self.page_count_by_book.get(book_id).copied().flatten())
         }
     }
@@ -336,7 +336,7 @@ mod tests {
             _user_id: &str,
             page: u64,
             completed: bool,
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.persisted.lock().unwrap().push(PersistedProgressWrite {
                 book_id: book_id.to_string(),
                 page,
@@ -345,7 +345,7 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_read_progress(&self, book_id: &str, _user_id: &str) -> Result<(), String> {
+        async fn delete_read_progress(&self, book_id: &str, _user_id: &str) -> anyhow::Result<()> {
             self.deleted_books.lock().unwrap().push(book_id.to_string());
             Ok(())
         }
@@ -354,7 +354,7 @@ mod tests {
             &self,
             series_id: &str,
             _user_id: &str,
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.refreshed_series
                 .lock()
                 .unwrap()
@@ -366,7 +366,7 @@ mod tests {
             &self,
             series_id: &str,
             _user_id: &str,
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.deleted_series
                 .lock()
                 .unwrap()

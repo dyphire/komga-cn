@@ -58,7 +58,7 @@ impl SessionResolverPort for IdentityAccess {
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Result<Option<AuthUser>, String> {
+    ) -> anyhow::Result<Option<AuthUser>> {
         auth_identity::auth_token_user_from_tokens(session_token, remember_me_token)
     }
 
@@ -66,7 +66,7 @@ impl SessionResolverPort for IdentityAccess {
         &self,
         session_token: Option<&str>,
         remember_me_token: Option<&str>,
-    ) -> Result<Option<ResolvedAuthToken>, String> {
+    ) -> anyhow::Result<Option<ResolvedAuthToken>> {
         auth_identity::auth_token_resolution_from_tokens(session_token, remember_me_token)
     }
 }
@@ -77,18 +77,18 @@ impl AuthenticationPort for IdentityAccess {
         &self,
         username: &str,
         password: &str,
-    ) -> Result<AuthOutcome, String> {
+    ) -> anyhow::Result<AuthOutcome> {
         auth_identity::authenticate_basic_credentials(self.db.read_pool(), username, password).await
     }
 
-    async fn authenticate_api_key(&self, api_key: &str) -> Result<AuthOutcome, String> {
+    async fn authenticate_api_key(&self, api_key: &str) -> anyhow::Result<AuthOutcome> {
         auth_identity::persisted_api_key_user_by_token(api_key, self.db.read_pool()).await
     }
 
     async fn api_key_metadata_by_token(
         &self,
         api_key: &str,
-    ) -> Result<Option<PersistedApiKeyMetadata>, String> {
+    ) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
         auth_identity::persisted_api_key_metadata_by_token(api_key, self.db.read_pool()).await
     }
 }
@@ -167,40 +167,40 @@ impl SessionLifecyclePort for IdentityAccess {
 
 #[async_trait::async_trait]
 impl UserAdminPort for IdentityAccess {
-    async fn persisted_users(&self) -> Result<Vec<AuthUser>, String> {
+    async fn persisted_users(&self) -> anyhow::Result<Vec<AuthUser>> {
         auth_identity::persisted_users(self.db.read_pool()).await
     }
 
     async fn create_auth_user(
         &self,
         input: CreateAuthUserInput,
-    ) -> Result<Option<AuthUser>, String> {
+    ) -> anyhow::Result<Option<AuthUser>> {
         user_mutation::create_auth_user(self.db.write_pool(), input)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn delete_auth_user(&self, target_user_id: &str) -> Result<bool, String> {
+    async fn delete_auth_user(&self, target_user_id: &str) -> anyhow::Result<bool> {
         user_mutation::delete_auth_user(self.db.write_pool(), target_user_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn update_auth_user(
         &self,
         target_user_id: &str,
         patch: UpdateAuthUserInput,
-    ) -> Result<UpdateAuthUserResult, String> {
+    ) -> anyhow::Result<UpdateAuthUserResult> {
         user_mutation::update_auth_user(self.db.write_pool(), target_user_id, patch)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn persisted_update_password_by_user_id(
         &self,
         user_id: &str,
         password: &str,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         auth_identity::persisted_update_password_by_user_id(self.db.write_pool(), user_id, password)
             .await
     }
@@ -209,17 +209,17 @@ impl UserAdminPort for IdentityAccess {
         &self,
         email: &str,
         allow_create: bool,
-    ) -> Result<Option<AuthUser>, String> {
+    ) -> anyhow::Result<Option<AuthUser>> {
         auth_identity::ensure_oauth_user(self.db.write_pool(), email, allow_create)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn persisted_create_api_key(
         &self,
         user_id: &str,
         comment: &str,
-    ) -> Result<PersistedApiKey, String> {
+    ) -> anyhow::Result<PersistedApiKey> {
         auth_identity::persisted_create_api_key(self.db.write_pool(), user_id, comment).await
     }
 
@@ -227,11 +227,11 @@ impl UserAdminPort for IdentityAccess {
         &self,
         user_id: &str,
         comment: &str,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         auth_identity::persisted_api_key_comment_exists(self.db.read_pool(), user_id, comment).await
     }
 
-    async fn persisted_list_api_keys(&self, user_id: &str) -> Result<Vec<PersistedApiKey>, String> {
+    async fn persisted_list_api_keys(&self, user_id: &str) -> anyhow::Result<Vec<PersistedApiKey>> {
         auth_identity::persisted_list_api_keys(self.db.read_pool(), user_id).await
     }
 
@@ -239,7 +239,7 @@ impl UserAdminPort for IdentityAccess {
         &self,
         user_id: &str,
         api_key_id: &str,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         auth_identity::persisted_delete_api_key_by_id(self.db.write_pool(), user_id, api_key_id)
             .await
     }
@@ -250,11 +250,11 @@ impl AuthActivityPort for IdentityAccess {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
-    ) -> Result<Vec<PersistedAuthenticationActivity>, String> {
+    ) -> anyhow::Result<Vec<PersistedAuthenticationActivity>> {
         auth_identity::persisted_list_authentication_activity(self.db.read_pool(), user_id).await
     }
 
-    async fn persisted_cleanup_authentication_activity(&self) -> Result<u64, String> {
+    async fn persisted_cleanup_authentication_activity(&self) -> anyhow::Result<u64> {
         auth_identity::persisted_cleanup_authentication_activity(self.db.write_pool()).await
     }
 
@@ -299,19 +299,19 @@ impl AuthActivityPort for IdentityAccess {
 
 #[async_trait::async_trait]
 impl DeviceSyncPort for IdentityAccess {
-    async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String> {
+    async fn load_book_created_timestamp(&self, book_id: &str) -> anyhow::Result<Option<String>> {
         device_auth::load_book_created_timestamp(self.db.read_pool(), book_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_kobo_metadata_record(
         &self,
         book_id: &str,
-    ) -> Result<Option<KoboMetadataRecord>, String> {
+    ) -> anyhow::Result<Option<KoboMetadataRecord>> {
         let Some(record) = device_auth::load_kobo_metadata_record(self.db.read_pool(), book_id)
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(anyhow::Error::from)?
         else {
             return Ok(None);
         };
@@ -330,23 +330,23 @@ impl DeviceSyncPort for IdentityAccess {
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<PersistedReadProgressRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedReadProgressRecord>> {
         device_auth::load_read_progress(self.db.read_pool(), book_id, user_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<DeviceThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<DeviceThumbnailBinary>> {
         device_auth::load_thumbnail_by_id(self.db.read_pool(), thumbnail_id).await
     }
 
-    async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, String> {
+    async fn persisted_book_exists(&self, book_id: &str) -> anyhow::Result<bool> {
         device_auth::persisted_book_exists(self.db.read_pool(), book_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -354,7 +354,7 @@ impl IdentityAccess {
     fn kobo_metadata_record(
         &self,
         record: device_auth::PersistedKoboMetadataRecord,
-    ) -> Result<KoboMetadataRecord, String> {
+    ) -> anyhow::Result<KoboMetadataRecord> {
         Ok(KoboMetadataRecord {
             title: record.title,
             summary: record.summary,
@@ -384,7 +384,7 @@ impl IdentityAccess {
 
 #[async_trait::async_trait]
 impl KoboSyncStatePort for IdentityAccess {
-    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String> {
+    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> anyhow::Result<KoboSyncPage> {
         kobo_sync::SqliteKoboSyncState::new(self.db.write_pool())
             .load_sync_page(request)
             .await
@@ -394,13 +394,13 @@ impl KoboSyncStatePort for IdentityAccess {
         &self,
         books: &[KoboSyncPointBook],
         user_id: &str,
-    ) -> Result<Vec<KoboSyncBookState>, String> {
+    ) -> anyhow::Result<Vec<KoboSyncBookState>> {
         kobo_sync::SqliteKoboSyncState::new(self.db.read_pool())
             .load_sync_book_states(books, user_id)
             .await
     }
 
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String> {
+    async fn remove_sync_point(&self, sync_point_id: &str) -> anyhow::Result<()> {
         kobo_sync::SqliteKoboSyncState::new(self.db.write_pool())
             .remove_sync_point(sync_point_id)
             .await
@@ -412,7 +412,7 @@ impl KoboProxyPort for IdentityAccess {
     async fn proxy_kobo_request(
         &self,
         request: KoboProxyRequest,
-    ) -> Result<KoboProxyResponse, String> {
+    ) -> anyhow::Result<KoboProxyResponse> {
         kobo_sync::proxy_kobo_request(self.kobo_proxy_base_url.as_str(), request).await
     }
 }

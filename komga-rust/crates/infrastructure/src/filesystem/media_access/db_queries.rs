@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     ArchiveEntry, BookAccessRestrictions, BookMediaRecord, BookPageRecord, EpubExtensionBlob,
     ManifestBookRecord, SeriesArchiveEntries, SeriesBookNumberSort, content_type_from_filename,
@@ -40,7 +41,7 @@ fn map_persisted_book_page_row(row: SqliteRow) -> BookPageRecord {
 pub(crate) async fn load_persisted_book_media(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<BookMediaRecord>, String> {
+) -> anyhow::Result<Option<BookMediaRecord>> {
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, b.NAME AS FILE_NAME, b.URL AS BOOK_URL,
             l.ROOT AS LIBRARY_ROOT,
@@ -54,7 +55,7 @@ pub(crate) async fn load_persisted_book_media(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted book media: {error}"))?;
+    .context("query persisted book media")?;
 
     Ok(row.map(|row| BookMediaRecord {
         library_id: row.get::<String, _>("LIBRARY_ID"),
@@ -71,12 +72,12 @@ pub(crate) async fn load_persisted_book_media(
 pub(crate) async fn load_persisted_book_media_files(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     sqlx::query("SELECT FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC")
         .bind(book_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted book media files: {error}"))
+        .context("query persisted book media files")
         .map(|rows| {
             rows.into_iter()
                 .map(|row| row.get::<String, _>("FILE_NAME"))
@@ -87,7 +88,7 @@ pub(crate) async fn load_persisted_book_media_files(
 pub(crate) async fn load_persisted_media_file_records(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<PersistedMediaFileRow>, String> {
+) -> anyhow::Result<Vec<PersistedMediaFileRow>> {
     sqlx::query(
         r#"SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE
          FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC"#,
@@ -95,7 +96,7 @@ pub(crate) async fn load_persisted_media_file_records(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted media file records: {error}"))
+    .context("query persisted media file records")
     .map(|rows| {
         rows.into_iter()
             .map(|row| {
@@ -114,12 +115,12 @@ pub(crate) async fn load_persisted_media_file_records(
 pub(crate) async fn book_media_is_ready_status(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let row = sqlx::query("SELECT STATUS FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query media status: {error}"))?;
+        .context("query media status")?;
 
     Ok(row
         .map(|row| row.get::<String, _>("STATUS"))
@@ -130,7 +131,7 @@ pub(crate) async fn book_media_is_ready_status(
 pub(crate) async fn load_persisted_book_pages(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<BookPageRecord>, String> {
+) -> anyhow::Result<Vec<BookPageRecord>> {
     let rows = sqlx::query(
         r#"SELECT NUMBER, FILE_NAME, MEDIA_TYPE, width, height,
             CASE WHEN FILE_SIZE IS NULL THEN -1 ELSE FILE_SIZE END AS FILE_SIZE
@@ -139,7 +140,7 @@ pub(crate) async fn load_persisted_book_pages(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted book pages: {error}"))?;
+    .context("query persisted book pages")?;
     Ok(rows.into_iter().map(map_persisted_book_page_row).collect())
 }
 
@@ -147,7 +148,7 @@ pub(crate) async fn load_persisted_book_page_row(
     pool: &SqlitePool,
     book_id: &str,
     page_number: u64,
-) -> Result<Option<BookPageRecord>, String> {
+) -> anyhow::Result<Option<BookPageRecord>> {
     let Some(persisted_page_number) = public_page_number_to_persisted(page_number) else {
         return Ok(None);
     };
@@ -161,20 +162,20 @@ pub(crate) async fn load_persisted_book_page_row(
     .bind(persisted_page_number)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query single persisted book page: {error}"))?;
+    .context("query single persisted book page")?;
     Ok(row.map(map_persisted_book_page_row))
 }
 
 pub(crate) async fn persisted_book_exists(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     Ok(
         sqlx::query("SELECT 1 AS FOUND FROM BOOK WHERE ID = ? LIMIT 1")
             .bind(book_id)
             .fetch_optional(pool)
             .await
-            .map_err(|error| format!("query persisted book existence: {error}"))?
+            .context("query persisted book existence")?
             .is_some(),
     )
 }
@@ -182,13 +183,13 @@ pub(crate) async fn persisted_book_exists(
 pub(crate) async fn persisted_series_exists(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     Ok(
         sqlx::query("SELECT 1 AS FOUND FROM SERIES WHERE ID = ? LIMIT 1")
             .bind(series_id)
             .fetch_optional(pool)
             .await
-            .map_err(|error| format!("query persisted series existence: {error}"))?
+            .context("query persisted series existence")?
             .is_some(),
     )
 }
@@ -196,20 +197,20 @@ pub(crate) async fn persisted_series_exists(
 pub(crate) async fn load_persisted_series_oneshot(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<bool>, String> {
+) -> anyhow::Result<Option<bool>> {
     let row =
         sqlx::query("SELECT COALESCE(ONESHOT, 0) AS ONESHOT FROM SERIES WHERE ID = ? LIMIT 1")
             .bind(series_id)
             .fetch_optional(pool)
             .await
-            .map_err(|error| format!("query persisted series oneshot: {error}"))?;
+            .context("query persisted series oneshot")?;
     Ok(row.map(|row| row.get::<i64, _>("ONESHOT") != 0))
 }
 
 pub(crate) async fn load_series_book_ids(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"SELECT b.ID AS ID
          FROM BOOK b
@@ -220,7 +221,7 @@ pub(crate) async fn load_series_book_ids(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series book ids: {error}"))?;
+    .context("query series book ids")?;
     Ok(rows
         .into_iter()
         .map(|row| row.get::<String, _>("ID"))
@@ -230,7 +231,7 @@ pub(crate) async fn load_series_book_ids(
 pub(crate) async fn load_series_book_number_sorts(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Vec<SeriesBookNumberSort>, String> {
+) -> anyhow::Result<Vec<SeriesBookNumberSort>> {
     let rows = sqlx::query(
         r#"SELECT b.ID AS ID, COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS NUMBER_SORT
          FROM BOOK b
@@ -241,7 +242,7 @@ pub(crate) async fn load_series_book_number_sorts(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series number sort rows: {error}"))?;
+    .context("query series number sort rows")?;
     Ok(rows
         .into_iter()
         .map(|row| SeriesBookNumberSort {
@@ -254,7 +255,7 @@ pub(crate) async fn load_series_book_number_sorts(
 pub(crate) async fn load_book_restrictions(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<BookAccessRestrictions>, String> {
+) -> anyhow::Result<Option<BookAccessRestrictions>> {
     let row = sqlx::query(
         r#"SELECT sm.AGE_RATING AS AGE_RATING,
                   COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
@@ -270,7 +271,7 @@ pub(crate) async fn load_book_restrictions(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query book restrictions: {error}"))?;
+    .context("query book restrictions")?;
 
     Ok(row.map(|row| {
         let age_rating = row
@@ -284,7 +285,7 @@ pub(crate) async fn load_book_restrictions(
 pub(crate) async fn load_persisted_manifest_book(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<ManifestBookRecord>, String> {
+) -> anyhow::Result<Option<ManifestBookRecord>> {
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID AS LIBRARY_ID, COALESCE(bm.TITLE, b.NAME) AS TITLE,
             b.NAME AS FILE_NAME,
@@ -297,7 +298,7 @@ pub(crate) async fn load_persisted_manifest_book(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted manifest book: {error}"))?;
+    .context("query persisted manifest book")?;
 
     Ok(row.map(|row| {
         let file_name = row.get::<String, _>("FILE_NAME");
@@ -313,14 +314,14 @@ pub(crate) async fn load_persisted_manifest_book(
 pub(crate) async fn load_persisted_epub_extension_blob(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<EpubExtensionBlob>, String> {
+) -> anyhow::Result<Option<EpubExtensionBlob>> {
     let row = sqlx::query(
         "SELECT EXTENSION_CLASS, EXTENSION_VALUE_BLOB FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
     )
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query epub extension blob: {error}"))?;
+    .context("query epub extension blob")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -340,7 +341,7 @@ pub(crate) async fn load_persisted_epub_extension_blob(
 pub(crate) async fn load_series_archive_entries(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<SeriesArchiveEntries>, String> {
+) -> anyhow::Result<Option<SeriesArchiveEntries>> {
     let series_row = sqlx::query(
         r#"SELECT COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE
          FROM SERIES s
@@ -351,7 +352,7 @@ pub(crate) async fn load_series_archive_entries(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query series archive metadata: {error}"))?;
+    .context("query series archive metadata")?;
     let Some(series_row) = series_row else {
         return Ok(None);
     };
@@ -367,7 +368,7 @@ pub(crate) async fn load_series_archive_entries(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series archive entries: {error}"))?;
+    .context("query series archive entries")?;
 
     let entries = rows
         .into_iter()

@@ -14,7 +14,7 @@ async fn load_tachiyomi_readlist_book_ids(
     app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
-) -> Result<Option<Vec<String>>, String> {
+) -> anyhow::Result<Option<Vec<String>>> {
     visible_readlist_book_ids_for_user(app, readlist_id, user).await
 }
 

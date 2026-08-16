@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 
 use komga_application::discovery::{SeriesReadModel, SeriesReadingDirection};
@@ -10,10 +11,10 @@ use super::models::SeriesSummary;
 
 pub(super) async fn load_persisted_series_summaries(
     pool: &SqlitePool,
-) -> Result<Vec<SeriesSummary>, String> {
+) -> anyhow::Result<Vec<SeriesSummary>> {
     let rows = fetch_persisted_series_summary_rows(pool, None)
         .await
-        .map_err(|error| format!("query persisted series summaries: {error}"))?;
+        .context("query persisted series summaries")?;
 
     Ok(rows.into_iter().map(map_series_summary).collect())
 }
@@ -21,14 +22,14 @@ pub(super) async fn load_persisted_series_summaries(
 pub(super) async fn load_persisted_series_summaries_by_ids(
     pool: &SqlitePool,
     ids: &[String],
-) -> Result<Vec<SeriesSummary>, String> {
+) -> anyhow::Result<Vec<SeriesSummary>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
     let rows = fetch_persisted_series_summary_rows(pool, Some(ids))
         .await
-        .map_err(|error| format!("query persisted series summaries by ids: {error}"))?;
+        .context("query persisted series summaries by ids")?;
 
     let mut rows_by_id: HashMap<String, SeriesSummary> = rows
         .into_iter()
@@ -124,17 +125,17 @@ async fn fetch_persisted_series_summary_rows(
 
 pub(crate) async fn load_persisted_series_read_models(
     pool: &SqlitePool,
-) -> Result<Vec<SeriesReadModel>, String> {
+) -> anyhow::Result<Vec<SeriesReadModel>> {
     load_persisted_series_summaries(pool)
         .await
         .map(|summaries| summaries.into_iter().map(series_read_model).collect())
 }
 
-pub(super) async fn load_persisted_series_count(pool: &SqlitePool) -> Result<usize, String> {
+pub(super) async fn load_persisted_series_count(pool: &SqlitePool) -> anyhow::Result<usize> {
     let row = sqlx::query("SELECT COUNT(*) AS COUNT FROM SERIES")
         .fetch_one(pool)
         .await
-        .map_err(|error| format!("query persisted series count: {error}"))?;
+        .context("query persisted series count")?;
     Ok(row.get::<i64, _>("COUNT").max(0) as usize)
 }
 

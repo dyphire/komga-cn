@@ -18,7 +18,7 @@ pub(crate) struct KoboBookFileQuery {
     convert_kepub: Option<bool>,
 }
 
-fn convert_epub_to_kepub_bytes(input_file: &FsPath) -> Result<Vec<u8>, String> {
+fn convert_epub_to_kepub_bytes(input_file: &FsPath) -> anyhow::Result<Vec<u8>> {
     komga_kepubify::convert_epub_file_to_bytes(input_file)
 }
 

@@ -40,7 +40,7 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
         &self,
         search: &str,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         authors::load_persisted_author_names(self.db.read_pool(), search, authorized_library_ids)
             .await
     }
@@ -48,7 +48,7 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
     async fn load_author_roles(
         &self,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         authors::load_persisted_author_roles(self.db.read_pool(), authorized_library_ids).await
     }
 
@@ -56,7 +56,7 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
         &self,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<PersistedAuthorEntry>, String> {
+    ) -> anyhow::Result<Vec<PersistedAuthorEntry>> {
         let mapped_scope = match scope {
             PersistedAuthorsScope::All => models::AuthorsScope::All,
             PersistedAuthorsScope::Libraries(ids) => models::AuthorsScope::Libraries(ids),
@@ -82,7 +82,7 @@ impl AuthorFacetPort for DiscoveryQuerySupportAccess {
 
 #[async_trait::async_trait]
 impl LibraryIdMappingPort for DiscoveryQuerySupportAccess {
-    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
+    async fn load_persisted_library_ids(&self) -> anyhow::Result<Vec<String>> {
         library_mappings::load_persisted_library_ids(self.db.read_pool()).await
     }
 }
@@ -92,13 +92,13 @@ impl BookSpecialListPort for DiscoveryQuerySupportAccess {
     async fn load_ondeck_books(
         &self,
         user_id: &str,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+    ) -> anyhow::Result<Vec<PersistedBookBrowseEntry>> {
         runtime_queries::load_persisted_ondeck_books(self.db.read_pool(), user_id)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
     }
 
-    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String> {
+    async fn load_duplicate_books(&self) -> anyhow::Result<Vec<PersistedBookBrowseEntry>> {
         runtime_queries::load_persisted_duplicate_books(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(persisted_book_browse_entry).collect())
@@ -111,7 +111,7 @@ impl CollectionSearchPort for DiscoveryQuerySupportAccess {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         self.search
             .search_ids(query, SearchEntityType::Collection, limit)
     }
@@ -123,7 +123,7 @@ impl ReadlistSearchPort for DiscoveryQuerySupportAccess {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ScoredSearchHit>, String> {
+    ) -> anyhow::Result<Vec<ScoredSearchHit>> {
         Ok(self
             .search
             .search_scored_ids(query, SearchEntityType::ReadList, limit)?

@@ -32,7 +32,7 @@ pub(super) async fn resolved_kobo_request_api_key_metadata(
     current_user: &AuthUser,
     auth_token: &str,
     headers: &HeaderMap,
-) -> Result<Option<PersistedApiKeyMetadata>, String> {
+) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
     if valid_kobo_path_token(auth_token) {
         match persisted_api_key_user_by_token(identity, auth_token).await {
             Ok(AuthOutcome::Valid(path_user)) if user_id(&path_user) == user_id(current_user) => {

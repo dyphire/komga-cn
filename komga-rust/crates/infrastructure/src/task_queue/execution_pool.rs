@@ -117,14 +117,14 @@ impl TaskExecutionPoolHandle {
         &self,
         task: TaskQueueRecord,
         runtime: TaskRuntimeContext,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         self.inner
             .job_tx
             .send(TaskExecutionCommand::Run(Box::new(TaskExecutionJob {
                 task,
                 runtime,
             })))
-            .map_err(|_| "task execution pool job channel closed".to_string())
+            .map_err(|_| anyhow::anyhow!("task execution pool job channel closed"))
     }
 
     pub(super) fn take_result_receiver(

@@ -73,7 +73,7 @@ async fn import_book_returns_error_when_source_file_is_missing() {
 
     let error = result.expect_err("missing source import should return an error");
     assert!(
-        error.contains("source file does not exist"),
+        error.to_string().contains("source file does not exist"),
         "unexpected import error: {error}"
     );
 
@@ -97,7 +97,7 @@ fn import_copy_mode_reports_source_metadata_errors() {
     .expect_err("source metadata error should be propagated");
 
     assert!(
-        error.contains("inspect import source file"),
+        error.to_string().contains("inspect import source file"),
         "unexpected import copy error: {error}"
     );
 
@@ -119,7 +119,9 @@ fn source_inside_library_roots_reports_library_root_probe_errors() {
         .expect_err("library root probe errors must not be treated as external source");
 
     assert!(
-        error.contains("canonicalize import library root"),
+        error
+            .to_string()
+            .contains("canonicalize import library root"),
         "unexpected library root probe error: {error}"
     );
 
@@ -147,7 +149,7 @@ async fn import_book_returns_error_when_series_target_is_missing() {
 
     let error = result.expect_err("missing series target import should return an error");
     assert!(
-        error.contains("series target") || error.contains("missing-series"),
+        error.to_string().contains("series target") || error.to_string().contains("missing-series"),
         "unexpected import error: {error}"
     );
 
@@ -175,7 +177,7 @@ async fn import_book_returns_error_when_destination_name_is_invalid() {
 
     let error = result.expect_err("invalid destination name import should return an error");
     assert!(
-        error.contains("destination") || error.contains("nested/book.cbz"),
+        error.to_string().contains("destination") || error.to_string().contains("nested/book.cbz"),
         "unexpected import error: {error}"
     );
 
@@ -229,7 +231,7 @@ async fn import_book_returns_error_when_upgrade_target_series_mismatches() {
 
     let error = result.expect_err("upgrade series mismatch should return an error");
     assert!(
-        error.contains("upgrade") || error.contains("series"),
+        error.to_string().contains("upgrade") || error.to_string().contains("series"),
         "unexpected import error: {error}"
     );
 
@@ -257,7 +259,7 @@ async fn import_book_returns_error_when_upgrade_target_is_missing() {
 
     let error = result.expect_err("missing upgrade target should return an error");
     assert!(
-        error.contains("upgrade") || error.contains("missing-upgrade-book"),
+        error.to_string().contains("upgrade") || error.to_string().contains("missing-upgrade-book"),
         "unexpected import error: {error}"
     );
 
@@ -289,7 +291,8 @@ async fn import_book_validates_library_roots_before_target_lookup() {
 
     let error = result.expect_err("library-contained import should return an error");
     assert!(
-        error.contains("existing library") || error.contains("part of an existing library"),
+        error.to_string().contains("existing library")
+            || error.to_string().contains("part of an existing library"),
         "unexpected import error: {error}"
     );
 
@@ -314,7 +317,7 @@ async fn import_book_validates_library_roots_before_target_lookup() {
         .await;
 
     let error = result.expect_err("library root query failure should return an error");
-    assert!(error.contains("query library roots"), "{error}");
+    assert!(error.to_string().contains("query library roots"), "{error}");
 
     pool.close().await;
 }
@@ -345,7 +348,7 @@ async fn import_book_propagates_historical_event_persistence_errors() {
 
     let error = result.expect_err("historical event persistence errors should fail import");
     assert!(
-        error.contains("historical") || error.contains("BookImported"),
+        error.to_string().contains("historical") || error.to_string().contains("BookImported"),
         "unexpected import error: {error}"
     );
 
@@ -381,7 +384,7 @@ async fn import_book_returns_error_when_oneshot_series_missing_upgrade_book_id()
 
     let error = result.expect_err("oneshot import without upgrade book should return an error");
     assert!(
-        error.contains("oneshot") || error.contains("upgradeBookId"),
+        error.to_string().contains("oneshot") || error.to_string().contains("upgradeBookId"),
         "unexpected import error: {error}"
     );
 
@@ -498,7 +501,7 @@ fn collect_book_sidecar_paths_reports_candidate_metadata_errors() {
         .expect_err("sidecar metadata errors must not be treated as absent sidecars");
 
     assert!(
-        error.contains("read book sidecar metadata"),
+        error.to_string().contains("read book sidecar metadata"),
         "unexpected sidecar collection error: {error}"
     );
 
@@ -643,7 +646,9 @@ async fn import_book_upgrade_reports_old_file_removal_errors() {
 
     let error = result.expect_err("upgrade cleanup errors should fail import");
     assert!(
-        error.contains("remove previous upgraded book file"),
+        error
+            .to_string()
+            .contains("remove previous upgraded book file"),
         "unexpected import error: {error}"
     );
 

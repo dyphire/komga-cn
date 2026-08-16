@@ -96,7 +96,7 @@ impl From<BookProgressionUpdate> for BookProgressionUpdateInput {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum BookProgressionOutcome {
     Updated,
     NotFound,
@@ -104,16 +104,32 @@ pub enum BookProgressionOutcome {
     InvalidPayload,
     BadRequest(String),
     Conflict,
-    Internal(String),
+    Internal(anyhow::Error),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[cfg(test)]
+impl PartialEq for BookProgressionOutcome {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Updated, Self::Updated)
+            | (Self::NotFound, Self::NotFound)
+            | (Self::Forbidden, Self::Forbidden)
+            | (Self::InvalidPayload, Self::InvalidPayload)
+            | (Self::Conflict, Self::Conflict) => true,
+            (Self::BadRequest(left), Self::BadRequest(right)) => left == right,
+            (Self::Internal(left), Self::Internal(right)) => left.to_string() == right.to_string(),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum BookProgressionGetOutcome {
     Progression(BookProgressionRecord),
     NoContent,
     NotFound,
     Forbidden,
-    Internal(String),
+    Internal(anyhow::Error),
 }
 
 pub trait BookProgressionSurfacePort:
@@ -128,18 +144,18 @@ impl<T> BookProgressionSurfacePort for T where
 
 #[async_trait::async_trait]
 pub trait BookProgressionReaderPort: Send + Sync {
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String>;
+    ) -> anyhow::Result<Option<BookAccessRestrictions>>;
 
     async fn book_progression(
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String>;
+    ) -> anyhow::Result<Option<BookProgressionRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -147,14 +163,14 @@ impl<T> BookProgressionReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + ReadProgressReadPort + ?Sized,
 {
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         BookMediaPort::book_media(self, book_id).await
     }
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         ContentAccessPort::book_restrictions(self, book_id).await
     }
 
@@ -162,7 +178,7 @@ where
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String> {
+    ) -> anyhow::Result<Option<BookProgressionRecord>> {
         ReadProgressReadPort::book_progression(self, book_id, user_id).await
     }
 }
@@ -309,7 +325,7 @@ where
         book_id: &str,
         user: &AuthUser,
         media: &BookMediaRecord,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         let context = BookAccessContext::from_auth_user(user);
         if !context.can_access_library(&media.library_id) {
             return Ok(false);

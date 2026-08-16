@@ -6,12 +6,12 @@ pub(super) async fn table_has_rows(
     pool: &SqlitePool,
     table: &str,
     label: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let sql = format!("SELECT 1 AS FOUND FROM {table} LIMIT 1");
     let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query {label} existence: {error}"))?;
+        .map_err(|error| anyhow::anyhow!(error).context(format!("query {label} existence")))?;
     Ok(row.is_some())
 }
 
@@ -52,11 +52,11 @@ pub(super) async fn delete_parent_with_children(
     parent_id_column: &str,
     parent_id: &str,
     label: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin {label} delete tx: {error}"))?;
+        .map_err(|error| anyhow::anyhow!(error).context(format!("begin {label} delete tx")))?;
 
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM {thumbnail_table} WHERE {parent_id_column} = ?"
@@ -64,7 +64,9 @@ pub(super) async fn delete_parent_with_children(
     .bind(parent_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete persisted {label} thumbnails: {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("delete persisted {label} thumbnails"))
+    })?;
 
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM {child_table} WHERE {parent_id_column} = ?"
@@ -72,7 +74,9 @@ pub(super) async fn delete_parent_with_children(
     .bind(parent_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete persisted {label} children: {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("delete persisted {label} children"))
+    })?;
 
     let deleted = sqlx::query(sqlx::AssertSqlSafe(format!(
         "DELETE FROM {parent_table} WHERE ID = ?"
@@ -80,19 +84,19 @@ pub(super) async fn delete_parent_with_children(
     .bind(parent_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete persisted {label}: {error}"))?
+    .map_err(|error| anyhow::anyhow!(error).context(format!("delete persisted {label}")))?
     .rows_affected()
         > 0;
 
     if !deleted {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback {label} delete tx: {error}"))?;
+        tx.rollback().await.map_err(|error| {
+            anyhow::anyhow!(error).context(format!("rollback {label} delete tx"))
+        })?;
         return Ok(false);
     }
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit {label} delete tx: {error}"))?;
+        .map_err(|error| anyhow::anyhow!(error).context(format!("commit {label} delete tx")))?;
     Ok(true)
 }

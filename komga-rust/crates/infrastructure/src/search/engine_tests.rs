@@ -56,7 +56,9 @@ async fn missing_index_searches_fail_without_creating_index_state() {
         .search_ids("anything", SearchEntityType::Book, 10)
         .expect_err("missing index should fail unscored search");
     assert!(
-        ids_error.contains("failed to open search index for query"),
+        ids_error
+            .to_string()
+            .contains("failed to open search index for query"),
         "{ids_error}"
     );
 
@@ -64,7 +66,9 @@ async fn missing_index_searches_fail_without_creating_index_state() {
         .search_scored_ids("anything", SearchEntityType::Book, 10)
         .expect_err("missing index should fail scored search");
     assert!(
-        scored_error.contains("failed to open search index for query"),
+        scored_error
+            .to_string()
+            .contains("failed to open search index for query"),
         "{scored_error}"
     );
     assert!(

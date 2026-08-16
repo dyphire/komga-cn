@@ -117,9 +117,10 @@ async fn enqueue_task_records_with_status(
         .enqueue_records(task_records, SubmitUrgency::Immediate)
         .await
     {
+        tracing::error!(?error, "library catalog task enqueue failed");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error })),
+            Json(json!({ "error": format!("{error:#}") })),
         )
             .into_response();
     }
@@ -139,10 +140,11 @@ fn bad_request_response(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
 }
 
-fn internal_error_response(error: impl std::fmt::Display) -> Response {
+fn internal_error_response(error: impl std::fmt::Display + std::fmt::Debug) -> Response {
+    tracing::error!(?error, "library catalog mutation failed");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": error.to_string() })),
+        Json(json!({ "error": format!("{error:#}") })),
     )
         .into_response()
 }

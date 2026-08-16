@@ -43,49 +43,49 @@ impl Default for RemoteFeedAccess {
 
 #[async_trait::async_trait]
 impl RemoteFeedPort for RemoteFeedAccess {
-    async fn load_announcements_feed(&self) -> Result<Option<RemoteAnnouncementsFeed>, String> {
+    async fn load_announcements_feed(&self) -> anyhow::Result<Option<RemoteAnnouncementsFeed>> {
         let bytes = Client::new()
             .get(&self.announcements_url)
             .send()
             .await
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .error_for_status()
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .bytes()
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(anyhow::Error::from)?;
         parse_announcements_feed_bytes(bytes.as_ref())
     }
 
-    async fn load_releases(&self) -> Result<Vec<RemoteRelease>, String> {
+    async fn load_releases(&self) -> anyhow::Result<Vec<RemoteRelease>> {
         let bytes = Client::new()
             .get(&self.releases_url)
             .header("User-Agent", "komga-rust-runtime")
             .send()
             .await
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .error_for_status()
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .bytes()
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(anyhow::Error::from)?;
         parse_releases_bytes(bytes.as_ref())
     }
 }
 
-fn parse_announcements_feed_bytes(bytes: &[u8]) -> Result<Option<RemoteAnnouncementsFeed>, String> {
+fn parse_announcements_feed_bytes(bytes: &[u8]) -> anyhow::Result<Option<RemoteAnnouncementsFeed>> {
     if bytes.is_empty() {
         return Ok(None);
     }
 
     serde_json::from_slice::<Option<AnnouncementsFeedDto>>(bytes)
         .map(|feed| feed.map(RemoteAnnouncementsFeed::from))
-        .map_err(|error| error.to_string())
+        .map_err(anyhow::Error::from)
 }
 
-fn parse_releases_bytes(bytes: &[u8]) -> Result<Vec<RemoteRelease>, String> {
+fn parse_releases_bytes(bytes: &[u8]) -> anyhow::Result<Vec<RemoteRelease>> {
     let upstream = serde_json::from_slice::<Vec<GithubReleaseUpstreamDto>>(bytes)
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     Ok(map_github_releases(upstream))
 }
 

@@ -22,7 +22,7 @@ pub(super) async fn book_thumbnail_housekeeping(
     tx: &mut Transaction<'_, Sqlite>,
     book_id: &str,
     library_root: &Path,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let rows = sqlx::query(
         r#"
         SELECT ID, URL, THUMBNAIL, SELECTED
@@ -34,7 +34,11 @@ pub(super) async fn book_thumbnail_housekeeping(
     .bind(book_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("failed to load thumbnails for '{book_id}' housekeeping: {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load thumbnails for '{book_id}' housekeeping: "
+        ))
+    })?;
 
     let mut retained_ids = Vec::new();
     let mut selected_ids = Vec::new();
@@ -55,10 +59,10 @@ pub(super) async fn book_thumbnail_housekeeping(
                 Ok(_) => true,
                 Err(error) if error.kind() == ErrorKind::NotFound => false,
                 Err(error) => {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(format!(
                         "failed to inspect thumbnail URL '{}' for '{book_id}': {error}",
                         resolved.display()
-                    ));
+                    )));
                 }
             }
         } else {
@@ -73,9 +77,9 @@ pub(super) async fn book_thumbnail_housekeeping(
                 .execute(&mut **tx)
                 .await
                 .map_err(|error| {
-                    format!(
-                        "failed to delete invalid thumbnail '{thumbnail_id}' for '{book_id}': {error}"
-                    )
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to delete invalid thumbnail '{thumbnail_id}' for '{book_id}': "
+                    ))
                 })?;
             continue;
         }
@@ -103,7 +107,11 @@ pub(super) async fn book_thumbnail_housekeeping(
     .bind(book_id)
     .execute(&mut **tx)
     .await
-    .map_err(|error| format!("failed to normalize selected thumbnail for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to normalize selected thumbnail for '{book_id}': "
+        ))
+    })?;
 
     Ok(())
 }
@@ -112,9 +120,11 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
     book_id: &str,
     thumbnail_bytes: &[u8],
     configured_max_edge: u32,
-) -> Result<RenderedThumbnail, String> {
+) -> anyhow::Result<RenderedThumbnail> {
     let image = image::load_from_memory(thumbnail_bytes).map_err(|error| {
-        format!("failed to decode generated thumbnail source for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to decode generated thumbnail source for '{book_id}': "
+        ))
     })?;
     let source_max_edge = image.width().max(image.height()).max(1);
     let effective_max_edge = configured_max_edge.min(source_max_edge);
@@ -125,7 +135,9 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
     resized
         .write_to(&mut output, image::ImageFormat::Jpeg)
         .map_err(|error| {
-            format!("failed to encode generated thumbnail for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to encode generated thumbnail for '{book_id}': "
+            ))
         })?;
     Ok(RenderedThumbnail {
         bytes: output.into_inner(),
@@ -138,24 +150,24 @@ pub(super) fn render_generated_thumbnail_from_image_bytes(
 pub(super) fn render_pdf_thumbnail(
     media: &BookMediaRecord,
     configured_max_edge: u32,
-) -> Result<Option<RenderedThumbnail>, String> {
+) -> anyhow::Result<Option<RenderedThumbnail>> {
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(&media.file_path, None)
         .map_err(|error| {
-            format!(
-                "failed to load PDF for thumbnail generation '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to load PDF for thumbnail generation '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?;
     let page = match document.pages().first() {
         Ok(page) => page,
         Err(PdfiumError::NoPagesInDocument) => return Ok(None),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "failed to load first PDF page for thumbnail generation '{}': {error}",
                 media.file_path.display()
-            ));
+            )));
         }
     };
 
@@ -166,17 +178,17 @@ pub(super) fn render_pdf_thumbnail(
                 .set_maximum_height(i32::try_from(configured_max_edge).unwrap_or(i32::MAX)),
         )
         .map_err(|error| {
-            format!(
-                "failed to render PDF page for thumbnail generation '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to render PDF page for thumbnail generation '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?
         .as_image()
         .map_err(|error| {
-            format!(
-                "failed to convert PDF render to image '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to convert PDF render to image '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?
         .into_rgb8();
 
@@ -186,10 +198,10 @@ pub(super) fn render_pdf_thumbnail(
     image::DynamicImage::ImageRgb8(rendered)
         .write_to(&mut output, image::ImageFormat::Jpeg)
         .map_err(|error| {
-            format!(
-                "failed to encode PDF thumbnail for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to encode PDF thumbnail for '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?;
 
     Ok(Some(RenderedThumbnail {
@@ -209,7 +221,7 @@ pub(super) enum MarkSelectedPreference {
 pub(super) async fn load_book_local_artwork_urls(
     library_root: &Path,
     book_url: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let book_path = resolve_rooted_path(library_root, book_url);
     let Some(book_dir) = book_path.parent() else {
         return Ok(Vec::new());
@@ -220,25 +232,25 @@ pub(super) async fn load_book_local_artwork_urls(
 
     let mut artwork_urls = Vec::new();
     let mut entries = fs::read_dir(book_dir).await.map_err(|error| {
-        format!(
-            "failed to scan local artwork directory '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to scan local artwork directory '{}' for '{}': ",
             book_dir.display(),
             book_url,
-        )
+        ))
     })?;
     while let Some(entry) = entries.next_entry().await.map_err(|error| {
-        format!(
-            "failed to read local artwork entry in '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read local artwork entry in '{}' for '{}': ",
             book_dir.display(),
             book_url,
-        )
+        ))
     })? {
         let file_type = entry.file_type().await.map_err(|error| {
-            format!(
-                "failed to inspect local artwork entry in '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to inspect local artwork entry in '{}' for '{}': ",
                 book_dir.display(),
                 book_url,
-            )
+            ))
         })?;
         let path = entry.path();
         if !file_type.is_file() || !supported_book_local_artwork_path(path.as_path()) {
@@ -254,11 +266,11 @@ pub(super) async fn load_book_local_artwork_urls(
         let relative_url = path
             .strip_prefix(library_root)
             .map_err(|error| {
-                format!(
-                    "failed to relativize local artwork '{}' against library root '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to relativize local artwork '{}' against library root '{}': ",
                     path.display(),
                     library_root.display(),
-                )
+                ))
             })?
             .to_string_lossy()
             .replace('\\', "/");
@@ -271,29 +283,29 @@ pub(super) async fn load_book_local_artwork_urls(
 pub(super) async fn load_series_local_artwork_urls(
     library_root: &Path,
     series_url: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let series_path = resolve_rooted_path(library_root, series_url);
     let mut artwork_urls = Vec::new();
     let mut entries = fs::read_dir(&series_path).await.map_err(|error| {
-        format!(
-            "failed to scan series local artwork directory '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to scan series local artwork directory '{}' for '{}': ",
             series_path.display(),
             series_url,
-        )
+        ))
     })?;
     while let Some(entry) = entries.next_entry().await.map_err(|error| {
-        format!(
-            "failed to read series local artwork entry in '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read series local artwork entry in '{}' for '{}': ",
             series_path.display(),
             series_url,
-        )
+        ))
     })? {
         let file_type = entry.file_type().await.map_err(|error| {
-            format!(
-                "failed to inspect series local artwork entry in '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to inspect series local artwork entry in '{}' for '{}': ",
                 series_path.display(),
                 series_url,
-            )
+            ))
         })?;
         let path = entry.path();
         if !file_type.is_file() || !supported_series_local_artwork_path(path.as_path()) {
@@ -309,11 +321,11 @@ pub(super) async fn load_series_local_artwork_urls(
         let relative_url = path
             .strip_prefix(library_root)
             .map_err(|error| {
-                format!(
-                    "failed to relativize series local artwork '{}' against library root '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to relativize series local artwork '{}' against library root '{}': ",
                     path.display(),
                     library_root.display(),
-                )
+                ))
             })?
             .to_string_lossy()
             .replace('\\', "/");
@@ -362,14 +374,14 @@ pub(super) async fn import_book_local_artwork_thumbnail(
     library_root: &Path,
     artwork_url: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let artwork_path = library_root.join(artwork_url);
     let metadata = tokio::fs::metadata(&artwork_path).await.map_err(|error| {
-        format!(
-            "failed to read local artwork '{}' for book '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read local artwork '{}' for book '{}': ",
             artwork_path.display(),
             book_id,
-        )
+        ))
     })?;
     let thumbnail_id = format!("thumbnail-book-sidecar:{book_id}:{artwork_url}");
     let selected = should_select_book_local_artwork(pool, book_id, selected_preference).await?;
@@ -381,10 +393,10 @@ pub(super) async fn import_book_local_artwork_thumbnail(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to remove duplicated sidecar thumbnail '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to remove duplicated sidecar thumbnail '{}' for '{}': ",
                 artwork_url, book_id,
-            )
+            ))
         })?;
 
     sqlx::query(
@@ -404,10 +416,10 @@ pub(super) async fn import_book_local_artwork_thumbnail(
     .execute(pool)
     .await
     .map_err(|error| {
-        format!(
-            "failed to insert local artwork '{}' for book '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to insert local artwork '{}' for book '{}': ",
             artwork_url, book_id,
-        )
+        ))
     })?;
 
     if selected {
@@ -418,11 +430,10 @@ pub(super) async fn import_book_local_artwork_thumbnail(
         .bind(book_id)
         .execute(pool)
         .await
-        .map_err(|error| {
-            format!(
-                "failed to mark local artwork '{}' as selected for '{}': {error}",
+        .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                "failed to mark local artwork '{}' as selected for '{}': ",
                 artwork_url, book_id,
-            )
+            ))
         })?;
     }
 
@@ -435,14 +446,14 @@ pub(super) async fn import_series_local_artwork_thumbnail(
     library_root: &Path,
     artwork_url: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let artwork_path = library_root.join(artwork_url);
     let metadata = tokio::fs::metadata(&artwork_path).await.map_err(|error| {
-        format!(
-            "failed to read series local artwork '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read series local artwork '{}' for '{}': ",
             artwork_path.display(),
             series_id,
-        )
+        ))
     })?;
     let thumbnail_id = format!("thumbnail-series-sidecar:{series_id}:{artwork_url}");
     let selected = should_select_series_local_artwork(pool, series_id, selected_preference).await?;
@@ -454,10 +465,10 @@ pub(super) async fn import_series_local_artwork_thumbnail(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to remove duplicated series sidecar thumbnail '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to remove duplicated series sidecar thumbnail '{}' for '{}': ",
                 artwork_url, series_id,
-            )
+            ))
         })?;
 
     sqlx::query(
@@ -477,10 +488,10 @@ pub(super) async fn import_series_local_artwork_thumbnail(
     .execute(pool)
     .await
     .map_err(|error| {
-        format!(
-            "failed to insert series local artwork '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to insert series local artwork '{}' for '{}': ",
             artwork_url, series_id,
-        )
+        ))
     })?;
 
     if selected {
@@ -491,11 +502,10 @@ pub(super) async fn import_series_local_artwork_thumbnail(
         .bind(series_id)
         .execute(pool)
         .await
-        .map_err(|error| {
-            format!(
-                "failed to mark series local artwork '{}' as selected for '{}': {error}",
+        .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                "failed to mark series local artwork '{}' as selected for '{}': ",
                 artwork_url, series_id,
-            )
+            ))
         })?;
     }
 
@@ -506,7 +516,7 @@ async fn should_select_book_local_artwork(
     pool: &SqlitePool,
     book_id: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     if selected_preference == MarkSelectedPreference::No {
         return Ok(false);
     }
@@ -517,7 +527,7 @@ async fn should_select_book_local_artwork(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load selected thumbnail for '{}': {error}", book_id))?;
+    .map_err(|error| anyhow::anyhow!(error).context( format!("failed to load selected thumbnail for '{}': ", book_id)))?;
 
     let thumbnail_type =
         selected_row.map(|row| parse_thumbnail_type(&row.get::<String, _>("TYPE")));
@@ -528,7 +538,7 @@ async fn should_select_series_local_artwork(
     pool: &SqlitePool,
     series_id: &str,
     selected_preference: MarkSelectedPreference,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     if selected_preference == MarkSelectedPreference::No {
         return Ok(false);
     }
@@ -539,11 +549,10 @@ async fn should_select_series_local_artwork(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| {
-        format!(
-            "failed to load selected series thumbnail for '{}': {error}",
+    .map_err(|error| { anyhow::anyhow!(error).context( format!(
+            "failed to load selected series thumbnail for '{}': ",
             series_id
-        )
+        ))
     })?;
 
     let thumbnail_type =
@@ -636,7 +645,9 @@ mod tests {
         };
 
         assert!(
-            error.contains("failed to load first PDF page for thumbnail generation"),
+            error
+                .to_string()
+                .contains("failed to load first PDF page for thumbnail generation"),
             "unexpected PDF thumbnail error: {error}"
         );
 
@@ -681,8 +692,12 @@ mod tests {
             .await
             .expect("housekeeping transaction should roll back");
 
-        assert!(error.contains("failed to inspect thumbnail URL"));
-        assert!(error.contains("book-1"));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to inspect thumbnail URL")
+        );
+        assert!(error.to_string().contains("book-1"));
 
         let remaining = sqlx::query("SELECT COUNT(*) AS COUNT FROM THUMBNAIL_BOOK WHERE ID = ?")
             .bind("sidecar-thumbnail")

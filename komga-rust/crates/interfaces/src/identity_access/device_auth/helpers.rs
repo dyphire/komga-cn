@@ -36,7 +36,7 @@ pub(super) async fn record_successful_api_key_authentication_by_token(
 pub(super) async fn api_key_metadata_by_token(
     identity: &IdentityState,
     api_key: &str,
-) -> Result<Option<PersistedApiKeyMetadata>, String> {
+) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
     let mut metadata_headers = HeaderMap::new();
     let Ok(header_value) = HeaderValue::from_str(api_key) else {
         return Ok(None);

@@ -49,17 +49,17 @@ pub trait OpdsFeedCatalogPort: Send + Sync {
     async fn load_book_feed_page(
         &self,
         query: OpdsBookFeedQuery<'_>,
-    ) -> Result<OpdsPagedBooks, String>;
+    ) -> anyhow::Result<OpdsPagedBooks>;
 
     async fn load_latest_series_feed_page(
         &self,
         query: OpdsLatestSeriesFeedQuery<'_>,
-    ) -> Result<OpdsPagedSeries, String>;
+    ) -> anyhow::Result<OpdsPagedSeries>;
 
     async fn load_library_series_feed_page(
         &self,
         query: OpdsLibrarySeriesQuery<'_>,
-    ) -> Result<OpdsSeriesFeedPage, String>;
+    ) -> anyhow::Result<OpdsSeriesFeedPage>;
 }
 
 /// Port for OPDS catalog browsing operations.
@@ -72,13 +72,13 @@ pub trait OpdsBrowseCatalogPort: Send + Sync {
         publishers: &[String],
         page: usize,
         size: usize,
-    ) -> Result<BrowseSeriesNavigationPage, String>;
+    ) -> anyhow::Result<BrowseSeriesNavigationPage>;
 
     async fn load_browse_publisher_entries(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
         library_id: Option<&str>,
-    ) -> Result<Vec<BrowsePublisherEntry>, String>;
+    ) -> anyhow::Result<Vec<BrowsePublisherEntry>>;
 
     async fn load_series_page(
         &self,
@@ -87,5 +87,5 @@ pub trait OpdsBrowseCatalogPort: Send + Sync {
         publishers: &[String],
         offset: i64,
         limit: i64,
-    ) -> Result<Vec<OpdsSeriesEntry>, String>;
+    ) -> anyhow::Result<Vec<OpdsSeriesEntry>>;
 }

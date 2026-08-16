@@ -315,12 +315,13 @@ async fn task_queue_status_event(app: &OperationalApiState) -> Event {
     let status = match app.task_queue.queue.status().await {
         Ok(status) => status,
         Err(error) => {
+            tracing::error!(?error, "task queue status failed");
             return sse_event(
                 "TaskQueueStatus",
                 json!({
                     "count": 0,
                     "countByType": {},
-                    "error": error,
+                    "error": format!("{error:#}"),
                 }),
             );
         }

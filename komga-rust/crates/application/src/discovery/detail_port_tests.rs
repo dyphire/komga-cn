@@ -13,14 +13,14 @@ struct RecordingBookIdResolver {
 
 #[async_trait::async_trait]
 impl PersistedBookIdResolverPort for RecordingBookIdResolver {
-    async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String> {
+    async fn persisted_book_resource_exists(&self, book_id: &str) -> anyhow::Result<bool> {
         Ok(self.existing.get(book_id).copied().unwrap_or(false))
     }
 
     async fn load_book_id_by_sorted_position(
         &self,
         index: usize,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         Ok(self.sorted_ids.get(&index).cloned())
     }
 }
@@ -33,14 +33,14 @@ struct RecordingSeriesIdResolver {
 
 #[async_trait::async_trait]
 impl PersistedSeriesIdResolverPort for RecordingSeriesIdResolver {
-    async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String> {
+    async fn persisted_series_resource_exists(&self, series_id: &str) -> anyhow::Result<bool> {
         Ok(self.existing.get(series_id).copied().unwrap_or(false))
     }
 
     async fn load_series_id_by_sorted_position(
         &self,
         index: usize,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         Ok(self.sorted_ids.get(&index).cloned())
     }
 }

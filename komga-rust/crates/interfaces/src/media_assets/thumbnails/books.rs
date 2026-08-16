@@ -267,7 +267,7 @@ pub(crate) async fn book_thumbnail_delete(
     match app.thumbnails.delete_book(&thumbnail_id).await {
         Ok(true) => StatusCode::ACCEPTED.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) if error == "only uploaded thumbnails can be deleted" => {
+        Err(error) if error.to_string() == "only uploaded thumbnails can be deleted" => {
             StatusCode::BAD_REQUEST.into_response()
         }
         Err(error) => internal_error_response(error),

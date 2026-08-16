@@ -43,14 +43,14 @@ fn record_resolved_auth_user(auth_user: Option<AuthUser>) -> Option<AuthUser> {
 pub(crate) fn resolved_auth_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<Option<AuthUser>, String> {
+) -> anyhow::Result<Option<AuthUser>> {
     resolved_auth_token(identity, headers).map(|resolved| resolved.map(|resolved| resolved.user))
 }
 
 pub(crate) fn resolved_auth_token(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<Option<komga_application::identity_access::ResolvedAuthToken>, String> {
+) -> anyhow::Result<Option<komga_application::identity_access::ResolvedAuthToken>> {
     let session_token = token::session_token_from_headers(headers);
     let remember_me_token = token::remember_me_token_from_headers(headers);
     let resolved = identity
@@ -65,7 +65,7 @@ pub(crate) fn resolved_auth_token(
 pub(crate) async fn resolved_request_auth_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<Option<AuthUser>, String> {
+) -> anyhow::Result<Option<AuthUser>> {
     let auth_user = match persisted_api_key_user(identity, headers).await {
         Ok(AuthOutcome::Valid(user)) => Some(*user),
         Ok(AuthOutcome::Invalid) => None,

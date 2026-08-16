@@ -101,7 +101,7 @@ async fn password_updates_emit_bcrypt_hashes() {
 
     let updated = persisted_update_password_by_user_id(&pool, "user-1", "new-password").await;
 
-    assert_eq!(updated, Ok(true));
+    assert!(matches!(updated, Ok(true)));
 
     let stored_password = persisted_password(&pool, "user-1").await;
     assert!(stored_password.starts_with("$2"));
@@ -132,7 +132,7 @@ async fn malformed_persisted_bcrypt_hash_fails_as_storage_error() {
         .await;
 
     assert!(
-        matches!(outcome, Err(ref error) if error.contains("failed to verify persisted password hash")),
+        matches!(outcome, Err(ref error) if error.to_string().contains("failed to verify persisted password hash")),
         "malformed persisted hash should be a storage error, got {outcome:?}"
     );
 }

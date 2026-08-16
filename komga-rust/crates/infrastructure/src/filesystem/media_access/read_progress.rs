@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::SeriesTachiyomiProgressBook;
 use sqlx::{Row, SqlitePool};
 
@@ -5,7 +6,7 @@ pub(crate) async fn refresh_series_read_progress_row(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let row = sqlx::query(
         r#"SELECT COALESCE(SUM(CASE WHEN rp.COMPLETED = 1 THEN 1 ELSE 0 END), 0) AS READ_COUNT,
                COALESCE(SUM(CASE WHEN rp.COMPLETED = 0 THEN 1 ELSE 0 END), 0) AS IN_PROGRESS_COUNT,
@@ -17,7 +18,7 @@ pub(crate) async fn refresh_series_read_progress_row(
     .bind(series_id)
     .fetch_one(pool)
     .await
-    .map_err(|error| format!("query series read progress aggregates: {error}"))?;
+    .context("query series read progress aggregates")?;
     sqlx::query(
         r#"INSERT INTO READ_PROGRESS_SERIES (SERIES_ID, USER_ID, READ_COUNT, IN_PROGRESS_COUNT, MOST_RECENT_READ_DATE, LAST_MODIFIED_DATE)
          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -32,7 +33,7 @@ pub(crate) async fn refresh_series_read_progress_row(
     .bind(row.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
     .execute(pool)
     .await
-    .map_err(|error| format!("upsert series read progress row: {error}"))?;
+    .context("upsert series read progress row")?;
     Ok(())
 }
 
@@ -40,13 +41,13 @@ pub(crate) async fn delete_series_read_progress_row(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ?")
         .bind(series_id)
         .bind(user_id_value)
         .execute(pool)
         .await
-        .map_err(|error| format!("delete series read progress row: {error}"))?;
+        .context("delete series read progress row")?;
     Ok(())
 }
 
@@ -54,7 +55,7 @@ pub(crate) async fn load_series_tachiyomi_progress_books(
     pool: &SqlitePool,
     series_id: &str,
     user_id_value: &str,
-) -> Result<Vec<SeriesTachiyomiProgressBook>, String> {
+) -> anyhow::Result<Vec<SeriesTachiyomiProgressBook>> {
     let rows = sqlx::query(
         r#"SELECT COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS NUMBER_SORT, rp.COMPLETED AS COMPLETED
          FROM BOOK b LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
@@ -66,7 +67,7 @@ pub(crate) async fn load_series_tachiyomi_progress_books(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series tachiyomi rows: {error}"))?;
+    .context("query series tachiyomi rows")?;
     Ok(rows
         .into_iter()
         .map(|row| SeriesTachiyomiProgressBook {

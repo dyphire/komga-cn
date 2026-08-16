@@ -12,7 +12,7 @@ pub trait BookProgressionWriteReaderPort: Send + Sync {
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String>;
+    ) -> anyhow::Result<Option<BookProgressionRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -24,14 +24,14 @@ where
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String> {
+    ) -> anyhow::Result<Option<BookProgressionRecord>> {
         BookProgressionReaderPort::book_progression(self, book_id, user_id).await
     }
 }
 
 #[async_trait::async_trait]
 pub trait BookProgressionWriterPort: Send + Sync {
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String>;
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -39,7 +39,7 @@ impl<T> BookProgressionWriterPort for T
 where
     T: ProgressWriterPort + ?Sized,
 {
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()> {
         ProgressWriterPort::persist_book_progression(self, input).await
     }
 }
@@ -86,10 +86,21 @@ pub(crate) enum BookProgressionWriteSource {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum BookProgressionWriteError {
     Stale,
-    Internal(String),
+    Internal(anyhow::Error),
+}
+
+#[cfg(test)]
+impl PartialEq for BookProgressionWriteError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Stale, Self::Stale) => true,
+            (Self::Internal(left), Self::Internal(right)) => left.to_string() == right.to_string(),
+            _ => false,
+        }
+    }
 }
 
 struct ResolvedProgressWrite {

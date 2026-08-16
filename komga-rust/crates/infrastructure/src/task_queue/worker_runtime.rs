@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,12 +50,12 @@ impl RuntimeBackgroundState {
         );
     }
 
-    pub async fn queued_task_counts(&self) -> Result<BTreeMap<String, usize>, String> {
+    pub async fn queued_task_counts(&self) -> anyhow::Result<BTreeMap<String, usize>> {
         let task_queue = self.task_queue.lock().await;
         task_queue
             .count_by_simple_type()
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     pub fn task_pool_size(&self) -> usize {
@@ -122,11 +123,12 @@ pub async fn prepare_task_queue(
         let enqueued = bootstrap_startup_library_scans_inner(&task_queue, &runtime)
             .await
             .unwrap_or_else(|error| {
+                let error_message = error.to_string();
                 log_runtime_bootstrap(
                     STARTUP_LIBRARY_SCANS_COMPONENT,
                     "failed",
                     &runtime,
-                    RuntimeLifecycleFields::default().with_error(&error),
+                    RuntimeLifecycleFields::default().with_error(&error_message),
                 );
                 panic!("bootstrap startup library scans: {error}");
             });
@@ -189,13 +191,14 @@ pub async fn prepare_task_queue(
                     .with_enqueued(enqueued),
             ),
             Err(error) => {
+                let error_message = error.to_string();
                 log_runtime_bootstrap(
                     STARTUP_SEARCH_TASK_COMPONENT,
                     "failed",
                     &runtime,
                     RuntimeLifecycleFields::default()
                         .with_startup_task(startup_task)
-                        .with_error(&error),
+                        .with_error(&error_message),
                 );
                 panic!("bootstrap startup search task: {error}");
             }
@@ -267,7 +270,7 @@ pub async fn process_startup_library_scans(config: impl TaskRuntimeConfig) {
 
 async fn process_startup_library_scans_inner(
     runtime: &TaskRuntimeContext,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     let startup_scan_batch = schedule_startup_library_scan_batch(
         runtime,
         "schedule startup library scans for processing",
@@ -294,10 +297,10 @@ async fn process_startup_library_scans_inner(
     task_queue
         .enqueue_batch(startup_scan_batch.into_task_batch())
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     super::queue_orchestration::process_available_serial(&task_queue, &runtime.job())
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     Ok(startup_scan_task_count)
 }
 
@@ -361,7 +364,7 @@ pub async fn run_periodic_library_scan_iteration(
     task_wakeup: Option<TaskQueueWakeSignal>,
     runtime: TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     match run_periodic_library_scan_iteration_inner(
         task_queue,
         task_wakeup.as_ref(),
@@ -396,7 +399,7 @@ pub async fn run_periodic_library_scan_iteration(
                     .with_enqueued(error.due_libraries.len())
                     .with_error(&error.message),
             );
-            Err(error.message)
+            Err(anyhow::anyhow!(error.message))
         }
     }
 }
@@ -468,7 +471,7 @@ fn spawn_background_task_worker(
 pub async fn run_background_task_iteration(
     task_queue: SharedTaskQueue,
     runtime: TaskRuntimeContext,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     let task_execution_pool = TaskExecutionPoolHandle::new(runtime.worker().task_pool_size());
     let mut result_rx = task_execution_pool
         .take_result_receiver()
@@ -487,13 +490,13 @@ async fn run_background_task_iteration_with_pool(
     task_execution_pool: &TaskExecutionPoolHandle,
     runtime: TaskRuntimeContext,
     result_rx: &mut mpsc::UnboundedReceiver<TaskExecutionResult>,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     let queued_tasks = {
         let task_queue = task_queue.lock().await;
         task_queue
             .count_by_simple_type()
             .await
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .values()
             .sum::<usize>()
     };
@@ -529,7 +532,7 @@ async fn run_background_task_iteration_with_pool(
                     .with_queued_tasks(queued_tasks)
                     .with_error(&error_message),
             );
-            return Err(error_message);
+            return Err(anyhow::anyhow!(error_message));
         }
     };
 
@@ -640,7 +643,7 @@ async fn wait_for_worker_shutdown(shutdown_rx: &mut watch::Receiver<bool>) {
 
 pub async fn cleanup_authentication_activity_once(
     runtime: &TaskRuntimeContext,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !runtime.job().database().owns_main_database() {
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -669,7 +672,7 @@ pub async fn cleanup_authentication_activity_once(
             runtime,
             RuntimeLifecycleFields::default().with_error(&error_message),
         );
-        return Err(error_message);
+        return Err(anyhow::anyhow!(error_message));
     }
 
     crate::auth::runtime_identity_access::persisted_cleanup_authentication_activity(
@@ -677,17 +680,18 @@ pub async fn cleanup_authentication_activity_once(
     )
     .await
     .map_err(|error| {
-        let error_message = format!(
-            "failed to clean up authentication activity using {}: {error}",
+        let context = format!(
+            "failed to clean up authentication activity using {}",
             runtime.job().database().main_db().database_file().display(),
         );
+        let error_message = format!("{context}: {error}");
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
             "failed",
             runtime,
             RuntimeLifecycleFields::default().with_error(&error_message),
         );
-        error_message
+        anyhow::anyhow!(error).context(context)
     })?;
 
     log_worker_event(
@@ -710,7 +714,7 @@ async fn bootstrap_startup_search_task_inner(
     task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
     startup_search_task: Option<&'static str>,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     if !runtime.job().search().owns_search_index() {
         return Ok(0);
     }
@@ -722,7 +726,7 @@ async fn bootstrap_startup_search_task_inner(
     task_queue
         .enqueue(startup_task_record(task_name))
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     Ok(1)
 }
 
@@ -762,13 +766,13 @@ async fn run_periodic_library_scan_iteration_inner(
     sync_periodic_library_scan_state(runtime, last_run_by_library)
         .await
         .map_err(|error| PeriodicLibraryScanIterationError {
-            message: error,
+            message: format!("{error:#}"),
             due_libraries: Vec::new(),
         })?;
     let due_tasks = schedule_periodic_library_scan_batch(runtime, last_run_by_library)
         .await
         .map_err(|error| PeriodicLibraryScanIterationError {
-            message: error,
+            message: format!("{error:#}"),
             due_libraries: Vec::new(),
         })?
         .into_scheduled_tasks();
@@ -820,7 +824,7 @@ async fn run_periodic_library_scan_iteration_inner(
 async fn bootstrap_startup_library_scans_inner(
     task_queue: &TaskQueueScheduler,
     runtime: &TaskRuntimeContext,
-) -> Result<usize, String> {
+) -> anyhow::Result<usize> {
     if !runtime.job().database().owns_main_database() {
         return Ok(0);
     }
@@ -831,7 +835,7 @@ async fn bootstrap_startup_library_scans_inner(
     task_queue
         .enqueue_batch(startup_batch.into_task_batch())
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
     Ok(enqueued)
 }
@@ -839,20 +843,20 @@ async fn bootstrap_startup_library_scans_inner(
 async fn schedule_startup_library_scan_batch(
     runtime: &TaskRuntimeContext,
     action: &str,
-) -> Result<ScheduledLibraryScanBatch, String> {
+) -> anyhow::Result<ScheduledLibraryScanBatch> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Startup,
             &LibraryScanScheduleState::default(),
         )
         .await
-        .map_err(|error| format!("{action}: {error}"))
+        .map_err(|error| anyhow::anyhow!(error).context(action.to_string()))
 }
 
 async fn schedule_periodic_library_scan_batch(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
-) -> Result<ScheduledLibraryScanBatch, String> {
+) -> anyhow::Result<ScheduledLibraryScanBatch> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .schedule(
             ScanSchedulingTrigger::Tick,
@@ -864,17 +868,17 @@ async fn schedule_periodic_library_scan_batch(
             },
         )
         .await
-        .map_err(|error| format!("schedule periodic library scans: {error}"))
+        .context("schedule periodic library scans")
 }
 
 async fn sync_periodic_library_scan_state(
     runtime: &TaskRuntimeContext,
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
-        .map_err(|error| format!("build periodic library scan state: {error}"))
+        .context("build periodic library scan state")
 }
 
 fn single_value_or_empty(values: &[String]) -> &str {

@@ -132,21 +132,21 @@ pub struct PersistedManifest {
 
 #[async_trait::async_trait]
 pub trait ManifestReaderPort: EpubNavigationExtensionReaderPort + Send + Sync {
-    async fn manifest_book(&self, book_id: &str) -> Result<Option<ManifestBookRecord>, String>;
+    async fn manifest_book(&self, book_id: &str) -> anyhow::Result<Option<ManifestBookRecord>>;
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String>;
+    ) -> anyhow::Result<Option<BookAccessRestrictions>>;
 
-    async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String>;
+    async fn book_pages(&self, book_id: &str) -> anyhow::Result<Vec<BookPageRecord>>;
 
     async fn media_file_records(
         &self,
         book_id: &str,
-    ) -> Result<Vec<PersistedMediaFileRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedMediaFileRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -154,12 +154,12 @@ pub trait ManifestContentPort: EpubNavigationContentPort {
     async fn archive_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String>;
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>>;
 
     fn generated_pdf_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String>;
+    ) -> anyhow::Result<Vec<BookPageRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -170,26 +170,26 @@ where
     async fn archive_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String> {
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         ContentResolverPort::archive_page_rows(self, media).await
     }
 
     fn generated_pdf_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String> {
+    ) -> anyhow::Result<Vec<BookPageRecord>> {
         ContentResolverPort::generated_pdf_page_rows(self, media)
     }
 }
 
 #[async_trait::async_trait]
 pub trait ManifestMetadataPort: Send + Sync {
-    async fn manifest_book_detail(&self, book_id: &str) -> Result<Option<BookReadModel>, String>;
+    async fn manifest_book_detail(&self, book_id: &str) -> anyhow::Result<Option<BookReadModel>>;
 
     async fn manifest_series_detail(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesDetailRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedSeriesDetailRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -197,14 +197,14 @@ impl<T> ManifestMetadataPort for T
 where
     T: BookDetailPort + SeriesDetailPort + Send + Sync + ?Sized,
 {
-    async fn manifest_book_detail(&self, book_id: &str) -> Result<Option<BookReadModel>, String> {
+    async fn manifest_book_detail(&self, book_id: &str) -> anyhow::Result<Option<BookReadModel>> {
         BookDetailPort::load_persisted_book_detail(self, book_id, None).await
     }
 
     async fn manifest_series_detail(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedSeriesDetailRecord>> {
         SeriesDetailPort::load_persisted_series_detail(self, series_id).await
     }
 }
@@ -214,29 +214,29 @@ impl<T> ManifestReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + Send + Sync + ?Sized,
 {
-    async fn manifest_book(&self, book_id: &str) -> Result<Option<ManifestBookRecord>, String> {
+    async fn manifest_book(&self, book_id: &str) -> anyhow::Result<Option<ManifestBookRecord>> {
         ContentAccessPort::manifest_book(self, book_id).await
     }
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         BookMediaPort::book_media(self, book_id).await
     }
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         ContentAccessPort::book_restrictions(self, book_id).await
     }
 
-    async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String> {
+    async fn book_pages(&self, book_id: &str) -> anyhow::Result<Vec<BookPageRecord>> {
         BookMediaPort::book_pages(self, book_id).await
     }
 
     async fn media_file_records(
         &self,
         book_id: &str,
-    ) -> Result<Vec<PersistedMediaFileRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedMediaFileRecord>> {
         BookMediaPort::media_file_records(self, book_id).await
     }
 }
@@ -421,7 +421,7 @@ async fn build_manifest_reading_order(
     media_type: &str,
     variant: ManifestVariant,
     profile: ManifestProfile,
-) -> Result<Vec<ManifestLinkItem>, String> {
+) -> anyhow::Result<Vec<ManifestLinkItem>> {
     Ok(match (variant, profile) {
         (ManifestVariant::Pdf, ManifestProfile::Pdf) => (1..=media.page_count.max(1))
             .map(|page| link_item(ManifestHref::RawPage(page), "application/pdf"))
@@ -494,7 +494,7 @@ fn default_reading_order_entry(media_type: &str) -> ManifestLinkItem {
 async fn load_persisted_webpub_metadata_additions(
     metadata: &dyn ManifestMetadataPort,
     book_id: &str,
-) -> Result<Option<WebpubMetadataAdditions>, String> {
+) -> anyhow::Result<Option<WebpubMetadataAdditions>> {
     let Some(book) = metadata.manifest_book_detail(book_id).await? else {
         return Ok(None);
     };
@@ -564,7 +564,7 @@ pub async fn build_persisted_book_manifest(
     user: &AuthUser,
     book_id: &str,
     variant: ManifestVariant,
-) -> Result<ManifestBuildOutcome, String> {
+) -> anyhow::Result<ManifestBuildOutcome> {
     let Some(manifest_book) = reader.manifest_book(book_id).await? else {
         return Ok(ManifestBuildOutcome::NotFound);
     };

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
@@ -9,10 +10,10 @@ use super::page_content::resolve_book_page_bytes;
 pub(crate) async fn persist_book_page_hashes_from_media_content(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let media = load_persisted_book_media(pool, book_id)
         .await?
-        .ok_or_else(|| "book media missing for page hash task".to_string())?;
+        .ok_or_else(|| anyhow::anyhow!("book media missing for page hash task"))?;
     let pages = load_persisted_book_pages(pool, book_id).await?;
 
     let mut hashes = Vec::<(i64, String)>::new();
@@ -44,7 +45,7 @@ pub(crate) async fn persist_book_page_hashes_from_media_content(
             .bind(number)
             .execute(pool)
             .await
-            .map_err(|error| format!("persist media-page hash: {error}"))?;
+            .context("persist media-page hash")?;
     }
 
     Ok(())

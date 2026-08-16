@@ -10,6 +10,10 @@ use super::{
     BookMediaReaderPort, BookPageRecord, EpubCoverImage, MediaImageDimensions,
 };
 
+fn clone_result<T: Clone>(result: &Result<T, String>) -> anyhow::Result<T> {
+    result.clone().map_err(anyhow::Error::msg)
+}
+
 #[derive(Default)]
 struct TestBookMediaReader {
     media_by_book: HashMap<String, super::BookMediaRecord>,
@@ -21,18 +25,18 @@ struct TestBookMediaReader {
 
 #[async_trait::async_trait]
 impl BookMediaReaderPort for TestBookMediaReader {
-    async fn book_media(&self, book_id: &str) -> Result<Option<super::BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<super::BookMediaRecord>> {
         Ok(self.media_by_book.get(book_id).cloned())
     }
 
-    async fn book_media_is_ready(&self, _book_id: &str) -> Result<bool, String> {
+    async fn book_media_is_ready(&self, _book_id: &str) -> anyhow::Result<bool> {
         if let Some(error) = self.media_ready_error.clone() {
-            return Err(error);
+            return Err(anyhow::anyhow!(error));
         }
         Ok(true)
     }
 
-    async fn book_pages(&self, _book_id: &str) -> Result<Vec<BookPageRecord>, String> {
+    async fn book_pages(&self, _book_id: &str) -> anyhow::Result<Vec<BookPageRecord>> {
         Ok(Vec::new())
     }
 
@@ -40,9 +44,9 @@ impl BookMediaReaderPort for TestBookMediaReader {
         &self,
         _book_id: &str,
         _page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         if let Some(error) = self.book_page_error.clone() {
-            return Err(error);
+            return Err(anyhow::anyhow!(error));
         }
         Ok(None)
     }
@@ -50,9 +54,9 @@ impl BookMediaReaderPort for TestBookMediaReader {
     async fn book_restrictions(
         &self,
         _book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         if let Some(error) = self.restriction_error.clone() {
-            return Err(error);
+            return Err(anyhow::anyhow!(error));
         }
         Ok(None)
     }
@@ -60,9 +64,9 @@ impl BookMediaReaderPort for TestBookMediaReader {
     async fn selected_book_thumbnail(
         &self,
         _book_id: &str,
-    ) -> Result<Option<super::EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<super::EntityThumbnailBinary>> {
         if let Some(error) = self.selected_thumbnail_error.clone() {
-            return Err(error);
+            return Err(anyhow::anyhow!(error));
         }
         Ok(None)
     }
@@ -107,8 +111,8 @@ impl BookMediaContentPort for TestBookMediaContent {
         _media: &super::BookMediaRecord,
         _page: &BookPageRecord,
         _page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String> {
-        self.page_bytes.clone()
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        clone_result(&self.page_bytes)
     }
 
     async fn render_page_thumbnail(
@@ -117,22 +121,22 @@ impl BookMediaContentPort for TestBookMediaContent {
         _page: &BookPageRecord,
         _page_number: u64,
         _max_edge: u32,
-    ) -> Result<Option<Vec<u8>>, String> {
-        self.thumbnail_bytes.clone()
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        clone_result(&self.thumbnail_bytes)
     }
 
     async fn archive_page_row(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
-        self.archive_page_row.clone()
+    ) -> anyhow::Result<Option<BookPageRecord>> {
+        clone_result(&self.archive_page_row)
     }
 
     async fn archive_page_rows(
         &self,
         _media: &super::BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String> {
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         Ok(None)
     }
 
@@ -140,14 +144,14 @@ impl BookMediaContentPort for TestBookMediaContent {
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         Ok(None)
     }
 
     fn generated_pdf_page_rows(
         &self,
         _media: &super::BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String> {
+    ) -> anyhow::Result<Vec<BookPageRecord>> {
         Ok(Vec::new())
     }
 
@@ -155,34 +159,34 @@ impl BookMediaContentPort for TestBookMediaContent {
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String> {
-        self.pdf_page_bytes.clone()
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        clone_result(&self.pdf_page_bytes)
     }
 
     fn detect_pdf_page_count(
         &self,
         _media: &super::BookMediaRecord,
-    ) -> Result<Option<u64>, String> {
-        self.pdf_page_count.clone()
+    ) -> anyhow::Result<Option<u64>> {
+        clone_result(&self.pdf_page_count)
     }
 
-    fn media_file_exists(&self, _path: &Path) -> Result<bool, String> {
-        self.media_file_exists.clone()
+    fn media_file_exists(&self, _path: &Path) -> anyhow::Result<bool> {
+        clone_result(&self.media_file_exists)
     }
 
-    async fn read_media_file_bytes(&self, _path: &Path) -> Result<Option<Vec<u8>>, String> {
-        self.media_file_bytes.clone()
+    async fn read_media_file_bytes(&self, _path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+        clone_result(&self.media_file_bytes)
     }
 
-    async fn read_media_file_size(&self, _path: &Path) -> Result<Option<i64>, String> {
-        self.media_file_size.clone()
+    async fn read_media_file_size(&self, _path: &Path) -> anyhow::Result<Option<i64>> {
+        clone_result(&self.media_file_size)
     }
 
     async fn read_media_image_dimensions(
         &self,
         _path: &Path,
-    ) -> Result<Option<MediaImageDimensions>, String> {
-        self.media_image_dimensions.clone()
+    ) -> anyhow::Result<Option<MediaImageDimensions>> {
+        clone_result(&self.media_image_dimensions)
     }
 
     fn convert_image_bytes(
@@ -190,18 +194,18 @@ impl BookMediaContentPort for TestBookMediaContent {
         bytes: &[u8],
         source_content_type: &str,
         target_content_type: &str,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         if source_content_type.eq_ignore_ascii_case(target_content_type) {
             return Ok(Some(bytes.to_vec()));
         }
-        self.converted_image_bytes.clone()
+        clone_result(&self.converted_image_bytes)
     }
 
     async fn epub_cover_bytes(
         &self,
         _media: &super::BookMediaRecord,
-    ) -> Result<Option<EpubCoverImage>, String> {
-        self.epub_cover.clone()
+    ) -> anyhow::Result<Option<EpubCoverImage>> {
+        clone_result(&self.epub_cover)
     }
 }
 
@@ -209,14 +213,14 @@ struct IdentityBookIdResolver;
 
 #[async_trait::async_trait]
 impl PersistedBookIdResolverPort for IdentityBookIdResolver {
-    async fn persisted_book_resource_exists(&self, _book_id: &str) -> Result<bool, String> {
+    async fn persisted_book_resource_exists(&self, _book_id: &str) -> anyhow::Result<bool> {
         Ok(true)
     }
 
     async fn load_book_id_by_sorted_position(
         &self,
         _index: usize,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
 }
@@ -244,7 +248,7 @@ async fn book_file_propagates_restriction_load_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("restriction lookup failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("restriction lookup failed"))
     );
 }
 
@@ -273,7 +277,7 @@ async fn book_page_propagates_media_ready_load_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("media ready lookup failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("media ready lookup failed"))
     );
 }
 
@@ -381,7 +385,7 @@ async fn book_page_propagates_page_byte_load_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("page bytes failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("page bytes failed"))
     );
 }
 
@@ -427,7 +431,7 @@ async fn book_page_propagates_page_conversion_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("page conversion failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("page conversion failed"))
     );
 }
 
@@ -456,7 +460,7 @@ async fn book_page_propagates_single_image_dimension_load_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("image dimensions failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("image dimensions failed"))
     );
 }
 
@@ -485,7 +489,7 @@ async fn book_page_propagates_single_image_file_size_load_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("file size failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("file size failed"))
     );
 }
 
@@ -536,7 +540,7 @@ async fn book_pages_propagate_single_image_file_probe_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("file probe failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("file probe failed"))
     );
 }
 
@@ -564,9 +568,9 @@ async fn book_pages_propagate_single_image_file_size_missing_after_probe() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal(
-            "single image media file missing: /library/cover.jpg".to_string()
-        )
+        BookMediaDelivery::Internal(anyhow::anyhow!(
+            "single image media file missing: /library/cover.jpg"
+        ))
     );
 }
 
@@ -593,7 +597,7 @@ async fn book_thumbnail_source_propagates_selected_thumbnail_load_errors() {
 
     assert_eq!(
         delivery,
-        super::BookThumbnailDelivery::Internal("selected thumbnail lookup failed".to_string())
+        super::BookThumbnailDelivery::Internal(anyhow::anyhow!("selected thumbnail lookup failed"))
     );
 }
 
@@ -631,7 +635,7 @@ async fn book_thumbnail_source_propagates_page_lookup_errors() {
 
     assert_eq!(
         delivery,
-        super::BookThumbnailDelivery::Internal("thumbnail page lookup failed".to_string())
+        super::BookThumbnailDelivery::Internal(anyhow::anyhow!("thumbnail page lookup failed"))
     );
 }
 
@@ -658,7 +662,7 @@ async fn book_thumbnail_source_propagates_epub_cover_errors() {
 
     assert_eq!(
         delivery,
-        super::BookThumbnailDelivery::Internal("epub cover read failed".to_string())
+        super::BookThumbnailDelivery::Internal(anyhow::anyhow!("epub cover read failed"))
     );
 }
 
@@ -695,7 +699,7 @@ async fn book_page_thumbnail_propagates_render_errors() {
 
     assert_eq!(
         delivery,
-        BookMediaDelivery::Internal("page thumbnail render failed".to_string())
+        BookMediaDelivery::Internal(anyhow::anyhow!("page thumbnail render failed"))
     );
 }
 

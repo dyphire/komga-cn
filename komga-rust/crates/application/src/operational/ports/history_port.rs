@@ -106,7 +106,7 @@ pub trait HistoryPort: Send + Sync {
         page: u64,
         size: u64,
         sort: HistorySortSelection,
-    ) -> Result<HistoryPage, String>;
+    ) -> anyhow::Result<HistoryPage>;
 }
 
 #[cfg(test)]

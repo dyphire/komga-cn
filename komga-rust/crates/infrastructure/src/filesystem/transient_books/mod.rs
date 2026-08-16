@@ -88,7 +88,7 @@ struct TransientEpubManifestItem {
 pub(crate) async fn infer_transient_series_and_number(
     pool: &SqlitePool,
     path_or_name: &str,
-) -> Result<TransientBookSeriesInference, String> {
+) -> anyhow::Result<TransientBookSeriesInference> {
     let inferred = metadata::infer_transient_metadata(path_or_name)?;
     let number = inferred.number;
     if inferred.series_titles.is_empty() {
@@ -111,13 +111,15 @@ pub(crate) async fn infer_transient_series_and_number(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("transient series exact match query failed for '{series_title}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "transient series exact match query failed for '{series_title}': "
+            ))
         })?
         .map(|row| {
             row.try_get::<String, _>("ID").map_err(|error| {
-                format!(
-                    "transient series exact match ID decode failed for '{series_title}': {error}"
-                )
+                anyhow::anyhow!(error).context(format!(
+                    "transient series exact match ID decode failed for '{series_title}': "
+                ))
             })
         })
         .transpose()?;
@@ -142,13 +144,15 @@ pub(crate) async fn infer_transient_series_and_number(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("transient series fuzzy match query failed for '{series_title}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "transient series fuzzy match query failed for '{series_title}': "
+            ))
         })?
         .map(|row| {
             row.try_get::<String, _>("ID").map_err(|error| {
-                format!(
-                    "transient series fuzzy match ID decode failed for '{series_title}': {error}"
-                )
+                anyhow::anyhow!(error).context(format!(
+                    "transient series fuzzy match ID decode failed for '{series_title}': "
+                ))
             })
         })
         .transpose()?;
@@ -169,56 +173,60 @@ pub(crate) async fn infer_transient_series_and_number(
 pub(crate) async fn validate_transient_scan_root(
     pool: &SqlitePool,
     root: &Path,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let library_roots = sqlx::query("SELECT ROOT AS ROOT FROM LIBRARY")
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("transient scan library roots query failed: {error}"))?
+        .map_err(|error| {
+            anyhow::Error::from(error).context("transient scan library roots query failed")
+        })?
         .into_iter()
         .map(|row| resolve_stored_path(row.get::<String, _>("ROOT").as_str()))
         .collect::<Vec<_>>();
 
     for library_root in library_roots {
         if root.starts_with(&library_root) {
-            return Err("ERR_1017".to_string());
+            return Err(anyhow::anyhow!("ERR_1017"));
         }
     }
 
-    let metadata = fs::metadata(root).map_err(|error| match error.kind() {
-        ErrorKind::NotFound => "ERR_1016".to_string(),
-        _ => format!(
-            "read transient scan root metadata '{}': {error}",
-            root.display()
-        ),
+    let metadata = fs::metadata(root).map_err(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            anyhow::anyhow!("ERR_1016")
+        } else {
+            anyhow::Error::from(error).context(format!(
+                "read transient scan root metadata '{}'",
+                root.display()
+            ))
+        }
     })?;
     if !metadata.is_dir() {
-        return Err("ERR_1016".to_string());
+        return Err(anyhow::anyhow!("ERR_1016"));
     }
 
     if let Err(error) = fs::read_dir(root) {
         if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) {
-            return Err("ERR_1016".to_string());
+            return Err(anyhow::anyhow!("ERR_1016"));
         }
-        return Err(format!(
-            "read transient scan root '{}': {error}",
-            root.display()
-        ));
+        return Err(anyhow::Error::from(error)
+            .context(format!("read transient scan root '{}'", root.display())));
     }
 
     Ok(())
 }
 
-pub(crate) fn transient_book_exists(path: &str) -> Result<bool, String> {
-    Path::new(path)
-        .try_exists()
-        .map_err(|error| format!("check transient book existence '{path}': {error}"))
+pub(crate) fn transient_book_exists(path: &str) -> anyhow::Result<bool> {
+    Path::new(path).try_exists().map_err(|error| {
+        anyhow::anyhow!(error).context(format!("check transient book existence '{path}'"))
+    })
 }
 
 pub(crate) fn load_transient_book_file_metadata(
     path: &str,
-) -> Result<TransientBookFileMetadata, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("read transient book metadata '{path}': {error}"))?;
+) -> anyhow::Result<TransientBookFileMetadata> {
+    let metadata = fs::metadata(path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read transient book metadata '{path}'"))
+    })?;
     Ok(TransientBookFileMetadata {
         file_last_modified_unix_nanos: to_unix_nanos(newest_file_system_time(
             metadata.created().ok(),
@@ -228,11 +236,13 @@ pub(crate) fn load_transient_book_file_metadata(
     })
 }
 
-pub(crate) fn load_transient_book_media(path: &str) -> Result<Vec<u8>, String> {
-    fs::read(path).map_err(|error| format!("read transient book media '{path}': {error}"))
+pub(crate) fn load_transient_book_media(path: &str) -> anyhow::Result<Vec<u8>> {
+    fs::read(path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read transient book media '{path}'"))
+    })
 }
 
-pub(crate) fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis, String> {
+pub(crate) fn analyze_transient_book(path: &str) -> anyhow::Result<TransientBookAnalysis> {
     if !transient_book_exists(path)? {
         return Ok(transient_analysis_error(
             MediaStatus::Error,
@@ -314,7 +324,7 @@ pub(crate) fn analyze_transient_book(path: &str) -> Result<TransientBookAnalysis
     })
 }
 
-fn analyze_transient_media_file(path: &str) -> Result<TransientBookMediaAnalysis, String> {
+fn analyze_transient_media_file(path: &str) -> anyhow::Result<TransientBookMediaAnalysis> {
     let analysis = MediaFileAnalyzer.analyze(Path::new(path), MediaAnalysisProfile::Transient)?;
     Ok(transient_pages_from_media_analysis(analysis))
 }
@@ -379,7 +389,7 @@ pub(crate) fn transient_book_page_content(
     media_type: &str,
     pages: &[TransientBookPage],
     page_number: u32,
-) -> Result<Option<TransientBookPageContent>, String> {
+) -> anyhow::Result<Option<TransientBookPageContent>> {
     if page_number == 0 {
         return Ok(None);
     }
@@ -411,22 +421,24 @@ pub(crate) fn transient_book_page_content(
     };
 
     if matches!(content_type, "application/zip" | "application/epub+zip") {
-        let file = fs::File::open(path)
-            .map_err(|error| format!("open transient archive '{path}': {error}"))?;
-        let mut archive = ZipArchive::new(file)
-            .map_err(|error| format!("read transient archive '{path}': {error}"))?;
+        let file = fs::File::open(path).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open transient archive '{path}'"))
+        })?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read transient archive '{path}'"))
+        })?;
         let mut entry = archive.by_name(page.file_name.as_str()).map_err(|error| {
-            format!(
-                "read transient archive entry '{}' from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read transient archive entry '{}' from '{}': ",
                 page.file_name, path
-            )
+            ))
         })?;
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(|error| {
-            format!(
-                "read transient archive entry '{}' bytes from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read transient archive entry '{}' bytes from '{}': ",
                 page.file_name, path
-            )
+            ))
         })?;
         return Ok(Some(TransientBookPageContent {
             content_type: page.media_type,
@@ -443,10 +455,10 @@ pub(crate) fn transient_book_page_content(
     ) {
         let bytes =
             read_rar_entry_bytes(Path::new(path), page.file_name.as_str())?.ok_or_else(|| {
-                format!(
+                anyhow::anyhow!(format!(
                     "read transient rar entry '{}' from '{}': entry not found",
                     page.file_name, path
-                )
+                ))
             })?;
         return Ok(Some(TransientBookPageContent {
             content_type: page.media_type,
@@ -467,7 +479,7 @@ pub(crate) fn transient_book_page_content(
 
 pub(crate) fn list_transient_book_entries(
     path: &Path,
-) -> Result<Vec<TransientBookScanEntry>, String> {
+) -> anyhow::Result<Vec<TransientBookScanEntry>> {
     let mut entries = Vec::new();
     collect_transient_book_entries(path, &mut entries)?;
     entries.sort_by(|left, right| left.path.cmp(&right.path));
@@ -494,22 +506,23 @@ fn newest_file_system_time(
 fn collect_transient_book_entries(
     path: &Path,
     entries: &mut Vec<TransientBookScanEntry>,
-) -> Result<(), String> {
-    let directory_entries = fs::read_dir(path)
-        .map_err(|error| format!("read transient directory '{}': {error}", path.display()))?;
+) -> anyhow::Result<()> {
+    let directory_entries = fs::read_dir(path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read transient directory '{}': ", path.display()))
+    })?;
 
     for entry in directory_entries {
         let entry = entry.map_err(|error| {
-            format!(
-                "read transient directory entry from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read transient directory entry from '{}': ",
                 path.display()
-            )
+            ))
         })?;
         let file_type = entry.file_type().map_err(|error| {
-            format!(
-                "read transient directory entry type '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read transient directory entry type '{}': ",
                 entry.path().display()
-            )
+            ))
         })?;
 
         let entry_path = entry.path();
@@ -854,7 +867,7 @@ mod tests {
             .expect_err("filesystem probe error should fail transient analysis");
 
         assert!(
-            error.contains("check transient book existence"),
+            error.to_string().contains("check transient book existence"),
             "unexpected error: {error}"
         );
 
@@ -998,7 +1011,9 @@ mod tests {
                 .expect_err("series lookup query errors must not become an empty inference");
 
         assert!(
-            error.contains("transient series exact match query failed"),
+            error
+                .to_string()
+                .contains("transient series exact match query failed"),
             "unexpected inference error: {error}"
         );
 
@@ -1022,7 +1037,9 @@ mod tests {
             .expect_err("metadata source errors must not become empty inference");
 
         assert!(
-            error.contains("open transient metadata archive"),
+            error
+                .to_string()
+                .contains("open transient metadata archive"),
             "unexpected metadata source error: {error}"
         );
 
@@ -1045,7 +1062,7 @@ mod tests {
             .expect_err("EPUB provider metadata parse errors must not become empty inference");
 
         assert!(
-            error.contains("EPUB package document"),
+            error.to_string().contains("EPUB package document"),
             "unexpected metadata parse error: {error}"
         );
 
@@ -1061,7 +1078,7 @@ mod tests {
             .expect_err("read_dir errors must not become an empty transient scan");
 
         assert!(
-            error.contains("read transient directory"),
+            error.to_string().contains("read transient directory"),
             "unexpected list error: {error}"
         );
 
@@ -1079,7 +1096,7 @@ mod tests {
             .await
             .expect_err("scan root filesystem probe errors must not become ERR_1016");
 
-        assert_ne!(error, "ERR_1016");
+        assert_ne!(error.to_string(), "ERR_1016");
 
         let _ = fs::remove_file(path);
         fixture.close().await;
@@ -1095,7 +1112,7 @@ mod tests {
                 .expect_err("image read errors must not become a missing page");
 
         assert!(
-            error.contains("read transient book media"),
+            error.to_string().contains("read transient book media"),
             "unexpected page content error: {error}"
         );
 
@@ -1127,7 +1144,7 @@ mod tests {
         .expect_err("archive entry read errors must not become a missing page");
 
         assert!(
-            error.contains("read transient archive entry"),
+            error.to_string().contains("read transient archive entry"),
             "unexpected page content error: {error}"
         );
 

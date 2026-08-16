@@ -25,7 +25,7 @@ pub(crate) async fn user_can_access_book_media(
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     if !user_can_access_library(user, &media.library_id) {
         return Ok(false);
     }
@@ -56,7 +56,7 @@ pub(super) async fn user_can_access_series_media(
     app: &MediaAssetsState,
     series_id: &str,
     user: &AuthUser,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let Some(library_id) = app.series_access.load_series_library_id(series_id).await? else {
         return Ok(false);
     };
@@ -79,7 +79,7 @@ pub(super) async fn user_can_access_readlist_media(
     app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     Ok(visible_readlist_book_ids_for_user(app, readlist_id, user)
         .await?
         .is_some_and(|book_ids| !book_ids.is_empty()))
@@ -89,7 +89,7 @@ pub(super) async fn visible_readlist_book_ids_for_user(
     app: &MediaAssetsState,
     readlist_id: &str,
     user: &AuthUser,
-) -> Result<Option<Vec<String>>, String> {
+) -> anyhow::Result<Option<Vec<String>>> {
     let principal = principal_from_user(user)
         .expect("authenticated user should resolve to discovery principal");
     let context = to_domain_query_context(to_query_context(&principal, None));
@@ -102,7 +102,7 @@ pub(super) async fn user_can_access_collection_media(
     app: &MediaAssetsState,
     collection_id: &str,
     user: &AuthUser,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     Ok(
         !visible_collection_series_ids_for_user(app, collection_id, user)
             .await?
@@ -114,7 +114,7 @@ pub(super) async fn visible_collection_series_ids_for_user(
     app: &MediaAssetsState,
     collection_id: &str,
     user: &AuthUser,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let principal = principal_from_user(user)
         .expect("authenticated user should resolve to discovery principal");
     let context = to_domain_query_context(to_query_context(&principal, None));
@@ -140,15 +140,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BookMediaReaderPort for TestBookMediaReader {
-        async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+        async fn book_media(&self, _book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
             Ok(None)
         }
 
-        async fn book_media_is_ready(&self, _book_id: &str) -> Result<bool, String> {
+        async fn book_media_is_ready(&self, _book_id: &str) -> anyhow::Result<bool> {
             Ok(false)
         }
 
-        async fn book_pages(&self, _book_id: &str) -> Result<Vec<BookPageRecord>, String> {
+        async fn book_pages(&self, _book_id: &str) -> anyhow::Result<Vec<BookPageRecord>> {
             Ok(Vec::new())
         }
 
@@ -156,21 +156,21 @@ mod tests {
             &self,
             _book_id: &str,
             _page_number: u64,
-        ) -> Result<Option<BookPageRecord>, String> {
+        ) -> anyhow::Result<Option<BookPageRecord>> {
             Ok(None)
         }
 
         async fn book_restrictions(
             &self,
             _book_id: &str,
-        ) -> Result<Option<BookAccessRestrictions>, String> {
-            self.restrictions.clone()
+        ) -> anyhow::Result<Option<BookAccessRestrictions>> {
+            self.restrictions.clone().map_err(anyhow::Error::msg)
         }
 
         async fn selected_book_thumbnail(
             &self,
             _book_id: &str,
-        ) -> Result<Option<EntityThumbnailBinary>, String> {
+        ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
             Ok(None)
         }
     }
@@ -185,7 +185,12 @@ mod tests {
             user_can_access_book_media(&reader, "book-a", &unrestricted_user(), &book_media())
                 .await;
 
-        assert_eq!(result, Err("restriction lookup failed".to_string()));
+        assert_eq!(
+            result
+                .expect_err("restriction lookup should fail")
+                .to_string(),
+            "restriction lookup failed"
+        );
     }
 
     fn unrestricted_user() -> AuthUser {

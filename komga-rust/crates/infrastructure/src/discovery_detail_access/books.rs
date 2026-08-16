@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{Row, SqlitePool};
 
 use komga_application::discovery::{
@@ -14,7 +15,7 @@ use crate::parsing::{
 pub(super) async fn load_book_id_by_sorted_position(
     pool: &SqlitePool,
     index: usize,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let row = sqlx::query(
         r#"SELECT b.ID AS ID
          FROM BOOK b
@@ -27,7 +28,7 @@ pub(super) async fn load_book_id_by_sorted_position(
     .bind((index - 1) as i64)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query remapped book id: {error}"))?;
+    .context("query remapped book id")?;
 
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
@@ -35,7 +36,7 @@ pub(super) async fn load_book_id_by_sorted_position(
 pub(super) async fn load_persisted_book_resource(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedBookResourceRecord>, String> {
+) -> anyhow::Result<Option<PersistedBookResourceRecord>> {
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
@@ -51,7 +52,7 @@ pub(super) async fn load_persisted_book_resource(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted book resource: {error}"))?;
+    .context("query persisted book resource")?;
 
     Ok(row.map(|row| PersistedBookResourceRecord {
         library_id: row.get::<String, _>("LIBRARY_ID"),
@@ -66,7 +67,7 @@ pub(super) async fn load_persisted_book_detail(
     pool: &SqlitePool,
     book_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<BookReadModel>, String> {
+) -> anyhow::Result<Option<BookReadModel>> {
     let row = sqlx::query(
         r#"SELECT b.ID AS ID, b.SERIES_ID AS SERIES_ID, COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
                 COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT,
@@ -122,7 +123,7 @@ pub(super) async fn load_persisted_book_detail(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted book detail: {error}"))?;
+    .context("query persisted book detail")?;
 
     Ok(row.map(|row| BookReadModel {
         id: row.get::<String, _>("ID"),
@@ -199,7 +200,7 @@ pub(super) async fn load_persisted_book_sibling_id(
     pool: &SqlitePool,
     book_id: &str,
     direction: PersistedBookSiblingDirectionRecord,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let current = sqlx::query(
         r#"SELECT b.SERIES_ID, bm.NUMBER_SORT AS NUMBER_SORT
          FROM BOOK b
@@ -209,7 +210,7 @@ pub(super) async fn load_persisted_book_sibling_id(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted current book for sibling lookup: {error}"))?;
+    .context("query persisted current book for sibling lookup")?;
 
     let Some(current) = current else {
         return Ok(None);
@@ -252,7 +253,7 @@ pub(super) async fn load_persisted_book_sibling_id(
             .await
         }
     }
-    .map_err(|error| format!("query persisted sibling book id: {error}"))?;
+    .context("query persisted sibling book id")?;
 
     Ok(sibling_row.map(|row| row.get::<String, _>("ID")))
 }

@@ -63,7 +63,7 @@ impl TaskQueueScheduler {
                 admin,
                 admin_loaded,
                 persisted_store,
-                persisted_store_error,
+                persisted_store_error: persisted_store_error.map(|error| error.to_string()),
             })),
             wakeup,
         }
@@ -460,11 +460,11 @@ impl TaskQueue for TaskQueueScheduler {
         &self,
         records: Vec<TaskQueueRecord>,
         urgency: SubmitUrgency,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         for record in records {
             TaskQueueScheduler::enqueue(self, record)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(anyhow::Error::from)?;
         }
         if urgency == SubmitUrgency::Immediate {
             self.wakeup.notify_one();
@@ -472,23 +472,23 @@ impl TaskQueue for TaskQueueScheduler {
         Ok(())
     }
 
-    async fn status(&self) -> Result<QueueStatus, String> {
+    async fn status(&self) -> anyhow::Result<QueueStatus> {
         let counts = TaskQueueScheduler::count_by_simple_type(self)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(anyhow::Error::from)?;
         Ok(QueueStatus { counts })
     }
 }
 
 #[async_trait::async_trait]
 impl TaskQueueAdmin for TaskQueueScheduler {
-    async fn clear_unowned_tasks(&self) -> Result<usize, String> {
+    async fn clear_unowned_tasks(&self) -> anyhow::Result<usize> {
         TaskQueueScheduler::clear_unowned(self)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn apply_pool_size(&self, _value: usize) -> Result<(), String> {
+    async fn apply_pool_size(&self, _value: usize) -> anyhow::Result<()> {
         Ok(())
     }
 

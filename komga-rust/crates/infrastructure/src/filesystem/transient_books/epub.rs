@@ -84,13 +84,13 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     manifest: &HashMap<String, TransientEpubManifestItem>,
     spine: &[TransientEpubManifestItem],
-) -> Result<Vec<TransientBookPage>, String> {
+) -> anyhow::Result<Vec<TransientBookPage>> {
     let mut pages = Vec::new();
 
     for item in spine {
         let page = if item.media_type.starts_with("image/") {
             let bytes = read_zip_entry_bytes_normalized(archive, &item.href)
-                .ok_or_else(|| format!("missing epub resource {}", item.href))?;
+                .ok_or_else(|| anyhow::anyhow!(format!("missing epub resource {}", item.href)))?;
             let dimensions = transient_epub_image_dimensions(&bytes, &item.media_type, &item.href)?;
             TransientBookPage {
                 number: (pages.len() as u32) + 1,
@@ -102,7 +102,7 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
             }
         } else if is_transient_epub_html_media_type(&item.media_type) {
             let resource_bytes = read_zip_entry_bytes_normalized(archive, &item.href)
-                .ok_or_else(|| format!("missing epub resource {}", item.href))?;
+                .ok_or_else(|| anyhow::anyhow!(format!("missing epub resource {}", item.href)))?;
             let Some(image_href) =
                 parse_transient_epub_divina_image_href(&resource_bytes, &item.href)?
             else {
@@ -115,8 +115,10 @@ fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
             if !image_item.media_type.starts_with("image/") {
                 return Ok(Vec::new());
             }
-            let image_bytes = read_zip_entry_bytes_normalized(archive, &image_href)
-                .ok_or_else(|| format!("missing epub image resource {image_href}"))?;
+            let image_bytes =
+                read_zip_entry_bytes_normalized(archive, &image_href).ok_or_else(|| {
+                    anyhow::anyhow!(format!("missing epub image resource {image_href}"))
+                })?;
             let dimensions =
                 transient_epub_image_dimensions(&image_bytes, &image_item.media_type, &image_href)?;
             TransientBookPage {
@@ -141,14 +143,18 @@ fn transient_epub_image_dimensions(
     bytes: &[u8],
     media_type: &str,
     resource_path: &str,
-) -> Result<Option<ImageDimensions>, String> {
+) -> anyhow::Result<Option<ImageDimensions>> {
     if !is_supported_transient_epub_raster_image_media_type(media_type) {
         return Ok(None);
     }
 
     image_dimensions_from_bytes_u32(bytes)
         .map(Some)
-        .ok_or_else(|| format!("failed to decode transient EPUB image dimensions {resource_path}"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(format!(
+                "failed to decode transient EPUB image dimensions {resource_path}"
+            ))
+        })
 }
 
 pub(super) fn read_zip_entry_bytes_normalized<R: Read + std::io::Seek>(
@@ -192,7 +198,7 @@ pub(super) fn parse_transient_epub_rootfile_path(container_xml: &[u8]) -> Option
 pub(super) fn parse_transient_epub_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
-) -> Result<HashMap<String, TransientEpubManifestItem>, String> {
+) -> anyhow::Result<HashMap<String, TransientEpubManifestItem>> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -209,9 +215,8 @@ pub(super) fn parse_transient_epub_manifest_items(
                 let mut media_type = None::<String>;
                 for attribute in event.attributes() {
                     let attribute = attribute.map_err(|error| {
-                        format!(
-                            "failed to parse transient EPUB package document attribute: {error}"
-                        )
+                        anyhow::anyhow!(error)
+                            .context("failed to parse transient EPUB package document attribute: ")
                     })?;
                     if transient_xml_name_matches(attribute.key.as_ref(), b"id") {
                         id = Some(transient_xml_attribute_value_result(
@@ -250,9 +255,9 @@ pub(super) fn parse_transient_epub_manifest_items(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "failed to parse transient EPUB package document: {error}"
-                ));
+                )));
             }
             _ => {}
         }
@@ -264,7 +269,7 @@ pub(super) fn parse_transient_epub_manifest_items(
 pub(super) fn parse_transient_epub_spine_items(
     package_document: &[u8],
     manifest: &HashMap<String, TransientEpubManifestItem>,
-) -> Result<Vec<TransientEpubManifestItem>, String> {
+) -> anyhow::Result<Vec<TransientEpubManifestItem>> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -279,9 +284,8 @@ pub(super) fn parse_transient_epub_spine_items(
                 let mut idref = None::<String>;
                 for attribute in event.attributes() {
                     let attribute = attribute.map_err(|error| {
-                        format!(
-                            "failed to parse transient EPUB package document attribute: {error}"
-                        )
+                        anyhow::anyhow!(error)
+                            .context("failed to parse transient EPUB package document attribute: ")
                     })?;
                     if transient_xml_name_matches(attribute.key.as_ref(), b"idref") {
                         idref = Some(transient_xml_attribute_value_result(
@@ -300,9 +304,9 @@ pub(super) fn parse_transient_epub_spine_items(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "failed to parse transient EPUB package document: {error}"
-                ));
+                )));
             }
             _ => {}
         }
@@ -316,7 +320,7 @@ pub(super) fn parse_transient_epub_spine_items(
 pub(super) fn parse_transient_epub_divina_image_href(
     resource_bytes: &[u8],
     page_href: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let mut reader = XmlReader::from_reader(resource_bytes);
     reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
@@ -362,9 +366,9 @@ pub(super) fn parse_transient_epub_divina_image_href(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "failed to parse transient EPUB spine resource: {error}"
-                ));
+                )));
             }
             _ => {}
         }
@@ -393,7 +397,7 @@ fn collect_transient_epub_divina_image_source(
     event: &quick_xml::events::BytesStart<'_>,
     inside_body: bool,
     image_sources: &mut Vec<String>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !inside_body {
         return Ok(());
     }
@@ -487,10 +491,11 @@ fn transient_xml_attribute_value_checked(
     event: &quick_xml::events::BytesStart<'_>,
     attribute_name: &[u8],
     document_name: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     for attribute in event.attributes() {
-        let attribute = attribute
-            .map_err(|error| format!("failed to parse {document_name} attribute: {error}"))?;
+        let attribute = attribute.map_err(|error| {
+            anyhow::anyhow!(error).context(format!("failed to parse {document_name} attribute"))
+        })?;
         if transient_xml_name_matches(attribute.key.as_ref(), attribute_name) {
             return transient_xml_attribute_value_result(attribute, document_name).map(Some);
         }
@@ -501,9 +506,12 @@ fn transient_xml_attribute_value_checked(
 fn transient_xml_attribute_value_result(
     attribute: quick_xml::events::attributes::Attribute<'_>,
     document_name: &str,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     attribute
         .normalized_value(XmlVersion::Implicit1_0)
         .map(|value| value.into_owned())
-        .map_err(|error| format!("failed to parse {document_name} attribute value: {error}"))
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to parse {document_name} attribute value"))
+        })
 }

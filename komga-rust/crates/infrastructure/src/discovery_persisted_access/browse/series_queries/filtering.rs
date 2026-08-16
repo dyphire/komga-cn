@@ -33,7 +33,7 @@ pub(in crate::discovery_persisted_access::browse) async fn load_persisted_series
     backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedSeriesBrowseQuery,
-) -> Result<PageEnvelope<PersistedSeriesSummary>, String> {
+) -> anyhow::Result<PageEnvelope<PersistedSeriesSummary>> {
     let mut series = Vec::new();
     let mut relevance_ranks: HashMap<String, usize> = HashMap::new();
 
@@ -162,7 +162,7 @@ async fn build_series_eval_context(
     context: &DiscoveryQueryContext,
     condition: Option<&SeriesCondition>,
     read_dates: Option<HashMap<String, String>>,
-) -> Result<SeriesEvaluationContext, String> {
+) -> anyhow::Result<SeriesEvaluationContext> {
     let mut eval_context = SeriesEvaluationContext {
         user_id_present: context.user_id.is_some(),
         collection_memberships: None,

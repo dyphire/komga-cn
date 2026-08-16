@@ -115,23 +115,23 @@ struct TestPort {
 
 #[async_trait::async_trait]
 impl LibraryCatalogMutationPort for TestPort {
-    async fn load_library(&self, _library_id: &str) -> Result<Option<LibraryRecord>, String> {
+    async fn load_library(&self, _library_id: &str) -> anyhow::Result<Option<LibraryRecord>> {
         Ok(self.library.clone())
     }
 
-    async fn validate_library(&self, _library: &LibraryRecord) -> Result<(), String> {
+    async fn validate_library(&self, _library: &LibraryRecord) -> anyhow::Result<()> {
         Ok(())
     }
 
-    async fn create_library(&self, _library: &LibraryRecord) -> Result<(), String> {
+    async fn create_library(&self, _library: &LibraryRecord) -> anyhow::Result<()> {
         Ok(())
     }
 
-    async fn update_library(&self, _library: &LibraryRecord) -> Result<bool, String> {
+    async fn update_library(&self, _library: &LibraryRecord) -> anyhow::Result<bool> {
         Ok(true)
     }
 
-    async fn delete_library(&self, _library_id: &str) -> Result<bool, String> {
+    async fn delete_library(&self, _library_id: &str) -> anyhow::Result<bool> {
         Ok(false)
     }
 
@@ -139,7 +139,7 @@ impl LibraryCatalogMutationPort for TestPort {
         &self,
         _library_id: &str,
         koreader: bool,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         Ok(if koreader {
             self.empty_hash_koreader_book_ids.clone()
         } else {
@@ -150,18 +150,18 @@ impl LibraryCatalogMutationPort for TestPort {
     async fn library_books_with_mismatched_extensions(
         &self,
         _library_id: &str,
-    ) -> Result<Vec<LibraryBookSeriesRecord>, String> {
+    ) -> anyhow::Result<Vec<LibraryBookSeriesRecord>> {
         Ok(self.mismatched_extension_books.clone())
     }
 
-    async fn library_book_ids(&self, _library_id: &str) -> Result<Option<Vec<String>>, String> {
+    async fn library_book_ids(&self, _library_id: &str) -> anyhow::Result<Option<Vec<String>>> {
         Ok(self.library_book_ids.clone())
     }
 
     async fn library_series_and_book_ids(
         &self,
         _library_id: &str,
-    ) -> Result<Option<LibrarySeriesAndBookIds>, String> {
+    ) -> anyhow::Result<Option<LibrarySeriesAndBookIds>> {
         Ok(self.library_series_and_book_ids.clone())
     }
 }

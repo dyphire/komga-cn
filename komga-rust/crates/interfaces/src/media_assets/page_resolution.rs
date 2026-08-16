@@ -12,7 +12,7 @@ async fn render_book_page_thumbnail(
     page: &BookPageRecord,
     page_number: u64,
     max_edge: u32,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     content
         .render_page_thumbnail(media, page, page_number, max_edge)
         .await
@@ -23,7 +23,7 @@ pub(crate) async fn load_book_thumbnail_page_source_bytes(
     content: &dyn BookMediaContentPort,
     book_id: &str,
     media: &BookMediaRecord,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if book_media_is_single_image(media) {
         return content.read_media_file_bytes(&media.file_path).await;
     }

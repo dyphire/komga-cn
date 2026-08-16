@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -53,19 +54,19 @@ impl OpdsPersistedAccess {
 
 #[async_trait::async_trait]
 impl OpdsLibraryPersistedPort for OpdsPersistedAccess {
-    async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+    async fn load_libraries(&self) -> anyhow::Result<Vec<PersistedLibraryRecord>> {
         load_libraries(self.db.read_pool())
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_library(
         &self,
         library_id: &str,
-    ) -> Result<Option<PersistedLibraryRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedLibraryRecord>> {
         load_library(self.db.read_pool(), library_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -74,25 +75,25 @@ impl OpdsReadlistVisibilityPersistedPort for OpdsPersistedAccess {
     async fn load_readlists_for_library(
         &self,
         library_id: &str,
-    ) -> Result<Vec<PersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
         load_readlists_for_library(self.db.read_pool(), library_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+    async fn load_all_readlists(&self) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
         load_all_readlists(self.db.read_pool())
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_readlist_books(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
         load_readlist_books(self.db.read_pool(), readlist_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -101,29 +102,29 @@ impl OpdsCollectionVisibilityPersistedPort for OpdsPersistedAccess {
     async fn load_collections(
         &self,
         library_id: Option<&str>,
-    ) -> Result<Vec<PersistedNamedRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedNamedRecord>> {
         load_collections(self.db.read_pool(), library_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_collection_series(
         &self,
         collection_id: &str,
         ordered: bool,
-    ) -> Result<Vec<PersistedSeriesRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesRecord>> {
         load_collection_series(self.db.read_pool(), collection_id, ordered)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
 #[async_trait::async_trait]
 impl OpdsSeriesPersistedPort for OpdsPersistedAccess {
-    async fn load_series(&self, series_id: &str) -> Result<Option<PersistedSeriesRecord>, String> {
+    async fn load_series(&self, series_id: &str) -> anyhow::Result<Option<PersistedSeriesRecord>> {
         load_series(self.db.read_pool(), series_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_series_books_paged(
@@ -132,16 +133,16 @@ impl OpdsSeriesPersistedPort for OpdsPersistedAccess {
         user_id: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesBookRecord>> {
         load_series_books_paged(self.db.read_pool(), series_id, user_id, offset, limit)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn load_series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
+    async fn load_series_tags(&self, series_id: &str) -> anyhow::Result<Vec<String>> {
         load_series_tags(self.db.read_pool(), series_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -150,19 +151,19 @@ impl OpdsReadlistDetailPersistedPort for OpdsPersistedAccess {
     async fn load_readlist(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<PersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedReadlistRecord>> {
         load_readlist(self.db.read_pool(), readlist_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_readlist_books(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
         load_readlist_books(self.db.read_pool(), readlist_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -171,7 +172,7 @@ impl OpdsSearchPersistedPort for OpdsPersistedAccess {
     async fn load_unified_search_results(
         &self,
         query: &str,
-    ) -> Result<OpdsPersistedUnifiedSearchRecords, String> {
+    ) -> anyhow::Result<OpdsPersistedUnifiedSearchRecords> {
         let trimmed_query = query.trim();
         if trimmed_query.is_empty() {
             return load_blank_opds_search_results(self.db.read_pool()).await;
@@ -208,19 +209,19 @@ impl OpdsSearchPersistedPort for OpdsPersistedAccess {
     async fn load_collection_books(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedBookFeedRecord>> {
         load_collection_books(self.db.read_pool(), collection_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_readlist_books(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
         load_readlist_books(self.db.read_pool(), readlist_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -229,10 +230,10 @@ impl OpdsPublisherPersistedPort for OpdsPersistedAccess {
     async fn load_publishers(
         &self,
         allowed_library_ids: Option<&HashSet<String>>,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         load_publishers(self.db.read_pool(), allowed_library_ids)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -241,48 +242,48 @@ impl OpdsCollectionDetailPersistedPort for OpdsPersistedAccess {
     async fn load_collection(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedNamedRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedNamedRecord>> {
         load_collection(self.db.read_pool(), collection_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_collection_books(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedBookFeedRecord>> {
         load_collection_books(self.db.read_pool(), collection_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_collection_series(
         &self,
         collection_id: &str,
         ordered: bool,
-    ) -> Result<Vec<PersistedSeriesRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesRecord>> {
         load_collection_series(self.db.read_pool(), collection_id, ordered)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 
 async fn load_blank_opds_search_results(
     pool: &SqlitePool,
-) -> Result<OpdsPersistedUnifiedSearchRecords, String> {
+) -> anyhow::Result<OpdsPersistedUnifiedSearchRecords> {
     Ok(OpdsPersistedUnifiedSearchRecords {
         series: load_series_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
-            .map_err(|error| format!("load blank OPDS series search rows: {error}"))?,
+            .context("load blank OPDS series search rows")?,
         books: load_book_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
-            .map_err(|error| format!("load blank OPDS book search rows: {error}"))?,
+            .context("load blank OPDS book search rows")?,
         collections: load_collection_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
-            .map_err(|error| format!("load blank OPDS collection search rows: {error}"))?,
+            .context("load blank OPDS collection search rows")?,
         readlists: load_readlist_search_records_limited(pool, OPDS_SEARCH_GROUP_LIMIT)
             .await
-            .map_err(|error| format!("load blank OPDS readlist search rows: {error}"))?,
+            .context("load blank OPDS readlist search rows")?,
     })
 }
 
@@ -290,10 +291,10 @@ async fn load_ranked_series_search_results(
     pool: &SqlitePool,
     search: &SearchIndexEngine,
     query: &str,
-) -> Result<Vec<PersistedSeriesSearchRecord>, String> {
+) -> anyhow::Result<Vec<PersistedSeriesSearchRecord>> {
     let limit = load_series_search_count(pool)
         .await
-        .map_err(|error| format!("load OPDS series search count: {error}"))?
+        .context("load OPDS series search count")?
         .max(1);
     let ids = search.search_ids(query, SearchEntityType::Series, limit)?;
     ordered_series_search_rows(pool, &ids).await
@@ -303,10 +304,10 @@ async fn load_ranked_book_search_results(
     pool: &SqlitePool,
     search: &SearchIndexEngine,
     query: &str,
-) -> Result<Vec<PersistedBookSearchRecord>, String> {
+) -> anyhow::Result<Vec<PersistedBookSearchRecord>> {
     let limit = load_book_search_count(pool)
         .await
-        .map_err(|error| format!("load OPDS book search count: {error}"))?
+        .context("load OPDS book search count")?
         .max(1);
     let ids = search.search_ids(query, SearchEntityType::Book, limit)?;
     ordered_book_search_rows(pool, &ids).await
@@ -316,10 +317,10 @@ async fn load_ranked_collection_search_results(
     pool: &SqlitePool,
     search: &SearchIndexEngine,
     query: &str,
-) -> Result<Vec<PersistedNamedRecord>, String> {
+) -> anyhow::Result<Vec<PersistedNamedRecord>> {
     let limit = load_collection_search_count(pool)
         .await
-        .map_err(|error| format!("load OPDS collection search count: {error}"))?
+        .context("load OPDS collection search count")?
         .max(1);
     let ids = search.search_ids(query, SearchEntityType::Collection, limit)?;
     ordered_collection_search_rows(pool, &ids).await
@@ -329,10 +330,10 @@ async fn load_ranked_readlist_search_results(
     pool: &SqlitePool,
     search: &SearchIndexEngine,
     query: &str,
-) -> Result<Vec<PersistedNamedRecord>, String> {
+) -> anyhow::Result<Vec<PersistedNamedRecord>> {
     let limit = load_readlist_search_count(pool)
         .await
-        .map_err(|error| format!("load OPDS readlist search count: {error}"))?
+        .context("load OPDS readlist search count")?
         .max(1);
     let ids = search.search_ids(query, SearchEntityType::ReadList, limit)?;
     ordered_readlist_search_rows(pool, &ids).await
@@ -341,10 +342,10 @@ async fn load_ranked_readlist_search_results(
 async fn ordered_series_search_rows(
     pool: &SqlitePool,
     ids: &[String],
-) -> Result<Vec<PersistedSeriesSearchRecord>, String> {
+) -> anyhow::Result<Vec<PersistedSeriesSearchRecord>> {
     let rows = load_series_search_records_by_ids(pool, ids)
         .await
-        .map_err(|error| format!("load OPDS series search rows by ids: {error}"))?;
+        .context("load OPDS series search rows by ids")?;
     let mut by_id = rows
         .into_iter()
         .map(|row| (row.id.clone(), row))
@@ -355,10 +356,10 @@ async fn ordered_series_search_rows(
 async fn ordered_book_search_rows(
     pool: &SqlitePool,
     ids: &[String],
-) -> Result<Vec<PersistedBookSearchRecord>, String> {
+) -> anyhow::Result<Vec<PersistedBookSearchRecord>> {
     let rows = load_book_search_records_by_ids(pool, ids)
         .await
-        .map_err(|error| format!("load OPDS book search rows by ids: {error}"))?;
+        .context("load OPDS book search rows by ids")?;
     let mut by_id = rows
         .into_iter()
         .map(|row| (row.id.clone(), row))
@@ -369,10 +370,10 @@ async fn ordered_book_search_rows(
 async fn ordered_collection_search_rows(
     pool: &SqlitePool,
     ids: &[String],
-) -> Result<Vec<PersistedNamedRecord>, String> {
+) -> anyhow::Result<Vec<PersistedNamedRecord>> {
     let rows = load_collection_search_records_by_ids(pool, ids)
         .await
-        .map_err(|error| format!("load OPDS collection search rows by ids: {error}"))?;
+        .context("load OPDS collection search rows by ids")?;
     let mut by_id = rows
         .into_iter()
         .map(|row| (row.id.clone(), row))
@@ -383,10 +384,10 @@ async fn ordered_collection_search_rows(
 async fn ordered_readlist_search_rows(
     pool: &SqlitePool,
     ids: &[String],
-) -> Result<Vec<PersistedNamedRecord>, String> {
+) -> anyhow::Result<Vec<PersistedNamedRecord>> {
     let rows = load_readlist_search_records_by_ids(pool, ids)
         .await
-        .map_err(|error| format!("load OPDS readlist search rows by ids: {error}"))?;
+        .context("load OPDS readlist search rows by ids")?;
     let mut by_id = rows
         .into_iter()
         .map(|row| (row.id.clone(), row))

@@ -34,51 +34,51 @@ impl ClientSettingsPort for ClientSettingsAccess {
     async fn load_client_settings_global(
         &self,
         allow_unauthorized_only: bool,
-    ) -> Result<ClientGlobalSettings, String> {
+    ) -> anyhow::Result<ClientGlobalSettings> {
         load_client_settings_global(self.db.read_pool(), allow_unauthorized_only)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn load_client_settings_user(&self, user_id: &str) -> Result<ClientUserSettings, String> {
+    async fn load_client_settings_user(&self, user_id: &str) -> anyhow::Result<ClientUserSettings> {
         load_client_settings_user(self.db.read_pool(), user_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn upsert_client_settings_global(
         &self,
         settings: &ClientGlobalSettings,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         upsert_client_settings_global(self.db.write_pool(), settings)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn upsert_client_settings_user(
         &self,
         user_id: &str,
         settings: &ClientUserSettings,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         upsert_client_settings_user(self.db.write_pool(), user_id, settings)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), String> {
+    async fn delete_client_settings_global(&self, keys: &[String]) -> anyhow::Result<()> {
         delete_client_settings_global(self.db.write_pool(), keys)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn delete_client_settings_user(
         &self,
         user_id: &str,
         keys: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         delete_client_settings_user(self.db.write_pool(), user_id, keys)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 

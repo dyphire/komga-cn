@@ -48,7 +48,7 @@ impl SeriesDetailReadProgressCounts {
 pub(in crate::discovery) async fn load_persisted_series_resource(
     app: &DiscoveryState,
     series_id: &str,
-) -> Result<Option<PersistedSeriesResource>, String> {
+) -> anyhow::Result<Option<PersistedSeriesResource>> {
     let resource = app
         .series_detail
         .load_persisted_series_resource(series_id)
@@ -66,7 +66,7 @@ pub(super) async fn load_persisted_series_detail(
     app: &DiscoveryState,
     series_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<SeriesDetailReadModel>, String> {
+) -> anyhow::Result<Option<SeriesDetailReadModel>> {
     let Some(row) = app
         .series_detail
         .load_persisted_series_detail(series_id)
@@ -235,7 +235,7 @@ fn parse_aggregated_series_authors(raw: &[String]) -> Vec<BookMetadataAuthorRead
 pub(super) async fn load_persisted_series_collections(
     app: &DiscoveryState,
     series_id: &str,
-) -> Result<Vec<CollectionReadModel>, String> {
+) -> anyhow::Result<Vec<CollectionReadModel>> {
     let rows = app
         .series_detail
         .load_persisted_series_collections(series_id)
@@ -257,7 +257,7 @@ pub(super) async fn load_persisted_series_collections(
 async fn load_existing_series_metadata(
     app: &DiscoveryState,
     series_id: &str,
-) -> Result<Option<ExistingSeriesMetadata>, String> {
+) -> anyhow::Result<Option<ExistingSeriesMetadata>> {
     let metadata = app
         .series_detail
         .load_existing_series_metadata(series_id)

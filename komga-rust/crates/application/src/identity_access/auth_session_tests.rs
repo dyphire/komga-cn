@@ -347,22 +347,22 @@ impl AuthenticationPort for AuthSessionPorts {
         &self,
         _username: &str,
         _password: &str,
-    ) -> Result<AuthOutcome, String> {
+    ) -> anyhow::Result<AuthOutcome> {
         self.basic_outcome
             .clone()
-            .ok_or_else(|| "storage failure".to_string())
+            .ok_or_else(|| anyhow::anyhow!("storage failure"))
     }
 
-    async fn authenticate_api_key(&self, _api_key: &str) -> Result<AuthOutcome, String> {
+    async fn authenticate_api_key(&self, _api_key: &str) -> anyhow::Result<AuthOutcome> {
         self.api_key_outcome
             .clone()
-            .ok_or_else(|| "storage failure".to_string())
+            .ok_or_else(|| anyhow::anyhow!("storage failure"))
     }
 
     async fn api_key_metadata_by_token(
         &self,
         _api_key: &str,
-    ) -> Result<Option<PersistedApiKeyMetadata>, String> {
+    ) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
         Ok(self.api_key_metadata.clone())
     }
 }
@@ -372,9 +372,9 @@ impl SessionResolverPort for AuthSessionPorts {
         &self,
         _session_token: Option<&str>,
         _remember_me_token: Option<&str>,
-    ) -> Result<Option<AuthUser>, String> {
+    ) -> anyhow::Result<Option<AuthUser>> {
         if self.resolved_user_error {
-            return Err("token storage failure".to_string());
+            return Err(anyhow::anyhow!("token storage failure"));
         }
         Ok(self.resolved_user.clone())
     }
@@ -383,9 +383,9 @@ impl SessionResolverPort for AuthSessionPorts {
         &self,
         _session_token: Option<&str>,
         _remember_me_token: Option<&str>,
-    ) -> Result<Option<ResolvedAuthToken>, String> {
+    ) -> anyhow::Result<Option<ResolvedAuthToken>> {
         if self.resolved_token_error {
-            return Err("token storage failure".to_string());
+            return Err(anyhow::anyhow!("token storage failure"));
         }
         Ok(self.resolved_token.clone())
     }
@@ -463,11 +463,11 @@ impl AuthActivityPort for AuthSessionPorts {
     async fn persisted_list_authentication_activity(
         &self,
         _user_id: Option<&str>,
-    ) -> Result<Vec<PersistedAuthenticationActivity>, String> {
+    ) -> anyhow::Result<Vec<PersistedAuthenticationActivity>> {
         Ok(Vec::new())
     }
 
-    async fn persisted_cleanup_authentication_activity(&self) -> Result<u64, String> {
+    async fn persisted_cleanup_authentication_activity(&self) -> anyhow::Result<u64> {
         Ok(0)
     }
 

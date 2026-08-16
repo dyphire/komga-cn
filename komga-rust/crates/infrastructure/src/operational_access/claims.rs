@@ -18,10 +18,10 @@ impl ClaimAccess {
 
 #[async_trait::async_trait]
 impl ClaimPort for ClaimAccess {
-    async fn load_claim_status(&self) -> Result<bool, String> {
+    async fn load_claim_status(&self) -> anyhow::Result<bool> {
         claims_access::load_claim_status(self.db.read_pool())
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn claim_initial_admin_user(
@@ -29,7 +29,7 @@ impl ClaimPort for ClaimAccess {
         user_id: &str,
         email: &str,
         password_hash: &str,
-    ) -> Result<AppClaimResult, String> {
+    ) -> anyhow::Result<AppClaimResult> {
         let result = claims_access::claim_initial_admin_user(
             self.db.write_pool(),
             user_id,
@@ -37,7 +37,7 @@ impl ClaimPort for ClaimAccess {
             password_hash,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(anyhow::Error::from)?;
         Ok(match result {
             ClaimInitialAdminUserResult::Created(user) => {
                 AppClaimResult::Created(CreatedClaimedUser {

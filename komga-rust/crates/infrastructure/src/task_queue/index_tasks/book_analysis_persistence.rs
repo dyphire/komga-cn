@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
 use sqlx::SqlitePool;
 
@@ -30,7 +31,7 @@ pub(super) struct AnalyzedBookMedia {
 pub(super) async fn analyze_book_input(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<BookAnalysisInput>, String> {
+) -> anyhow::Result<Option<BookAnalysisInput>> {
     let row = sqlx::query(
         r#"SELECT
              b.URL AS URL,
@@ -49,7 +50,7 @@ pub(super) async fn analyze_book_input(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load BOOK row for analyze: {error}"))?;
+    .context("failed to load BOOK row for analyze")?;
 
     Ok(row.map(|row| BookAnalysisInput {
         url: sqlx::Row::get::<String, _>(&row, "URL"),
@@ -67,16 +68,21 @@ pub(super) async fn persist_book_analysis(
     pool: &SqlitePool,
     book_id: &str,
     analysis: &AnalyzedBookMedia,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start analyze-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start analyze-book transaction for '{book_id}': "
+        ))
     })?;
 
     sqlx::query("DELETE FROM MEDIA_PAGE WHERE BOOK_ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("failed to clear MEDIA_PAGE rows for '{book_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to clear MEDIA_PAGE rows for '{book_id}'"))
+        })?;
 
     for (index, page) in analysis.pages.iter().enumerate() {
         sqlx::query(
@@ -100,7 +106,10 @@ pub(super) async fn persist_book_analysis(
         .bind(page.file_size)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("failed to insert MEDIA_PAGE row for '{book_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to insert MEDIA_PAGE row for '{book_id}'"))
+        })?;
     }
 
     sqlx::query(
@@ -122,18 +131,22 @@ pub(super) async fn persist_book_analysis(
     .bind(analysis.pages.len() as i32)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("failed to persist MEDIA analyze state: {error}"))?;
+    .context("failed to persist MEDIA analyze state")?;
 
     sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
         .bind(book_id)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("failed to refresh BOOK last-modified during analyze for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh BOOK last-modified during analyze for '{book_id}': "
+            ))
         })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit analyze-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit analyze-book transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())

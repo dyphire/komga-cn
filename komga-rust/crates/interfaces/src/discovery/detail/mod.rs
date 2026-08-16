@@ -99,7 +99,7 @@ pub(super) async fn load_persisted_book_detail(
     app: &DiscoveryState,
     book_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<BookReadModel>, String> {
+) -> anyhow::Result<Option<BookReadModel>> {
     books_persistence::load_persisted_book_detail(app, book_id, user_id).await
 }
 

@@ -13,13 +13,13 @@ pub trait PersistedSetVisibilityService: Send + Sync {
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn visible_readlist_book_ids(
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<Vec<String>>, String>;
+    ) -> anyhow::Result<Option<Vec<String>>>;
 }
 
 #[async_trait::async_trait]
@@ -29,24 +29,24 @@ pub trait PersistedSetService: PersistedSetVisibilityService {
         visibility_context: &DiscoveryQueryContext,
         request_scope_context: Option<&DiscoveryQueryContext>,
         query: CollectionListQuery,
-    ) -> Result<PageEnvelope<CollectionReadModel>, String>;
+    ) -> anyhow::Result<PageEnvelope<CollectionReadModel>>;
 
     async fn collection_detail(
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String>;
+    ) -> anyhow::Result<Option<CollectionReadModel>>;
 
     async fn collection_for_mutation(
         &self,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String>;
+    ) -> anyhow::Result<Option<CollectionReadModel>>;
 
     async fn visible_collections(
         &self,
         context: &DiscoveryQueryContext,
         collections: Vec<CollectionReadModel>,
-    ) -> Result<Vec<CollectionReadModel>, String>;
+    ) -> anyhow::Result<Vec<CollectionReadModel>>;
 
     async fn create_collection(
         &self,
@@ -67,29 +67,29 @@ pub trait PersistedSetService: PersistedSetVisibilityService {
         requested_context: &DiscoveryQueryContext,
         visibility_context: &DiscoveryQueryContext,
         query: ReadListsQuery,
-    ) -> Result<PageEnvelope<ReadListReadModel>, String>;
+    ) -> anyhow::Result<PageEnvelope<ReadListReadModel>>;
 
     async fn readlist_detail(
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String>;
+    ) -> anyhow::Result<Option<ReadListReadModel>>;
 
     async fn readlist_for_mutation(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String>;
+    ) -> anyhow::Result<Option<ReadListReadModel>>;
 
     async fn match_comicrack_readlist(
         &self,
         request: &ComicRackReadListRequest,
-    ) -> Result<ComicRackReadListMatchResult, String>;
+    ) -> anyhow::Result<ComicRackReadListMatchResult>;
 
     async fn list_readlist_books(
         &self,
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
-    ) -> Result<Option<PageEnvelope<BookReadModel>>, String>;
+    ) -> anyhow::Result<Option<PageEnvelope<BookReadModel>>>;
 
     async fn readlist_book_sibling(
         &self,
@@ -97,14 +97,14 @@ pub trait PersistedSetService: PersistedSetVisibilityService {
         readlist_id: &str,
         book_id: &str,
         next: bool,
-    ) -> Result<Option<BookReadModel>, String>;
+    ) -> anyhow::Result<Option<BookReadModel>>;
 
     async fn readlists_for_book(
         &self,
         candidate_library_ids: Option<&[String]>,
         visibility_context: &DiscoveryQueryContext,
         book_id: &str,
-    ) -> Result<Vec<ReadListReadModel>, String>;
+    ) -> anyhow::Result<Vec<ReadListReadModel>>;
 
     async fn create_readlist(
         &self,

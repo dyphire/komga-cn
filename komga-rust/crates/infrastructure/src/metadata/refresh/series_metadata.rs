@@ -58,7 +58,7 @@ async fn load_series_books_for_refresh(
     pool: &SqlitePool,
     series_id: &str,
     library_root: &Path,
-) -> Result<Vec<SeriesBookRefreshSource>, String> {
+) -> anyhow::Result<Vec<SeriesBookRefreshSource>> {
     let rows = sqlx::query(
         r#"
         SELECT b.LIBRARY_ID AS LIBRARY_ID,
@@ -79,7 +79,9 @@ async fn load_series_books_for_refresh(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to load series books for metadata refresh '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load series books for metadata refresh '{series_id}': "
+        ))
     })?;
 
     Ok(rows
@@ -102,35 +104,35 @@ async fn load_series_books_for_refresh(
 fn load_archive_entry_bytes(
     archive_path: &Path,
     entry_name: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let file = fs::File::open(archive_path).map_err(|error| {
-        format!(
-            "failed to open ComicInfo archive '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to open ComicInfo archive '{}': ",
             archive_path.display()
-        )
+        ))
     })?;
     let mut archive = zip::ZipArchive::new(file).map_err(|error| {
-        format!(
-            "failed to read ComicInfo archive '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read ComicInfo archive '{}': ",
             archive_path.display()
-        )
+        ))
     })?;
     let mut entry = match archive.by_name(entry_name) {
         Ok(entry) => entry,
         Err(ZipError::FileNotFound) => return Ok(None),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "failed to read ComicInfo archive entry '{entry_name}' from '{}': {error}",
                 archive_path.display()
-            ));
+            )));
         }
     };
     let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes).map_err(|error| {
-        format!(
-            "failed to read ComicInfo archive entry '{entry_name}' bytes from '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read ComicInfo archive entry '{entry_name}' bytes from '{}': ",
             archive_path.display()
-        )
+        ))
     })?;
     Ok(Some(bytes))
 }
@@ -138,7 +140,7 @@ fn load_archive_entry_bytes(
 fn load_comicinfo_series_patch_for_book(
     source: &SeriesBookRefreshSource,
     append_volume_to_title: bool,
-) -> Result<Option<SeriesMetadataImportPatch>, String> {
+) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
     if !book_media_is_zip_archive(&source.media) {
         return Ok(None);
     }
@@ -148,10 +150,10 @@ fn load_comicinfo_series_patch_for_book(
         return Ok(None);
     };
     let xml = String::from_utf8(xml).map_err(|error| {
-        format!(
-            "failed to decode ComicInfo.xml from '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to decode ComicInfo.xml from '{}': ",
             source.media.file_path.display()
-        )
+        ))
     })?;
     Ok(Some(extract_comicinfo_series_patch(
         &xml,
@@ -161,7 +163,7 @@ fn load_comicinfo_series_patch_for_book(
 
 async fn load_epub_series_patch_for_book(
     source: &SeriesBookRefreshSource,
-) -> Result<Option<SeriesMetadataImportPatch>, String> {
+) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
     if !book_media_is_epub(&source.media) {
         return Ok(None);
     }
@@ -225,7 +227,7 @@ fn aggregate_series_metadata_import_patches(
 async fn load_series_metadata_refresh_state(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<SeriesMetadataRefreshState>, String> {
+) -> anyhow::Result<Option<SeriesMetadataRefreshState>> {
     let row = sqlx::query(
         r#"
         SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY,
@@ -241,7 +243,9 @@ async fn load_series_metadata_refresh_state(
     .fetch_optional(pool)
     .await
     .map_err(|error| {
-        format!("failed to load existing series metadata for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load existing series metadata for '{series_id}': "
+        ))
     })?;
 
     let Some(row) = row else {
@@ -254,7 +258,7 @@ async fn load_series_metadata_refresh_state(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to load existing series genres for '{series_id}': {error}"))?
+    .map_err(|error| anyhow::anyhow!(error).context( format!("failed to load existing series genres for '{series_id}'")))?
     .into_iter()
     .map(|row| row.get::<String, _>("GENRE"))
     .collect::<Vec<_>>();
@@ -291,9 +295,11 @@ async fn persist_series_metadata_refresh_state(
     pool: &SqlitePool,
     series_id: &str,
     state: &SeriesMetadataRefreshState,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to begin series metadata refresh update tx for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to begin series metadata refresh update tx for '{series_id}': "
+        ))
     })?;
 
     let updated = sqlx::query(
@@ -324,24 +330,33 @@ async fn persist_series_metadata_refresh_state(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("failed to update series metadata for '{series_id}': {error}"))?
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to update series metadata for '{series_id}': "
+        ))
+    })?
     .rows_affected()
         > 0;
 
     if !updated {
         tx.rollback().await.map_err(|error| {
-            format!("failed to rollback missing series metadata update for '{series_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to rollback missing series metadata update for '{series_id}': "
+            ))
         })?;
-        return Err(format!(
+        return Err(anyhow::anyhow!(format!(
             "series metadata row disappeared before metadata refresh for '{series_id}'"
-        ));
+        )));
     }
 
     sqlx::query("DELETE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ?")
         .bind(series_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("failed to clear series genres for '{series_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to clear series genres for '{series_id}'"))
+        })?;
 
     for genre in &state.genres {
         sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
@@ -349,11 +364,16 @@ async fn persist_series_metadata_refresh_state(
             .bind(genre)
             .execute(&mut *tx)
             .await
-            .map_err(|error| format!("failed to insert series genre for '{series_id}': {error}"))?;
+            .map_err(|error| {
+                anyhow::anyhow!(error)
+                    .context(format!("failed to insert series genre for '{series_id}'"))
+            })?;
     }
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit series metadata refresh update for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit series metadata refresh update for '{series_id}': "
+        ))
     })?;
     Ok(())
 }
@@ -362,7 +382,7 @@ async fn apply_series_metadata_import_patch(
     pool: &SqlitePool,
     series_id: &str,
     patch: SeriesMetadataImportPatch,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let Some(mut state) = load_series_metadata_refresh_state(pool, series_id).await? else {
         return Ok(());
     };
@@ -459,7 +479,7 @@ async fn apply_series_metadata_import_patch(
 async fn load_collection_membership_by_name(
     pool: &SqlitePool,
     collection_name: &str,
-) -> Result<Option<PersistedCollectionMembership>, String> {
+) -> anyhow::Result<Option<PersistedCollectionMembership>> {
     let row = sqlx::query(
         r#"
         SELECT ID, NAME, ORDERED
@@ -471,7 +491,11 @@ async fn load_collection_membership_by_name(
     .bind(collection_name)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load collection by name '{collection_name}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load collection by name '{collection_name}': "
+        ))
+    })?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -485,7 +509,9 @@ async fn load_collection_membership_by_name(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to load collection series ids for '{collection_name}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load collection series ids for '{collection_name}': "
+        ))
     })?
     .into_iter()
     .map(|series_row| series_row.get::<String, _>("SERIES_ID"))
@@ -504,7 +530,7 @@ async fn add_series_to_collection_for_refresh(
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     collection_name: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let Some(collection_name) = nonblank_string(collection_name.to_string()) else {
         return Ok(());
     };
@@ -519,7 +545,9 @@ async fn add_series_to_collection_for_refresh(
         }
 
         let mut tx = pool.begin().await.map_err(|error| {
-            format!("failed to begin collection update tx for '{collection_name}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to begin collection update tx for '{collection_name}': "
+            ))
         })?;
 
         sqlx::query(
@@ -531,7 +559,7 @@ async fn add_series_to_collection_for_refresh(
         .bind(&existing.id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("failed to update collection '{collection_name}': {error}"))?;
+        .map_err(|error| anyhow::anyhow!(error).context( format!("failed to update collection '{collection_name}'")))?;
 
         sqlx::query(
             "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
@@ -542,11 +570,15 @@ async fn add_series_to_collection_for_refresh(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("failed to append series to collection '{collection_name}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to append series to collection '{collection_name}': "
+            ))
         })?;
 
         tx.commit().await.map_err(|error| {
-            format!("failed to commit collection update for '{collection_name}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to commit collection update for '{collection_name}': "
+            ))
         })?;
 
         let mut series_ids = existing.series_ids;
@@ -557,7 +589,9 @@ async fn add_series_to_collection_for_refresh(
 
     let collection_id = generated_collection_id(&collection_name);
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to begin collection create tx for '{collection_name}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to begin collection create tx for '{collection_name}': "
+        ))
     })?;
 
     sqlx::query(
@@ -572,7 +606,9 @@ async fn add_series_to_collection_for_refresh(
     .bind(1_i64)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("failed to create collection '{collection_name}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("failed to create collection '{collection_name}'"))
+    })?;
 
     sqlx::query(
         "INSERT INTO COLLECTION_SERIES (COLLECTION_ID, SERIES_ID, NUMBER) VALUES (?, ?, ?)",
@@ -583,11 +619,15 @@ async fn add_series_to_collection_for_refresh(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to seed collection '{collection_name}' membership: {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to seed collection '{collection_name}' membership: "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit collection create for '{collection_name}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit collection create for '{collection_name}': "
+        ))
     })?;
     super::events::emit_collection(
         runtime_events,
@@ -603,7 +643,7 @@ async fn apply_series_collection_imports(
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     collection_names: impl IntoIterator<Item = String>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     for collection_name in dedupe_strings_preserve_order(collection_names) {
         add_series_to_collection_for_refresh(pool, runtime_events, series_id, &collection_name)
             .await?;
@@ -619,7 +659,7 @@ pub(super) async fn apply_mylar_series_import(
     series_url: &str,
     import_mylar_series: bool,
     oneshot: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !import_mylar_series || oneshot {
         return Ok(());
     }
@@ -645,7 +685,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
     import_comicinfo_collection: bool,
     import_comicinfo_series_append_volume: bool,
     import_epub_series: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !(import_comicinfo_series || import_comicinfo_collection || import_epub_series) {
         return Ok(());
     }
@@ -698,7 +738,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
 pub(super) async fn apply_oneshot_series_metadata_import(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let book_row = sqlx::query(
         r#"
         SELECT bm.TITLE AS TITLE,
@@ -713,7 +753,9 @@ pub(super) async fn apply_oneshot_series_metadata_import(
     .fetch_optional(pool)
     .await
     .map_err(|error| {
-        format!("failed to load oneshot series source book metadata for '{series_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load oneshot series source book metadata for '{series_id}': "
+        ))
     })?;
 
     let Some(book_row) = book_row else {
@@ -787,7 +829,7 @@ mod tests {
         .await
         .expect_err("corrupt ComicInfo archive should fail series metadata import");
 
-        assert!(error.contains("ComicInfo archive"), "{error}");
+        assert!(error.to_string().contains("ComicInfo archive"), "{error}");
         let _ = fs::remove_dir_all(library_root);
         fixture.close().await;
     }
@@ -829,7 +871,10 @@ mod tests {
         .await
         .expect_err("corrupt EPUB package should fail series metadata import");
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
         let _ = fs::remove_dir_all(library_root);
         fixture.close().await;
     }
@@ -857,7 +902,7 @@ mod tests {
         .await
         .expect_err("malformed Mylar series.json should fail series metadata import");
 
-        assert!(error.contains("Mylar series.json"), "{error}");
+        assert!(error.to_string().contains("Mylar series.json"), "{error}");
         let _ = fs::remove_dir_all(library_root);
         fixture.close().await;
     }

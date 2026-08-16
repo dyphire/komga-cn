@@ -16,18 +16,18 @@ struct TestArchiveReader {
 
 #[async_trait::async_trait]
 impl ArchiveReaderPort for TestArchiveReader {
-    async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String> {
+    async fn readlist_name(&self, readlist_id: &str) -> anyhow::Result<Option<String>> {
         Ok(self.readlist_names.get(readlist_id).cloned())
     }
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         Ok(self.media_by_book.get(book_id).cloned())
     }
 
     async fn series_archive_entries(
         &self,
         series_id: &str,
-    ) -> Result<Option<SeriesArchiveEntries>, String> {
+    ) -> anyhow::Result<Option<SeriesArchiveEntries>> {
         Ok(self.series_by_id.get(series_id).cloned())
     }
 }
@@ -39,8 +39,12 @@ struct TestArchiveContent {
 
 #[async_trait::async_trait]
 impl ArchiveContentPort for TestArchiveContent {
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String> {
-        self.bytes_by_path.get(path).cloned().unwrap_or(Ok(None))
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+        self.bytes_by_path
+            .get(path)
+            .cloned()
+            .unwrap_or(Ok(None))
+            .map_err(anyhow::Error::msg)
     }
 }
 
@@ -72,9 +76,9 @@ impl TestArchiveBuilder {
 }
 
 impl ArchiveBuilderPort for TestArchiveBuilder {
-    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> Result<Vec<u8>, String> {
+    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> anyhow::Result<Vec<u8>> {
         self.entries.lock().expect("entries lock").push(entries);
-        self.result.clone()
+        self.result.clone().map_err(anyhow::Error::msg)
     }
 }
 
@@ -162,10 +166,10 @@ async fn readlist_archive_propagates_content_read_errors() {
         .readlist_archive("readlist-1", vec!["book-1".to_string()])
         .await;
 
-    assert_eq!(
+    assert!(matches!(
         delivery,
-        ArchiveDelivery::Internal("read book file failed".to_string())
-    );
+        ArchiveDelivery::Internal(error) if error.to_string() == "read book file failed"
+    ));
 }
 
 #[tokio::test]
@@ -234,10 +238,10 @@ async fn archive_delivery_returns_builder_errors() {
         .readlist_archive("readlist-1", vec!["book-1".to_string()])
         .await;
 
-    assert_eq!(
+    assert!(matches!(
         delivery,
-        ArchiveDelivery::Internal("zip builder failed".to_string())
-    );
+        ArchiveDelivery::Internal(error) if error.to_string() == "zip builder failed"
+    ));
 }
 
 fn media_record(file_name: &str, file_path: &str) -> BookMediaRecord {

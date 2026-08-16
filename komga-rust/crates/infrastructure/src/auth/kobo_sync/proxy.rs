@@ -5,7 +5,7 @@ use serde_json::Value;
 pub(super) async fn execute_kobo_proxy_request(
     base_url: &str,
     request: KoboProxyRequest,
-) -> Result<KoboProxyResponse, String> {
+) -> anyhow::Result<KoboProxyResponse> {
     let mut target = format!(
         "{}/{}",
         base_url.trim_end_matches('/'),
@@ -18,9 +18,9 @@ pub(super) async fn execute_kobo_proxy_request(
 
     let client = reqwest::Client::builder()
         .build()
-        .map_err(|error| error.to_string())?;
-    let request_method = reqwest::Method::from_bytes(request.method.as_bytes())
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
+    let request_method =
+        reqwest::Method::from_bytes(request.method.as_bytes()).map_err(anyhow::Error::from)?;
     let mut builder = client.request(request_method, target);
 
     for header in request.headers {
@@ -37,7 +37,7 @@ pub(super) async fn execute_kobo_proxy_request(
         builder = builder.body(body);
     }
 
-    let response = builder.send().await.map_err(|error| error.to_string())?;
+    let response = builder.send().await.map_err(anyhow::Error::from)?;
     let status = response.status().as_u16();
     let headers = response
         .headers()
@@ -50,7 +50,7 @@ pub(super) async fn execute_kobo_proxy_request(
                 .map(|value| KoboProxyHeader::new(name.as_str(), value))
         })
         .collect::<Vec<_>>();
-    let response_bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    let response_bytes = response.bytes().await.map_err(anyhow::Error::from)?;
     if response_bytes.is_empty() || !(200..=299).contains(&status) {
         return Ok(KoboProxyResponse {
             status,
@@ -59,8 +59,7 @@ pub(super) async fn execute_kobo_proxy_request(
         });
     }
 
-    let body =
-        serde_json::from_slice::<Value>(&response_bytes).map_err(|error| error.to_string())?;
+    let body = serde_json::from_slice::<Value>(&response_bytes).map_err(anyhow::Error::from)?;
     Ok(KoboProxyResponse {
         status,
         headers,

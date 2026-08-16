@@ -44,7 +44,7 @@ where
         self.port
             .validate_library(&library)
             .await
-            .map_err(LibraryCatalogMutationError::Validation)?;
+            .map_err(|error| LibraryCatalogMutationError::Validation(error.to_string()))?;
         self.port
             .create_library(&library)
             .await
@@ -73,7 +73,7 @@ where
         self.port
             .validate_library(&library)
             .await
-            .map_err(LibraryCatalogMutationError::Validation)?;
+            .map_err(|error| LibraryCatalogMutationError::Validation(error.to_string()))?;
         let updated = self
             .port
             .update_library(&library)

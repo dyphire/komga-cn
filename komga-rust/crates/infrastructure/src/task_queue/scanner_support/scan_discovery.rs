@@ -14,24 +14,28 @@ pub(super) fn collect_series_directories(
     current: &Path,
     scan_config: &LibraryScanConfig,
     discovered: &mut Vec<PathBuf>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if is_hidden_path(current)
         || is_library_path_excluded(current, &scan_config.scan_directory_exclusions)
     {
         return Ok(());
     }
 
-    let entries = fs::read_dir(current)
-        .map_err(|error| format!("failed to scan directory '{}': {error}", current.display()))?;
+    let entries = fs::read_dir(current).map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to scan directory '{}': ",
+            current.display()
+        ))
+    })?;
 
     let mut has_supported_book = false;
     let mut children = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
-                "failed to read directory entry in '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to read directory entry in '{}': ",
                 current.display()
-            )
+            ))
         })?;
         let path = entry.path();
         if is_hidden_path(path.as_path())
@@ -41,7 +45,10 @@ pub(super) fn collect_series_directories(
         }
 
         let metadata = entry.metadata().map_err(|error| {
-            format!("failed to read metadata for '{}': {error}", path.display())
+            anyhow::anyhow!(error).context(format!(
+                "failed to read metadata for '{}': ",
+                path.display()
+            ))
         })?;
         if metadata.is_file() && is_supported_book_file(path.as_path(), scan_config) {
             has_supported_book = true;
@@ -89,16 +96,26 @@ pub(super) fn is_supported_book_file(path: &Path, scan_config: &LibraryScanConfi
         })
 }
 
-pub(super) fn path_file_name_utf8(path: &Path) -> Result<&str, String> {
+pub(super) fn path_file_name_utf8(path: &Path) -> anyhow::Result<&str> {
     path.file_name()
         .and_then(|value| value.to_str())
-        .ok_or_else(|| format!("path '{}' has no valid UTF-8 file name", path.display()))
+        .ok_or_else(|| {
+            anyhow::anyhow!(format!(
+                "path '{}' has no valid UTF-8 file name",
+                path.display()
+            ))
+        })
 }
 
-pub(super) fn path_file_stem_utf8(path: &Path) -> Result<&str, String> {
+pub(super) fn path_file_stem_utf8(path: &Path) -> anyhow::Result<&str> {
     path.file_stem()
         .and_then(|value| value.to_str())
-        .ok_or_else(|| format!("path '{}' has no valid UTF-8 file stem", path.display()))
+        .ok_or_else(|| {
+            anyhow::anyhow!(format!(
+                "path '{}' has no valid UTF-8 file stem",
+                path.display()
+            ))
+        })
 }
 
 pub(super) fn is_library_path_excluded(path: &Path, exclusions: &[String]) -> bool {
@@ -160,7 +177,7 @@ pub(super) fn build_sidecars(
     books: &[ScannedBookRow],
     sidecar_candidates: &[(PathBuf, fs::Metadata)],
     include_series_sidecars: bool,
-) -> Result<Vec<ScannedSidecarRow>, String> {
+) -> anyhow::Result<Vec<ScannedSidecarRow>> {
     let mut sidecars = Vec::new();
 
     'candidate: for (path, metadata) in sidecar_candidates {
@@ -253,21 +270,21 @@ pub(super) fn is_book_artwork_sidecar(base_name: &str, book_name: &str) -> bool 
         .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }
 
-fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> Result<i64, String> {
+fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> anyhow::Result<i64> {
     match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => i64::try_from(duration.as_secs()).map_err(|_| {
-            format!(
+        Ok(duration) => i64::try_from(duration.as_secs()).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
                 "filesystem timestamp for '{}' is outside i64 range",
                 path.display()
-            )
+            ))
         }),
         Err(error) => {
             let duration = error.duration();
-            let seconds = i64::try_from(duration.as_secs()).map_err(|_| {
-                format!(
+            let seconds = i64::try_from(duration.as_secs()).map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
                     "filesystem timestamp for '{}' is outside i64 range",
                     path.display()
-                )
+                ))
             })?;
             Ok(-seconds)
         }
@@ -277,7 +294,7 @@ fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> Result<i64, Stri
 pub(super) fn metadata_updated_unix_seconds(
     metadata: &fs::Metadata,
     path: &Path,
-) -> Result<i64, String> {
+) -> anyhow::Result<i64> {
     [metadata.created().ok(), metadata.modified().ok()]
         .into_iter()
         .flatten()
@@ -286,10 +303,10 @@ pub(super) fn metadata_updated_unix_seconds(
         .into_iter()
         .max()
         .ok_or_else(|| {
-            format!(
+            anyhow::anyhow!(format!(
                 "failed to read created or modified timestamp for '{}'",
                 path.display()
-            )
+            ))
         })
 }
 
@@ -343,6 +360,9 @@ mod tests {
         );
         let error = path_file_stem_utf8(path.as_path())
             .expect_err("scanner should reject non-UTF-8 book stems");
-        assert!(error.contains("valid UTF-8 file stem"), "{error}");
+        assert!(
+            error.to_string().contains("valid UTF-8 file stem"),
+            "{error}"
+        );
     }
 }

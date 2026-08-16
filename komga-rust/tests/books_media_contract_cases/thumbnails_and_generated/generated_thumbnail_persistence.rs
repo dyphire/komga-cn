@@ -111,7 +111,7 @@ async fn generate_book_thumbnail_reports_invalid_epub_archive_errors() {
     pool.close().await;
 
     assert!(
-        error.contains("open EPUB archive"),
+        error.to_string().contains("open EPUB archive"),
         "unexpected error: {error}"
     );
 }

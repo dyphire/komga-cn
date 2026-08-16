@@ -297,7 +297,7 @@ impl SessionStore {
         token
     }
 
-    fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+    fn resolve_session_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
         let Some(session) = self
             .sessions
             .read()
@@ -419,7 +419,7 @@ impl RememberMeTokenStore {
         ))
     }
 
-    fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+    fn resolve_remember_me_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
         let Some(parsed_token) = parse_remember_me_token(token) else {
             return Ok(None);
         };
@@ -523,7 +523,7 @@ impl RememberMeRuntime for SessionRegistry {
         self.remember_me.issue_remember_me_token(user, runtime_key)
     }
 
-    fn resolve_remember_me_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+    fn resolve_remember_me_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
         self.remember_me.resolve_remember_me_user(token)
     }
 
@@ -537,7 +537,7 @@ impl SessionRuntime for SessionRegistry {
         self.sessions.issue_session_token(user, runtime_key)
     }
 
-    fn resolve_session_user(&self, token: &str) -> Result<Option<AuthUser>, String> {
+    fn resolve_session_user(&self, token: &str) -> anyhow::Result<Option<AuthUser>> {
         self.sessions.resolve_session_user(token)
     }
 
@@ -707,8 +707,8 @@ fn short_sha256_hex(input: &[u8], length: usize) -> String {
 fn load_persisted_user_by_login_identifier(
     database_file: &Path,
     login_identifier: &str,
-) -> Result<Option<AuthUser>, String> {
-    let connection = Connection::open(database_file).map_err(|error| error.to_string())?;
+) -> anyhow::Result<Option<AuthUser>> {
+    let connection = Connection::open(database_file).map_err(anyhow::Error::from)?;
     let persisted = connection
         .query_row(
             "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER WHERE LOWER(EMAIL) = LOWER(?) LIMIT 1",
@@ -732,7 +732,7 @@ fn load_persisted_user_by_login_identifier(
             },
         )
         .optional()
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     let Some(persisted) = persisted else {
         return Ok(None);
     };
@@ -770,24 +770,24 @@ fn query_string_column(
     connection: &Connection,
     sql: &str,
     user_id: &str,
-) -> Result<Vec<String>, String> {
-    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+) -> anyhow::Result<Vec<String>> {
+    let mut statement = connection.prepare(sql).map_err(anyhow::Error::from)?;
     let rows = statement
         .query_map(params![user_id], |row: &Row<'_>| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())
+        .map_err(anyhow::Error::from)
 }
 
 fn query_user_sharing_labels(
     connection: &Connection,
     user_id: &str,
-) -> Result<UserSharingLabels, String> {
+) -> anyhow::Result<UserSharingLabels> {
     let mut statement = connection
         .prepare(
             "SELECT LABEL, ALLOW FROM USER_SHARING WHERE USER_ID = ? ORDER BY ALLOW DESC, LABEL",
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     let rows = statement
         .query_map(params![user_id], |row: &Row<'_>| {
             Ok(UserSharingLabelRow {
@@ -795,11 +795,11 @@ fn query_user_sharing_labels(
                 allow: row.get(1)?,
             })
         })
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     let mut labels_allow = Vec::new();
     let mut labels_exclude = Vec::new();
     for row in rows {
-        let sharing_label = row.map_err(|error| error.to_string())?;
+        let sharing_label = row.map_err(anyhow::Error::from)?;
         if sharing_label.allow {
             labels_allow.push(sharing_label.label);
         } else {

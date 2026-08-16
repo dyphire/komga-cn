@@ -43,7 +43,7 @@ impl<'a> ActuatorService<'a> {
         &self,
         metric_name: &str,
         tag_filters: &HashMap<String, String>,
-    ) -> Result<Option<ActuatorMetricDetail>, String> {
+    ) -> anyhow::Result<Option<ActuatorMetricDetail>> {
         let probes = self.snapshots.metric_probe_snapshot();
         ActuatorMetricService::new(self.metrics)
             .metric_detail(metric_name, &probes, tag_filters)

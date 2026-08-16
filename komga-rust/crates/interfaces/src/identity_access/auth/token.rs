@@ -7,7 +7,7 @@ use crate::state::IdentityState;
 pub(crate) fn auth_token_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<Option<AuthUser>, String> {
+) -> anyhow::Result<Option<AuthUser>> {
     let session_token = session_token_from_headers(headers);
     let remember_me_token = remember_me_token_from_headers(headers);
     identity

@@ -383,14 +383,14 @@ struct TestDeviceSync {
 
 #[async_trait::async_trait]
 impl DeviceSyncPort for TestDeviceSync {
-    async fn load_book_created_timestamp(&self, _book_id: &str) -> Result<Option<String>, String> {
+    async fn load_book_created_timestamp(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
 
     async fn load_kobo_metadata_record(
         &self,
         _book_id: &str,
-    ) -> Result<Option<crate::identity_access::KoboMetadataRecord>, String> {
+    ) -> anyhow::Result<Option<crate::identity_access::KoboMetadataRecord>> {
         Ok(None)
     }
 
@@ -405,18 +405,18 @@ impl DeviceSyncPort for TestDeviceSync {
         &self,
         _book_id: &str,
         _user_id: &str,
-    ) -> Result<Option<crate::identity_access::PersistedReadProgressRecord>, String> {
+    ) -> anyhow::Result<Option<crate::identity_access::PersistedReadProgressRecord>> {
         Ok(self.read_progress.clone())
     }
 
     async fn load_thumbnail_by_id(
         &self,
         _thumbnail_id: &str,
-    ) -> Result<Option<DeviceThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<DeviceThumbnailBinary>> {
         Ok(None)
     }
 
-    async fn persisted_book_exists(&self, _book_id: &str) -> Result<bool, String> {
+    async fn persisted_book_exists(&self, _book_id: &str) -> anyhow::Result<bool> {
         Ok(false)
     }
 }
@@ -428,7 +428,7 @@ struct TestProgressWriter {
 
 #[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()> {
         self.persisted.lock().unwrap().push(input);
         Ok(())
     }
@@ -443,7 +443,7 @@ impl EpubNavigationContentPort for NoopContentResolver {
     fn decode_epub_navigation_extension(
         &self,
         _blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String> {
+    ) -> anyhow::Result<EpubNavigationExtension> {
         Ok(self.positions_extension.clone())
     }
 }
@@ -466,16 +466,16 @@ impl EpubNavigationExtensionReaderPort for NoopMediaReader {
     async fn epub_extension_blob(
         &self,
         _book_id: &str,
-    ) -> Result<Option<EpubExtensionBlob>, String> {
+    ) -> anyhow::Result<Option<EpubExtensionBlob>> {
         Ok(self.epub_extension_blob.clone())
     }
 }
 
 #[async_trait::async_trait]
 impl EpubNavigationReaderPort for NoopMediaReader {
-    async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
+    async fn book_media_files(&self, _book_id: &str) -> anyhow::Result<Vec<String>> {
         if let Some(error) = &self.book_media_files_error {
-            return Err(error.clone());
+            return Err(anyhow::anyhow!(error.clone()));
         }
         Ok(self.media_files.clone())
     }
@@ -487,14 +487,14 @@ impl BookProgressionWriteReaderPort for NoopMediaReader {
         &self,
         _book_id: &str,
         _user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String> {
+    ) -> anyhow::Result<Option<BookProgressionRecord>> {
         Ok(self.book_progression.clone())
     }
 }
 
 #[async_trait::async_trait]
 impl DeviceProgressPageCountPort for NoopMediaReader {
-    async fn book_page_count(&self, _book_id: &str) -> Result<Option<u64>, String> {
+    async fn book_page_count(&self, _book_id: &str) -> anyhow::Result<Option<u64>> {
         Ok(self.page_count)
     }
 }

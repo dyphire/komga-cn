@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{Row, SqlitePool};
 
 use super::common;
@@ -9,7 +10,7 @@ use komga_application::discovery::{
 
 pub(super) async fn load_persisted_readlists(
     pool: &SqlitePool,
-) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
@@ -17,7 +18,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted readlists: {error}"))?;
+    .context("query persisted readlists")?;
 
     Ok(rows
         .into_iter()
@@ -35,7 +36,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 pub(super) async fn load_persisted_readlist_detail(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
+) -> anyhow::Result<Option<DiscoveryPersistedReadlistRecord>> {
     let row = sqlx::query(
         r#"SELECT ID, NAME, SUMMARY, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM READLIST
@@ -44,7 +45,7 @@ WHERE ID = ?"#,
     .bind(readlist_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted readlist detail: {error}"))?;
+    .context("query persisted readlist detail")?;
 
     Ok(row.map(|row| DiscoveryPersistedReadlistRecord {
         id: row.get::<String, _>("ID"),
@@ -59,7 +60,7 @@ WHERE ID = ?"#,
 pub(super) async fn load_persisted_readlist_book_rows(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
+) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>> {
     let rows = sqlx::query(
         r#"SELECT rb.BOOK_ID, b.LIBRARY_ID
 FROM READLIST_BOOK rb
@@ -70,7 +71,7 @@ ORDER BY rb.NUMBER ASC"#,
     .bind(readlist_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted readlist books: {error}"))?;
+    .context("query persisted readlist books")?;
 
     Ok(rows
         .into_iter()
@@ -83,7 +84,7 @@ ORDER BY rb.NUMBER ASC"#,
 
 pub(super) async fn load_comicrack_match_candidates(
     pool: &SqlitePool,
-) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+) -> anyhow::Result<Vec<PersistedComicrackMatchCandidateRecord>> {
     let rows = sqlx::query(
         r#"SELECT s.ID AS SERIES_ID,
        COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -99,7 +100,7 @@ LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query comicrack match candidates: {error}"))?;
+    .context("query comicrack match candidates")?;
 
     Ok(rows
         .into_iter()
@@ -121,11 +122,8 @@ pub(super) async fn persist_readlist_create(
     summary: &str,
     ordered: bool,
     book_ids: &[String],
-) -> Result<(), String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin readlist create tx: {error}"))?;
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await.context("begin readlist create tx")?;
 
     sqlx::query(
         r#"INSERT INTO READLIST (ID, NAME, BOOK_COUNT, SUMMARY, ORDERED)
@@ -138,7 +136,7 @@ VALUES (?, ?, ?, ?, ?)"#,
     .bind(ordered)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert persisted readlist: {error}"))?;
+    .context("insert persisted readlist")?;
 
     common::replace_ordered_children(
         &mut tx,
@@ -149,11 +147,9 @@ VALUES (?, ?, ?, ?, ?)"#,
         book_ids,
     )
     .await
-    .map_err(|error| format!("insert persisted readlist books: {error}"))?;
+    .context("insert persisted readlist books")?;
 
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit readlist create tx: {error}"))?;
+    tx.commit().await.context("commit readlist create tx")?;
 
     Ok(())
 }
@@ -165,11 +161,8 @@ pub(super) async fn persist_readlist_update(
     summary: &str,
     ordered: bool,
     book_ids: &[String],
-) -> Result<bool, String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin readlist update tx: {error}"))?;
+) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await.context("begin readlist update tx")?;
 
     let updated = sqlx::query(
         r#"UPDATE READLIST
@@ -184,14 +177,12 @@ WHERE ID = ?"#,
     .bind(readlist_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("update persisted readlist: {error}"))?
+    .context("update persisted readlist")?
     .rows_affected()
         > 0;
 
     if !updated {
-        tx.rollback()
-            .await
-            .map_err(|error| format!("rollback readlist update tx: {error}"))?;
+        tx.rollback().await.context("rollback readlist update tx")?;
         return Ok(false);
     }
 
@@ -204,18 +195,16 @@ WHERE ID = ?"#,
         book_ids,
     )
     .await
-    .map_err(|error| format!("replace persisted readlist books: {error}"))?;
+    .context("replace persisted readlist books")?;
 
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit readlist update tx: {error}"))?;
+    tx.commit().await.context("commit readlist update tx")?;
     Ok(true)
 }
 
 pub(super) async fn delete_persisted_readlist(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     common::delete_parent_with_children(
         pool,
         "THUMBNAIL_READLIST",

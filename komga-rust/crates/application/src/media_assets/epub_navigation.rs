@@ -5,16 +5,16 @@ use super::{
     EpubNavigationPosition,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum EpubNavigationLoadError {
     MissingExtension,
-    Internal(String),
+    Internal(anyhow::Error),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum EpubNavigationError {
     BadRequest(String),
-    Internal(String),
+    Internal(anyhow::Error),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,7 +51,7 @@ impl NormalizedEpubLocator {
 #[async_trait::async_trait]
 pub trait EpubNavigationExtensionReaderPort: Send + Sync {
     async fn epub_extension_blob(&self, book_id: &str)
-    -> Result<Option<EpubExtensionBlob>, String>;
+    -> anyhow::Result<Option<EpubExtensionBlob>>;
 }
 
 #[async_trait::async_trait]
@@ -62,14 +62,14 @@ where
     async fn epub_extension_blob(
         &self,
         book_id: &str,
-    ) -> Result<Option<EpubExtensionBlob>, String> {
+    ) -> anyhow::Result<Option<EpubExtensionBlob>> {
         BookMediaPort::epub_extension_blob(self, book_id).await
     }
 }
 
 #[async_trait::async_trait]
 pub trait EpubNavigationReaderPort: EpubNavigationExtensionReaderPort {
-    async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
+    async fn book_media_files(&self, book_id: &str) -> anyhow::Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -77,7 +77,7 @@ impl<T> EpubNavigationReaderPort for T
 where
     T: BookMediaPort + ?Sized,
 {
-    async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String> {
+    async fn book_media_files(&self, book_id: &str) -> anyhow::Result<Vec<String>> {
         BookMediaPort::book_media_files(self, book_id).await
     }
 }
@@ -86,7 +86,7 @@ pub trait EpubNavigationContentPort: Send + Sync {
     fn decode_epub_navigation_extension(
         &self,
         blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String>;
+    ) -> anyhow::Result<EpubNavigationExtension>;
 }
 
 impl<T> EpubNavigationContentPort for T
@@ -96,7 +96,7 @@ where
     fn decode_epub_navigation_extension(
         &self,
         blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String> {
+    ) -> anyhow::Result<EpubNavigationExtension> {
         ContentResolverPort::decode_epub_navigation_extension(self, blob)
     }
 }
@@ -246,7 +246,7 @@ impl EpubNavigation {
         };
         let unique_hrefs = self.unique_hrefs();
         let Some(href) = unique_hrefs.get(resource_index) else {
-            return Err(EpubNavigationError::Internal(format!(
+            return Err(EpubNavigationError::Internal(anyhow::anyhow!(
                 "Could not get Epub resource index from progress: {progress}"
             )));
         };

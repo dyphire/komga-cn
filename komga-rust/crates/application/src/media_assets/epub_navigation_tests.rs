@@ -179,14 +179,14 @@ impl EpubNavigationExtensionReaderPort for TestEpubNavigationReader {
     async fn epub_extension_blob(
         &self,
         _book_id: &str,
-    ) -> Result<Option<EpubExtensionBlob>, String> {
+    ) -> anyhow::Result<Option<EpubExtensionBlob>> {
         Ok(self.extension_blob.clone())
     }
 }
 
 #[async_trait::async_trait]
 impl EpubNavigationReaderPort for TestEpubNavigationReader {
-    async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
+    async fn book_media_files(&self, _book_id: &str) -> anyhow::Result<Vec<String>> {
         Ok(self.media_files.clone())
     }
 }
@@ -199,7 +199,7 @@ impl EpubNavigationContentPort for TestContentResolver {
     fn decode_epub_navigation_extension(
         &self,
         _blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String> {
+    ) -> anyhow::Result<EpubNavigationExtension> {
         Ok(self.extension.clone())
     }
 }

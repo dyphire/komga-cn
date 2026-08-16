@@ -28,9 +28,9 @@ pub trait AuthActivityPort: Send + Sync {
     async fn persisted_list_authentication_activity(
         &self,
         user_id: Option<&str>,
-    ) -> Result<Vec<PersistedAuthenticationActivity>, String>;
+    ) -> anyhow::Result<Vec<PersistedAuthenticationActivity>>;
 
-    async fn persisted_cleanup_authentication_activity(&self) -> Result<u64, String>;
+    async fn persisted_cleanup_authentication_activity(&self) -> anyhow::Result<u64>;
 
     async fn persisted_record_failed_authentication_activity(
         &self,

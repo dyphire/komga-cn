@@ -23,7 +23,7 @@ pub fn filter_and_paginate_books(
     context: &BrowseContext,
     query: BookBrowseQuery,
     eval_ctx: BookEvaluationContext,
-) -> Result<PageEnvelope<BookRow>, String> {
+) -> anyhow::Result<PageEnvelope<BookRow>> {
     if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
         rows.retain(|row| allowed_ids.iter().any(|id| id == &row.library_id));
     }
@@ -54,7 +54,7 @@ pub fn filter_and_paginate_series(
     context: &BrowseContext,
     query: SeriesBrowseQuery,
     eval_ctx: SeriesEvaluationContext,
-) -> Result<PageEnvelope<SeriesRow>, String> {
+) -> anyhow::Result<PageEnvelope<SeriesRow>> {
     if let Some(allowed_ids) = context.authorized_library_ids.as_ref() {
         rows.retain(|row| allowed_ids.iter().any(|id| id == &row.library_id));
     }
@@ -219,7 +219,7 @@ fn paginate<T>(
     page: usize,
     size: usize,
     unpaged: bool,
-) -> Result<PageEnvelope<T>, String> {
+) -> anyhow::Result<PageEnvelope<T>> {
     let total_elements = rows.len();
     if unpaged {
         return Ok(PageEnvelope {

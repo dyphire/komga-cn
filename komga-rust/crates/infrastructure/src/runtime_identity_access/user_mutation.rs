@@ -98,7 +98,7 @@ pub(super) async fn create_auth_user(
 
     persisted_users(pool)
         .await
-        .map_err(sqlx::Error::Protocol)?
+        .map_err(|error| sqlx::Error::Protocol(error.to_string()))?
         .into_iter()
         .find(|candidate| candidate.id == input.user_id)
         .ok_or(sqlx::Error::RowNotFound)

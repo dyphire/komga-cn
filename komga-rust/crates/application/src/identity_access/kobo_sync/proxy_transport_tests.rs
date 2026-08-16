@@ -161,7 +161,7 @@ async fn kobo_store_sync_rejects_successful_non_array_proxy_body() {
         .await
         .expect_err("successful store sync body must be an event array");
 
-    assert!(error.contains("store sync proxy body"));
+    assert!(error.to_string().contains("store sync proxy body"));
 }
 
 struct RecordingKoboProxy {
@@ -173,7 +173,7 @@ impl KoboProxyPort for RecordingKoboProxy {
     async fn proxy_kobo_request(
         &self,
         request: KoboProxyRequest,
-    ) -> Result<KoboProxyResponse, String> {
+    ) -> anyhow::Result<KoboProxyResponse> {
         self.requests
             .lock()
             .expect("proxy request lock should not be poisoned")
@@ -196,7 +196,7 @@ impl KoboProxyPort for NonArrayStoreProxy {
     async fn proxy_kobo_request(
         &self,
         _request: KoboProxyRequest,
-    ) -> Result<KoboProxyResponse, String> {
+    ) -> anyhow::Result<KoboProxyResponse> {
         Ok(KoboProxyResponse {
             status: 200,
             headers: Vec::new(),

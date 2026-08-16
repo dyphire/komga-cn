@@ -68,9 +68,9 @@ impl TaskProcessingError {
         }
     }
 
-    pub fn runtime(message: impl Into<String>) -> Self {
+    pub fn runtime(message: impl std::fmt::Display) -> Self {
         Self {
-            message: message.into(),
+            message: message.to_string(),
         }
     }
 }

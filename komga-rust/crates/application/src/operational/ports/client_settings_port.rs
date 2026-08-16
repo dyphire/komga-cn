@@ -19,21 +19,21 @@ pub trait ClientSettingsPort: Send + Sync {
     async fn load_client_settings_global(
         &self,
         allow_unauthorized_only: bool,
-    ) -> Result<ClientGlobalSettings, String>;
-    async fn load_client_settings_user(&self, user_id: &str) -> Result<ClientUserSettings, String>;
+    ) -> anyhow::Result<ClientGlobalSettings>;
+    async fn load_client_settings_user(&self, user_id: &str) -> anyhow::Result<ClientUserSettings>;
     async fn upsert_client_settings_global(
         &self,
         settings: &ClientGlobalSettings,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
     async fn upsert_client_settings_user(
         &self,
         user_id: &str,
         settings: &ClientUserSettings,
-    ) -> Result<(), String>;
-    async fn delete_client_settings_global(&self, keys: &[String]) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
+    async fn delete_client_settings_global(&self, keys: &[String]) -> anyhow::Result<()>;
     async fn delete_client_settings_user(
         &self,
         user_id: &str,
         keys: &[String],
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 }

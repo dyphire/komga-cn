@@ -14,16 +14,16 @@ pub struct LibrarySeriesAndBookIds {
     pub books: Vec<LibraryBookSeriesRecord>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum LibraryCatalogMutationError {
     NotFound,
     Validation(String),
-    Persistence(String),
+    Persistence(anyhow::Error),
 }
 
 impl LibraryCatalogMutationError {
-    pub fn persistence(error: impl Into<String>) -> Self {
-        Self::Persistence(error.into())
+    pub fn persistence(error: anyhow::Error) -> Self {
+        Self::Persistence(error)
     }
 }
 
@@ -43,31 +43,31 @@ pub trait LibraryCatalogReadPort: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait LibraryCatalogMutationPort: Send + Sync {
-    async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String>;
+    async fn load_library(&self, library_id: &str) -> anyhow::Result<Option<LibraryRecord>>;
 
-    async fn validate_library(&self, library: &LibraryRecord) -> Result<(), String>;
+    async fn validate_library(&self, library: &LibraryRecord) -> anyhow::Result<()>;
 
-    async fn create_library(&self, library: &LibraryRecord) -> Result<(), String>;
+    async fn create_library(&self, library: &LibraryRecord) -> anyhow::Result<()>;
 
-    async fn update_library(&self, library: &LibraryRecord) -> Result<bool, String>;
+    async fn update_library(&self, library: &LibraryRecord) -> anyhow::Result<bool>;
 
-    async fn delete_library(&self, library_id: &str) -> Result<bool, String>;
+    async fn delete_library(&self, library_id: &str) -> anyhow::Result<bool>;
 
     async fn library_book_ids_with_empty_hash(
         &self,
         library_id: &str,
         koreader: bool,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn library_books_with_mismatched_extensions(
         &self,
         library_id: &str,
-    ) -> Result<Vec<LibraryBookSeriesRecord>, String>;
+    ) -> anyhow::Result<Vec<LibraryBookSeriesRecord>>;
 
-    async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String>;
+    async fn library_book_ids(&self, library_id: &str) -> anyhow::Result<Option<Vec<String>>>;
 
     async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> Result<Option<LibrarySeriesAndBookIds>, String>;
+    ) -> anyhow::Result<Option<LibrarySeriesAndBookIds>>;
 }

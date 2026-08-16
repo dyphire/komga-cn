@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::fs;
 use std::io::ErrorKind;
 
@@ -184,28 +185,28 @@ pub(crate) async fn load_persisted_library_write_model(
 pub(crate) async fn validate_library_before_persist(
     pool: &SqlitePool,
     library: &PersistedLibraryWriteModel,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let root_path = resolve_stored_path(&library.root);
     let root_metadata = match fs::metadata(&root_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            return Err("library root does not exist".to_string());
+            return Err(anyhow::anyhow!("library root does not exist"));
         }
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "failed to inspect library root '{}': {error}",
                 root_path.display()
-            ));
+            )));
         }
     };
     if !root_metadata.is_dir() {
-        return Err("library root must be a directory".to_string());
+        return Err(anyhow::anyhow!("library root must be a directory"));
     }
 
     let rows = sqlx::query(r#"SELECT ID, NAME, ROOT FROM LIBRARY"#)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query library validation rows: {error}"))?;
+        .context("query library validation rows")?;
 
     let normalized_root = normalize_library_root(&library.root);
     for row in rows {
@@ -216,7 +217,7 @@ pub(crate) async fn validate_library_before_persist(
 
         let existing_name = row.get::<String, _>("NAME");
         if existing_name == library.name {
-            return Err("library name must be unique".to_string());
+            return Err(anyhow::anyhow!("library name must be unique"));
         }
 
         let normalized_existing = normalize_library_root(&row.get::<String, _>("ROOT"));
@@ -224,7 +225,9 @@ pub(crate) async fn validate_library_before_persist(
             || normalized_root.starts_with(&(normalized_existing.clone() + "/"))
             || normalized_existing.starts_with(&(normalized_root.clone() + "/"))
         {
-            return Err("library root cannot overlap another library root".to_string());
+            return Err(anyhow::anyhow!(
+                "library root cannot overlap another library root"
+            ));
         }
     }
 
@@ -235,7 +238,7 @@ pub(crate) async fn library_book_ids_with_empty_hash(
     pool: &SqlitePool,
     library_id: &str,
     koreader: bool,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let sql = if koreader {
         r#"SELECT ID
            FROM BOOK
@@ -254,7 +257,7 @@ pub(crate) async fn library_book_ids_with_empty_hash(
         .bind(library_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query books with empty hash: {error}"))?;
+        .context("query books with empty hash")?;
 
     Ok(rows
         .into_iter()
@@ -265,7 +268,7 @@ pub(crate) async fn library_book_ids_with_empty_hash(
 pub(crate) async fn library_books_with_mismatched_extensions(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<Vec<PersistedLibraryBookSeriesRecord>, String> {
+) -> anyhow::Result<Vec<PersistedLibraryBookSeriesRecord>> {
     let rows = sqlx::query(
         r#"SELECT b.ID AS BOOK_ID,
                   b.SERIES_ID AS SERIES_ID,
@@ -281,7 +284,7 @@ pub(crate) async fn library_books_with_mismatched_extensions(
     .bind(library_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query books with mismatched extensions: {error}"))?;
+    .context("query books with mismatched extensions")?;
 
     Ok(rows
         .into_iter()
@@ -605,7 +608,7 @@ mod tests {
         .await
         .expect_err("library root metadata errors should be propagated");
 
-        assert!(error.contains("failed to inspect library root"));
+        assert!(error.to_string().contains("failed to inspect library root"));
 
         pool.close().await;
         let _ = fs::remove_dir_all(root);

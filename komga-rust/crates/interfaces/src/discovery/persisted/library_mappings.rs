@@ -9,7 +9,7 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
 pub(in crate::discovery) async fn remap_requested_library_ids_for_persisted(
     backend: &dyn LibraryIdMappingPort,
     requested: Option<&Vec<String>>,
-) -> Result<Option<Vec<String>>, String> {
+) -> anyhow::Result<Option<Vec<String>>> {
     let Some(requested) = requested else {
         return Ok(None);
     };
@@ -61,8 +61,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LibraryIdMappingPort for FailingLibraryIdMapping {
-        async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String> {
-            Err("library lookup failed".to_string())
+        async fn load_persisted_library_ids(&self) -> anyhow::Result<Vec<String>> {
+            Err(anyhow::anyhow!("library lookup failed"))
         }
     }
 
@@ -74,6 +74,6 @@ mod tests {
                 .await
                 .expect_err("library id lookup errors must not become unmapped filters");
 
-        assert_eq!(error, "library lookup failed");
+        assert_eq!(error.to_string(), "library lookup failed");
     }
 }

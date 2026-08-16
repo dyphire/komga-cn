@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use crate::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
 use crate::identity_access::{AuthUser, AuthUserRole, user_has_role};
 
@@ -18,7 +20,7 @@ pub struct BookMediaPageRequest {
     pub prefer_pdf: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum BookMediaDelivery {
     Asset(BookMediaDeliveryAsset),
     Pages(Vec<BookPageRecord>),
@@ -27,7 +29,24 @@ pub enum BookMediaDelivery {
     MediaAnalysisFailed,
     MissingFile,
     BadRequest(Option<String>),
-    Internal(String),
+    Internal(anyhow::Error),
+}
+
+#[cfg(test)]
+impl PartialEq for BookMediaDelivery {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Asset(left), Self::Asset(right)) => left == right,
+            (Self::Pages(left), Self::Pages(right)) => left == right,
+            (Self::NotFound, Self::NotFound)
+            | (Self::Forbidden, Self::Forbidden)
+            | (Self::MediaAnalysisFailed, Self::MediaAnalysisFailed)
+            | (Self::MissingFile, Self::MissingFile) => true,
+            (Self::BadRequest(left), Self::BadRequest(right)) => left == right,
+            (Self::Internal(left), Self::Internal(right)) => left.to_string() == right.to_string(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,12 +65,24 @@ pub enum BookMediaDeliveryDisposition {
     None,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum BookThumbnailDelivery {
     Thumbnail(BookThumbnailAsset),
     NotFound,
     Forbidden,
-    Internal(String),
+    Internal(anyhow::Error),
+}
+
+#[cfg(test)]
+impl PartialEq for BookThumbnailDelivery {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Thumbnail(left), Self::Thumbnail(right)) => left == right,
+            (Self::NotFound, Self::NotFound) | (Self::Forbidden, Self::Forbidden) => true,
+            (Self::Internal(left), Self::Internal(right)) => left.to_string() == right.to_string(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,27 +105,27 @@ where
 
 #[async_trait::async_trait]
 pub trait BookMediaReaderPort: Send + Sync {
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
 
-    async fn book_media_is_ready(&self, book_id: &str) -> Result<bool, String>;
+    async fn book_media_is_ready(&self, book_id: &str) -> anyhow::Result<bool>;
 
-    async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String>;
+    async fn book_pages(&self, book_id: &str) -> anyhow::Result<Vec<BookPageRecord>>;
 
     async fn book_page(
         &self,
         book_id: &str,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String>;
+    ) -> anyhow::Result<Option<BookAccessRestrictions>>;
 
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
 }
 
 #[async_trait::async_trait]
@@ -102,15 +133,15 @@ impl<T> BookMediaReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + ThumbnailReadPort + Send + Sync + ?Sized,
 {
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         BookMediaPort::book_media(self, book_id).await
     }
 
-    async fn book_media_is_ready(&self, book_id: &str) -> Result<bool, String> {
+    async fn book_media_is_ready(&self, book_id: &str) -> anyhow::Result<bool> {
         BookMediaPort::book_media_is_ready(self, book_id).await
     }
 
-    async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String> {
+    async fn book_pages(&self, book_id: &str) -> anyhow::Result<Vec<BookPageRecord>> {
         BookMediaPort::book_pages(self, book_id).await
     }
 
@@ -118,21 +149,21 @@ where
         &self,
         book_id: &str,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         BookMediaPort::book_page(self, book_id, page_number).await
     }
 
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         ContentAccessPort::book_restrictions(self, book_id).await
     }
 
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
         ThumbnailReadPort::selected_book_thumbnail(self, book_id).await
     }
 }
@@ -144,7 +175,7 @@ pub trait BookMediaContentPort: Send + Sync {
         media: &BookMediaRecord,
         page: &BookPageRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     async fn render_page_thumbnail(
         &self,
@@ -152,63 +183,63 @@ pub trait BookMediaContentPort: Send + Sync {
         page: &BookPageRecord,
         page_number: u64,
         max_edge: u32,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     async fn archive_page_row(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
 
     async fn archive_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String>;
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>>;
 
     fn pdf_page_row(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
 
     fn generated_pdf_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String>;
+    ) -> anyhow::Result<Vec<BookPageRecord>>;
 
     fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> Result<Option<u64>, String>;
+    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>>;
 
-    fn media_file_exists(&self, path: &Path) -> Result<bool, String> {
+    fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()
-            .map_err(|error| format!("check media file existence '{}': {error}", path.display()))
+            .with_context(|| format!("check media file existence '{}'", path.display()))
     }
 
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String>;
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>>;
 
-    async fn read_media_file_size(&self, path: &Path) -> Result<Option<i64>, String>;
+    async fn read_media_file_size(&self, path: &Path) -> anyhow::Result<Option<i64>>;
 
     async fn read_media_image_dimensions(
         &self,
         path: &Path,
-    ) -> Result<Option<MediaImageDimensions>, String>;
+    ) -> anyhow::Result<Option<MediaImageDimensions>>;
 
     fn convert_image_bytes(
         &self,
         bytes: &[u8],
         source_content_type: &str,
         target_content_type: &str,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     async fn epub_cover_bytes(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<EpubCoverImage>, String>;
+    ) -> anyhow::Result<Option<EpubCoverImage>>;
 }
 
 #[async_trait::async_trait]
@@ -221,7 +252,7 @@ where
         media: &BookMediaRecord,
         page: &BookPageRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::resolve_page_bytes(self, media, page, page_number).await
     }
 
@@ -231,7 +262,7 @@ where
         page: &BookPageRecord,
         page_number: u64,
         max_edge: u32,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::render_page_thumbnail(self, media, page, page_number, max_edge).await
     }
 
@@ -239,14 +270,14 @@ where
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         ContentResolverPort::archive_page_row(self, media, page_number).await
     }
 
     async fn archive_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String> {
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         ContentResolverPort::archive_page_rows(self, media).await
     }
 
@@ -254,14 +285,14 @@ where
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         ContentResolverPort::pdf_page_row(self, media, page_number)
     }
 
     fn generated_pdf_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String> {
+    ) -> anyhow::Result<Vec<BookPageRecord>> {
         ContentResolverPort::generated_pdf_page_rows(self, media)
     }
 
@@ -269,26 +300,26 @@ where
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::read_pdf_page_as_single_page_pdf(self, media, page_number)
     }
 
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> Result<Option<u64>, String> {
+    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>> {
         ContentResolverPort::detect_pdf_page_count(self, media)
     }
 
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String> {
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::read_media_file_bytes(self, path).await
     }
 
-    async fn read_media_file_size(&self, path: &Path) -> Result<Option<i64>, String> {
+    async fn read_media_file_size(&self, path: &Path) -> anyhow::Result<Option<i64>> {
         ContentResolverPort::read_media_file_size(self, path).await
     }
 
     async fn read_media_image_dimensions(
         &self,
         path: &Path,
-    ) -> Result<Option<MediaImageDimensions>, String> {
+    ) -> anyhow::Result<Option<MediaImageDimensions>> {
         ContentResolverPort::read_media_image_dimensions(self, path).await
     }
 
@@ -297,7 +328,7 @@ where
         bytes: &[u8],
         source_content_type: &str,
         target_content_type: &str,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::convert_image_bytes(
             self,
             bytes,
@@ -309,7 +340,7 @@ where
     async fn epub_cover_bytes(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<EpubCoverImage>, String> {
+    ) -> anyhow::Result<Option<EpubCoverImage>> {
         ContentResolverPort::epub_cover_bytes(self, media).await
     }
 }
@@ -659,7 +690,7 @@ where
         book_id: &str,
         user: &AuthUser,
         media: &BookMediaRecord,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         let context = BookAccessContext::from_auth_user(user);
         if !context.can_access_library(&media.library_id) {
             return Ok(false);
@@ -704,7 +735,7 @@ where
         media: &BookMediaRecord,
         page_number: u64,
         allow_pdf_fallback: bool,
-    ) -> Result<Option<BookPageRecord>, String> {
+    ) -> anyhow::Result<Option<BookPageRecord>> {
         match self.reader.book_page(book_id, page_number).await {
             Ok(Some(row)) => Ok(Some(row)),
             Ok(None) if book_media_is_single_image(media) && page_number == 1 => {
@@ -727,7 +758,7 @@ where
         &self,
         book_id: &str,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String> {
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         let page_rows = self.reader.book_pages(book_id).await?;
 
         if !page_rows.is_empty() {
@@ -764,7 +795,7 @@ where
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<BookPageRecord, String> {
+    ) -> anyhow::Result<BookPageRecord> {
         let dimensions = self
             .content
             .read_media_image_dimensions(media.file_path.as_path())
@@ -780,7 +811,7 @@ where
                 .read_media_file_size(&media.file_path)
                 .await?
                 .ok_or_else(|| {
-                    format!(
+                    anyhow::anyhow!(
                         "single image media file missing: {}",
                         media.file_path.display()
                     )
@@ -792,7 +823,7 @@ where
         &self,
         book_id: &str,
         media: &BookMediaRecord,
-    ) -> Result<Option<BookThumbnailAsset>, String> {
+    ) -> anyhow::Result<Option<BookThumbnailAsset>> {
         match self.reader.selected_book_thumbnail(book_id).await? {
             Some(thumbnail) if thumbnail.thumbnail_type != ThumbnailType::Generated => {
                 return Ok(Some(BookThumbnailAsset {
@@ -828,7 +859,7 @@ where
         &self,
         media: &BookMediaRecord,
         book_id: &str,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         if book_media_is_single_image(media) {
             return self.content.read_media_file_bytes(&media.file_path).await;
         }

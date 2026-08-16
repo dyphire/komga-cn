@@ -56,7 +56,7 @@ pub(crate) async fn opds_v2_collection(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS collection: {error}") })),
+                Json(json!({ "error": format!("load OPDS collection: {error:#}") })),
             )
                 .into_response();
         }
@@ -203,7 +203,7 @@ pub(crate) async fn opds_v2_series(
         Err(OpdsSeriesAccessError::Load(error)) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS series: {error}") })),
+                Json(json!({ "error": format!("load OPDS series: {error:#}") })),
             )
                 .into_response();
         }
@@ -226,7 +226,7 @@ pub(crate) async fn opds_v2_series(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS series books: {error}") })),
+                Json(json!({ "error": format!("load OPDS series books: {error:#}") })),
             )
                 .into_response();
         }
@@ -237,7 +237,7 @@ pub(crate) async fn opds_v2_series(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS series tags: {error}") })),
+                Json(json!({ "error": format!("load OPDS series tags: {error:#}") })),
             )
                 .into_response();
         }
@@ -394,7 +394,7 @@ pub(crate) async fn opds_v2_readlist(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS readlist: {error}") })),
+                Json(json!({ "error": format!("load OPDS readlist: {error:#}") })),
             )
                 .into_response();
         }
@@ -445,7 +445,7 @@ pub(crate) async fn opds_v2_search(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS search results: {error}") })),
+                Json(json!({ "error": format!("load OPDS search results: {error:#}") })),
             )
                 .into_response();
         }

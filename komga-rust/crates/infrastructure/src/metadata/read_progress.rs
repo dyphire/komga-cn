@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 
 use komga_application::media_assets::{BookProgressionInput, BookProgressionRecord};
@@ -15,16 +16,16 @@ async fn require_user_exists(
     pool: &SqlitePool,
     user_id_value: &str,
     query_context: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let user_exists = sqlx::query("SELECT 1 FROM USER WHERE ID = ? LIMIT 1")
         .bind(user_id_value)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query {query_context} user: {error}"))?
+        .map_err(|error| anyhow::anyhow!(error).context(format!("query {query_context} user")))?
         .is_some();
 
     if !user_exists {
-        return Err("read-progress user not found".to_string());
+        return Err(anyhow::anyhow!("read-progress user not found"));
     }
 
     Ok(())
@@ -34,12 +35,14 @@ async fn load_book_series_id(
     pool: &SqlitePool,
     book_id: &str,
     query_context: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query {query_context} book series: {error}"))
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("query {query_context} book series"))
+        })
         .map(|row| row.map(|row| row.get::<String, _>("SERIES_ID")))
 }
 
@@ -48,7 +51,7 @@ async fn sync_series_read_progress(
     series_id: &str,
     user_id_value: &str,
     query_context: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let row = sqlx::query(
         r#"
         SELECT COUNT(rp.BOOK_ID) AS PROGRESS_COUNT,
@@ -64,7 +67,11 @@ async fn sync_series_read_progress(
     .bind(series_id)
     .fetch_one(pool)
     .await
-    .map_err(|error| format!("query {query_context} series read progress aggregates: {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "query {query_context} series read progress aggregates: "
+        ))
+    })?;
 
     let progress_count = row.get::<i64, _>("PROGRESS_COUNT");
     if progress_count == 0 {
@@ -73,7 +80,10 @@ async fn sync_series_read_progress(
             .bind(user_id_value)
             .execute(pool)
             .await
-            .map_err(|error| format!("delete {query_context} series read progress row: {error}"))?;
+            .map_err(|error| {
+                anyhow::anyhow!(error)
+                    .context(format!("delete {query_context} series read progress row"))
+            })?;
         return Ok(());
     }
 
@@ -93,7 +103,7 @@ async fn sync_series_read_progress(
     .bind(row.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
     .execute(pool)
     .await
-    .map_err(|error| format!("upsert {query_context} series read progress row: {error}"))?;
+    .map_err(|error| anyhow::anyhow!(error).context( format!("upsert {query_context} series read progress row")))?;
 
     Ok(())
 }
@@ -103,7 +113,7 @@ async fn sync_series_read_progress_for_book(
     book_id: &str,
     user_id_value: &str,
     query_context: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let Some(series_id) = load_book_series_id(pool, book_id, query_context).await? else {
         return Ok(());
     };
@@ -116,7 +126,7 @@ async fn persisted_series_read_progress_exists(
     series_id: &str,
     user_id_value: &str,
     query_context: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     sqlx::query(
         "SELECT 1 AS FOUND FROM READ_PROGRESS_SERIES WHERE SERIES_ID = ? AND USER_ID = ? LIMIT 1",
     )
@@ -124,7 +134,9 @@ async fn persisted_series_read_progress_exists(
     .bind(user_id_value)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query {query_context} series read progress row: {error}"))
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("query {query_context} series read progress row"))
+    })
     .map(|row| row.is_some())
 }
 
@@ -178,7 +190,7 @@ pub(crate) async fn persist_read_progress(
     page: u64,
     completed: bool,
     locator: Option<Value>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     require_user_exists(pool, user_id_value, "read-progress").await?;
 
     sqlx::query(
@@ -198,7 +210,7 @@ pub(crate) async fn persist_read_progress(
     .bind(serialize_locator(locator.as_ref()))
     .execute(pool)
     .await
-    .map_err(|error| format!("persist read-progress: {error}"))?;
+    .context("persist read-progress")?;
 
     let series_id = load_book_series_id(pool, book_id, "read-progress").await?;
     sync_series_read_progress_for_book(pool, book_id, user_id_value, "read-progress").await?;
@@ -218,7 +230,7 @@ pub(crate) async fn persist_book_progression(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     input: BookProgressionInput,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     require_user_exists(pool, &input.user_id, "progression").await?;
 
     sqlx::query(
@@ -241,7 +253,7 @@ pub(crate) async fn persist_book_progression(
     .bind(serialize_locator(input.locator.as_ref()))
     .execute(pool)
     .await
-    .map_err(|error| format!("persist book progression: {error}"))?;
+    .context("persist book progression")?;
 
     let series_id = load_book_series_id(pool, &input.book_id, "progression").await?;
     sync_series_read_progress_for_book(pool, &input.book_id, &input.user_id, "progression").await?;
@@ -261,7 +273,7 @@ pub(crate) async fn load_book_progression(
     pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
-) -> Result<Option<BookProgressionRecord>, String> {
+) -> anyhow::Result<Option<BookProgressionRecord>> {
     let row = sqlx::query(
         r#"
         SELECT PAGE, READ_DATE, DEVICE_ID, DEVICE_NAME, LOCATOR
@@ -274,7 +286,7 @@ pub(crate) async fn load_book_progression(
     .bind(user_id_value)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted book progression: {error}"))?;
+    .context("query persisted book progression")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -283,23 +295,23 @@ pub(crate) async fn load_book_progression(
     let locator_blob = row
         .try_get::<Option<Vec<u8>>, _>("LOCATOR")
         .or_else(|_| row.try_get::<Option<Vec<u8>>, _>("locator"))
-        .map_err(|error| format!("read persisted book progression locator: {error}"))?;
+        .context("read persisted book progression locator")?;
     let locator = decode_book_progression_locator(locator_blob.as_deref())?;
     let read_date = row
         .try_get::<String, _>("READ_DATE")
         .or_else(|_| row.try_get::<String, _>("read_date"))
-        .map_err(|error| format!("read persisted book progression read_date: {error}"))?;
+        .context("read persisted book progression read_date")?;
     let modified = progression_modified_utc(read_date);
     Ok(Some(BookProgressionRecord {
         modified,
         device_id: row
             .try_get::<String, _>("DEVICE_ID")
             .or_else(|_| row.try_get::<String, _>("device_id"))
-            .map_err(|error| format!("read persisted book progression device_id: {error}"))?,
+            .context("read persisted book progression device_id")?,
         device_name: row
             .try_get::<String, _>("DEVICE_NAME")
             .or_else(|_| row.try_get::<String, _>("device_name"))
-            .map_err(|error| format!("read persisted book progression device_name: {error}"))?,
+            .context("read persisted book progression device_name")?,
         locator,
     }))
 }
@@ -316,17 +328,19 @@ fn progression_modified_utc(read_date: String) -> String {
     }
 }
 
-fn decode_book_progression_locator(locator: Option<&[u8]>) -> Result<Value, String> {
+fn decode_book_progression_locator(locator: Option<&[u8]>) -> anyhow::Result<Value> {
     let Some(locator) = locator.filter(|blob| !blob.is_empty()) else {
         return Ok(serde_json::json!({}));
     };
 
     let payload = serde_json::from_slice::<Value>(locator)
-        .map_err(|error| format!("decode persisted book progression locator: {error}"))?;
+        .context("decode persisted book progression locator")?;
     if payload.is_object() {
         Ok(payload)
     } else {
-        Err("decode persisted book progression locator: expected JSON object".to_string())
+        Err(anyhow::anyhow!(
+            "decode persisted book progression locator: expected JSON object"
+        ))
     }
 }
 
@@ -334,7 +348,7 @@ pub(crate) async fn load_book_read_progress_completed(
     pool: &SqlitePool,
     book_id: &str,
     user_id_value: &str,
-) -> Result<Option<bool>, String> {
+) -> anyhow::Result<Option<bool>> {
     let row = sqlx::query(
         r#"
         SELECT COMPLETED
@@ -347,7 +361,7 @@ pub(crate) async fn load_book_read_progress_completed(
     .bind(user_id_value)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted book read-progress completion: {error}"))?;
+    .context("query persisted book read-progress completion")?;
 
     Ok(row.map(|row| row.get::<bool, _>("COMPLETED")))
 }
@@ -355,12 +369,12 @@ pub(crate) async fn load_book_read_progress_completed(
 pub(crate) async fn load_book_page_count(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<u64>, String> {
+) -> anyhow::Result<Option<u64>> {
     let row = sqlx::query("SELECT PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query book page-count: {error}"))?;
+        .context("query book page-count")?;
 
     Ok(row.map(|row| row.get::<i64, _>("PAGE_COUNT").max(0) as u64))
 }
@@ -370,7 +384,7 @@ pub(crate) async fn delete_persisted_read_progress(
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     user_id_value: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let series_id = load_book_series_id(pool, book_id, "read-progress delete").await?;
 
     sqlx::query("DELETE FROM READ_PROGRESS WHERE BOOK_ID = ? AND USER_ID = ?")
@@ -378,7 +392,7 @@ pub(crate) async fn delete_persisted_read_progress(
         .bind(user_id_value)
         .execute(pool)
         .await
-        .map_err(|error| format!("delete read-progress: {error}"))?;
+        .context("delete read-progress")?;
 
     if let Some(series_id) = series_id {
         sync_series_read_progress(pool, &series_id, user_id_value, "read-progress delete").await?;
@@ -401,7 +415,7 @@ pub(crate) async fn read_progress_completed_by_book_ids(
     pool: &SqlitePool,
     ordered_book_ids: &[String],
     user_id_value: &str,
-) -> Result<Vec<Option<bool>>, String> {
+) -> anyhow::Result<Vec<Option<bool>>> {
     if ordered_book_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -421,7 +435,7 @@ pub(crate) async fn read_progress_completed_by_book_ids(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query read progress completion states: {error}"))?;
+        .context("query read progress completion states")?;
 
     let completed_by_book = rows
         .into_iter()

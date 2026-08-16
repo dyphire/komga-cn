@@ -30,7 +30,7 @@ pub struct ScoredSearchHit {
 #[async_trait::async_trait]
 pub trait CollectionSearchPort: Send + Sync {
     async fn search_collection_ids(&self, query: &str, limit: usize)
-    -> Result<Vec<String>, String>;
+    -> anyhow::Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -39,7 +39,7 @@ pub trait ReadlistSearchPort: Send + Sync {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ScoredSearchHit>, String>;
+    ) -> anyhow::Result<Vec<ScoredSearchHit>>;
 }
 
 #[async_trait::async_trait]
@@ -48,23 +48,23 @@ pub trait AuthorFacetPort: Send + Sync {
         &self,
         search: &str,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn load_author_roles(
         &self,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<String>, String>;
+    ) -> anyhow::Result<Vec<String>>;
 
     async fn load_authors_by_scope(
         &self,
         scope: PersistedAuthorsScope,
         authorized_library_ids: Option<&[String]>,
-    ) -> Result<Vec<PersistedAuthorEntry>, String>;
+    ) -> anyhow::Result<Vec<PersistedAuthorEntry>>;
 }
 
 #[async_trait::async_trait]
 pub trait LibraryIdMappingPort: Send + Sync {
-    async fn load_persisted_library_ids(&self) -> Result<Vec<String>, String>;
+    async fn load_persisted_library_ids(&self) -> anyhow::Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -72,7 +72,7 @@ pub trait BookSpecialListPort: Send + Sync {
     async fn load_ondeck_books(
         &self,
         user_id: &str,
-    ) -> Result<Vec<PersistedBookBrowseEntry>, String>;
+    ) -> anyhow::Result<Vec<PersistedBookBrowseEntry>>;
 
-    async fn load_duplicate_books(&self) -> Result<Vec<PersistedBookBrowseEntry>, String>;
+    async fn load_duplicate_books(&self) -> anyhow::Result<Vec<PersistedBookBrowseEntry>>;
 }

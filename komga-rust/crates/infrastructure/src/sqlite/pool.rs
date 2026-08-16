@@ -274,12 +274,11 @@ pub fn default_read_max_connections() -> u32 {
 pub fn reject_or_quarantine_pool_topology(
     database_url: &str,
     max_connections: u32,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if database_url == "sqlite::memory:" && max_connections > 1 {
-        return Err(
+        return Err(anyhow::anyhow!(
             "pooled sqlite::memory: is quarantined; use deterministic file-backed sqlite topology instead"
-                .to_string(),
-        );
+        ));
     }
 
     Ok(())

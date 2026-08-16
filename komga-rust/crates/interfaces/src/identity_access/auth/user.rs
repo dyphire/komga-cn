@@ -10,7 +10,7 @@ pub(crate) async fn persisted_api_key_comment_exists(
     identity: &IdentityState,
     user_id: &str,
     comment: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     identity
         .user_admin()
         .persisted_api_key_comment_exists(user_id, comment)
@@ -20,7 +20,7 @@ pub(crate) async fn persisted_api_key_comment_exists(
 pub(crate) async fn persisted_api_key_metadata(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<Option<PersistedApiKeyMetadata>, String> {
+) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
     let Some(api_key) = api_key_header_value(headers) else {
         return Ok(None);
     };
@@ -33,7 +33,7 @@ pub(crate) async fn persisted_api_key_metadata(
 pub(crate) async fn persisted_api_key_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<AuthOutcome, String> {
+) -> anyhow::Result<AuthOutcome> {
     let Some(api_key) = api_key_header_value(headers) else {
         return Ok(AuthOutcome::Missing);
     };
@@ -46,7 +46,7 @@ pub(crate) async fn persisted_api_key_user(
 pub(crate) async fn persisted_api_key_user_by_token(
     identity: &IdentityState,
     api_key: &str,
-) -> Result<AuthOutcome, String> {
+) -> anyhow::Result<AuthOutcome> {
     identity
         .authentication()
         .authenticate_api_key(api_key)
@@ -56,7 +56,7 @@ pub(crate) async fn persisted_api_key_user_by_token(
 pub(crate) async fn persisted_basic_user(
     identity: &IdentityState,
     headers: &HeaderMap,
-) -> Result<AuthOutcome, String> {
+) -> anyhow::Result<AuthOutcome> {
     let Some(credentials) = basic_credentials(headers) else {
         return Ok(AuthOutcome::Missing);
     };
@@ -70,7 +70,7 @@ pub(crate) async fn persisted_create_api_key(
     identity: &IdentityState,
     user_id: &str,
     comment: &str,
-) -> Result<PersistedApiKey, String> {
+) -> anyhow::Result<PersistedApiKey> {
     identity
         .user_admin()
         .persisted_create_api_key(user_id, comment)
@@ -81,7 +81,7 @@ pub(crate) async fn persisted_delete_api_key_by_id(
     identity: &IdentityState,
     user_id: &str,
     api_key_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     identity
         .user_admin()
         .persisted_delete_api_key_by_id(user_id, api_key_id)
@@ -91,14 +91,14 @@ pub(crate) async fn persisted_delete_api_key_by_id(
 pub(crate) async fn persisted_list_api_keys(
     identity: &IdentityState,
     user_id: &str,
-) -> Result<Vec<PersistedApiKey>, String> {
+) -> anyhow::Result<Vec<PersistedApiKey>> {
     identity.user_admin().persisted_list_api_keys(user_id).await
 }
 
 pub(crate) async fn persisted_list_authentication_activity(
     identity: &IdentityState,
     user_id: Option<&str>,
-) -> Result<Vec<PersistedAuthenticationActivity>, String> {
+) -> anyhow::Result<Vec<PersistedAuthenticationActivity>> {
     identity
         .auth_activity()
         .persisted_list_authentication_activity(user_id)
@@ -129,14 +129,14 @@ pub(crate) async fn persisted_update_password_by_user_id(
     identity: &IdentityState,
     user_id: &str,
     password: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     identity
         .user_admin()
         .persisted_update_password_by_user_id(user_id, password)
         .await
 }
 
-pub(crate) async fn persisted_users(identity: &IdentityState) -> Result<Vec<AuthUser>, String> {
+pub(crate) async fn persisted_users(identity: &IdentityState) -> anyhow::Result<Vec<AuthUser>> {
     identity.user_admin().persisted_users().await
 }
 

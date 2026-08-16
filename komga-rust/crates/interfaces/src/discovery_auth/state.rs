@@ -127,7 +127,7 @@ impl DiscoveryAuthState {
         &self,
         identity: &IdentityState,
         headers: &HeaderMap,
-    ) -> Result<Option<DiscoveryPrincipal>, String> {
+    ) -> anyhow::Result<Option<DiscoveryPrincipal>> {
         let Some(user) = resolved_request_auth_user(identity, headers).await? else {
             return Ok(None);
         };
@@ -146,7 +146,7 @@ impl DiscoveryAuthState {
         identity: &IdentityState,
         headers: &HeaderMap,
         requested_library_ids: Option<&[String]>,
-    ) -> Result<Option<DiscoveryQueryContext>, String> {
+    ) -> anyhow::Result<Option<DiscoveryQueryContext>> {
         if let Some(context) = self.resolve_query_context(headers, requested_library_ids) {
             return Ok(Some(context));
         }

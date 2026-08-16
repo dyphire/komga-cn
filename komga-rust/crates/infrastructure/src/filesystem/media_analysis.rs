@@ -99,7 +99,7 @@ impl MediaFileAnalyzer {
         &self,
         file_path: &Path,
         profile: MediaAnalysisProfile,
-    ) -> Result<MediaFileAnalysis, String> {
+    ) -> anyhow::Result<MediaFileAnalysis> {
         let media_type = profile.media_type_from_path(file_path);
 
         match file_path.try_exists() {
@@ -113,10 +113,10 @@ impl MediaFileAnalyzer {
                 });
             }
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "check media file existence '{}': {error}",
                     file_path.display()
-                ));
+                )));
             }
         }
 
@@ -375,20 +375,24 @@ fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<Media
     })
 }
 
-fn analyze_single_image(file_path: &Path) -> Result<AnalyzedMediaFileContents, String> {
+fn analyze_single_image(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileContents> {
     let file_name = file_path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_string();
-    let metadata = std::fs::metadata(file_path)
-        .map_err(|error| format!("read image metadata '{}': {error}", file_path.display()))?;
-    let size_bytes = i64::try_from(metadata.len())
-        .map_err(|_| format!("image file too large '{}'", file_path.display()))?;
-    let bytes = std::fs::read(file_path)
-        .map_err(|error| format!("read image bytes '{}': {error}", file_path.display()))?;
-    let dimensions = image_dimensions_from_bytes_i64(&bytes)
-        .ok_or_else(|| format!("decode image dimensions '{}'", file_path.display()))?;
+    let metadata = std::fs::metadata(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read image metadata '{}': ", file_path.display()))
+    })?;
+    let size_bytes = i64::try_from(metadata.len()).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("image file too large '{}'", file_path.display()))
+    })?;
+    let bytes = std::fs::read(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read image bytes '{}': ", file_path.display()))
+    })?;
+    let dimensions = image_dimensions_from_bytes_i64(&bytes).ok_or_else(|| {
+        anyhow::anyhow!(format!("decode image dimensions '{}'", file_path.display()))
+    })?;
     let dimensions = analyzed_media_page_dimensions(Some(dimensions));
 
     Ok(AnalyzedMediaFileContents {
@@ -407,25 +411,29 @@ fn analyze_zip_media_pages(
     file_path: &Path,
     include_epub_resources: bool,
     profile: MediaAnalysisProfile,
-) -> Result<AnalyzedMediaFileContents, String> {
-    let file = std::fs::File::open(file_path)
-        .map_err(|error| format!("open zip file '{}': {error}", file_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|error| format!("open zip archive '{}': {error}", file_path.display()))?;
+) -> anyhow::Result<AnalyzedMediaFileContents> {
+    let file = std::fs::File::open(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open zip file '{}': ", file_path.display()))
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open zip archive '{}': ", file_path.display()))
+    })?;
 
     let mut files = Vec::new();
     let mut pages = Vec::new();
     for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| format!("read zip entry at index {index}: {error}"))?;
+        let mut entry = archive.by_index(index).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read zip entry at index {index}"))
+        })?;
         if entry.is_dir() {
             continue;
         }
 
         let file_name = entry
             .name()
-            .map_err(|error| format!("read zip entry name at index {index}: {error}"))?
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!("read zip entry name at index {index}"))
+            })?
             .trim()
             .to_string();
         if file_name.is_empty() {
@@ -447,9 +455,12 @@ fn analyze_zip_media_pages(
             Some(
                 image_dimensions_from_reader(&mut entry)
                     .map_err(|error| {
-                        format!("read zip entry dimensions for '{file_name}': {error}")
+                        anyhow::anyhow!(error)
+                            .context(format!("read zip entry dimensions for '{file_name}'"))
                     })?
-                    .ok_or_else(|| format!("decode zip entry dimensions for '{file_name}'"))?,
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(format!("decode zip entry dimensions for '{file_name}'"))
+                    })?,
             )
         } else {
             None
@@ -471,8 +482,9 @@ fn analyze_zip_media_pages(
 fn analyze_rar_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
-) -> Result<AnalyzedMediaFileContents, String> {
-    let entries = list_rar_entries(file_path).map_err(|_| "read rar entries failed".to_string())?;
+) -> anyhow::Result<AnalyzedMediaFileContents> {
+    let entries =
+        list_rar_entries(file_path).map_err(|_| anyhow::anyhow!("read rar entries failed"))?;
     let mut files = entries
         .iter()
         .map(|entry| entry.file_name.clone())
@@ -485,8 +497,12 @@ fn analyze_rar_media_pages(
             if !profile.includes_page_file_name(&entry.file_name) {
                 continue;
             }
-            let dimensions = image_dimensions_from_bytes_i64(&entry.bytes)
-                .ok_or_else(|| format!("decode rar entry dimensions for '{}'", entry.file_name))?;
+            let dimensions = image_dimensions_from_bytes_i64(&entry.bytes).ok_or_else(|| {
+                anyhow::anyhow!(format!(
+                    "decode rar entry dimensions for '{}'",
+                    entry.file_name
+                ))
+            })?;
             pages.push(analyzed_rar_media_page(
                 entry.file_name,
                 entry.unpacked_size,
@@ -508,9 +524,10 @@ fn analyze_rar_media_pages(
 fn analyze_pdf_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
-) -> Result<AnalyzedMediaFileContents, String> {
-    let document = PdfDocument::load(file_path)
-        .map_err(|error| format!("load pdf '{}': {error}", file_path.display()))?;
+) -> anyhow::Result<AnalyzedMediaFileContents> {
+    let document = PdfDocument::load(file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("load pdf '{}': ", file_path.display()))
+    })?;
     let page_count = document.get_pages().len();
     let pages = (0..page_count)
         .map(|index| {
@@ -847,7 +864,7 @@ mod tests {
             .expect_err("filesystem probe error should fail analysis");
 
         assert!(
-            error.contains("check media file existence"),
+            error.to_string().contains("check media file existence"),
             "unexpected error: {error}"
         );
 

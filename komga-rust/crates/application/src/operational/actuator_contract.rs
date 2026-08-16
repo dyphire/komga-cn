@@ -279,7 +279,7 @@ impl<'a> ActuatorMetricService<'a> {
         metric_name: &str,
         probes: &ActuatorMetricProbeSnapshot,
         tag_filters: &HashMap<String, String>,
-    ) -> Result<Option<ActuatorMetricDetail>, String> {
+    ) -> anyhow::Result<Option<ActuatorMetricDetail>> {
         match metric_name {
             "application.ready.time" => Ok(Some(single_measurement_metric(
                 metric_name,
@@ -469,7 +469,7 @@ impl<'a> ActuatorMetricService<'a> {
     async fn metric_tasks_execution(
         &self,
         task_type: Option<&str>,
-    ) -> Result<ActuatorMetricDetail, String> {
+    ) -> anyhow::Result<ActuatorMetricDetail> {
         let values = self.runtime.load_task_execution_values().await?;
 
         let count = if let Some(task_type) = task_type {
@@ -504,7 +504,7 @@ impl<'a> ActuatorMetricService<'a> {
         })
     }
 
-    async fn metric_tasks_failure(&self) -> Result<ActuatorMetricDetail, String> {
+    async fn metric_tasks_failure(&self) -> anyhow::Result<ActuatorMetricDetail> {
         let failures = self.runtime.load_task_failure_count().await?;
         let task_types = unique_strings(
             self.runtime
@@ -531,7 +531,7 @@ impl<'a> ActuatorMetricService<'a> {
         description: &str,
         tag_filters: &HashMap<String, String>,
         field: JdbcConnectionsField,
-    ) -> Result<Option<ActuatorMetricDetail>, String> {
+    ) -> anyhow::Result<Option<ActuatorMetricDetail>> {
         let samples = self
             .runtime
             .load_database_pool_snapshots(&[

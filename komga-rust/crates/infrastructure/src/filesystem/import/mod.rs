@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -35,7 +36,7 @@ impl BookImportPort for FilesystemBookImport {
         &self,
         copy_mode: ImportCopyMode,
         entry: BooksImportEntry,
-    ) -> Result<Option<ImportBookOutcome>, String> {
+    ) -> anyhow::Result<Option<ImportBookOutcome>> {
         import_book_impl(&self.read_pool, &self.write_pool, copy_mode, entry).await
     }
 }
@@ -45,29 +46,33 @@ async fn import_book_impl(
     write_pool: &SqlitePool,
     copy_mode: ImportCopyMode,
     entry: BooksImportEntry,
-) -> Result<Option<ImportBookOutcome>, String> {
+) -> anyhow::Result<Option<ImportBookOutcome>> {
     if !path_exists(entry.source_file.as_path(), "inspect import source file")? {
-        return Err("source file does not exist".to_string());
+        return Err(anyhow::anyhow!("source file does not exist"));
     }
 
     let library_roots = load_library_roots(read_pool).await?;
     if source_inside_library_roots(entry.source_file.as_path(), &library_roots)? {
-        return Err("cannot import file that is part of an existing library".to_string());
+        return Err(anyhow::anyhow!(
+            "cannot import file that is part of an existing library"
+        ));
     }
 
     let target = match load_import_series_target(read_pool, &entry.series_id).await {
         Ok(Some(target)) => target,
         Ok(None) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "series target for import was not found: {}",
                 entry.series_id
-            ));
+            )));
         }
         Err(error) => return Err(error),
     };
 
     if target.oneshot && entry.upgrade_book_id.is_none() {
-        return Err("destination series is oneshot but upgradeBookId is missing".to_string());
+        return Err(anyhow::anyhow!(
+            "destination series is oneshot but upgradeBookId is missing"
+        ));
     }
 
     let mut upgrade_file: Option<PathBuf> = None;
@@ -77,18 +82,18 @@ async fn import_book_impl(
             match load_import_upgrade_book_target(read_pool, upgrade_book_id).await {
                 Ok(Some(target)) => target,
                 Ok(None) => {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(format!(
                         "upgrade target for import was not found: {upgrade_book_id}"
-                    ));
+                    )));
                 }
                 Err(error) => return Err(error),
             };
 
         if loaded_upgrade_target.series_id != entry.series_id {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "upgrade target series mismatch for import: expected {}, got {}",
                 entry.series_id, loaded_upgrade_target.series_id
-            ));
+            )));
         }
 
         let loaded_upgrade_file = resolve_library_item_path(
@@ -103,15 +108,14 @@ async fn import_book_impl(
         entry.source_file.as_path(),
         entry.destination_name.as_deref(),
     ) else {
-        return Err(format!(
+        return Err(anyhow::anyhow!(format!(
             "destination name for import is invalid: {}",
             entry.destination_name.as_deref().unwrap_or_default()
-        ));
+        )));
     };
 
     let destination_dir = resolve_import_destination_dir(&target);
-    fs::create_dir_all(&destination_dir)
-        .map_err(|error| format!("create destination directory for import: {error}"))?;
+    fs::create_dir_all(&destination_dir).context("create destination directory for import")?;
 
     let destination_file = destination_dir.join(destination_name);
     let imported_sidecars =
@@ -129,10 +133,10 @@ async fn import_book_impl(
         destination_file.as_path(),
         "inspect import destination file",
     )? {
-        return Err(format!(
+        return Err(anyhow::anyhow!(format!(
             "destination file already exists: {}",
             destination_file.display()
-        ));
+        )));
     }
 
     apply_import_copy_mode(
@@ -224,7 +228,7 @@ struct ImportBookSidecarResult {
 async fn load_import_series_target(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<ImportSeriesTarget>, String> {
+) -> anyhow::Result<Option<ImportSeriesTarget>> {
     let row = sqlx::query(
         r#"SELECT s.ID AS SERIES_ID, s.LIBRARY_ID AS LIBRARY_ID, s.URL AS SERIES_URL,
             l.ROOT AS LIBRARY_ROOT, s.ONESHOT AS ONESHOT
@@ -236,7 +240,7 @@ async fn load_import_series_target(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query series target for import: {error}"))?;
+    .context("query series target for import")?;
 
     Ok(row.map(|row| ImportSeriesTarget {
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -250,7 +254,7 @@ async fn load_import_series_target(
 async fn load_import_upgrade_book_target(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<ImportUpgradeBookTarget>, String> {
+) -> anyhow::Result<Option<ImportUpgradeBookTarget>> {
     let row = sqlx::query(
         r#"SELECT b.SERIES_ID AS SERIES_ID, b.URL AS BOOK_URL,
             l.ROOT AS LIBRARY_ROOT
@@ -262,7 +266,7 @@ async fn load_import_upgrade_book_target(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query upgrade book target for import: {error}"))?;
+    .context("query upgrade book target for import")?;
 
     Ok(row.map(|row| ImportUpgradeBookTarget {
         series_id: row.get::<String, _>("SERIES_ID"),
@@ -286,11 +290,11 @@ fn resolve_import_destination_dir(target: &ImportSeriesTarget) -> PathBuf {
     }
 }
 
-async fn load_library_roots(pool: &SqlitePool) -> Result<Vec<PathBuf>, String> {
+async fn load_library_roots(pool: &SqlitePool) -> anyhow::Result<Vec<PathBuf>> {
     let rows = sqlx::query("SELECT ROOT FROM LIBRARY")
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query library roots for import: {error}"))?;
+        .context("query library roots for import")?;
 
     Ok(rows
         .into_iter()
@@ -301,15 +305,15 @@ async fn load_library_roots(pool: &SqlitePool) -> Result<Vec<PathBuf>, String> {
 fn source_inside_library_roots(
     source_file: &Path,
     library_roots: &[PathBuf],
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let source = match fs::canonicalize(source_file) {
         Ok(source) => source,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "canonicalize import source file '{}': {error}",
                 source_file.display()
-            ));
+            )));
         }
     };
 
@@ -318,10 +322,10 @@ fn source_inside_library_roots(
             Ok(root) => root,
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "canonicalize import library root '{}': {error}",
                     root.display()
-                ));
+                )));
             }
         };
         if source.starts_with(root) {
@@ -359,37 +363,36 @@ fn apply_import_copy_mode(
     source_file: &Path,
     destination_file: &Path,
     replace_existing: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if !path_exists(source_file, "inspect import source file")? {
-        return Err("source file does not exist".to_string());
+        return Err(anyhow::anyhow!("source file does not exist"));
     }
 
     let destination_exists = path_exists(destination_file, "inspect import destination file")?;
     if replace_existing && destination_exists {
-        fs::remove_file(destination_file)
-            .map_err(|error| format!("remove existing destination file: {error}"))?;
+        fs::remove_file(destination_file).context("remove existing destination file")?;
     } else if destination_exists {
-        return Err(format!(
+        return Err(anyhow::anyhow!(format!(
             "destination file already exists: {}",
             destination_file.display()
-        ));
+        )));
     }
 
     match copy_mode {
         ImportCopyMode::Copy => {
-            fs::copy(source_file, destination_file)
-                .map_err(|error| format!("copy source file for import: {error}"))?;
+            fs::copy(source_file, destination_file).context("copy source file for import")?;
             Ok(())
         }
         ImportCopyMode::Move => {
-            if let Err(error) = fs::rename(source_file, destination_file) {
+            if let Err(rename_error) = fs::rename(source_file, destination_file) {
                 fs::copy(source_file, destination_file).map_err(|copy_error| {
-                    format!(
-                        "move source file for import failed ({error}); copy attempt failed: {copy_error}"
-                    )
+                    anyhow::Error::from(copy_error).context(format!(
+                        "move source file for import failed ({rename_error}); copy attempt failed"
+                    ))
                 })?;
                 fs::remove_file(source_file).map_err(|remove_error| {
-                    format!("remove source file after move-then-copy attempt: {remove_error}")
+                    anyhow::anyhow!(remove_error)
+                        .context("remove source file after move-then-copy attempt")
                 })?;
             }
             Ok(())
@@ -397,30 +400,36 @@ fn apply_import_copy_mode(
         ImportCopyMode::Hardlink => {
             if fs::hard_link(source_file, destination_file).is_err() {
                 fs::copy(source_file, destination_file)
-                    .map_err(|error| format!("hardlink/copy source file for import: {error}"))?;
+                    .context("hardlink/copy source file for import")?;
             }
             Ok(())
         }
     }
 }
 
-fn path_exists(path: &Path, context: &str) -> Result<bool, String> {
+fn path_exists(path: &Path, context: &str) -> anyhow::Result<bool> {
     match fs::metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("{context} '{}': {error}", path.display())),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "{context} '{}': {error}",
+            path.display()
+        ))),
     }
 }
 
-fn remove_import_upgrade_path(path: &Path, context: &str) -> Result<(), String> {
+fn remove_import_upgrade_path(path: &Path, context: &str) -> anyhow::Result<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("{context} '{}': {error}", path.display())),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "{context} '{}': {error}",
+            path.display()
+        ))),
     }
 }
 
-fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> {
+fn collect_book_sidecar_paths(book_file: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let Some(book_dir) = book_file.parent() else {
         return Ok(Vec::new());
     };
@@ -429,19 +438,19 @@ fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> 
     };
 
     let entries = fs::read_dir(book_dir).map_err(|error| {
-        format!(
-            "read book sidecar directory '{}' for import: {error}",
+        anyhow::anyhow!(error).context(format!(
+            "read book sidecar directory '{}' for import: ",
             book_dir.display()
-        )
+        ))
     })?;
 
     let mut sidecar_paths = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
-                "read book sidecar directory entry '{}' for import: {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read book sidecar directory entry '{}' for import: ",
                 book_dir.display()
-            )
+            ))
         })?;
         let path = entry.path();
         if path == book_file {
@@ -450,10 +459,10 @@ fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> 
 
         if classify_import_book_sidecar(path.as_path(), book_base_name).is_some() {
             let metadata = fs::metadata(&path).map_err(|error| {
-                format!(
-                    "read book sidecar metadata '{}' for import: {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read book sidecar metadata '{}' for import: ",
                     path.display()
-                )
+                ))
             })?;
             if !metadata.is_file() {
                 continue;
@@ -468,7 +477,7 @@ fn collect_book_sidecar_paths(book_file: &Path) -> Result<Vec<PathBuf>, String> 
 fn collect_import_book_sidecars(
     source_file: &Path,
     destination_file: &Path,
-) -> Result<Vec<ImportBookSidecarTransfer>, String> {
+) -> anyhow::Result<Vec<ImportBookSidecarTransfer>> {
     let Some(destination_dir) = destination_file.parent() else {
         return Ok(Vec::new());
     };
@@ -554,7 +563,7 @@ fn is_supported_book_artwork_extension(extension: &str) -> bool {
 fn import_book_sidecars(
     copy_mode: ImportCopyMode,
     sidecars: &[ImportBookSidecarTransfer],
-) -> Result<ImportBookSidecarResult, String> {
+) -> anyhow::Result<ImportBookSidecarResult> {
     let mut result = ImportBookSidecarResult::default();
     for sidecar in sidecars {
         apply_import_copy_mode(
@@ -583,7 +592,7 @@ async fn migrate_upgraded_book_identity(
     new_book_id: &str,
     library_root: &Path,
     destination_file: &Path,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if old_book_id == new_book_id {
         return Ok(());
     }
@@ -598,18 +607,18 @@ async fn migrate_upgraded_book_identity(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin import-upgrade migration tx: {error}"))?;
+        .context("begin import-upgrade migration tx")?;
 
     let source_exists = sqlx::query("SELECT 1 AS FOUND FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(old_book_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| format!("query upgraded source book for migration: {error}"))?
+        .context("query upgraded source book for migration")?
         .is_some();
     if !source_exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback import-upgrade migration tx: {error}"))?;
+            .context("rollback import-upgrade migration tx")?;
         return Ok(());
     }
 
@@ -635,15 +644,13 @@ async fn migrate_upgraded_book_identity(
     .bind(old_book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("upsert upgraded destination book identity: {error}"))?;
+    .context("upsert upgraded destination book identity")?;
 
     sqlx::query("DELETE FROM BOOK_METADATA WHERE BOOK_ID = ?")
         .bind(new_book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| {
-            format!("delete destination metadata before upgrade migration: {error}")
-        })?;
+        .context("delete destination metadata before upgrade migration: ")?;
     sqlx::query(
         "UPDATE BOOK_METADATA SET BOOK_ID = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE BOOK_ID = ?",
     )
@@ -651,7 +658,7 @@ async fn migrate_upgraded_book_identity(
     .bind(old_book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("move book metadata during upgrade migration: {error}"))?;
+    .context("move book metadata during upgrade migration")?;
 
     for table in [
         "BOOK_METADATA_AUTHOR",
@@ -665,7 +672,9 @@ async fn migrate_upgraded_book_identity(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("delete destination {table} rows before upgrade migration: {error}")
+            anyhow::anyhow!(error).context(format!(
+                "delete destination {table} rows before upgrade migration: "
+            ))
         })?;
 
         sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -675,7 +684,9 @@ async fn migrate_upgraded_book_identity(
         .bind(old_book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("move {table} rows during upgrade migration"))
+        })?;
     }
 
     for table in ["MEDIA", "MEDIA_FILE", "MEDIA_PAGE", "READ_PROGRESS"] {
@@ -686,7 +697,9 @@ async fn migrate_upgraded_book_identity(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("delete destination {table} rows before upgrade migration: {error}")
+            anyhow::anyhow!(error).context(format!(
+                "delete destination {table} rows before upgrade migration: "
+            ))
         })?;
 
         sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -696,7 +709,9 @@ async fn migrate_upgraded_book_identity(
         .bind(old_book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("move {table} rows during upgrade migration: {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("move {table} rows during upgrade migration"))
+        })?;
     }
 
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = ?")
@@ -705,7 +720,8 @@ async fn migrate_upgraded_book_identity(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("delete destination user-uploaded thumbnails before upgrade migration: {error}")
+            anyhow::anyhow!(error)
+                .context("delete destination user-uploaded thumbnails before upgrade migration: ")
         })?;
     sqlx::query("UPDATE THUMBNAIL_BOOK SET BOOK_ID = ? WHERE BOOK_ID = ? AND TYPE = ?")
         .bind(new_book_id)
@@ -714,7 +730,8 @@ async fn migrate_upgraded_book_identity(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("move user-uploaded thumbnails during upgrade migration: {error}")
+            anyhow::anyhow!(error)
+                .context("move user-uploaded thumbnails during upgrade migration: ")
         })?;
 
     sqlx::query(
@@ -727,46 +744,47 @@ async fn migrate_upgraded_book_identity(
     .bind(old_book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("copy readlist mapping rows during upgrade migration: {error}"))?;
+    .context("copy readlist mapping rows during upgrade migration: ")?;
     sqlx::query("DELETE FROM READLIST_BOOK WHERE BOOK_ID = ?")
         .bind(old_book_id)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("delete source readlist mappings during upgrade migration: {error}")
+            anyhow::anyhow!(error)
+                .context("delete source readlist mappings during upgrade migration: ")
         })?;
 
     sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ?")
         .bind(old_book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("delete source thumbnails during upgrade migration: {error}"))?;
+        .context("delete source thumbnails during upgrade migration: ")?;
 
     sqlx::query("DELETE FROM BOOK WHERE ID = ?")
         .bind(old_book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("delete source book after upgrade migration: {error}"))?;
+        .context("delete source book after upgrade migration")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit import-upgrade migration tx: {error}"))?;
+        .context("commit import-upgrade migration tx")?;
     Ok(())
 }
 
 fn import_book_url_for_library_root(
     library_root: &Path,
     destination_file: &Path,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     destination_file
         .strip_prefix(library_root)
         .map(|relative| relative.to_string_lossy().replace('\\', "/"))
         .map_err(|error| {
-            format!(
-                "derive imported book url '{}' from library root '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "derive imported book url '{}' from library root '{}': ",
                 destination_file.display(),
                 library_root.display()
-            )
+            ))
         })
 }
 
@@ -777,7 +795,7 @@ async fn persist_book_imported_event(
     destination_file: &Path,
     source_file: &Path,
     upgrade: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let event_id = generated_historical_event_id();
     let destination_name = destination_file.to_string_lossy().to_string();
     let source_name = source_file.to_string_lossy().to_string();
@@ -786,7 +804,7 @@ async fn persist_book_imported_event(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin historical-event tx for import: {error}"))?;
+        .context("begin historical-event tx for import")?;
 
     sqlx::query("INSERT INTO HISTORICAL_EVENT (ID, TYPE, BOOK_ID, SERIES_ID) VALUES (?, ?, ?, ?)")
         .bind(&event_id)
@@ -795,7 +813,7 @@ async fn persist_book_imported_event(
         .bind(series_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("insert historical BookImported event: {error}"))?;
+        .context("insert historical BookImported event")?;
 
     for (key, value) in [
         ("name", destination_name.as_str()),
@@ -809,13 +827,15 @@ async fn persist_book_imported_event(
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!("insert historical event property '{key}' for BookImported: {error}")
+                anyhow::anyhow!(error).context(format!(
+                    "insert historical event property '{key}' for BookImported: "
+                ))
             })?;
     }
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit historical-event tx for import: {error}"))?;
+        .context("commit historical-event tx for import")?;
 
     Ok(())
 }

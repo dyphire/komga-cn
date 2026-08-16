@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 use http_body_util::BodyExt;
 use komga_application::media_assets::{
     BookImportService, BooksImportEntry, BooksImportPayload, ImportCopyMode,
@@ -229,10 +230,10 @@ async fn import_book_for_sse(
     runtime_events: Arc<dyn RuntimeSseEventSink>,
     source_file: &Path,
     expected_success: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let pool = crate::support::sqlite::connect_test_pool(main_db, 1)
         .await
-        .map_err(|error| format!("open import db for sse test: {error}"))?;
+        .context("open import db for sse test")?;
     let service = BookImportService::new(
         Arc::new(FilesystemBookImport::new(pool.clone(), pool.clone())),
         runtime_events,
@@ -257,7 +258,7 @@ async fn import_book_for_sse(
         (true, Ok(_)) => Ok(()),
         (true, Err(error)) => Err(error),
         (false, Err(_)) => Ok(()),
-        (false, Ok(_)) => Err("import unexpectedly succeeded".to_string()),
+        (false, Ok(_)) => Err(anyhow::anyhow!("import unexpectedly succeeded")),
     }
 }
 

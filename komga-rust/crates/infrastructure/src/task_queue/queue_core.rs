@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -25,37 +26,39 @@ pub(super) struct SqliteTaskQueueStore {
 
 fn persisted_row_from_runtime_record(
     task: &PersistedTaskStoreRecord,
-) -> Result<PersistedTaskRowShape, String> {
+) -> anyhow::Result<PersistedTaskRowShape> {
     PersistedTaskRowShape::from_queue_record(runtime_record_from_store_record(task.clone()))
-        .map_err(|error| format!("build persisted task row for '{}': {error}", task.id))
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("build persisted task row for '{}': ", task.id))
+        })
 }
 
 impl SqliteTaskQueueStore {
-    pub(super) async fn new(tasks_db_file: PathBuf) -> Result<Option<Self>, String> {
+    pub(super) async fn new(tasks_db_file: PathBuf) -> anyhow::Result<Option<Self>> {
         match fs::metadata(&tasks_db_file) {
             Ok(_) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "inspect tasks sqlite file '{}': {error}",
                     tasks_db_file.display()
-                ));
+                )));
             }
         }
 
         let tasks_pool = connect_shared_pool(&tasks_db_file, default_read_max_connections())
             .await
             .map_err(|error| {
-                format!(
-                    "open tasks sqlite pool '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "open tasks sqlite pool '{}': ",
                     tasks_db_file.display()
-                )
+                ))
             })?;
 
         Ok(Some(Self { tasks_pool }))
     }
 
-    pub(super) async fn load_records(&self) -> Result<Vec<PersistedTaskStoreRecord>, String> {
+    pub(super) async fn load_records(&self) -> anyhow::Result<Vec<PersistedTaskStoreRecord>> {
         let rows = sqlx::query(
             r#"SELECT
                 ID,
@@ -70,7 +73,7 @@ impl SqliteTaskQueueStore {
         )
         .fetch_all(&self.tasks_pool)
         .await
-        .map_err(|error| format!("persisted task queue rows should be readable: {error}"))?;
+        .context("persisted task queue rows should be readable")?;
 
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
@@ -81,7 +84,7 @@ impl SqliteTaskQueueStore {
         Ok(records)
     }
 
-    pub(super) async fn persist_task(&self, task: &PersistedTaskStoreRecord) -> Result<(), String> {
+    pub(super) async fn persist_task(&self, task: &PersistedTaskStoreRecord) -> anyhow::Result<()> {
         let row = persisted_row_from_runtime_record(task)?;
         sqlx::query(
             r#"INSERT INTO TASK (
@@ -111,11 +114,14 @@ impl SqliteTaskQueueStore {
         .bind(row.owner)
         .execute(&self.tasks_pool)
         .await
-        .map_err(|error| format!("persist queued task '{}' to TASK table: {error}", task.id))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("persist queued task '{}' to TASK table: ", task.id))
+        })?;
         Ok(())
     }
 
-    pub(super) async fn claim_task(&self, task_id: &str, owner: &str) -> Result<(), String> {
+    pub(super) async fn claim_task(&self, task_id: &str, owner: &str) -> anyhow::Result<()> {
         let task_id = task_id.to_string();
         let owner = owner.to_string();
         sqlx::query(
@@ -127,22 +133,22 @@ impl SqliteTaskQueueStore {
         .bind(task_id)
         .execute(&self.tasks_pool)
         .await
-        .map_err(|error| format!("persist claimed task owner to TASK table: {error}"))?;
+        .context("persist claimed task owner to TASK table")?;
         Ok(())
     }
 
-    pub(super) async fn delete_task(&self, task_id: &str) -> Result<bool, String> {
+    pub(super) async fn delete_task(&self, task_id: &str) -> anyhow::Result<bool> {
         let task_id = task_id.to_string();
         let deleted = sqlx::query("DELETE FROM TASK WHERE ID = ?")
             .bind(task_id)
             .execute(&self.tasks_pool)
             .await
-            .map_err(|error| format!("delete completed task row from TASK table: {error}"))?
+            .context("delete completed task row from TASK table")?
             .rows_affected();
         Ok(deleted > 0)
     }
 
-    pub(super) async fn disown_all(&self) -> Result<(), String> {
+    pub(super) async fn disown_all(&self) -> anyhow::Result<()> {
         sqlx::query(
             r#"UPDATE TASK
             SET OWNER = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
@@ -150,15 +156,15 @@ impl SqliteTaskQueueStore {
         )
         .execute(&self.tasks_pool)
         .await
-        .map_err(|error| format!("disown owned task rows in TASK table: {error}"))?;
+        .context("disown owned task rows in TASK table")?;
         Ok(())
     }
 
-    pub(super) async fn clear_unowned(&self) -> Result<usize, String> {
+    pub(super) async fn clear_unowned(&self) -> anyhow::Result<usize> {
         let deleted = sqlx::query("DELETE FROM TASK WHERE OWNER IS NULL")
             .execute(&self.tasks_pool)
             .await
-            .map_err(|error| format!("delete unowned task rows from TASK table: {error}"))?
+            .context("delete unowned task rows from TASK table")?
             .rows_affected() as usize;
         Ok(deleted)
     }
@@ -230,7 +236,7 @@ mod tests {
             .await
             .expect_err("tasks db open error should be reported");
         assert!(
-            error.contains("open tasks sqlite pool"),
+            error.to_string().contains("open tasks sqlite pool"),
             "unexpected error: {error}"
         );
 

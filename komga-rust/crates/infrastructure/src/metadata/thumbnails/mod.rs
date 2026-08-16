@@ -35,7 +35,7 @@ fn load_thumbnail_bytes_or_sidecar(
     url: Option<String>,
     library_root: Option<String>,
     context: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if let Some(thumbnail) = thumbnail {
         return Ok(Some(thumbnail));
     }
@@ -46,13 +46,15 @@ fn load_thumbnail_bytes_or_sidecar(
 
     let path =
         resolve_optional_library_item_path(library_root.as_deref(), &url).ok_or_else(|| {
-            format!("persisted thumbnail sidecar URL requires a library root for {context}: {url}")
+            anyhow::anyhow!(format!(
+                "persisted thumbnail sidecar URL requires a library root for {context}: {url}"
+            ))
         })?;
     let bytes = std::fs::read(&path).map_err(|error| {
-        format!(
-            "read thumbnail sidecar {} for {context}: {error}",
+        anyhow::anyhow!(error).context(format!(
+            "read thumbnail sidecar {} for {context}: ",
             path.display()
-        )
+        ))
     })?;
     Ok(Some(bytes))
 }

@@ -36,15 +36,16 @@ pub(crate) struct RarEntryBytesRecord {
     pub bytes: Vec<u8>,
 }
 
-pub(crate) fn list_rar_entries(path: &Path) -> Result<Vec<RarEntryRecord>, String> {
-    let mut archive = Archive::new(path)
-        .open_for_listing()
-        .map_err(|error| format!("open rar for listing '{}': {error}", path.display()))?;
+pub(crate) fn list_rar_entries(path: &Path) -> anyhow::Result<Vec<RarEntryRecord>> {
+    let mut archive = Archive::new(path).open_for_listing().map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open rar for listing '{}': ", path.display()))
+    })?;
 
     let mut entries = Vec::new();
     for entry in archive.by_ref() {
-        let entry =
-            entry.map_err(|error| format!("read rar entry '{}': {error}", path.display()))?;
+        let entry = entry.map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read rar entry '{}': ", path.display()))
+        })?;
         if entry.is_directory() {
             continue;
         }
@@ -58,16 +59,16 @@ pub(crate) fn list_rar_entries(path: &Path) -> Result<Vec<RarEntryRecord>, Strin
     Ok(entries)
 }
 
-pub(crate) fn read_rar_entries_bytes(path: &Path) -> Result<Vec<RarEntryBytesRecord>, String> {
-    let mut archive = Archive::new(path)
-        .open_for_processing()
-        .map_err(|error| format!("open rar for processing '{}': {error}", path.display()))?;
+pub(crate) fn read_rar_entries_bytes(path: &Path) -> anyhow::Result<Vec<RarEntryBytesRecord>> {
+    let mut archive = Archive::new(path).open_for_processing().map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open rar for processing '{}': ", path.display()))
+    })?;
 
     let mut entries = Vec::new();
     loop {
-        let Some(header) = archive
-            .read_header()
-            .map_err(|error| format!("read rar header '{}': {error}", path.display()))?
+        let Some(header) = archive.read_header().map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read rar header '{}': ", path.display()))
+        })?
         else {
             break;
         };
@@ -76,20 +77,20 @@ pub(crate) fn read_rar_entries_bytes(path: &Path) -> Result<Vec<RarEntryBytesRec
         let unpacked_size = header.entry().unpacked_size;
         if header.entry().is_directory() {
             archive = header.skip().map_err(|error| {
-                format!(
-                    "skip rar entry '{file_name}' in '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "skip rar entry '{file_name}' in '{}': ",
                     path.display()
-                )
+                ))
             })?;
             continue;
         }
 
         let (bytes, rest) = header.read().map_err(|error| {
-            format!(
-                "read rar entry '{}' from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read rar entry '{}' from '{}': ",
                 file_name,
                 path.display()
-            )
+            ))
         })?;
         archive = rest;
         entries.push(RarEntryBytesRecord {
@@ -105,16 +106,17 @@ pub(crate) fn read_rar_entries_bytes(path: &Path) -> Result<Vec<RarEntryBytesRec
 pub(crate) fn read_rar_entry_bytes(
     path: &Path,
     entry_name: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let matched_bytes = {
-        let mut archive = Archive::new(path)
-            .open_for_processing()
-            .map_err(|error| format!("open rar for processing '{}': {error}", path.display()))?;
+        let mut archive = Archive::new(path).open_for_processing().map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("open rar for processing '{}': ", path.display()))
+        })?;
 
         loop {
-            let Some(header) = archive
-                .read_header()
-                .map_err(|error| format!("read rar header '{}': {error}", path.display()))?
+            let Some(header) = archive.read_header().map_err(|error| {
+                anyhow::anyhow!(error).context(format!("read rar header '{}': ", path.display()))
+            })?
             else {
                 break None;
             };
@@ -122,22 +124,22 @@ pub(crate) fn read_rar_entry_bytes(
             let current_name = header.entry().filename.to_string_lossy().replace('\\', "/");
             if current_name == entry_name {
                 let (data, rest) = header.read().map_err(|error| {
-                    format!(
-                        "read rar entry '{}' from '{}': {error}",
+                    anyhow::anyhow!(error).context(format!(
+                        "read rar entry '{}' from '{}': ",
                         entry_name,
                         path.display()
-                    )
+                    ))
                 })?;
                 drop(rest);
                 break Some(data);
             }
 
             archive = header.skip().map_err(|error| {
-                format!(
-                    "skip rar entry '{}' in '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "skip rar entry '{}' in '{}': ",
                     current_name,
                     path.display()
-                )
+                ))
             })?;
         }
     };

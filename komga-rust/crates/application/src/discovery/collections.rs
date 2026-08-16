@@ -36,10 +36,10 @@ pub struct CollectionCreateResult {
     pub collection_id: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum CollectionMutationError {
     DuplicateName,
-    Persistence(String),
+    Persistence(anyhow::Error),
 }
 
 impl std::fmt::Display for CollectionMutationError {
@@ -52,6 +52,19 @@ impl std::fmt::Display for CollectionMutationError {
 }
 
 impl std::error::Error for CollectionMutationError {}
+
+#[cfg(test)]
+impl PartialEq for CollectionMutationError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::DuplicateName, Self::DuplicateName) => true,
+            (Self::Persistence(left), Self::Persistence(right)) => {
+                left.to_string() == right.to_string()
+            }
+            _ => false,
+        }
+    }
+}
 
 pub struct CollectionProjectionService<'a, C, S, R>
 where
@@ -91,7 +104,7 @@ where
         visibility_context: &DiscoveryQueryContext,
         request_scope_context: Option<&DiscoveryQueryContext>,
         query: CollectionListQuery,
-    ) -> Result<PageEnvelope<CollectionReadModel>, String> {
+    ) -> anyhow::Result<PageEnvelope<CollectionReadModel>> {
         let mut content = if self.collections.persisted_collections_exist().await? {
             self.load_collections().await?
         } else {
@@ -123,7 +136,7 @@ where
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         let Some(collection) = self.load_collection_detail(collection_id).await? else {
             return Ok(None);
         };
@@ -135,7 +148,7 @@ where
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         Ok(self
             .collection_detail(context, collection_id)
             .await?
@@ -147,7 +160,7 @@ where
         &self,
         context: &DiscoveryQueryContext,
         collections: Vec<CollectionReadModel>,
-    ) -> Result<Vec<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Vec<CollectionReadModel>> {
         let mut visible = Vec::with_capacity(collections.len());
         for collection in collections {
             if let Some(collection) = self.visible_collection(context, collection).await? {
@@ -161,7 +174,7 @@ where
         &self,
         context: &DiscoveryQueryContext,
         mut collection: CollectionReadModel,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         self.apply_visibility(&mut collection, context, None)
             .await?;
         if collection.series_ids.is_empty() {
@@ -171,7 +184,7 @@ where
         Ok(Some(collection))
     }
 
-    async fn load_collections(&self) -> Result<Vec<CollectionReadModel>, String> {
+    async fn load_collections(&self) -> anyhow::Result<Vec<CollectionReadModel>> {
         let rows = self.collections.load_persisted_collections().await?;
 
         let mut collections = Vec::with_capacity(rows.len());
@@ -185,7 +198,7 @@ where
     async fn collection_read_model(
         &self,
         row: PersistedCollectionAccessRecord,
-    ) -> Result<CollectionReadModel, String> {
+    ) -> anyhow::Result<CollectionReadModel> {
         let id = row.id.clone();
         let series_ids = self
             .collections
@@ -197,7 +210,7 @@ where
     async fn load_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         let Some(row) = self
             .collections
             .load_persisted_collection_detail(collection_id)
@@ -218,7 +231,7 @@ where
         collection: &mut CollectionReadModel,
         visibility_context: &DiscoveryQueryContext,
         request_scope_context: Option<&DiscoveryQueryContext>,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
         let mut matches_requested_scope = request_scope_context.is_none();
 
@@ -286,7 +299,7 @@ async fn series_visible_to_context(
     context: &DiscoveryQueryContext,
     series_id: &str,
     known_library_id: Option<&str>,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let library_id = match known_library_id {
         Some(value) => value.to_string(),
         None => {
@@ -454,7 +467,7 @@ where
     async fn load_collection_for_mutation(
         &self,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         let Some(row) = self
             .collections
             .load_persisted_collection_detail(collection_id)
@@ -476,7 +489,7 @@ async fn sort_collections_by_search(
     content: &mut Vec<CollectionReadModel>,
     query: &str,
     search_limit: usize,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let ranked_ids = search.search_collection_ids(query, search_limit).await?;
     let ranks = ranked_ids
         .iter()
@@ -827,20 +840,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CollectionProjectionPort for TestCollectionPorts {
-        async fn persisted_collections_exist(&self) -> Result<bool, String> {
+        async fn persisted_collections_exist(&self) -> anyhow::Result<bool> {
             Ok(!self.collections.is_empty())
         }
 
         async fn load_persisted_collections(
             &self,
-        ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
             Ok(self.collections.clone())
         }
 
         async fn load_persisted_collection_detail(
             &self,
             collection_id: &str,
-        ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
             Ok(self
                 .collections
                 .iter()
@@ -851,7 +864,7 @@ mod tests {
         async fn load_persisted_collection_series_ids(
             &self,
             collection_id: &str,
-        ) -> Result<Vec<String>, String> {
+        ) -> anyhow::Result<Vec<String>> {
             Ok(self
                 .collection_series
                 .get(collection_id)
@@ -864,14 +877,14 @@ mod tests {
     impl CollectionMutationPort for TestCollectionPorts {
         async fn load_persisted_collections(
             &self,
-        ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
             Ok(self.collections.clone())
         }
 
         async fn load_persisted_collection_detail(
             &self,
             collection_id: &str,
-        ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
             Ok(self
                 .collections
                 .iter()
@@ -882,7 +895,7 @@ mod tests {
         async fn load_persisted_collection_series_ids(
             &self,
             collection_id: &str,
-        ) -> Result<Vec<String>, String> {
+        ) -> anyhow::Result<Vec<String>> {
             Ok(self
                 .collection_series
                 .get(collection_id)
@@ -896,7 +909,7 @@ mod tests {
             _name: &str,
             _ordered: bool,
             _series_ids: &[String],
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.created_collections
                 .lock()
                 .expect("created collections lock should not be poisoned")
@@ -910,7 +923,7 @@ mod tests {
             _name: &str,
             _ordered: bool,
             _series_ids: &[String],
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             self.updated_collections
                 .lock()
                 .expect("updated collections lock should not be poisoned")
@@ -921,7 +934,7 @@ mod tests {
                 .any(|collection| collection.id == collection_id))
         }
 
-        async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+        async fn delete_persisted_collection(&self, collection_id: &str) -> anyhow::Result<bool> {
             self.deleted_collections
                 .lock()
                 .expect("deleted collections lock should not be poisoned")
@@ -935,7 +948,7 @@ mod tests {
         async fn upsert_collection_search_document(
             &self,
             collection_id: &str,
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             self.search_upserts
                 .lock()
                 .expect("search upserts lock should not be poisoned")
@@ -946,7 +959,7 @@ mod tests {
         async fn delete_collection_search_document(
             &self,
             collection_id: &str,
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.search_deletes
                 .lock()
                 .expect("search deletes lock should not be poisoned")
@@ -957,14 +970,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CollectionSeriesPort for TestCollectionPorts {
-        async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
+        async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>> {
             Ok(self.series_libraries.get(series_id).cloned())
         }
 
         async fn load_series_restrictions(
             &self,
             _series_id: &str,
-        ) -> Result<PersistedSeriesRestrictionRecord, String> {
+        ) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
             Ok(PersistedSeriesRestrictionRecord {
                 age_rating: None,
                 labels: vec![],
@@ -978,7 +991,7 @@ mod tests {
             &self,
             query: &str,
             _limit: usize,
-        ) -> Result<Vec<String>, String> {
+        ) -> anyhow::Result<Vec<String>> {
             Ok(self.search_hits.get(query).cloned().unwrap_or_default())
         }
     }

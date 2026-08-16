@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{ReadlistThumbnailRecord, ThumbnailType};
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
@@ -8,7 +9,7 @@ use crate::parsing::parse_thumbnail_type;
 pub(crate) async fn load_persisted_readlist_thumbnails(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Vec<ReadlistThumbnailRecord>, String> {
+) -> anyhow::Result<Vec<ReadlistThumbnailRecord>> {
     let rows = sqlx::query(
         r#"
         SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -20,7 +21,7 @@ pub(crate) async fn load_persisted_readlist_thumbnails(
     .bind(readlist_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted readlist thumbnails: {error}"))?;
+    .context("query persisted readlist thumbnails")?;
 
     rows.into_iter()
         .map(|row| {
@@ -42,7 +43,7 @@ pub(crate) async fn load_persisted_readlist_thumbnails(
 pub(crate) async fn load_readlist_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<ReadlistThumbnailRecord>, String> {
+) -> anyhow::Result<Option<ReadlistThumbnailRecord>> {
     sqlx::query(
         r#"
         SELECT ID, READLIST_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -54,7 +55,7 @@ pub(crate) async fn load_readlist_thumbnail_by_id(
     .bind(thumbnail_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query single readlist thumbnail: {error}"))
+    .context("query single readlist thumbnail")
     .map(|row| {
         row.map(|row| ReadlistThumbnailRecord {
             id: row.get::<String, _>("ID"),
@@ -83,11 +84,11 @@ pub(crate) async fn insert_readlist_thumbnail(
     width: i64,
     height: i64,
     selected: bool,
-) -> Result<ReadlistThumbnailRecord, String> {
+) -> anyhow::Result<ReadlistThumbnailRecord> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin readlist thumbnail create tx: {error}"))?;
+        .context("begin readlist thumbnail create tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -100,13 +101,13 @@ pub(crate) async fn insert_readlist_thumbnail(
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query readlist existence for thumbnail create: {error}"))?
+    .context("query readlist existence for thumbnail create")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback readlist thumbnail create tx: {error}"))?;
-        return Err("readlist does not exist".to_string());
+            .context("rollback readlist thumbnail create tx")?;
+        return Err(anyhow::anyhow!("readlist does not exist"));
     }
 
     if selected {
@@ -120,7 +121,7 @@ pub(crate) async fn insert_readlist_thumbnail(
         .bind(readlist_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("clear selected readlist thumbnails: {error}"))?;
+        .context("clear selected readlist thumbnails")?;
     }
 
     let id = generated_thumbnail_id("thumbnail-readlist");
@@ -142,11 +143,11 @@ pub(crate) async fn insert_readlist_thumbnail(
     .bind(height)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert readlist thumbnail: {error}"))?;
+    .context("insert readlist thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit readlist thumbnail create tx: {error}"))?;
+        .context("commit readlist thumbnail create tx")?;
 
     let record = ReadlistThumbnailRecord {
         id,
@@ -168,11 +169,11 @@ pub(crate) async fn select_readlist_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     readlist_id: &str,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin readlist thumbnail select tx: {error}"))?;
+        .context("begin readlist thumbnail select tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -185,12 +186,12 @@ pub(crate) async fn select_readlist_thumbnail(
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query readlist existence for thumbnail select: {error}"))?
+    .context("query readlist existence for thumbnail select")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback readlist thumbnail select tx: {error}"))?;
+            .context("rollback readlist thumbnail select tx")?;
         return Ok(false);
     }
 
@@ -205,12 +206,12 @@ pub(crate) async fn select_readlist_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query readlist thumbnail select target: {error}"))?
+    .context("query readlist thumbnail select target")?
     .map(|row| row.get::<String, _>("READLIST_ID"));
     let Some(target_readlist_id) = target_readlist_id else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback readlist thumbnail select tx: {error}"))?;
+            .context("rollback readlist thumbnail select tx")?;
         return Ok(true);
     };
 
@@ -224,7 +225,7 @@ pub(crate) async fn select_readlist_thumbnail(
     .bind(&target_readlist_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("clear selected readlist thumbnails for select: {error}"))?;
+    .context("clear selected readlist thumbnails for select")?;
     sqlx::query(
         r#"
         UPDATE THUMBNAIL_READLIST
@@ -235,11 +236,11 @@ pub(crate) async fn select_readlist_thumbnail(
     .bind(thumbnail_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("mark selected readlist thumbnail: {error}"))?;
+    .context("mark selected readlist thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit readlist thumbnail select tx: {error}"))?;
+        .context("commit readlist thumbnail select tx")?;
     emit_thumbnail_readlist_event(runtime_events, &target_readlist_id, true, true);
     Ok(true)
 }
@@ -249,11 +250,11 @@ pub(crate) async fn delete_readlist_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     readlist_id: &str,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin readlist thumbnail delete tx: {error}"))?;
+        .context("begin readlist thumbnail delete tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -266,12 +267,12 @@ pub(crate) async fn delete_readlist_thumbnail(
     .bind(readlist_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query readlist existence for thumbnail delete: {error}"))?
+    .context("query readlist existence for thumbnail delete")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback readlist thumbnail delete tx: {error}"))?;
+            .context("rollback readlist thumbnail delete tx")?;
         return Ok(false);
     }
 
@@ -286,11 +287,11 @@ pub(crate) async fn delete_readlist_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query readlist thumbnail delete target: {error}"))?;
+    .context("query readlist thumbnail delete target")?;
     let Some(target) = target else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback readlist thumbnail delete tx: {error}"))?;
+            .context("rollback readlist thumbnail delete tx")?;
         return Ok(false);
     };
     let target_readlist_id = target.get::<String, _>("READLIST_ID");
@@ -305,13 +306,13 @@ pub(crate) async fn delete_readlist_thumbnail(
     .bind(thumbnail_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete readlist thumbnail: {error}"))?;
+    .context("delete readlist thumbnail")?;
 
     normalize_readlist_thumbnail_selection(&mut tx, &target_readlist_id, deleted_selected).await?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit readlist thumbnail delete tx: {error}"))?;
+        .context("commit readlist thumbnail delete tx")?;
     emit_thumbnail_readlist_event(runtime_events, &target_readlist_id, deleted_selected, false);
     Ok(true)
 }
@@ -320,7 +321,7 @@ async fn normalize_readlist_thumbnail_selection(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     readlist_id: &str,
     deleted_selected: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let remaining_rows = sqlx::query(
         r#"
         SELECT ID, SELECTED
@@ -333,7 +334,8 @@ async fn normalize_readlist_thumbnail_selection(
     .fetch_all(&mut **tx)
     .await
     .map_err(|error| {
-        format!("query remaining readlist thumbnails for delete housekeeping: {error}")
+        anyhow::anyhow!(error)
+            .context("query remaining readlist thumbnails for delete housekeeping: ")
     })?;
 
     let selected_ids = remaining_rows
@@ -367,7 +369,7 @@ async fn normalize_readlist_thumbnail_selection(
     .bind(readlist_id)
     .execute(&mut **tx)
     .await
-    .map_err(|error| format!("normalize readlist thumbnail selection after delete: {error}"))?;
+    .context("normalize readlist thumbnail selection after delete")?;
 
     Ok(())
 }
@@ -375,7 +377,7 @@ async fn normalize_readlist_thumbnail_selection(
 pub(crate) async fn load_persisted_readlist_name(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let row = sqlx::query(
         r#"
         SELECT NAME
@@ -386,14 +388,14 @@ pub(crate) async fn load_persisted_readlist_name(
     .bind(readlist_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted readlist name: {error}"))?;
+    .context("query persisted readlist name")?;
     Ok(row.map(|row| row.get::<String, _>("NAME")))
 }
 
 pub(crate) async fn persisted_readlist_exists(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     Ok(load_persisted_readlist_name(pool, readlist_id)
         .await?
         .is_some())

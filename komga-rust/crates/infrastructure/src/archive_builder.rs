@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::io::{Cursor, Write};
 
 use komga_application::media_assets::{ArchiveBuilderPort, ArchiveFileEntry};
@@ -7,12 +8,12 @@ use zip::{CompressionMethod, ZipWriter};
 pub struct ZipArchiveBuilder;
 
 impl ArchiveBuilderPort for ZipArchiveBuilder {
-    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> Result<Vec<u8>, String> {
+    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> anyhow::Result<Vec<u8>> {
         build_zip_archive(entries)
     }
 }
 
-fn build_zip_archive(entries: Vec<ArchiveFileEntry>) -> Result<Vec<u8>, String> {
+fn build_zip_archive(entries: Vec<ArchiveFileEntry>) -> anyhow::Result<Vec<u8>> {
     let cursor = Cursor::new(Vec::new());
     let mut writer = ZipWriter::new(cursor);
     writer.set_raw_zip64_extensible_data_sector(Vec::new().into_boxed_slice());
@@ -23,16 +24,18 @@ fn build_zip_archive(entries: Vec<ArchiveFileEntry>) -> Result<Vec<u8>, String> 
             .large_file(true);
         writer
             .start_file(entry.file_name.as_str(), options)
-            .map_err(|error| format!("start zip entry '{}': {error}", entry.file_name))?;
-        writer
-            .write_all(&entry.bytes)
-            .map_err(|error| format!("write zip entry '{}': {error}", entry.file_name))?;
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!("start zip entry '{}'", entry.file_name))
+            })?;
+        writer.write_all(&entry.bytes).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("write zip entry '{}'", entry.file_name))
+        })?;
     }
 
     writer
         .finish()
         .map(|cursor| cursor.into_inner())
-        .map_err(|error| format!("finalize zip archive: {error}"))
+        .context("finalize zip archive")
 }
 
 #[cfg(test)]

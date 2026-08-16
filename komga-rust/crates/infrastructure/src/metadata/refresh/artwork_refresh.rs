@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, book_media_is_epub, book_media_is_pdf,
     book_media_is_single_image, content_type_from_filename,
@@ -26,10 +27,10 @@ pub(crate) async fn refresh_book_local_artwork(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let book_id = book_id.to_string();
 
-    let result: Result<(), String> = 'result: {
+    let result: anyhow::Result<()> = 'result: {
         let book_row = sqlx::query(
             r#"
             SELECT b.URL AS BOOK_URL, l.ROOT AS LIBRARY_ROOT
@@ -43,7 +44,9 @@ pub(crate) async fn refresh_book_local_artwork(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("failed to resolve book path for artwork refresh '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve book path for artwork refresh '{book_id}': "
+            ))
         })?;
 
         if let Some(book_row) = &book_row {
@@ -52,9 +55,9 @@ pub(crate) async fn refresh_book_local_artwork(
                 .fetch_optional(pool)
                 .await
                 .map_err(|error| {
-                    format!(
-                        "failed to resolve book series for artwork refresh '{book_id}': {error}"
-                    )
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to resolve book series for artwork refresh '{book_id}': "
+                    ))
                 })?
                 .map(|row| row.get::<String, _>("SERIES_ID"))
                 .unwrap_or_default();
@@ -71,7 +74,9 @@ pub(crate) async fn refresh_book_local_artwork(
             .fetch_optional(pool)
             .await
             .map_err(|error| {
-                format!("failed to resolve import-local-artwork flag for '{book_id}': {error}")
+                anyhow::anyhow!(error).context(format!(
+                    "failed to resolve import-local-artwork flag for '{book_id}': "
+                ))
             })?
             .map(|row| row.get::<bool, _>("IMPORT_LOCAL_ARTWORK"))
             .unwrap_or(false);
@@ -113,7 +118,9 @@ pub(crate) async fn refresh_book_local_artwork(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!("failed to refresh THUMBNAIL_BOOK rows for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh THUMBNAIL_BOOK rows for '{book_id}': "
+            ))
         })?;
 
         sqlx::query(
@@ -127,9 +134,9 @@ pub(crate) async fn refresh_book_local_artwork(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to refresh BOOK row while updating local artwork for '{book_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh BOOK row while updating local artwork for '{book_id}': "
+            ))
         })?;
 
         Ok(())
@@ -142,9 +149,9 @@ pub async fn generate_book_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     policy: ThumbnailRegenerationPolicy,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let book_id = book_id.to_string();
-    let result: Result<(), String> = 'result: {
+    let result: anyhow::Result<()> = 'result: {
         let media_row = sqlx::query(
             r#"
             SELECT b.LIBRARY_ID AS LIBRARY_ID,
@@ -166,7 +173,9 @@ pub async fn generate_book_thumbnail(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("failed to resolve book media for thumbnail generation '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve book media for thumbnail generation '{book_id}': "
+            ))
         })?;
 
         let Some(media_row) = media_row else {
@@ -214,11 +223,10 @@ pub async fn generate_book_thumbnail(
             } else if book_media_is_single_image(&media) {
                 let file_size = tokio::fs::metadata(&media.file_path)
                     .await
-                    .map_err(|error| {
-                        format!(
-                            "failed to inspect single-image media '{}' for thumbnail generation '{book_id}': {error}",
+                    .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                            "failed to inspect single-image media '{}' for thumbnail generation '{book_id}': ",
                             media.file_path.display()
-                        )
+                        ))
                     })?
                     .len() as i64;
                 Some(BookPageRecord {
@@ -269,15 +277,16 @@ pub async fn generate_book_thumbnail(
         .bind(&book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to query selected thumbnail for '{book_id}': {error}"))?
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to query selected thumbnail for '{book_id}': "
+            ))
+        })?
         .map(|row| parse_thumbnail_type(&row.get::<String, _>("TYPE")));
         let should_select = selected_thumbnail_type
             .is_none_or(|thumbnail_type| thumbnail_type == ThumbnailType::Generated);
 
-        let mut tx = pool
-            .begin()
-            .await
-            .map_err(|error| format!("begin generate thumbnail tx: {error}"))?;
+        let mut tx = pool.begin().await.context("begin generate thumbnail tx")?;
 
         sqlx::query("DELETE FROM THUMBNAIL_BOOK WHERE BOOK_ID = ? AND TYPE = ?")
             .bind(&book_id)
@@ -285,7 +294,9 @@ pub async fn generate_book_thumbnail(
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!("failed to delete prior generated thumbnails for '{book_id}': {error}")
+                anyhow::anyhow!(error).context(format!(
+                    "failed to delete prior generated thumbnails for '{book_id}': "
+                ))
             })?;
 
         if should_select {
@@ -294,7 +305,9 @@ pub async fn generate_book_thumbnail(
                 .execute(&mut *tx)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear selected thumbnails for '{book_id}': {error}")
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to clear selected thumbnails for '{book_id}': "
+                    ))
                 })?;
         }
 
@@ -317,17 +330,14 @@ pub async fn generate_book_thumbnail(
         .bind(thumbnail.height)
         .execute(&mut *tx)
         .await
-        .map_err(|error| {
-            format!("failed to insert generated thumbnail for '{book_id}': {error}")
+        .map_err(|error| { anyhow::anyhow!(error).context( format!("failed to insert generated thumbnail for '{book_id}'"))
         })?;
 
         if !should_select {
             book_thumbnail_housekeeping(&mut tx, &book_id, resolved_library_root.as_path()).await?;
         }
 
-        tx.commit()
-            .await
-            .map_err(|error| format!("commit generate thumbnail tx: {error}"))?;
+        tx.commit().await.context("commit generate thumbnail tx")?;
         emit_thumbnail_book_event(runtime_events, &book_id, &series_id, should_select, true);
 
         Ok(())
@@ -339,10 +349,10 @@ pub(crate) async fn refresh_series_local_artwork(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let series_id = series_id.to_string();
 
-    let result: Result<(), String> = 'result: {
+    let result: anyhow::Result<()> = 'result: {
         let series_row = sqlx::query(
             r#"
             SELECT s.URL AS SERIES_URL,
@@ -359,7 +369,9 @@ pub(crate) async fn refresh_series_local_artwork(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("failed to resolve series path for artwork refresh '{series_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve series path for artwork refresh '{series_id}': "
+            ))
         })?;
 
         if let Some(series_row) = &series_row {
@@ -406,7 +418,9 @@ pub(crate) async fn refresh_series_local_artwork(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!("failed to refresh THUMBNAIL_SERIES rows for '{series_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh THUMBNAIL_SERIES rows for '{series_id}': "
+            ))
         })?;
 
         sqlx::query(
@@ -420,9 +434,9 @@ pub(crate) async fn refresh_series_local_artwork(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to refresh SERIES row while updating local artwork for '{series_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh SERIES row while updating local artwork for '{series_id}': "
+            ))
         })?;
 
         Ok(())
@@ -550,7 +564,9 @@ mod tests {
         .expect_err("single-image metadata errors should fail thumbnail generation");
 
         assert!(
-            error.contains("failed to inspect single-image media"),
+            error
+                .to_string()
+                .contains("failed to inspect single-image media"),
             "unexpected thumbnail generation error: {error}"
         );
         let generated_count = sqlx::query(

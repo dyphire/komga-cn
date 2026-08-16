@@ -16,20 +16,20 @@ impl SyncpointAccess {
 
 #[async_trait::async_trait]
 impl SyncpointPort for SyncpointAccess {
-    async fn delete_syncpoints_by_user(&self, user_id: &str) -> Result<(), String> {
+    async fn delete_syncpoints_by_user(&self, user_id: &str) -> anyhow::Result<()> {
         delete_syncpoints_by_user(self.db.write_pool(), user_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn delete_syncpoints_by_user_and_key_ids(
         &self,
         user_id: &str,
         key_ids: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         delete_syncpoints_by_user_and_key_ids(self.db.write_pool(), user_id, key_ids)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 

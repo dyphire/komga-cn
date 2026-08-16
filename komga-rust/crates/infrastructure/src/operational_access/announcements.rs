@@ -16,15 +16,15 @@ impl AnnouncementAccess {
 
 #[async_trait::async_trait]
 impl AnnouncementPort for AnnouncementAccess {
-    async fn load_announcement_read_ids(&self, user_id: &str) -> Result<Vec<String>, String> {
+    async fn load_announcement_read_ids(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
         announcements_access::load_announcement_read_ids(self.db.read_pool(), user_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn save_announcements_read(&self, user_id: &str, ids: &[String]) -> Result<(), String> {
+    async fn save_announcements_read(&self, user_id: &str, ids: &[String]) -> anyhow::Result<()> {
         announcements_access::save_announcements_read(self.db.write_pool(), user_id, ids)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }

@@ -15,7 +15,7 @@ pub(in crate::discovery_persisted_access::browse) async fn load_persisted_alphab
     context: &DiscoveryQueryContext,
     condition: Option<SeriesCondition>,
     full_text_search: Option<String>,
-) -> Result<Vec<SeriesAlphabeticalGroup>, String> {
+) -> anyhow::Result<Vec<SeriesAlphabeticalGroup>> {
     let page = load_persisted_series_page(
         backend,
         context,

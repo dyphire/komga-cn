@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -76,7 +77,7 @@ pub(in crate::task_queue) struct PersistedHashedPageToDelete {
 pub(in crate::task_queue) async fn load_book_hashed_pages(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<PersistedHashedPageToDelete>, String> {
+) -> anyhow::Result<Vec<PersistedHashedPageToDelete>> {
     let rows = sqlx::query(
         r#"
         SELECT
@@ -93,7 +94,9 @@ pub(in crate::task_queue) async fn load_book_hashed_pages(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to load hashed pages for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("failed to load hashed pages for '{book_id}'"))
+    })?;
 
     Ok(rows
         .into_iter()
@@ -110,7 +113,7 @@ pub(in crate::task_queue) async fn load_book_hashed_pages(
 pub(in crate::task_queue) async fn load_library_hashing_flags(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<PersistedLibraryHashingFlags, String> {
+) -> anyhow::Result<PersistedLibraryHashingFlags> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -125,10 +128,16 @@ pub(in crate::task_queue) async fn load_library_hashing_flags(
     .bind(library_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load library hashing flags for '{library_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load library hashing flags for '{library_id}': "
+        ))
+    })?;
 
     let Some(row) = row else {
-        return Err(format!("library '{library_id}' does not exist"));
+        return Err(anyhow::anyhow!(format!(
+            "library '{library_id}' does not exist"
+        )));
     };
 
     Ok(PersistedLibraryHashingFlags {
@@ -141,7 +150,7 @@ pub(in crate::task_queue) async fn load_library_hashing_flags(
 pub(in crate::task_queue) async fn load_library_maintenance_flags(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<PersistedLibraryMaintenanceFlags, String> {
+) -> anyhow::Result<PersistedLibraryMaintenanceFlags> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -156,11 +165,15 @@ pub(in crate::task_queue) async fn load_library_maintenance_flags(
     .fetch_optional(pool)
     .await
     .map_err(|error| {
-        format!("failed to load library maintenance flags for '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load library maintenance flags for '{library_id}': "
+        ))
     })?;
 
     let Some(row) = row else {
-        return Err(format!("library '{library_id}' does not exist"));
+        return Err(anyhow::anyhow!(format!(
+            "library '{library_id}' does not exist"
+        )));
     };
 
     Ok(PersistedLibraryMaintenanceFlags {
@@ -172,7 +185,7 @@ pub(in crate::task_queue) async fn load_library_maintenance_flags(
 pub(in crate::task_queue) async fn load_book_library_id(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let row = sqlx::query(
         r#"
         SELECT LIBRARY_ID
@@ -184,7 +197,9 @@ pub(in crate::task_queue) async fn load_book_library_id(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load book library for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("failed to load book library for '{book_id}'"))
+    })?;
 
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
@@ -192,7 +207,7 @@ pub(in crate::task_queue) async fn load_book_library_id(
 pub(in crate::task_queue) async fn load_book_hash_runtime_state(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedBookHashRuntimeState>, String> {
+) -> anyhow::Result<Option<PersistedBookHashRuntimeState>> {
     let row = sqlx::query(
         r#"
         SELECT LIBRARY_ID,
@@ -206,7 +221,11 @@ pub(in crate::task_queue) async fn load_book_hash_runtime_state(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load book hash runtime state for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load book hash runtime state for '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| PersistedBookHashRuntimeState {
         library_id: row.get::<String, _>("LIBRARY_ID"),
@@ -218,7 +237,7 @@ pub(in crate::task_queue) async fn load_book_hash_runtime_state(
 pub(in crate::task_queue) async fn load_book_file_path(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PathBuf>, String> {
+) -> anyhow::Result<Option<PathBuf>> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -233,7 +252,11 @@ pub(in crate::task_queue) async fn load_book_file_path(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to query book file for hash task '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to query book file for hash task '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| {
         resolve_library_item_path(
@@ -245,7 +268,7 @@ pub(in crate::task_queue) async fn load_book_file_path(
 
 pub(in crate::task_queue) async fn load_non_deleted_book_ids(
     pool: &SqlitePool,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
         SELECT b.ID
@@ -257,7 +280,8 @@ pub(in crate::task_queue) async fn load_non_deleted_book_ids(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to query non-deleted books for thumbnail regeneration: {error}")
+        anyhow::anyhow!(error)
+            .context("failed to query non-deleted books for thumbnail regeneration: ")
     })?;
 
     Ok(rows
@@ -269,7 +293,7 @@ pub(in crate::task_queue) async fn load_non_deleted_book_ids(
 pub(in crate::task_queue) async fn load_books_with_undersized_generated_thumbnails(
     pool: &SqlitePool,
     max_edge: i64,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
         SELECT DISTINCT BOOK_ID
@@ -285,7 +309,8 @@ pub(in crate::task_queue) async fn load_books_with_undersized_generated_thumbnai
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to query books with undersized generated thumbnails: {error}")
+        anyhow::anyhow!(error)
+            .context("failed to query books with undersized generated thumbnails: ")
     })?;
 
     Ok(rows
@@ -297,7 +322,7 @@ pub(in crate::task_queue) async fn load_books_with_undersized_generated_thumbnai
 pub(in crate::task_queue) async fn load_books_with_missing_page_hash(
     pool: &SqlitePool,
     library_id: Option<&str>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let library_id = library_id.map(str::to_string);
     let rows = if let Some(library_id) = library_id.as_deref() {
         sqlx::query(
@@ -324,7 +349,7 @@ pub(in crate::task_queue) async fn load_books_with_missing_page_hash(
         .fetch_all(pool)
         .await
     }
-    .map_err(|error| format!("failed to query books with missing page hashes: {error}"))?;
+    .context("failed to query books with missing page hashes")?;
 
     Ok(rows
         .into_iter()
@@ -335,7 +360,7 @@ pub(in crate::task_queue) async fn load_books_with_missing_page_hash(
 pub(in crate::task_queue) async fn load_duplicate_pages_to_delete(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<HashMap<String, Vec<PersistedHashedPageToDelete>>, String> {
+) -> anyhow::Result<HashMap<String, Vec<PersistedHashedPageToDelete>>> {
     let library_id = library_id.to_string();
     let rows = sqlx::query(
         r#"
@@ -371,7 +396,9 @@ pub(in crate::task_queue) async fn load_duplicate_pages_to_delete(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to query duplicate pages to delete for '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to query duplicate pages to delete for '{library_id}': "
+        ))
     })?;
 
     let mut by_book = HashMap::<String, Vec<PersistedHashedPageToDelete>>::new();
@@ -395,7 +422,7 @@ pub(in crate::task_queue) async fn load_duplicate_pages_to_delete(
 pub(in crate::task_queue) async fn load_books_requiring_analysis(
     pool: &SqlitePool,
     book_ids: &[String],
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if book_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -414,7 +441,9 @@ pub(in crate::task_queue) async fn load_books_requiring_analysis(
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to query media status for '{book_id}': {error}"))?
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("failed to query media status for '{book_id}'"))
+        })?
         .map(|row| row.get::<String, _>("STATUS"));
 
         let needs_analysis = match status.as_deref() {
@@ -437,7 +466,7 @@ pub(in crate::task_queue) async fn load_books_with_missing_file_hash(
     pool: &SqlitePool,
     library_id: &str,
     koreader: bool,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let query = if koreader {
         sqlx::query(
             r#"
@@ -465,7 +494,9 @@ pub(in crate::task_queue) async fn load_books_with_missing_file_hash(
         .fetch_all(pool)
         .await
         .map_err(|error| {
-            format!("failed to query books with missing file hash for '{library_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to query books with missing file hash for '{library_id}': "
+            ))
         })?;
 
     Ok(rows
@@ -477,7 +508,7 @@ pub(in crate::task_queue) async fn load_books_with_missing_file_hash(
 pub(in crate::task_queue) async fn load_books_to_convert(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<Vec<PersistedBookToConvert>, String> {
+) -> anyhow::Result<Vec<PersistedBookToConvert>> {
     let rows = sqlx::query(
         r#"
         SELECT ID, SERIES_ID
@@ -494,7 +525,11 @@ pub(in crate::task_queue) async fn load_books_to_convert(
     .bind(library_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to query books to convert for '{library_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to query books to convert for '{library_id}': "
+        ))
+    })?;
 
     Ok(rows
         .into_iter()
@@ -508,7 +543,7 @@ pub(in crate::task_queue) async fn load_books_to_convert(
 pub(in crate::task_queue) async fn load_book_conversion_target(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedConversionTarget>, String> {
+) -> anyhow::Result<Option<PersistedConversionTarget>> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -530,7 +565,11 @@ pub(in crate::task_queue) async fn load_book_conversion_target(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load convert-book source row for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load convert-book source row for '{book_id}': "
+        ))
+    })?;
 
     Ok(row.map(|row| PersistedConversionTarget {
         book_url: row.get::<String, _>("BOOK_URL"),
@@ -547,7 +586,7 @@ pub(in crate::task_queue) async fn load_book_conversion_target(
 pub(in crate::task_queue) async fn load_books_for_extension_repair(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<Vec<PersistedExtensionRepairTarget>, String> {
+) -> anyhow::Result<Vec<PersistedExtensionRepairTarget>> {
     let rows = sqlx::query(
         r#"
         SELECT
@@ -568,7 +607,9 @@ pub(in crate::task_queue) async fn load_books_for_extension_repair(
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to query books for extension repair in '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to query books for extension repair in '{library_id}': "
+        ))
     })?;
 
     Ok(rows
@@ -598,7 +639,7 @@ pub(in crate::task_queue) async fn load_books_for_extension_repair(
 pub(in crate::task_queue) async fn load_book_for_extension_repair(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedExtensionRepairTarget>, String> {
+) -> anyhow::Result<Option<PersistedExtensionRepairTarget>> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -620,7 +661,9 @@ pub(in crate::task_queue) async fn load_book_for_extension_repair(
     .fetch_optional(pool)
     .await
     .map_err(|error| {
-        format!("failed to load repair-extension source row for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load repair-extension source row for '{book_id}': "
+        ))
     })?;
 
     Ok(row.map(|row| PersistedExtensionRepairTarget {
@@ -636,7 +679,7 @@ pub(in crate::task_queue) async fn load_book_for_extension_repair(
 pub(in crate::task_queue) async fn load_book_archive_source(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<PersistedBookArchiveSource>, String> {
+) -> anyhow::Result<Option<PersistedBookArchiveSource>> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -656,7 +699,9 @@ pub(in crate::task_queue) async fn load_book_archive_source(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load archive source for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("failed to load archive source for '{book_id}'"))
+    })?;
 
     Ok(row.map(|row| PersistedBookArchiveSource {
         file_path: resolve_library_item_path(
@@ -711,8 +756,8 @@ mod tests {
             .await
             .expect_err("missing library maintenance flags should fail");
 
-        assert!(hashing_error.contains("missing-library"));
-        assert!(maintenance_error.contains("missing-library"));
+        assert!(hashing_error.to_string().contains("missing-library"));
+        assert!(maintenance_error.to_string().contains("missing-library"));
 
         close_test_pool(db_path, pool).await;
     }

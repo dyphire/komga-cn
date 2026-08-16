@@ -31,17 +31,17 @@ pub trait TaskQueue: Send + Sync {
         &self,
         records: Vec<TaskQueueRecord>,
         urgency: SubmitUrgency,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
-    async fn status(&self) -> Result<QueueStatus, String>;
+    async fn status(&self) -> anyhow::Result<QueueStatus>;
 }
 
 /// Administrative operations for startup and settings endpoints.
 #[async_trait::async_trait]
 pub trait TaskQueueAdmin: TaskQueue {
-    async fn clear_unowned_tasks(&self) -> Result<usize, String>;
+    async fn clear_unowned_tasks(&self) -> anyhow::Result<usize>;
 
-    async fn apply_pool_size(&self, value: usize) -> Result<(), String>;
+    async fn apply_pool_size(&self, value: usize) -> anyhow::Result<()>;
 
     fn wakeup(&self);
 }

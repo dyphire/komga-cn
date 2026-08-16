@@ -9,27 +9,27 @@ pub trait PageHashPort: Send + Sync {
     async fn load_page_hash_matches_page(
         &self,
         query: PageHashMatchesQuery,
-    ) -> Result<PageHashPage<PageHashMatchEntry>, String>;
+    ) -> anyhow::Result<PageHashPage<PageHashMatchEntry>>;
     async fn load_page_hash_thumbnail(
         &self,
         page_hash: &str,
-    ) -> Result<Option<PageHashThumbnail>, String>;
+    ) -> anyhow::Result<Option<PageHashThumbnail>>;
     async fn load_unknown_page_hash_thumbnail(
         &self,
         page_hash: &str,
         resize_to: Option<u32>,
-    ) -> Result<Option<PageHashThumbnail>, String>;
+    ) -> anyhow::Result<Option<PageHashThumbnail>>;
     async fn load_page_hashes_page(
         &self,
         query: PageHashKnownQuery,
-    ) -> Result<PageHashPage<PageHashKnownEntry>, String>;
+    ) -> anyhow::Result<PageHashPage<PageHashKnownEntry>>;
     async fn load_page_hashes_unknown_page(
         &self,
         query: PageHashUnknownQuery,
-    ) -> Result<PageHashPage<PageHashUnknownEntry>, String>;
+    ) -> anyhow::Result<PageHashPage<PageHashUnknownEntry>>;
     async fn load_page_hash_delete_targets(
         &self,
         hash: &str,
-    ) -> Result<Vec<PageHashDeleteTarget>, String>;
-    async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String>;
+    ) -> anyhow::Result<Vec<PageHashDeleteTarget>>;
+    async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> anyhow::Result<()>;
 }

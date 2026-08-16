@@ -46,10 +46,10 @@ pub enum SeriesMetadataUpdateResult {
     NotFound,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum SeriesMetadataUpdateError {
     Validation(String),
-    Persistence(String),
+    Persistence(anyhow::Error),
 }
 
 impl SeriesMetadataUpdateError {
@@ -57,24 +57,34 @@ impl SeriesMetadataUpdateError {
         Self::Validation(message.into())
     }
 
-    pub(crate) fn persistence(message: impl Into<String>) -> Self {
-        Self::Persistence(message.into())
-    }
-
-    pub fn message(&self) -> &str {
-        match self {
-            Self::Validation(message) | Self::Persistence(message) => message,
-        }
+    pub(crate) fn persistence(error: anyhow::Error) -> Self {
+        Self::Persistence(error)
     }
 }
 
 impl fmt::Display for SeriesMetadataUpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
+        match self {
+            Self::Validation(message) => f.write_str(message),
+            Self::Persistence(error) => write!(f, "{error}"),
+        }
     }
 }
 
 impl std::error::Error for SeriesMetadataUpdateError {}
+
+#[cfg(test)]
+impl PartialEq for SeriesMetadataUpdateError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Validation(left), Self::Validation(right)) => left == right,
+            (Self::Persistence(left), Self::Persistence(right)) => {
+                left.to_string() == right.to_string()
+            }
+            _ => false,
+        }
+    }
+}
 
 pub trait SeriesEventEmitter: Send + Sync {
     fn emit_series_changed(&self, series_id: &str, library_id: &str);
@@ -82,23 +92,23 @@ pub trait SeriesEventEmitter: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait SeriesMetadataWritePort: Send + Sync {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String>;
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>>;
 
     async fn load_existing_series_metadata(
         &self,
         series_id: &str,
-    ) -> Result<Option<ExistingSeriesMetadataRecord>, String>;
+    ) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>>;
 
     async fn persist_series_metadata_update(
         &self,
         series_id: &str,
         update: SeriesMetadataUpdateRecord,
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
         series_id: &str,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 }
 
 pub struct SeriesMetadataWriter<'a, P, E>

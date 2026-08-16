@@ -246,7 +246,7 @@ fn opds_v2_recommended_error_response(error: OpdsV2FeedPageError) -> Response {
         OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Load(error))
         | OpdsV2FeedPageError::Load(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("load OPDS libraries: {error}") })),
+            Json(json!({ "error": format!("load OPDS libraries: {error:#}") })),
         )
             .into_response(),
     }
@@ -374,7 +374,7 @@ pub(crate) async fn opds_v2_library_browse(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS libraries: {error}") })),
+                Json(json!({ "error": format!("load OPDS libraries: {error:#}") })),
             )
                 .into_response();
         }
@@ -555,10 +555,14 @@ pub(crate) async fn opds_v2_library_browse(
         .into_response()
 }
 
-fn opds_v2_browse_load_error(context: &str, error: String) -> Response {
+fn opds_v2_browse_load_error(
+    context: &str,
+    error: impl std::fmt::Display + std::fmt::Debug,
+) -> Response {
+    tracing::error!(?error, %context, "internal OPDS browse load error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": format!("load OPDS browse {context}: {error}") })),
+        Json(json!({ "error": format!("load OPDS browse {context}: {error:#}") })),
     )
         .into_response()
 }

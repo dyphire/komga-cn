@@ -28,61 +28,61 @@ impl PageHashPort for PageHashAccess {
     async fn load_page_hash_matches_page(
         &self,
         query: PageHashMatchesQuery,
-    ) -> Result<PageHashPage<PageHashMatchEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashMatchEntry>> {
         load_page_hash_matches_page(self.db.read_pool(), query)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_page_hash_thumbnail(
         &self,
         page_hash: &str,
-    ) -> Result<Option<PageHashThumbnail>, String> {
+    ) -> anyhow::Result<Option<PageHashThumbnail>> {
         thumbnails::load_page_hash_thumbnail(self.db.read_pool(), page_hash)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_unknown_page_hash_thumbnail(
         &self,
         page_hash: &str,
         resize_to: Option<u32>,
-    ) -> Result<Option<PageHashThumbnail>, String> {
+    ) -> anyhow::Result<Option<PageHashThumbnail>> {
         thumbnails::load_unknown_page_hash_thumbnail(self.db.read_pool(), page_hash, resize_to)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_page_hashes_page(
         &self,
         query: PageHashKnownQuery,
-    ) -> Result<PageHashPage<PageHashKnownEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashKnownEntry>> {
         load_page_hashes_page(self.db.read_pool(), query)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_page_hashes_unknown_page(
         &self,
         query: PageHashUnknownQuery,
-    ) -> Result<PageHashPage<PageHashUnknownEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashUnknownEntry>> {
         load_page_hashes_unknown_page(self.db.read_pool(), query)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
     async fn load_page_hash_delete_targets(
         &self,
         hash: &str,
-    ) -> Result<Vec<PageHashDeleteTarget>, String> {
+    ) -> anyhow::Result<Vec<PageHashDeleteTarget>> {
         load_page_hash_delete_targets(self.db.read_pool(), hash)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 
-    async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String> {
+    async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> anyhow::Result<()> {
         thumbnails::upsert_page_hash(self.db.read_pool(), self.db.write_pool(), command)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }

@@ -43,68 +43,68 @@ struct DiscoveryQueryContext {
 trait PersistedDiscoveryBrowseDataSource: Send + Sync {
     async fn load_book_poster_summaries(
         &self,
-    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String>;
+    ) -> anyhow::Result<HashMap<String, Vec<PersistedBookPosterSummary>>>;
 
     async fn load_persisted_book_summaries(
         &self,
         user_id: Option<&str>,
-    ) -> Result<Vec<PersistedBookSummary>, String>;
+    ) -> anyhow::Result<Vec<PersistedBookSummary>>;
 
     async fn load_persisted_book_summaries_by_ids(
         &self,
         user_id: Option<&str>,
         ids: &[String],
-    ) -> Result<Vec<PersistedBookSummary>, String>;
+    ) -> anyhow::Result<Vec<PersistedBookSummary>>;
 
-    async fn load_persisted_book_count(&self) -> Result<usize, String>;
+    async fn load_persisted_book_count(&self) -> anyhow::Result<usize>;
 
     async fn load_collection_memberships(
         &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String>;
+    ) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>>;
 
     async fn load_collection_ordering(
         &self,
         collection_id: &str,
-    ) -> Result<HashMap<String, i64>, String>;
+    ) -> anyhow::Result<HashMap<String, i64>>;
 
     async fn load_readlist_memberships(&self)
-    -> Result<BTreeMap<String, BTreeSet<String>>, String>;
+    -> anyhow::Result<BTreeMap<String, BTreeSet<String>>>;
 
     async fn load_readlist_ordering(
         &self,
         readlist_id: &str,
-    ) -> Result<HashMap<String, i64>, String>;
+    ) -> anyhow::Result<HashMap<String, i64>>;
 
-    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String>;
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> anyhow::Result<Option<String>>;
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String>;
+    ) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>>;
 
     async fn load_series_read_dates(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, String>, String>;
+    ) -> anyhow::Result<HashMap<String, String>>;
 
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String>;
+    async fn load_series_total_book_counts(&self) -> anyhow::Result<HashMap<String, i64>>;
 
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String>;
+    async fn load_persisted_series_summaries(&self) -> anyhow::Result<Vec<PersistedSeriesSummary>>;
 
     async fn load_persisted_series_summaries_by_ids(
         &self,
         ids: &[String],
-    ) -> Result<Vec<PersistedSeriesSummary>, String>;
+    ) -> anyhow::Result<Vec<PersistedSeriesSummary>>;
 
-    async fn load_persisted_series_count(&self) -> Result<usize, String>;
+    async fn load_persisted_series_count(&self) -> anyhow::Result<usize>;
 
-    async fn search_book_ids(&self, query: &str, limit: usize) -> Result<Vec<String>, String>;
+    async fn search_book_ids(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>>;
 
     async fn search_series_scored_ids(
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ScoredSearchHit>, String>;
+    ) -> anyhow::Result<Vec<ScoredSearchHit>>;
 }
 
 #[derive(Clone)]
@@ -381,7 +381,7 @@ fn persisted_series_summary(row: persisted_models::SeriesSummary) -> PersistedSe
 impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_book_poster_summaries(
         &self,
-    ) -> Result<HashMap<String, Vec<PersistedBookPosterSummary>>, String> {
+    ) -> anyhow::Result<HashMap<String, Vec<PersistedBookPosterSummary>>> {
         let rows = books::load_book_poster_summaries(self.db.read_pool()).await?;
         Ok(rows
             .into_iter()
@@ -403,7 +403,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_persisted_book_summaries(
         &self,
         user_id: Option<&str>,
-    ) -> Result<Vec<PersistedBookSummary>, String> {
+    ) -> anyhow::Result<Vec<PersistedBookSummary>> {
         books::load_persisted_book_summaries(self.db.read_pool(), user_id)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
@@ -413,65 +413,65 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
         &self,
         user_id: Option<&str>,
         ids: &[String],
-    ) -> Result<Vec<PersistedBookSummary>, String> {
+    ) -> anyhow::Result<Vec<PersistedBookSummary>> {
         books::load_persisted_book_summaries_by_ids(self.db.read_pool(), user_id, ids)
             .await
             .map(|rows| rows.into_iter().map(persisted_book_summary).collect())
     }
 
-    async fn load_persisted_book_count(&self) -> Result<usize, String> {
+    async fn load_persisted_book_count(&self) -> anyhow::Result<usize> {
         books::load_persisted_book_count(self.db.read_pool()).await
     }
 
     async fn load_collection_memberships(
         &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    ) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
         library_mappings::load_collection_memberships(self.db.read_pool()).await
     }
 
     async fn load_collection_ordering(
         &self,
         collection_id: &str,
-    ) -> Result<HashMap<String, i64>, String> {
+    ) -> anyhow::Result<HashMap<String, i64>> {
         library_mappings::load_collection_ordering(self.db.read_pool(), collection_id).await
     }
 
     async fn load_readlist_memberships(
         &self,
-    ) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    ) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
         library_mappings::load_readlist_memberships(self.db.read_pool()).await
     }
 
     async fn load_readlist_ordering(
         &self,
         readlist_id: &str,
-    ) -> Result<HashMap<String, i64>, String> {
+    ) -> anyhow::Result<HashMap<String, i64>> {
         library_mappings::load_readlist_ordering(self.db.read_pool(), readlist_id).await
     }
 
-    async fn persisted_utc_date_minus_days(&self, days: i64) -> Result<Option<String>, String> {
+    async fn persisted_utc_date_minus_days(&self, days: i64) -> anyhow::Result<Option<String>> {
         runtime_queries::persisted_utc_date_minus_days(self.db.read_pool(), days).await
     }
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String> {
+    ) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>> {
         runtime_queries::load_series_read_progress_counts(self.db.read_pool(), user_id).await
     }
 
     async fn load_series_read_dates(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, String>, String> {
+    ) -> anyhow::Result<HashMap<String, String>> {
         runtime_queries::load_series_read_dates(self.db.read_pool(), user_id).await
     }
 
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> anyhow::Result<HashMap<String, i64>> {
         runtime_queries::load_series_total_book_counts(self.db.read_pool()).await
     }
 
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<PersistedSeriesSummary>, String> {
+    async fn load_persisted_series_summaries(&self) -> anyhow::Result<Vec<PersistedSeriesSummary>> {
         series::load_persisted_series_summaries(self.db.read_pool())
             .await
             .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
@@ -480,17 +480,17 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
     async fn load_persisted_series_summaries_by_ids(
         &self,
         ids: &[String],
-    ) -> Result<Vec<PersistedSeriesSummary>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesSummary>> {
         series::load_persisted_series_summaries_by_ids(self.db.read_pool(), ids)
             .await
             .map(|rows| rows.into_iter().map(persisted_series_summary).collect())
     }
 
-    async fn load_persisted_series_count(&self) -> Result<usize, String> {
+    async fn load_persisted_series_count(&self) -> anyhow::Result<usize> {
         series::load_persisted_series_count(self.db.read_pool()).await
     }
 
-    async fn search_book_ids(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
+    async fn search_book_ids(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
         self.search.search_ids(query, SearchEntityType::Book, limit)
     }
 
@@ -498,7 +498,7 @@ impl PersistedDiscoveryBrowseDataSource for SqliteDiscoveryBrowseService {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ScoredSearchHit>, String> {
+    ) -> anyhow::Result<Vec<ScoredSearchHit>> {
         Ok(self
             .search
             .search_scored_ids(query, SearchEntityType::Series, limit)?
@@ -532,7 +532,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
         let page =
             series_queries::filtering::load_persisted_series_page(self, &context, persisted_query)
                 .await
-                .map_err(DiscoveryError::Persistence)?;
+                .map_err(|error| DiscoveryError::Persistence(error.to_string()))?;
         Ok(map_series_page(page))
     }
 
@@ -554,7 +554,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
 
         books_queries::load_persisted_books_page(self, &context, persisted_query)
             .await
-            .map_err(DiscoveryError::Persistence)
+            .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 
     async fn list_latest_books(
@@ -576,7 +576,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
 
         books_queries::load_persisted_books_page(self, &context, persisted_query)
             .await
-            .map_err(DiscoveryError::Persistence)
+            .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 
     async fn list_series_alphabetical_groups(
@@ -592,7 +592,7 @@ impl DiscoveryBrowseService for SqliteDiscoveryBrowseService {
             request.search,
         )
         .await
-        .map_err(DiscoveryError::Persistence)
+        .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 }
 
@@ -632,7 +632,7 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
                 facets::load_persisted_series_release_dates(db, library_ids, collection_ids).await
             }
         }
-        .map_err(DiscoveryError::Persistence)
+        .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 
     async fn list_book_tags(
@@ -654,7 +654,7 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
             library_ids.as_deref(),
         )
         .await
-        .map_err(DiscoveryError::Persistence)
+        .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 
     async fn list_referential_tags(
@@ -671,7 +671,7 @@ impl DiscoveryFacetService for SqliteDiscoveryBrowseService {
             authorized_library_ids.as_deref(),
         )
         .await
-        .map_err(DiscoveryError::Persistence)
+        .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 }
 

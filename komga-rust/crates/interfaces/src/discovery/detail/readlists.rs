@@ -232,7 +232,7 @@ pub(crate) async fn readlist_match_comicrack(
 ) -> Response {
     let xml = match extract_comicrack_upload_xml(multipart).await {
         Ok(xml) => xml,
-        Err(error) => return comicrack_bad_request_response(error.as_str()),
+        Err(error) => return comicrack_bad_request_response(&format!("{error:#}")),
     };
 
     let request = match parse_comicrack_readlist(&xml) {
@@ -303,7 +303,7 @@ pub(crate) async fn readlist_delete(
     match app.persisted_sets.delete_readlist(&readlist_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => internal_error_response(error.to_string()),
+        Err(error) => internal_error_response(error),
     }
 }
 
@@ -491,25 +491,30 @@ fn book_details_page_payload(
 
 async fn extract_comicrack_upload_xml(
     multipart: Result<Multipart, MultipartRejection>,
-) -> Result<Vec<u8>, String> {
-    let mut multipart = multipart.map_err(|rejection| rejection.body_text())?;
+) -> anyhow::Result<Vec<u8>> {
+    let mut multipart = multipart.map_err(|rejection| anyhow::anyhow!(rejection.body_text()))?;
 
     loop {
         let field = multipart
             .next_field()
             .await
-            .map_err(|error| error.body_text())?;
+            .map_err(|error| anyhow::anyhow!(error.body_text()))?;
         let Some(field) = field else {
-            return Err("Required request part 'file' is not present".to_string());
+            return Err(anyhow::anyhow!(
+                "Required request part 'file' is not present"
+            ));
         };
 
         if field.name() != Some("file") {
             continue;
         }
 
-        let bytes = field.bytes().await.map_err(|error| error.body_text())?;
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|error| anyhow::anyhow!(error.body_text()))?;
         if bytes.is_empty() {
-            return Err("ERR_1015".to_string());
+            return Err(anyhow::anyhow!("ERR_1015"));
         }
 
         return Ok(bytes.to_vec());

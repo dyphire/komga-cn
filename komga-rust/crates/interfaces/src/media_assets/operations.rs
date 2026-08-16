@@ -90,7 +90,11 @@ pub(crate) async fn book_metadata_update(
     let patch = match parse_book_metadata_patch(patch) {
         Ok(value) => value,
         Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("{error:#}") })),
+            )
+                .into_response();
         }
     };
 
@@ -140,7 +144,7 @@ pub(crate) async fn book_metadata_batch_update(
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({
-                        "error": format!("invalid metadata patch for {book_id}: {error}"),
+                        "error": format!("invalid metadata patch for {book_id}: {error:#}"),
                     })),
                 )
                     .into_response();
@@ -170,7 +174,7 @@ fn metadata_update_error_response(error: BookMetadataUpdateError) -> Response {
 
 fn parse_book_metadata_patch(
     patch: &serde_json::Map<String, Value>,
-) -> Result<BookMetadataPatch, String> {
+) -> anyhow::Result<BookMetadataPatch> {
     Ok(BookMetadataPatch {
         title: optional_string(patch, "title")?,
         title_lock: optional_bool(patch, "titleLock")?,
@@ -196,24 +200,24 @@ fn parse_book_metadata_patch(
 fn optional_bool(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<bool>, String> {
+) -> anyhow::Result<Option<bool>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
         Some(value) => value
             .as_bool()
             .map(Some)
-            .ok_or_else(|| format!("{key} must be a boolean or null")),
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a boolean or null"))),
         None => Ok(None),
     }
 }
 
-fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> Result<Option<f64>, String> {
+fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> anyhow::Result<Option<f64>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
         Some(value) => value
             .as_f64()
             .map(Some)
-            .ok_or_else(|| format!("{key} must be a number or null")),
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a number or null"))),
         None => Ok(None),
     }
 }
@@ -221,13 +225,13 @@ fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> Result<Opt
 fn optional_string(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
         Some(value) => value
             .as_str()
             .map(|value| Some(value.to_string()))
-            .ok_or_else(|| format!("{key} must be a string or null")),
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a string or null"))),
         None => Ok(None),
     }
 }
@@ -235,13 +239,13 @@ fn optional_string(
 fn optional_nullable_string(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Option<String>>, String> {
+) -> anyhow::Result<Option<Option<String>>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(None)),
         Some(value) => value
             .as_str()
             .map(|value| Some(Some(value.to_string())))
-            .ok_or_else(|| format!("{key} must be a string or null")),
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a string or null"))),
         None => Ok(None),
     }
 }
@@ -249,18 +253,18 @@ fn optional_nullable_string(
 fn optional_string_vec(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<String>>, String> {
+) -> anyhow::Result<Option<Vec<String>>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(Vec::new())),
         Some(value) => value
             .as_array()
-            .ok_or_else(|| format!("{key} must be an array or null"))?
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be an array or null")))?
             .iter()
             .map(|entry| {
                 entry
                     .as_str()
                     .map(ToString::to_string)
-                    .ok_or_else(|| format!("{key} entries must be strings"))
+                    .ok_or_else(|| anyhow::anyhow!(format!("{key} entries must be strings")))
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Some),
@@ -271,25 +275,25 @@ fn optional_string_vec(
 fn optional_authors(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<BookMetadataAuthor>>, String> {
+) -> anyhow::Result<Option<Vec<BookMetadataAuthor>>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(Vec::new())),
         Some(value) => value
             .as_array()
-            .ok_or_else(|| format!("{key} must be an array or null"))?
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be an array or null")))?
             .iter()
             .map(|entry| {
                 let entry = entry
                     .as_object()
-                    .ok_or_else(|| format!("{key} entries must be objects"))?;
+                    .ok_or_else(|| anyhow::anyhow!(format!("{key} entries must be objects")))?;
                 let name = entry
                     .get("name")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "author.name must be a string".to_string())?;
+                    .ok_or_else(|| anyhow::anyhow!("author.name must be a string"))?;
                 let role = entry
                     .get("role")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "author.role must be a string".to_string())?;
+                    .ok_or_else(|| anyhow::anyhow!("author.role must be a string"))?;
                 Ok(BookMetadataAuthor {
                     name: name.to_string(),
                     role: role.to_string(),
@@ -304,25 +308,25 @@ fn optional_authors(
 fn optional_links(
     patch: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<BookMetadataLink>>, String> {
+) -> anyhow::Result<Option<Vec<BookMetadataLink>>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(Some(Vec::new())),
         Some(value) => value
             .as_array()
-            .ok_or_else(|| format!("{key} must be an array or null"))?
+            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be an array or null")))?
             .iter()
             .map(|entry| {
                 let entry = entry
                     .as_object()
-                    .ok_or_else(|| format!("{key} entries must be objects"))?;
+                    .ok_or_else(|| anyhow::anyhow!(format!("{key} entries must be objects")))?;
                 let label = entry
                     .get("label")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "links.label must be a string".to_string())?;
+                    .ok_or_else(|| anyhow::anyhow!("links.label must be a string"))?;
                 let url = entry
                     .get("url")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| "links.url must be a string".to_string())?;
+                    .ok_or_else(|| anyhow::anyhow!("links.url must be a string"))?;
                 Ok(BookMetadataLink {
                     label: label.to_string(),
                     url: url.to_string(),

@@ -49,7 +49,7 @@ pub struct KoboMetadataRecord {
 pub fn kobo_metadata_pre_paginated(
     content: &dyn EpubNavigationContentPort,
     extension_blob: Option<&[u8]>,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let Some(blob) = extension_blob else {
         return Ok(false);
     };

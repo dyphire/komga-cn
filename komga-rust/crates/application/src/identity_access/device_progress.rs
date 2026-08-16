@@ -12,7 +12,7 @@ use super::DeviceSyncPort;
 
 #[async_trait::async_trait]
 pub trait DeviceProgressPageCountPort: Send + Sync {
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>>;
 }
 
 #[async_trait::async_trait]
@@ -20,7 +20,7 @@ impl<T> DeviceProgressPageCountPort for T
 where
     T: ReadProgressReadPort + ?Sized,
 {
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>> {
         ReadProgressReadPort::book_page_count(self, book_id).await
     }
 }

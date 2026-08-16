@@ -67,63 +67,63 @@ pub trait ThumbnailReaderPort: Send + Sync {
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
 
     async fn book_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
 
-    async fn book_thumbnails(&self, book_id: &str) -> Result<Vec<EntityThumbnailRecord>, String>;
+    async fn book_thumbnails(&self, book_id: &str) -> anyhow::Result<Vec<EntityThumbnailRecord>>;
 
     async fn selected_series_thumbnail(
         &self,
         series_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
 
     async fn series_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
 
     async fn series_thumbnails(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<SeriesThumbnailRecord>>;
 
     async fn readlist_thumbnails(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<ReadlistThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<ReadlistThumbnailRecord>>;
 
     async fn readlist_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<ReadlistThumbnailRecord>, String>;
+    ) -> anyhow::Result<Option<ReadlistThumbnailRecord>>;
 
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<CollectionThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<CollectionThumbnailRecord>>;
 
     async fn collection_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<CollectionThumbnailRecord>, String>;
+    ) -> anyhow::Result<Option<CollectionThumbnailRecord>>;
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
 
-    async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
+    async fn book_exists(&self, book_id: &str) -> anyhow::Result<bool>;
 
-    async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
+    async fn series_exists(&self, series_id: &str) -> anyhow::Result<bool>;
 
-    async fn readlist_exists(&self, readlist_id: &str) -> Result<bool, String>;
+    async fn readlist_exists(&self, readlist_id: &str) -> anyhow::Result<bool>;
 
-    async fn collection_exists(&self, collection_id: &str) -> Result<bool, String>;
+    async fn collection_exists(&self, collection_id: &str) -> anyhow::Result<bool>;
 
-    async fn series_oneshot(&self, series_id: &str) -> Result<Option<bool>, String>;
+    async fn series_oneshot(&self, series_id: &str) -> anyhow::Result<Option<bool>>;
 
-    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
+    async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]
@@ -140,95 +140,95 @@ where
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
         ThumbnailReadPort::selected_book_thumbnail(self, book_id).await
     }
 
     async fn book_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
         ThumbnailReadPort::book_thumbnail_by_id(self, thumbnail_id).await
     }
 
-    async fn book_thumbnails(&self, book_id: &str) -> Result<Vec<EntityThumbnailRecord>, String> {
+    async fn book_thumbnails(&self, book_id: &str) -> anyhow::Result<Vec<EntityThumbnailRecord>> {
         ThumbnailReadPort::book_thumbnails(self, book_id).await
     }
 
     async fn selected_series_thumbnail(
         &self,
         series_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
         ThumbnailReadPort::selected_series_thumbnail(self, series_id).await
     }
 
     async fn series_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String> {
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>> {
         ThumbnailReadPort::series_thumbnail_by_id(self, thumbnail_id).await
     }
 
     async fn series_thumbnails(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesThumbnailRecord>, String> {
+    ) -> anyhow::Result<Vec<SeriesThumbnailRecord>> {
         ThumbnailReadPort::series_thumbnails(self, series_id).await
     }
 
     async fn readlist_thumbnails(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<ReadlistThumbnailRecord>, String> {
+    ) -> anyhow::Result<Vec<ReadlistThumbnailRecord>> {
         ThumbnailReadPort::readlist_thumbnails(self, readlist_id).await
     }
 
     async fn readlist_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<ReadlistThumbnailRecord>, String> {
+    ) -> anyhow::Result<Option<ReadlistThumbnailRecord>> {
         ThumbnailReadPort::readlist_thumbnail_by_id(self, thumbnail_id).await
     }
 
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<CollectionThumbnailRecord>, String> {
+    ) -> anyhow::Result<Vec<CollectionThumbnailRecord>> {
         ThumbnailReadPort::collection_thumbnails(self, collection_id).await
     }
 
     async fn collection_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<CollectionThumbnailRecord>, String> {
+    ) -> anyhow::Result<Option<CollectionThumbnailRecord>> {
         ThumbnailReadPort::collection_thumbnail_by_id(self, thumbnail_id).await
     }
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         BookMediaPort::book_media(self, book_id).await
     }
 
-    async fn book_exists(&self, book_id: &str) -> Result<bool, String> {
+    async fn book_exists(&self, book_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::book_exists(self, book_id).await
     }
 
-    async fn series_exists(&self, series_id: &str) -> Result<bool, String> {
+    async fn series_exists(&self, series_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::series_exists(self, series_id).await
     }
 
-    async fn readlist_exists(&self, readlist_id: &str) -> Result<bool, String> {
+    async fn readlist_exists(&self, readlist_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::readlist_exists(self, readlist_id).await
     }
 
-    async fn collection_exists(&self, collection_id: &str) -> Result<bool, String> {
+    async fn collection_exists(&self, collection_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::collection_exists(self, collection_id).await
     }
 
-    async fn series_oneshot(&self, series_id: &str) -> Result<Option<bool>, String> {
+    async fn series_oneshot(&self, series_id: &str) -> anyhow::Result<Option<bool>> {
         SeriesRelationPort::series_oneshot(self, series_id).await
     }
 
-    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
+    async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>> {
         SeriesRelationPort::series_book_ids(self, series_id).await
     }
 }

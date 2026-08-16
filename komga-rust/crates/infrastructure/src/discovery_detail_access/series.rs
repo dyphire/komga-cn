@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{Row, SqlitePool};
 
 use komga_application::discovery::{
@@ -12,7 +13,7 @@ use crate::parsing::clamp_kotlin_int_u32;
 pub(super) async fn load_persisted_series_resource(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<PersistedSeriesResourceRecord>, String> {
+) -> anyhow::Result<Option<PersistedSeriesResourceRecord>> {
     let row = sqlx::query(
         r#"SELECT s.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
@@ -27,7 +28,7 @@ pub(super) async fn load_persisted_series_resource(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted series resource: {error}"))?;
+    .context("query persisted series resource")?;
 
     Ok(row.map(|row| PersistedSeriesResourceRecord {
         library_id: row.get::<String, _>("LIBRARY_ID"),
@@ -41,7 +42,7 @@ pub(super) async fn load_persisted_series_resource(
 pub(super) async fn load_series_id_by_sorted_position(
     pool: &SqlitePool,
     index: usize,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let row = sqlx::query(
         r#"SELECT s.ID AS ID
          FROM SERIES s
@@ -54,7 +55,7 @@ pub(super) async fn load_series_id_by_sorted_position(
     .bind((index - 1) as i64)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query remapped series id: {error}"))?;
+    .context("query remapped series id")?;
 
     Ok(row.map(|row| row.get::<String, _>("ID")))
 }
@@ -62,7 +63,7 @@ pub(super) async fn load_series_id_by_sorted_position(
 pub(super) async fn load_persisted_series_detail(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<PersistedSeriesDetailRecord>, String> {
+) -> anyhow::Result<Option<PersistedSeriesDetailRecord>> {
     let row = sqlx::query(
         r#"SELECT s.ID AS ID, s.LIBRARY_ID AS LIBRARY_ID, s.NAME AS NAME, s.URL AS URL,
                 s.CREATED_DATE AS CREATED_DATE, s.LAST_MODIFIED_DATE AS LAST_MODIFIED_DATE,
@@ -91,7 +92,7 @@ pub(super) async fn load_persisted_series_detail(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted series detail: {error}"))?;
+    .context("query persisted series detail")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -105,7 +106,7 @@ pub(super) async fn load_persisted_series_detail(
     .bind(series_id)
     .fetch_one(pool)
     .await
-    .map_err(|error| format!("query persisted series books count: {error}"))?;
+    .context("query persisted series books count")?;
 
     Ok(Some(PersistedSeriesDetailRecord {
         id: row.get::<String, _>("ID"),
@@ -140,7 +141,7 @@ pub(super) async fn load_persisted_series_detail(
 pub(super) async fn load_persisted_series_collections(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
+) -> anyhow::Result<Vec<PersistedSeriesCollectionRecord>> {
     let rows = sqlx::query(
         r#"SELECT c.ID, c.NAME, c.ORDERED, c.CREATED_DATE, c.LAST_MODIFIED_DATE
          FROM COLLECTION c
@@ -151,7 +152,7 @@ pub(super) async fn load_persisted_series_collections(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted series collections: {error}"))?;
+    .context("query persisted series collections")?;
 
     let mut collections = Vec::with_capacity(rows.len());
     for row in rows {
@@ -165,7 +166,7 @@ pub(super) async fn load_persisted_series_collections(
         .bind(collection_id.clone())
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted collection series ids: {error}"))?;
+        .context("query persisted collection series ids")?;
 
         collections.push(PersistedSeriesCollectionRecord {
             id: collection_id,
@@ -186,7 +187,7 @@ pub(super) async fn load_persisted_series_collections(
 pub(super) async fn load_existing_series_metadata(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
+) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>> {
     let row = sqlx::query(
         r#"SELECT STATUS, STATUS_LOCK, TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK, SUMMARY,
                 SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK, PUBLISHER,
@@ -199,7 +200,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query existing series metadata: {error}"))?;
+    .context("query existing series metadata")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -211,7 +212,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing series metadata genres: {error}"))?
+    .context("query existing series metadata genres")?
     .into_iter()
     .map(|row| row.get::<String, _>("GENRE"))
     .collect::<Vec<_>>();
@@ -222,7 +223,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing series metadata tags: {error}"))?
+    .context("query existing series metadata tags")?
     .into_iter()
     .map(|row| row.get::<String, _>("TAG"))
     .collect::<Vec<_>>();
@@ -235,7 +236,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing series metadata sharing labels: {error}"))?
+    .context("query existing series metadata sharing labels")?
     .into_iter()
     .map(|row| row.get::<String, _>("LABEL"))
     .collect::<Vec<_>>();
@@ -248,7 +249,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing series metadata links: {error}"))?
+    .context("query existing series metadata links")?
     .into_iter()
     .map(|row| SeriesMetadataLinkRecord {
         label: row.get::<String, _>("LABEL"),
@@ -264,7 +265,7 @@ pub(super) async fn load_existing_series_metadata(
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query existing series metadata alternate titles: {error}"))?
+    .context("query existing series metadata alternate titles")?
     .into_iter()
     .map(|row| SeriesAlternateTitleRecord {
         label: row.get::<String, _>("LABEL"),
@@ -316,11 +317,11 @@ pub(super) async fn persist_series_metadata_update(
     pool: &SqlitePool,
     series_id: &str,
     update: SeriesMetadataUpdateRecord,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin series metadata update tx: {error}"))?;
+        .context("begin series metadata update tx")?;
 
     let result = sqlx::query(
         r#"UPDATE SERIES_METADATA
@@ -359,12 +360,12 @@ pub(super) async fn persist_series_metadata_update(
     .bind(series_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("persist series metadata update: {error}"))?;
+    .context("persist series metadata update")?;
 
     if result.rows_affected() == 0 {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback series metadata update tx: {error}"))?;
+            .context("rollback series metadata update tx")?;
         return Ok(false);
     }
 
@@ -397,7 +398,7 @@ pub(super) async fn persist_series_metadata_update(
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit series metadata update tx: {error}"))?;
+        .context("commit series metadata update tx")?;
 
     Ok(true)
 }
@@ -408,14 +409,16 @@ async fn replace_series_metadata_strings(
     value_column: &str,
     series_id: &str,
     values: &[String],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"DELETE FROM {table} WHERE SERIES_ID = ?"#
     )))
     .bind(series_id)
     .execute(&mut **tx)
     .await
-    .map_err(|error| format!("clear {table} during series metadata update: {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("clear {table} during series metadata update"))
+    })?;
 
     for value in values {
         sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -425,7 +428,9 @@ async fn replace_series_metadata_strings(
         .bind(value)
         .execute(&mut **tx)
         .await
-        .map_err(|error| format!("insert {table} during series metadata update: {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("insert {table} during series metadata update"))
+        })?;
     }
 
     Ok(())
@@ -435,13 +440,14 @@ async fn replace_series_metadata_alternate_titles(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     series_id: &str,
     titles: &[SeriesAlternateTitleRecord],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     sqlx::query(r#"DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"#)
         .bind(series_id)
         .execute(&mut **tx)
         .await
         .map_err(|error| {
-            format!("clear SERIES_METADATA_ALTERNATE_TITLE during series metadata update: {error}")
+            anyhow::anyhow!(error)
+                .context("clear SERIES_METADATA_ALTERNATE_TITLE during series metadata update: ")
         })?;
 
     for title in titles {
@@ -453,9 +459,7 @@ async fn replace_series_metadata_alternate_titles(
         .bind(&title.title)
         .execute(&mut **tx)
         .await
-        .map_err(|error| {
-            format!("insert SERIES_METADATA_ALTERNATE_TITLE during series metadata update: {error}")
-        })?;
+        .context("insert SERIES_METADATA_ALTERNATE_TITLE during series metadata update")?;
     }
 
     Ok(())
@@ -465,13 +469,14 @@ async fn replace_series_metadata_links(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     series_id: &str,
     links: &[SeriesMetadataLinkRecord],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     sqlx::query(r#"DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?"#)
         .bind(series_id)
         .execute(&mut **tx)
         .await
         .map_err(|error| {
-            format!("clear SERIES_METADATA_LINK during series metadata update: {error}")
+            anyhow::anyhow!(error)
+                .context("clear SERIES_METADATA_LINK during series metadata update: ")
         })?;
 
     for link in links {
@@ -482,7 +487,8 @@ async fn replace_series_metadata_links(
             .execute(&mut **tx)
             .await
             .map_err(|error| {
-                format!("insert SERIES_METADATA_LINK during series metadata update: {error}")
+                anyhow::anyhow!(error)
+                    .context("insert SERIES_METADATA_LINK during series metadata update: ")
             })?;
     }
 
@@ -492,7 +498,7 @@ async fn replace_series_metadata_links(
 pub(super) async fn refresh_series_after_metadata_update(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     sqlx::query(
         r#"UPDATE SERIES_METADATA
          SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
@@ -501,7 +507,7 @@ pub(super) async fn refresh_series_after_metadata_update(
     .bind(series_id)
     .execute(pool)
     .await
-    .map_err(|error| format!("refresh series metadata timestamp: {error}"))?;
+    .context("refresh series metadata timestamp")?;
 
     sqlx::query(
         r#"UPDATE SERIES
@@ -511,7 +517,7 @@ pub(super) async fn refresh_series_after_metadata_update(
     .bind(series_id)
     .execute(pool)
     .await
-    .map_err(|error| format!("refresh series row timestamp: {error}"))?;
+    .context("refresh series row timestamp")?;
 
     Ok(())
 }

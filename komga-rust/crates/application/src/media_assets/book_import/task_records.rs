@@ -9,7 +9,7 @@ const IMPORT_BOOK_PRIORITY: i32 = 100;
 pub(super) fn build_import_task_records(
     payload: BooksImportPayload,
     mut next_task_id: impl FnMut() -> String,
-) -> Result<Vec<TaskQueueRecord>, String> {
+) -> anyhow::Result<Vec<TaskQueueRecord>> {
     payload
         .books
         .into_iter()

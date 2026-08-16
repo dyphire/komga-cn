@@ -1,3 +1,4 @@
+use anyhow::Context;
 use sqlx::{Row, SqlitePool};
 
 use super::common;
@@ -6,13 +7,13 @@ use komga_application::discovery::{
     PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
 
-pub(super) async fn persisted_collections_exist(pool: &SqlitePool) -> Result<bool, String> {
+pub(super) async fn persisted_collections_exist(pool: &SqlitePool) -> anyhow::Result<bool> {
     common::table_has_rows(pool, "COLLECTION", "persisted collections").await
 }
 
 pub(super) async fn load_persisted_collections(
     pool: &SqlitePool,
-) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
@@ -20,7 +21,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted collections: {error}"))?;
+    .context("query persisted collections")?;
 
     Ok(rows
         .into_iter()
@@ -37,7 +38,7 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
 pub(super) async fn load_persisted_collection_detail(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
     let row = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, CREATED_DATE, LAST_MODIFIED_DATE
 FROM COLLECTION
@@ -46,7 +47,7 @@ WHERE ID = ?"#,
     .bind(collection_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted collection detail: {error}"))?;
+    .context("query persisted collection detail")?;
 
     Ok(row.map(|row| PersistedCollectionAccessRecord {
         id: row.get::<String, _>("ID"),
@@ -60,7 +61,7 @@ WHERE ID = ?"#,
 pub(super) async fn load_persisted_collection_series_ids(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID
 FROM COLLECTION_SERIES
@@ -70,7 +71,7 @@ ORDER BY NUMBER ASC"#,
     .bind(collection_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted collection series ids: {error}"))?;
+    .context("query persisted collection series ids")?;
 
     Ok(rows
         .into_iter()
@@ -81,7 +82,7 @@ ORDER BY NUMBER ASC"#,
 pub(super) async fn load_series_library_id(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let row = sqlx::query(
         r#"SELECT LIBRARY_ID
 FROM SERIES
@@ -91,7 +92,7 @@ LIMIT 1"#,
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query series library for visibility: {error}"))?;
+    .context("query series library for visibility")?;
 
     Ok(row.map(|row| row.get::<String, _>("LIBRARY_ID")))
 }
@@ -99,7 +100,7 @@ LIMIT 1"#,
 pub(super) async fn load_series_restrictions(
     pool: &SqlitePool,
     series_id: &str,
-) -> Result<PersistedSeriesRestrictionRecord, String> {
+) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
     let age_row = sqlx::query(
         r#"SELECT AGE_RATING
 FROM SERIES_METADATA
@@ -109,7 +110,7 @@ LIMIT 1"#,
     .bind(series_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query series age rating for visibility: {error}"))?;
+    .context("query series age rating for visibility")?;
 
     let label_rows = sqlx::query(
         r#"SELECT LABEL
@@ -119,7 +120,7 @@ WHERE SERIES_ID = ?"#,
     .bind(series_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series sharing labels for visibility: {error}"))?;
+    .context("query series sharing labels for visibility")?;
 
     let age_rating = age_row
         .and_then(|row| row.get::<Option<i64>, _>("AGE_RATING"))
@@ -138,11 +139,8 @@ pub(super) async fn persist_collection_create(
     name: &str,
     ordered: bool,
     series_ids: &[String],
-) -> Result<(), String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin collection create tx: {error}"))?;
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await.context("begin collection create tx")?;
 
     sqlx::query(
         r#"INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT, CREATED_DATE,
@@ -155,7 +153,7 @@ VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
     .bind(series_ids.len() as i64)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert persisted collection: {error}"))?;
+    .context("insert persisted collection")?;
 
     common::replace_ordered_children(
         &mut tx,
@@ -166,11 +164,9 @@ VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
         series_ids,
     )
     .await
-    .map_err(|error| format!("insert persisted collection series: {error}"))?;
+    .context("insert persisted collection series")?;
 
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit collection create tx: {error}"))?;
+    tx.commit().await.context("commit collection create tx")?;
 
     Ok(())
 }
@@ -181,11 +177,8 @@ pub(super) async fn persist_collection_update(
     name: &str,
     ordered: bool,
     series_ids: &[String],
-) -> Result<bool, String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin collection update tx: {error}"))?;
+) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await.context("begin collection update tx")?;
 
     let updated = sqlx::query(
         r#"UPDATE COLLECTION
@@ -198,14 +191,14 @@ WHERE ID = ?"#,
     .bind(collection_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("update persisted collection: {error}"))?
+    .context("update persisted collection")?
     .rows_affected()
         > 0;
 
     if !updated {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback collection update tx: {error}"))?;
+            .context("rollback collection update tx")?;
         return Ok(false);
     }
 
@@ -218,18 +211,16 @@ WHERE ID = ?"#,
         series_ids,
     )
     .await
-    .map_err(|error| format!("replace persisted collection series: {error}"))?;
+    .context("replace persisted collection series")?;
 
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit collection update tx: {error}"))?;
+    tx.commit().await.context("commit collection update tx")?;
     Ok(true)
 }
 
 pub(super) async fn delete_persisted_collection(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     common::delete_parent_with_children(
         pool,
         "THUMBNAIL_COLLECTION",

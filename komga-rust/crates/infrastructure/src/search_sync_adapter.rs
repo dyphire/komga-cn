@@ -20,7 +20,7 @@ impl SearchSyncAdapter {
 
 #[async_trait::async_trait]
 impl SearchSyncPort for SearchSyncAdapter {
-    async fn sync_book(&self, book_id: &str) -> Result<(), String> {
+    async fn sync_book(&self, book_id: &str) -> anyhow::Result<()> {
         self.search.upsert_book(book_id).await.map(|_| ())
     }
 }

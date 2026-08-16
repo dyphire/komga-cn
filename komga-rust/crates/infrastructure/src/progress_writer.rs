@@ -33,7 +33,7 @@ impl ProgressWriterPort for ProgressWriter {
         page: u64,
         completed: bool,
         locator: Option<Value>,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         metadata::persist_read_progress(
             &self.pool,
             self.runtime_events.as_ref(),
@@ -46,11 +46,11 @@ impl ProgressWriterPort for ProgressWriter {
         .await
     }
 
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()> {
         metadata::persist_book_progression(&self.pool, self.runtime_events.as_ref(), input).await
     }
 
-    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String> {
+    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> anyhow::Result<()> {
         metadata::delete_persisted_read_progress(
             &self.pool,
             self.runtime_events.as_ref(),
@@ -64,7 +64,7 @@ impl ProgressWriterPort for ProgressWriter {
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         media_read_progress::refresh_series_read_progress_row(&self.pool, series_id, user_id).await
     }
 
@@ -72,7 +72,7 @@ impl ProgressWriterPort for ProgressWriter {
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         media_read_progress::delete_series_read_progress_row(&self.pool, series_id, user_id).await
     }
 }

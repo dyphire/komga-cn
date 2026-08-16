@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use super::cleanup_tasks::{cleanup_empty_sets_rows, empty_trash_rows};
 use super::scan_follow_up::ScanFollowUpPlanner;
 use super::scanner_support::LibraryScanner;
 
-async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScanProfile>, String> {
+async fn load_library_scan_profiles(pool: &SqlitePool) -> anyhow::Result<Vec<LibraryScanProfile>> {
     let rows = sqlx::query(
         r#"SELECT
             ID,
@@ -27,7 +28,7 @@ async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScan
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query scan profiles: {error}"))?;
+    .context("query scan profiles")?;
 
     rows.into_iter()
         .map(|row| {
@@ -42,10 +43,10 @@ async fn load_library_scan_profiles(pool: &SqlitePool) -> Result<Vec<LibraryScan
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn library_scan_interval_from_db(value: &str) -> Result<LibraryScanInterval, String> {
+fn library_scan_interval_from_db(value: &str) -> anyhow::Result<LibraryScanInterval> {
     let normalized = value.trim().to_ascii_uppercase();
     LibraryScanInterval::from_persisted_name(normalized.as_str())
-        .ok_or_else(|| format!("unsupported library scan interval: {value}"))
+        .ok_or_else(|| anyhow::anyhow!(format!("unsupported library scan interval: {value}")))
 }
 
 #[derive(Clone)]

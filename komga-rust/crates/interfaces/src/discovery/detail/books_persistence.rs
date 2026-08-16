@@ -19,7 +19,7 @@ pub(super) enum PersistedBookSiblingDirection {
 pub(in crate::discovery) async fn load_persisted_book_resource(
     app: &DiscoveryState,
     book_id: &str,
-) -> Result<Option<PersistedBookResource>, String> {
+) -> anyhow::Result<Option<PersistedBookResource>> {
     let resource = app
         .book_detail
         .load_persisted_book_resource(book_id)
@@ -36,7 +36,7 @@ pub(super) async fn load_persisted_book_detail(
     app: &DiscoveryState,
     book_id: &str,
     user_id: Option<&str>,
-) -> Result<Option<BookReadModel>, String> {
+) -> anyhow::Result<Option<BookReadModel>> {
     app.book_detail
         .load_persisted_book_detail(book_id, user_id)
         .await
@@ -47,7 +47,7 @@ pub(super) async fn load_persisted_book_sibling_detail(
     book_id: &str,
     direction: PersistedBookSiblingDirection,
     user_id: Option<&str>,
-) -> Result<Option<BookReadModel>, String> {
+) -> anyhow::Result<Option<BookReadModel>> {
     let direction = match direction {
         PersistedBookSiblingDirection::Previous => PersistedBookSiblingDirectionRecord::Previous,
         PersistedBookSiblingDirection::Next => PersistedBookSiblingDirectionRecord::Next,

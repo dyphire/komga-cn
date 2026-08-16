@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 
 use sqlx::sqlite::SqliteRow;
@@ -13,14 +14,14 @@ use crate::parsing::parse_thumbnail_type;
 
 pub(super) async fn load_book_poster_summaries(
     pool: &SqlitePool,
-) -> Result<HashMap<String, Vec<BookPosterSummary>>, String> {
+) -> anyhow::Result<HashMap<String, Vec<BookPosterSummary>>> {
     let rows = sqlx::query(
         r#"SELECT BOOK_ID, TYPE, SELECTED
          FROM THUMBNAIL_BOOK"#,
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query book posters: {error}"))?;
+    .context("query book posters")?;
 
     let mut posters: HashMap<String, Vec<BookPosterSummary>> = HashMap::new();
     for row in rows {
@@ -38,10 +39,10 @@ pub(super) async fn load_book_poster_summaries(
 pub(super) async fn load_persisted_book_summaries(
     pool: &SqlitePool,
     user_id: Option<&str>,
-) -> Result<Vec<BookSummary>, String> {
+) -> anyhow::Result<Vec<BookSummary>> {
     let rows = fetch_persisted_book_summary_rows(pool, user_id, None)
         .await
-        .map_err(|error| format!("query persisted book summaries: {error}"))?;
+        .context("query persisted book summaries")?;
 
     Ok(map_book_summary_rows(rows))
 }
@@ -50,14 +51,14 @@ pub(super) async fn load_persisted_book_summaries_by_ids(
     pool: &SqlitePool,
     user_id: Option<&str>,
     ids: &[String],
-) -> Result<Vec<BookSummary>, String> {
+) -> anyhow::Result<Vec<BookSummary>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
     let rows = fetch_persisted_book_summary_rows(pool, user_id, Some(ids))
         .await
-        .map_err(|error| format!("query persisted book summaries by ids: {error}"))?;
+        .context("query persisted book summaries by ids")?;
 
     let mut rows_by_id: HashMap<String, BookSummary> = map_book_summary_rows(rows)
         .into_iter()
@@ -236,11 +237,11 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
     }
 }
 
-pub(super) async fn load_persisted_book_count(pool: &SqlitePool) -> Result<usize, String> {
+pub(super) async fn load_persisted_book_count(pool: &SqlitePool) -> anyhow::Result<usize> {
     let row = sqlx::query(r#"SELECT COUNT(*) AS COUNT FROM BOOK"#)
         .fetch_one(pool)
         .await
-        .map_err(|error| format!("query persisted book count: {error}"))?;
+        .context("query persisted book count")?;
     Ok(row.get::<i64, _>("COUNT").max(0) as usize)
 }
 

@@ -54,14 +54,14 @@ struct TestProgressionReader {
 
 #[async_trait::async_trait]
 impl BookProgressionReaderPort for TestProgressionReader {
-    async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, _book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         Ok(None)
     }
 
     async fn book_restrictions(
         &self,
         _book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         Ok(None)
     }
 
@@ -69,7 +69,7 @@ impl BookProgressionReaderPort for TestProgressionReader {
         &self,
         _book_id: &str,
         _user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String> {
+    ) -> anyhow::Result<Option<BookProgressionRecord>> {
         Ok(self.book_progression.clone())
     }
 }
@@ -81,7 +81,7 @@ struct TestProgressWriter {
 
 #[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()> {
         self.persisted.lock().unwrap().push(input);
         Ok(())
     }

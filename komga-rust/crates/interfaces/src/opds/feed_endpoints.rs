@@ -218,21 +218,22 @@ fn opds_v2_feed_error_response(kind: OpdsV2FeedKind, error: OpdsV2FeedPageError)
         }
         OpdsV2FeedPageError::LibraryScope(OpdsLibraryScopeError::Load(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("load OPDS {} library scope: {error}", kind.error_label()) })),
+            Json(json!({ "error": format!("load OPDS {} library scope: {error:#}", kind.error_label()) })),
         )
             .into_response(),
         OpdsV2FeedPageError::Load(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("load OPDS {}: {error}", kind.error_label()) })),
+            Json(json!({ "error": format!("load OPDS {}: {error:#}", kind.error_label()) })),
         )
             .into_response(),
     }
 }
 
-fn opds_v2_load_error(context: &str, error: String) -> Response {
+fn opds_v2_load_error(context: &str, error: impl std::fmt::Display + std::fmt::Debug) -> Response {
+    tracing::error!(?error, %context, "internal OPDS load error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": format!("load OPDS {context}: {error}") })),
+        Json(json!({ "error": format!("load OPDS {context}: {error:#}") })),
     )
         .into_response()
 }
@@ -275,7 +276,7 @@ pub(super) async fn opds_v2_collections_feed(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS libraries: {error}") })),
+                Json(json!({ "error": format!("load OPDS libraries: {error:#}") })),
             )
                 .into_response();
         }
@@ -294,7 +295,7 @@ pub(super) async fn opds_v2_collections_feed(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS collections: {error}") })),
+                Json(json!({ "error": format!("load OPDS collections: {error:#}") })),
             )
                 .into_response();
         }
@@ -456,7 +457,9 @@ pub(super) async fn opds_v2_readlists_feed(
             Err(error) => {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS library readlists scope: {error}") })),
+                    Json(
+                        json!({ "error": format!("load OPDS library readlists scope: {error:#}") }),
+                    ),
                 )
                     .into_response();
             }
@@ -476,7 +479,7 @@ pub(super) async fn opds_v2_readlists_feed(
         Err(error) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("load OPDS readlists: {error}") })),
+                Json(json!({ "error": format!("load OPDS readlists: {error:#}") })),
             )
                 .into_response();
         }

@@ -27,7 +27,7 @@ pub(super) async fn load_browse_series_navigation(
     publishers: &[String],
     page: usize,
     size: usize,
-) -> Result<OpdsJsonNavigationPage, String> {
+) -> anyhow::Result<OpdsJsonNavigationPage> {
     let page_result = backend
         .load_browse_series_navigation_entries(
             allowed_library_ids.as_ref(),
@@ -70,7 +70,7 @@ pub(super) async fn load_browse_publisher_navigation(
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
-) -> Result<Vec<Value>, String> {
+) -> anyhow::Result<Vec<Value>> {
     let entries = backend
         .load_browse_publisher_entries(allowed_library_ids.as_ref(), library_id)
         .await?;
@@ -98,7 +98,7 @@ pub(super) async fn load_series_page(
     publishers: &[String],
     offset: i64,
     limit: i64,
-) -> Result<Vec<PersistedSeries>, String> {
+) -> anyhow::Result<Vec<PersistedSeries>> {
     backend
         .load_series_page(
             allowed_library_ids.as_ref(),

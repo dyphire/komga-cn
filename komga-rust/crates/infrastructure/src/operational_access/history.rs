@@ -27,10 +27,10 @@ impl HistoryPort for HistoryAccess {
         page: u64,
         size: u64,
         sort: HistorySortSelection,
-    ) -> Result<HistoryPage, String> {
+    ) -> anyhow::Result<HistoryPage> {
         load_history_page(self.db.read_pool(), page, size, sort)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(anyhow::Error::from)
     }
 }
 

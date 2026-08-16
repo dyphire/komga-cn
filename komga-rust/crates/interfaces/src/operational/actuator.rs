@@ -127,11 +127,14 @@ pub(crate) async fn actuator_metric_detail(
     match service.metric_detail(&metric_name, &tag_filters).await {
         Ok(Some(metric)) => actuator_json(actuator_metric_detail_payload(metric)),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error })),
-        )
-            .into_response(),
+        Err(error) => {
+            tracing::error!(?error, "actuator metric detail failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("{error:#}") })),
+            )
+                .into_response()
+        }
     }
 }
 

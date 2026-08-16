@@ -34,7 +34,7 @@ pub(super) async fn load_persisted_books_page(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     query: PersistedBooksBrowseQuery,
-) -> Result<PageEnvelope<BookReadModel>, String> {
+) -> anyhow::Result<PageEnvelope<BookReadModel>> {
     let mut books = Vec::new();
     let mut relevance_ranks: HashMap<String, usize> = HashMap::new();
 
@@ -124,7 +124,7 @@ async fn build_book_eval_context(
     backend: &dyn PersistedDiscoveryBrowseDataSource,
     context: &DiscoveryQueryContext,
     condition: Option<&BookCondition>,
-) -> Result<BookEvaluationContext, String> {
+) -> anyhow::Result<BookEvaluationContext> {
     let mut eval_context = BookEvaluationContext {
         user_id_present: context.user_id.is_some(),
         readlist_memberships: None,

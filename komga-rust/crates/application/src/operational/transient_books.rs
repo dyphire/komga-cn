@@ -79,10 +79,13 @@ impl TransientBookService {
     ) -> Result<Vec<TransientBookRecord>, TransientBookScanError> {
         match self.port.validate_transient_scan_root(requested_path).await {
             Ok(()) => {}
-            Err(error_code) if matches!(error_code.as_str(), "ERR_1016" | "ERR_1017") => {
-                return Err(TransientBookScanError::BadRequest(error_code));
+            Err(error) => {
+                let error_message = error.to_string();
+                if matches!(error_message.as_str(), "ERR_1016" | "ERR_1017") {
+                    return Err(TransientBookScanError::BadRequest(error_message));
+                }
+                return Err(TransientBookScanError::Internal);
             }
-            Err(_) => return Err(TransientBookScanError::Internal),
         }
 
         let mut records = self
@@ -325,6 +328,10 @@ mod tests {
         TransientBookSeriesInference,
     };
 
+    fn clone_result<T: Clone>(result: &Result<T, String>) -> anyhow::Result<T> {
+        result.clone().map_err(anyhow::Error::msg)
+    }
+
     #[test]
     fn transient_book_id_uses_kotlin_compatible_tsid_shape() {
         let id = transient_book_id();
@@ -560,37 +567,37 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TransientBookPort for TestTransientBookPort {
-        fn analyze_transient_book(&self, _path: &str) -> Result<TransientBookAnalysis, String> {
-            self.analysis.clone()
+        fn analyze_transient_book(&self, _path: &str) -> anyhow::Result<TransientBookAnalysis> {
+            clone_result(&self.analysis)
         }
 
         async fn infer_transient_series_and_number(
             &self,
             _transient_name: &str,
-        ) -> Result<TransientBookSeriesInference, String> {
-            self.series_inference.clone()
+        ) -> anyhow::Result<TransientBookSeriesInference> {
+            clone_result(&self.series_inference)
         }
 
         fn list_transient_book_entries(
             &self,
             _root: &Path,
-        ) -> Result<Vec<TransientBookScanEntry>, String> {
-            self.scan_entries.clone()
+        ) -> anyhow::Result<Vec<TransientBookScanEntry>> {
+            clone_result(&self.scan_entries)
         }
 
-        async fn validate_transient_scan_root(&self, _path: &str) -> Result<(), String> {
+        async fn validate_transient_scan_root(&self, _path: &str) -> anyhow::Result<()> {
             Ok(())
         }
 
         fn load_transient_book_file_metadata(
             &self,
             _path: &str,
-        ) -> Result<TransientBookFileMetadata, String> {
-            self.file_metadata.clone()
+        ) -> anyhow::Result<TransientBookFileMetadata> {
+            clone_result(&self.file_metadata)
         }
 
-        fn transient_book_exists(&self, _path: &str) -> Result<bool, String> {
-            self.exists.clone()
+        fn transient_book_exists(&self, _path: &str) -> anyhow::Result<bool> {
+            clone_result(&self.exists)
         }
 
         fn transient_book_page_content(
@@ -599,8 +606,8 @@ mod tests {
             _media_type: &str,
             _pages: &[TransientBookPage],
             _page_number: u32,
-        ) -> Result<Option<TransientBookPageContent>, String> {
-            self.page_content.clone()
+        ) -> anyhow::Result<Option<TransientBookPageContent>> {
+            clone_result(&self.page_content)
         }
     }
 

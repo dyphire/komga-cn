@@ -11,7 +11,7 @@ pub(in crate::task_queue) type BookMediaAnalysis = media_analysis::MediaFileAnal
 pub(in crate::task_queue) fn analyze_book_media_file(
     file_path: &Path,
     analyze_dimensions: bool,
-) -> Result<BookMediaAnalysis, String> {
+) -> anyhow::Result<BookMediaAnalysis> {
     MediaFileAnalyzer.analyze(
         file_path,
         MediaAnalysisProfile::PersistedBook {

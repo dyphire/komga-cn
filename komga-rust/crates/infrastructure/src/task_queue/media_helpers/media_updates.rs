@@ -36,12 +36,15 @@ fn emit_book_changed(
 async fn load_book_sse_context(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<BookSseContext>, String> {
+) -> anyhow::Result<Option<BookSseContext>> {
     sqlx::query("SELECT SERIES_ID, LIBRARY_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to load book SSE context for '{book_id}': {error}"))
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to load book SSE context for '{book_id}'"))
+        })
         .map(|row| {
             row.map(|row| BookSseContext {
                 series_id: row.get::<String, _>("SERIES_ID"),
@@ -55,7 +58,7 @@ pub(in crate::task_queue) async fn persist_book_hash(
     book_id: &str,
     hash: &str,
     koreader: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let sql = if koreader {
         r#"
         UPDATE BOOK
@@ -77,7 +80,9 @@ pub(in crate::task_queue) async fn persist_book_hash(
         .bind(book_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to persist book hash for '{book_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("failed to persist book hash for '{book_id}'"))
+        })?;
 
     Ok(())
 }
@@ -89,9 +94,11 @@ pub(in crate::task_queue) async fn persist_removed_hashed_pages(
     deleted_count_by_hash: &HashMap<String, i64>,
     file_last_modified: i64,
     file_size: i64,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start remove-hashed-pages transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start remove-hashed-pages transaction for '{book_id}': "
+        ))
     })?;
 
     for (hash, deleted) in deleted_count_by_hash {
@@ -108,7 +115,9 @@ pub(in crate::task_queue) async fn persist_removed_hashed_pages(
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            format!("failed to update PAGE_HASH delete count for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to update PAGE_HASH delete count for '{book_id}': "
+            ))
         })?;
     }
 
@@ -129,11 +138,15 @@ pub(in crate::task_queue) async fn persist_removed_hashed_pages(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to update BOOK metadata after hashed-page removal for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to update BOOK metadata after hashed-page removal for '{book_id}': "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit remove-hashed-pages transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit remove-hashed-pages transaction for '{book_id}': "
+        ))
     })?;
 
     let book_context = load_book_sse_context(pool, book_id).await?;
@@ -152,9 +165,11 @@ pub(in crate::task_queue) async fn persist_book_extension_repair(
     destination_url: &str,
     file_last_modified: i64,
     file_size: i64,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start extension-repair transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start extension-repair transaction for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -174,7 +189,9 @@ pub(in crate::task_queue) async fn persist_book_extension_repair(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to update BOOK row during extension repair for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to update BOOK row during extension repair for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -191,11 +208,15 @@ pub(in crate::task_queue) async fn persist_book_extension_repair(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to update SIDECAR rows during extension repair for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to update SIDECAR rows during extension repair for '{book_id}': "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit extension-repair transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit extension-repair transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())
@@ -214,9 +235,11 @@ pub(in crate::task_queue) async fn persist_book_conversion(
     destination_url: &str,
     file_last_modified: i64,
     file_size: i64,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start convert-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start convert-book transaction for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -238,7 +261,9 @@ pub(in crate::task_queue) async fn persist_book_conversion(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to update BOOK row during conversion for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to update BOOK row during conversion for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -255,7 +280,9 @@ pub(in crate::task_queue) async fn persist_book_conversion(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to update SIDECAR rows during conversion for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to update SIDECAR rows during conversion for '{book_id}': "
+        ))
     })?;
 
     sqlx::query(
@@ -271,11 +298,15 @@ pub(in crate::task_queue) async fn persist_book_conversion(
     .execute(&mut *tx)
     .await
     .map_err(|error| {
-        format!("failed to refresh MEDIA row during conversion for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to refresh MEDIA row during conversion for '{book_id}': "
+        ))
     })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit convert-book transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit convert-book transaction for '{book_id}': "
+        ))
     })?;
 
     let book_context = load_book_sse_context(pool, book_id).await?;
@@ -293,7 +324,7 @@ pub(in crate::task_queue) async fn adjust_analyzed_book_read_progress(
     previous_media_status: Option<MediaStatus>,
     previous_page_count: i64,
     current_page_count: i64,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if previous_media_status != Some(MediaStatus::Outdated)
         || previous_page_count == current_page_count
     {
@@ -302,24 +333,27 @@ pub(in crate::task_queue) async fn adjust_analyzed_book_read_progress(
 
     let current_page_count = current_page_count.max(0);
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start analyze-book read-progress adjustment for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start analyze-book read-progress adjustment for '{book_id}': "
+        ))
     })?;
 
-    let progress_rows = sqlx::query(
-        "SELECT USER_ID, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ?",
-    )
-    .bind(book_id)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(|error| {
-        format!(
-            "failed to load READ_PROGRESS rows for analyze-book adjustment '{book_id}': {error}"
-        )
-    })?;
+    let progress_rows =
+        sqlx::query("SELECT USER_ID, COMPLETED FROM READ_PROGRESS WHERE BOOK_ID = ?")
+            .bind(book_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load READ_PROGRESS rows for analyze-book adjustment '{book_id}': "
+                ))
+            })?;
 
     if progress_rows.is_empty() {
         tx.commit().await.map_err(|error| {
-            format!("failed to commit empty analyze-book read-progress adjustment for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to commit empty analyze-book read-progress adjustment for '{book_id}': "
+            ))
         })?;
         return Ok(());
     }
@@ -339,10 +373,9 @@ pub(in crate::task_queue) async fn adjust_analyzed_book_read_progress(
         .bind(&user_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| {
-            format!(
-                "failed to update READ_PROGRESS for analyze-book adjustment '{book_id}' user '{user_id}': {error}"
-            )
+        .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                "failed to update READ_PROGRESS for analyze-book adjustment '{book_id}' user '{user_id}': "
+            ))
         })?;
         affected_user_ids.insert(user_id);
     }
@@ -351,16 +384,17 @@ pub(in crate::task_queue) async fn adjust_analyzed_book_read_progress(
         for user_id in &affected_user_ids {
             upsert_series_read_progress_row(&mut tx, series_id, user_id)
                 .await
-                .map_err(|error| {
-                    format!(
-                        "failed to refresh READ_PROGRESS_SERIES during analyze-book adjustment '{book_id}' for user '{user_id}': {error}"
-                    )
+                .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                        "failed to refresh READ_PROGRESS_SERIES during analyze-book adjustment '{book_id}' for user '{user_id}': "
+                    ))
                 })?;
         }
     }
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit analyze-book read-progress adjustment for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit analyze-book read-progress adjustment for '{book_id}': "
+        ))
     })?;
 
     Ok(())
@@ -373,11 +407,13 @@ pub(in crate::task_queue) async fn persist_book_conversion_events(
     source_path: &Path,
     destination_path: &Path,
     source_deleted: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let source_name = source_path.to_string_lossy().to_string();
     let destination_name = destination_path.to_string_lossy().to_string();
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start historical conversion-event transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start historical conversion-event transaction for '{book_id}': "
+        ))
     })?;
 
     if source_deleted {
@@ -396,9 +432,9 @@ pub(in crate::task_queue) async fn persist_book_conversion_events(
         )
         .await
         .map_err(|error| {
-            format!(
-                "failed to insert BookFileDeleted event for converted book '{book_id}': {error}"
-            )
+            anyhow::anyhow!(error).context(format!(
+                "failed to insert BookFileDeleted event for converted book '{book_id}': "
+            ))
         })?;
     }
 
@@ -413,10 +449,16 @@ pub(in crate::task_queue) async fn persist_book_conversion_events(
         ],
     )
     .await
-    .map_err(|error| format!("failed to insert BookConverted event for '{book_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to insert BookConverted event for '{book_id}': "
+        ))
+    })?;
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit historical conversion-event transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit historical conversion-event transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())
@@ -426,13 +468,15 @@ pub(in crate::task_queue) async fn persist_book_page_hashes(
     pool: &SqlitePool,
     book_id: &str,
     page_hashes: &[BookPageHashWrite],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if page_hashes.is_empty() {
         return Ok(());
     }
 
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start restore-page-hash transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start restore-page-hash transaction for '{book_id}': "
+        ))
     })?;
 
     for page_hash in page_hashes {
@@ -443,15 +487,17 @@ pub(in crate::task_queue) async fn persist_book_page_hashes(
             .execute(&mut *tx)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to restore MEDIA_PAGE hash for '{book_id}' page {}: {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to restore MEDIA_PAGE hash for '{book_id}' page {}: ",
                     page_hash.page_number
-                )
+                ))
             })?;
     }
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit restore-page-hash transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit restore-page-hash transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())
@@ -463,14 +509,16 @@ pub(in crate::task_queue) async fn persist_duplicate_page_deleted_events(
     series_id: &str,
     book_path: &Path,
     removed_pages: &[PersistedHashedPageToDelete],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     if removed_pages.is_empty() {
         return Ok(());
     }
 
     let book_name = book_path.to_string_lossy().to_string();
     let mut tx = pool.begin().await.map_err(|error| {
-        format!("failed to start duplicate-page-deleted transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to start duplicate-page-deleted transaction for '{book_id}': "
+        ))
     })?;
 
     for removed_page in removed_pages {
@@ -490,12 +538,16 @@ pub(in crate::task_queue) async fn persist_duplicate_page_deleted_events(
         )
         .await
         .map_err(|error| {
-            format!("failed to insert DuplicatePageDeleted event for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to insert DuplicatePageDeleted event for '{book_id}': "
+            ))
         })?;
     }
 
     tx.commit().await.map_err(|error| {
-        format!("failed to commit duplicate-page-deleted transaction for '{book_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to commit duplicate-page-deleted transaction for '{book_id}': "
+        ))
     })?;
 
     Ok(())

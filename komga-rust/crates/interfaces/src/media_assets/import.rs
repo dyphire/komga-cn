@@ -22,7 +22,11 @@ pub(crate) async fn books_import(
     let payload = match parse_books_import_request_body(&body) {
         Ok(payload) => payload,
         Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("{error:#}") })),
+            )
+                .into_response();
         }
     };
 
@@ -66,27 +70,29 @@ fn books_import_submission_response(failures: Vec<BookImportSubmissionFailure>) 
     StatusCode::ACCEPTED.into_response()
 }
 
-fn parse_books_import_request_body(body: &Value) -> Result<BooksImportPayload, String> {
+fn parse_books_import_request_body(body: &Value) -> anyhow::Result<BooksImportPayload> {
     let body = body
         .as_object()
-        .ok_or_else(|| "books import payload must be a JSON object".to_string())?;
+        .ok_or_else(|| anyhow::anyhow!("books import payload must be a JSON object"))?;
 
     let copy_mode = match body.get("copyMode").and_then(Value::as_str) {
         Some("MOVE") => ImportCopyMode::Move,
         Some("COPY") => ImportCopyMode::Copy,
         Some("HARDLINK") => ImportCopyMode::Hardlink,
         Some(_) => {
-            return Err("copyMode must be one of MOVE, COPY, HARDLINK".to_string());
+            return Err(anyhow::anyhow!(
+                "copyMode must be one of MOVE, COPY, HARDLINK"
+            ));
         }
         None => {
-            return Err("copyMode is required".to_string());
+            return Err(anyhow::anyhow!("copyMode is required"));
         }
     };
 
     let books = match body.get("books") {
         Some(books) => books
             .as_array()
-            .ok_or_else(|| "books must be an array".to_string())?
+            .ok_or_else(|| anyhow::anyhow!("books must be an array"))?
             .iter()
             .map(parse_books_import_entry)
             .collect::<Result<Vec<_>, _>>()?,
@@ -96,21 +102,23 @@ fn parse_books_import_request_body(body: &Value) -> Result<BooksImportPayload, S
     Ok(BooksImportPayload { copy_mode, books })
 }
 
-fn parse_books_import_entry(entry: &Value) -> Result<BooksImportEntry, String> {
+fn parse_books_import_entry(entry: &Value) -> anyhow::Result<BooksImportEntry> {
     let entry = entry
         .as_object()
-        .ok_or_else(|| "books entries must be objects".to_string())?;
+        .ok_or_else(|| anyhow::anyhow!("books entries must be objects"))?;
 
     let source_file = entry
         .get("sourceFile")
         .and_then(Value::as_str)
-        .ok_or_else(|| "books[].sourceFile must be a string".to_string())?;
+        .ok_or_else(|| anyhow::anyhow!("books[].sourceFile must be a string"))?;
     let series_id = entry
         .get("seriesId")
         .and_then(Value::as_str)
-        .ok_or_else(|| "books[].seriesId must be a string".to_string())?;
+        .ok_or_else(|| anyhow::anyhow!("books[].seriesId must be a string"))?;
     if source_file.trim().is_empty() || series_id.trim().is_empty() {
-        return Err("books[].sourceFile and books[].seriesId must not be blank".to_string());
+        return Err(anyhow::anyhow!(
+            "books[].sourceFile and books[].seriesId must not be blank"
+        ));
     }
 
     let destination_name = entry

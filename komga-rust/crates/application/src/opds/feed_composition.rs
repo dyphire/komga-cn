@@ -66,10 +66,21 @@ pub struct OpdsV2RecommendedPage {
     pub groups: Vec<OpdsV2RecommendedGroup>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum OpdsV2FeedPageError {
     LibraryScope(OpdsLibraryScopeError),
-    Load(String),
+    Load(anyhow::Error),
+}
+
+#[cfg(test)]
+impl PartialEq for OpdsV2FeedPageError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::LibraryScope(left), Self::LibraryScope(right)) => left == right,
+            (Self::Load(left), Self::Load(right)) => left.to_string() == right.to_string(),
+            _ => false,
+        }
+    }
 }
 
 pub struct OpdsV2FeedCompositionService<'a, P: ?Sized> {
@@ -365,7 +376,7 @@ mod tests {
         async fn load_book_feed_page(
             &self,
             query: OpdsBookFeedQuery<'_>,
-        ) -> Result<OpdsPagedBooks, String> {
+        ) -> anyhow::Result<OpdsPagedBooks> {
             let books = match query.kind {
                 OpdsBookFeedKind::KeepReading => {
                     self.keep_reading_calls
@@ -391,7 +402,7 @@ mod tests {
                     include_read_progress,
                 } => {
                     if let Some(error) = self.latest_books_error.clone() {
-                        return Err(error);
+                        return Err(anyhow::anyhow!(error));
                     }
                     self.latest_books_calls
                         .lock()
@@ -417,13 +428,13 @@ mod tests {
         async fn load_latest_series_feed_page(
             &self,
             query: OpdsLatestSeriesFeedQuery<'_>,
-        ) -> Result<OpdsPagedSeries, String> {
+        ) -> anyhow::Result<OpdsPagedSeries> {
             self.latest_series_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")
                 .push(query.library_id.map(str::to_string));
             if let Some(error) = self.latest_series_error.clone() {
-                return Err(error);
+                return Err(anyhow::anyhow!(error));
             }
             let series = self
                 .latest_series
@@ -440,7 +451,7 @@ mod tests {
         async fn load_library_series_feed_page(
             &self,
             _query: OpdsLibrarySeriesQuery<'_>,
-        ) -> Result<OpdsSeriesFeedPage, String> {
+        ) -> anyhow::Result<OpdsSeriesFeedPage> {
             Ok(OpdsSeriesFeedPage {
                 series: Vec::new(),
                 has_next: false,
@@ -458,14 +469,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl OpdsLibraryPersistedPort for TestPersisted {
-        async fn load_libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+        async fn load_libraries(&self) -> anyhow::Result<Vec<PersistedLibraryRecord>> {
             Ok(self.libraries.values().cloned().collect())
         }
 
         async fn load_library(
             &self,
             library_id: &str,
-        ) -> Result<Option<PersistedLibraryRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedLibraryRecord>> {
             self.load_library_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")
@@ -479,16 +490,16 @@ mod tests {
         async fn load_readlists_for_library(
             &self,
             _library_id: &str,
-        ) -> Result<Vec<PersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
             if let Some(error) = self.readlist_visibility_error.clone() {
-                return Err(error);
+                return Err(anyhow::anyhow!(error));
             }
             Ok(Vec::new())
         }
 
-        async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+        async fn load_all_readlists(&self) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
             if let Some(error) = self.readlist_visibility_error.clone() {
-                return Err(error);
+                return Err(anyhow::anyhow!(error));
             }
             Ok(Vec::new())
         }
@@ -496,7 +507,7 @@ mod tests {
         async fn load_readlist_books(
             &self,
             _readlist_id: &str,
-        ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
             Ok(Vec::new())
         }
     }
@@ -506,9 +517,9 @@ mod tests {
         async fn load_collections(
             &self,
             _library_id: Option<&str>,
-        ) -> Result<Vec<PersistedNamedRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedNamedRecord>> {
             if let Some(error) = self.collection_visibility_error.clone() {
-                return Err(error);
+                return Err(anyhow::anyhow!(error));
             }
             Ok(Vec::new())
         }
@@ -517,7 +528,7 @@ mod tests {
             &self,
             _collection_id: &str,
             _ordered: bool,
-        ) -> Result<Vec<PersistedSeriesRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedSeriesRecord>> {
             Ok(Vec::new())
         }
     }
@@ -748,7 +759,7 @@ mod tests {
 
         assert_eq!(
             error,
-            OpdsV2FeedPageError::Load("collections unavailable".to_string())
+            OpdsV2FeedPageError::Load(anyhow::anyhow!("collections unavailable"))
         );
 
         let readlist_persisted = TestPersisted {
@@ -767,7 +778,7 @@ mod tests {
 
         assert_eq!(
             error,
-            OpdsV2FeedPageError::Load("readlists unavailable".to_string())
+            OpdsV2FeedPageError::Load(anyhow::anyhow!("readlists unavailable"))
         );
     }
 
@@ -789,7 +800,7 @@ mod tests {
 
         assert_eq!(
             error,
-            OpdsV2FeedPageError::Load("latest books unavailable".to_string())
+            OpdsV2FeedPageError::Load(anyhow::anyhow!("latest books unavailable"))
         );
 
         let latest_series_catalog = TestCatalog {
@@ -807,7 +818,7 @@ mod tests {
 
         assert_eq!(
             error,
-            OpdsV2FeedPageError::Load("latest series unavailable".to_string())
+            OpdsV2FeedPageError::Load(anyhow::anyhow!("latest series unavailable"))
         );
     }
 

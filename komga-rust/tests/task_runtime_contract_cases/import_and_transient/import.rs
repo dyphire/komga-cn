@@ -55,7 +55,7 @@ impl BookImportPort for RecordingImportPort {
         &self,
         copy_mode: ImportCopyMode,
         book: BooksImportEntry,
-    ) -> Result<Option<ImportBookOutcome>, String> {
+    ) -> anyhow::Result<Option<ImportBookOutcome>> {
         self.calls
             .lock()
             .expect("recording import port lock should not be poisoned")

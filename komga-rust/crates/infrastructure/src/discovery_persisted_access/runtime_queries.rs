@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{BTreeSet, HashMap};
 
 use komga_application::discovery::SeriesReadProgressCounts;
@@ -8,7 +9,7 @@ use super::models::{BookBrowseEntry, BookTagsScope};
 pub(super) async fn load_persisted_ondeck_books(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<Vec<BookBrowseEntry>, String> {
+) -> anyhow::Result<Vec<BookBrowseEntry>> {
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
          FROM READ_PROGRESS_SERIES rps
@@ -35,7 +36,7 @@ pub(super) async fn load_persisted_ondeck_books(
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted books ondeck: {error}"))?;
+    .context("query persisted books ondeck")?;
 
     Ok(rows
         .into_iter()
@@ -50,7 +51,7 @@ pub(super) async fn load_persisted_ondeck_books(
 
 pub(super) async fn load_persisted_duplicate_books(
     pool: &SqlitePool,
-) -> Result<Vec<BookBrowseEntry>, String> {
+) -> anyhow::Result<Vec<BookBrowseEntry>> {
     let rows = sqlx::query(
         r#"SELECT b.ID, b.LIBRARY_ID, b.NAME, COALESCE(bm.TITLE, b.NAME) AS TITLE
          FROM BOOK b
@@ -66,7 +67,7 @@ pub(super) async fn load_persisted_duplicate_books(
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted books duplicates: {error}"))?;
+    .context("query persisted books duplicates")?;
 
     Ok(rows
         .into_iter()
@@ -83,7 +84,7 @@ pub(super) async fn load_persisted_book_tags(
     pool: &SqlitePool,
     scope: Option<&BookTagsScope>,
     authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let Some(scope) = scope else {
         return Ok(vec![]);
     };
@@ -183,7 +184,7 @@ pub(super) async fn load_persisted_book_tags(
             query.build().fetch_all(pool).await
         }
     }
-    .map_err(|error| format!("query persisted book tags: {error}"))?;
+    .context("query persisted book tags")?;
 
     let mut tags = Vec::with_capacity(rows.len());
     let mut seen = BTreeSet::new();
@@ -200,7 +201,7 @@ pub(super) async fn load_persisted_book_tags(
 pub(crate) async fn persisted_utc_date_minus_days(
     pool: &SqlitePool,
     days: i64,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let modifier = if days >= 0 {
         format!("-{days} days")
     } else {
@@ -211,7 +212,7 @@ pub(crate) async fn persisted_utc_date_minus_days(
         .bind(modifier)
         .fetch_one(pool)
         .await
-        .map_err(|error| format!("query persisted utc cutoff date: {error}"))?;
+        .context("query persisted utc cutoff date")?;
 
     Ok(row.get::<Option<String>, _>("CUTOFF"))
 }
@@ -219,7 +220,7 @@ pub(crate) async fn persisted_utc_date_minus_days(
 pub(crate) async fn load_series_read_progress_counts(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<HashMap<String, SeriesReadProgressCounts>, String> {
+) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT
          FROM READ_PROGRESS_SERIES
@@ -228,7 +229,7 @@ pub(crate) async fn load_series_read_progress_counts(
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series read-progress counts: {error}"))?;
+    .context("query series read-progress counts")?;
 
     let mut counts = HashMap::new();
     for row in rows {
@@ -246,7 +247,7 @@ pub(crate) async fn load_series_read_progress_counts(
 pub(crate) async fn load_series_read_dates(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<HashMap<String, String>, String> {
+) -> anyhow::Result<HashMap<String, String>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, MOST_RECENT_READ_DATE
          FROM READ_PROGRESS_SERIES
@@ -256,7 +257,7 @@ pub(crate) async fn load_series_read_dates(
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series read dates: {error}"))?;
+    .context("query series read dates")?;
 
     let mut dates = HashMap::new();
     for row in rows {
@@ -271,7 +272,7 @@ pub(crate) async fn load_series_read_dates(
 
 pub(crate) async fn load_series_total_book_counts(
     pool: &SqlitePool,
-) -> Result<HashMap<String, i64>, String> {
+) -> anyhow::Result<HashMap<String, i64>> {
     let rows = sqlx::query(
         r#"SELECT SERIES_ID, TOTAL_BOOK_COUNT
          FROM SERIES_METADATA
@@ -279,7 +280,7 @@ pub(crate) async fn load_series_total_book_counts(
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query series total-book-counts: {error}"))?;
+    .context("query series total-book-counts")?;
 
     let mut totals = HashMap::new();
     for row in rows {

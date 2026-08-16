@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -21,7 +22,7 @@ use crate::random_hex_token;
 pub(crate) fn auth_token_user_from_tokens(
     session_token: Option<&str>,
     remember_me_token: Option<&str>,
-) -> Result<Option<AuthUser>, String> {
+) -> anyhow::Result<Option<AuthUser>> {
     auth_token_resolution_from_tokens(session_token, remember_me_token)
         .map(|resolved| resolved.map(|resolved| resolved.user))
 }
@@ -29,7 +30,7 @@ pub(crate) fn auth_token_user_from_tokens(
 pub(crate) fn auth_token_resolution_from_tokens(
     session_token: Option<&str>,
     remember_me_token: Option<&str>,
-) -> Result<Option<ResolvedAuthToken>, String> {
+) -> anyhow::Result<Option<ResolvedAuthToken>> {
     resolve_authenticated_token(
         session_token_store(),
         session_token_store(),
@@ -121,7 +122,7 @@ pub(crate) async fn authenticate_basic_credentials(
     pool: &SqlitePool,
     username: &str,
     password: &str,
-) -> Result<AuthOutcome, String> {
+) -> anyhow::Result<AuthOutcome> {
     let mut users = load_persisted_users(pool).await?;
     let Some(user) = users
         .iter_mut()
@@ -133,17 +134,17 @@ pub(crate) async fn authenticate_basic_credentials(
     match verify_bcrypt_password(password, &user.password) {
         Ok(true) => Ok(AuthOutcome::Valid(Box::new(user.clone()))),
         Ok(false) => Ok(AuthOutcome::Invalid),
-        Err(error) => Err(format!(
+        Err(error) => Err(anyhow::anyhow!(format!(
             "failed to verify persisted password hash for user {}: {error}",
             user.id
-        )),
+        ))),
     }
 }
 
 pub(crate) async fn persisted_api_key_user_by_token(
     api_key: &str,
     pool: &SqlitePool,
-) -> Result<AuthOutcome, String> {
+) -> anyhow::Result<AuthOutcome> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Ok(AuthOutcome::Missing);
@@ -155,7 +156,7 @@ pub(crate) async fn persisted_api_key_user_by_token(
         .bind(api_key_hash)
         .fetch_optional(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
     let Some(row) = row else {
         return Ok(AuthOutcome::Invalid);
     };
@@ -172,13 +173,13 @@ pub(crate) async fn persisted_api_key_user_by_token(
 pub(crate) async fn persisted_api_key_metadata_by_token(
     api_key: &str,
     pool: &SqlitePool,
-) -> Result<Option<PersistedApiKeyMetadata>, String> {
+) -> anyhow::Result<Option<PersistedApiKeyMetadata>> {
     let api_key_hash = sha512_hex(api_key);
     let row = sqlx::query("SELECT ID, COMMENT FROM USER_API_KEY WHERE API_KEY = ? LIMIT 1")
         .bind(api_key_hash)
         .fetch_optional(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -190,7 +191,7 @@ pub(crate) async fn persisted_api_key_metadata_by_token(
     }))
 }
 
-pub(crate) async fn persisted_users(pool: &SqlitePool) -> Result<Vec<AuthUser>, String> {
+pub(crate) async fn persisted_users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     load_persisted_users(pool).await
 }
 
@@ -198,15 +199,15 @@ pub async fn persisted_update_password_by_user_id(
     pool: &SqlitePool,
     user_id: &str,
     password: &str,
-) -> Result<bool, String> {
-    let hashed_password = hash_bcrypt_password(password, DEFAULT_COST)
-        .map_err(|error| format!("failed to hash password: {error}"))?;
+) -> anyhow::Result<bool> {
+    let hashed_password =
+        hash_bcrypt_password(password, DEFAULT_COST).context("failed to hash password")?;
     let update = sqlx::query("UPDATE USER SET PASSWORD = ? WHERE ID = ?")
         .bind(hashed_password)
         .bind(user_id)
         .execute(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
     Ok(update.rows_affected() > 0)
 }
@@ -215,13 +216,13 @@ pub(crate) async fn persisted_create_api_key(
     pool: &SqlitePool,
     user_id: &str,
     comment: &str,
-) -> Result<PersistedApiKey, String> {
+) -> anyhow::Result<PersistedApiKey> {
     let generated_key = generated_api_key_secret();
     let generated_key_hash = sha512_hex(&generated_key);
     let generated_id = generated_api_key_id();
     let normalized_comment = comment.trim();
     if normalized_comment.is_empty() {
-        return Err("api key comment must not be blank".to_string());
+        return Err(anyhow::anyhow!("api key comment must not be blank"));
     }
 
     sqlx::query("INSERT INTO USER_API_KEY (ID, USER_ID, API_KEY, COMMENT) VALUES (?, ?, ?, ?)")
@@ -231,7 +232,7 @@ pub(crate) async fn persisted_create_api_key(
         .bind(normalized_comment)
         .execute(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
     let row = sqlx::query(
         "SELECT CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ? LIMIT 1",
@@ -240,8 +241,8 @@ pub(crate) async fn persisted_create_api_key(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| error.to_string())?
-    .ok_or_else(|| "created api key row was not found".to_string())?;
+    .map_err(anyhow::Error::from)?
+    .ok_or_else(|| anyhow::anyhow!("created api key row was not found"))?;
 
     Ok(PersistedApiKey {
         id: generated_id,
@@ -257,10 +258,10 @@ pub(crate) async fn persisted_api_key_comment_exists(
     pool: &SqlitePool,
     user_id: &str,
     comment: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let normalized_comment = comment.trim();
     if normalized_comment.is_empty() {
-        return Err("api key comment must not be blank".to_string());
+        return Err(anyhow::anyhow!("api key comment must not be blank"));
     }
 
     let row = sqlx::query(
@@ -270,7 +271,7 @@ pub(crate) async fn persisted_api_key_comment_exists(
     .bind(normalized_comment)
     .fetch_optional(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(anyhow::Error::from)?;
 
     Ok(row.is_some())
 }
@@ -278,14 +279,14 @@ pub(crate) async fn persisted_api_key_comment_exists(
 pub(crate) async fn persisted_list_api_keys(
     pool: &SqlitePool,
     user_id: &str,
-) -> Result<Vec<PersistedApiKey>, String> {
+) -> anyhow::Result<Vec<PersistedApiKey>> {
     let rows = sqlx::query(
         "SELECT ID, USER_ID, COMMENT, CREATED_DATE, LAST_MODIFIED_DATE FROM USER_API_KEY WHERE USER_ID = ? ORDER BY CREATED_DATE DESC, ID DESC",
     )
     .bind(user_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(anyhow::Error::from)?;
 
     Ok(rows
         .into_iter()
@@ -304,13 +305,13 @@ pub(crate) async fn persisted_delete_api_key_by_id(
     pool: &SqlitePool,
     user_id: &str,
     api_key_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let delete = sqlx::query("DELETE FROM USER_API_KEY WHERE ID = ? AND USER_ID = ?")
         .bind(api_key_id)
         .bind(user_id)
         .execute(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
     Ok(delete.rows_affected() > 0)
 }
@@ -318,7 +319,7 @@ pub(crate) async fn persisted_delete_api_key_by_id(
 pub(crate) async fn persisted_list_authentication_activity(
     pool: &SqlitePool,
     user_id: Option<&str>,
-) -> Result<Vec<PersistedAuthenticationActivity>, String> {
+) -> anyhow::Result<Vec<PersistedAuthenticationActivity>> {
     let rows = if let Some(user_id) = user_id {
         sqlx::query(
             r#"
@@ -363,7 +364,7 @@ pub(crate) async fn persisted_list_authentication_activity(
         .await
     };
 
-    let rows = rows.map_err(|error| error.to_string())?;
+    let rows = rows.map_err(anyhow::Error::from)?;
     Ok(rows
         .into_iter()
         .map(|row| PersistedAuthenticationActivity {
@@ -383,13 +384,13 @@ pub(crate) async fn persisted_list_authentication_activity(
 
 pub(crate) async fn persisted_cleanup_authentication_activity(
     pool: &SqlitePool,
-) -> Result<u64, String> {
+) -> anyhow::Result<u64> {
     let deleted = sqlx::query(
         "DELETE FROM AUTHENTICATION_ACTIVITY WHERE datetime(DATE_TIME) < datetime('now', '-1 month')",
     )
     .execute(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(anyhow::Error::from)?;
 
     Ok(deleted.rows_affected())
 }
@@ -527,7 +528,7 @@ pub(crate) async fn ensure_oauth_user(
 ) -> Result<Option<AuthUser>, sqlx::Error> {
     if let Some(user) = persisted_users(pool)
         .await
-        .map_err(sqlx::Error::Protocol)?
+        .map_err(|error| sqlx::Error::Protocol(error.to_string()))?
         .into_iter()
         .find(|user| auth_user_email_equals(user, email))
     {
@@ -585,18 +586,18 @@ pub(crate) async fn ensure_oauth_user(
 
     Ok(persisted_users(pool)
         .await
-        .map_err(sqlx::Error::Protocol)?
+        .map_err(|error| sqlx::Error::Protocol(error.to_string()))?
         .into_iter()
         .find(|user| auth_user_email_equals(user, email)))
 }
 
-async fn load_persisted_users(pool: &SqlitePool) -> Result<Vec<AuthUser>, String> {
+async fn load_persisted_users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     let user_rows = sqlx::query(
         "SELECT ID, EMAIL, PASSWORD, SHARED_ALL_LIBRARIES, AGE_RESTRICTION, AGE_RESTRICTION_ALLOW_ONLY FROM USER ORDER BY EMAIL",
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(anyhow::Error::from)?;
 
     let mut users = Vec::with_capacity(user_rows.len());
     for row in user_rows {
@@ -605,7 +606,7 @@ async fn load_persisted_users(pool: &SqlitePool) -> Result<Vec<AuthUser>, String
             .bind(&user_id)
             .fetch_all(pool)
             .await
-            .map_err(|error| error.to_string())?
+            .map_err(anyhow::Error::from)?
             .into_iter()
             .map(|row| row.get::<String, _>("ROLE"))
             .collect::<Vec<_>>();
@@ -616,7 +617,7 @@ async fn load_persisted_users(pool: &SqlitePool) -> Result<Vec<AuthUser>, String
         .bind(&user_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(anyhow::Error::from)?
         .into_iter()
         .map(|row| row.get::<String, _>("LIBRARY_ID"))
         .collect::<Vec<_>>();
@@ -627,7 +628,7 @@ async fn load_persisted_users(pool: &SqlitePool) -> Result<Vec<AuthUser>, String
         .bind(&user_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(anyhow::Error::from)?;
 
         let labels_allow = sharing_rows
             .iter()

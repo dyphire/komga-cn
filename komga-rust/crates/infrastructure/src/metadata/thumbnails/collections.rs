@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{CollectionThumbnailRecord, ThumbnailType};
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
@@ -8,7 +9,7 @@ use crate::parsing::parse_thumbnail_type;
 pub(crate) async fn persisted_collection_exists(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let row = sqlx::query(
         r#"
         SELECT 1 AS FOUND
@@ -20,14 +21,14 @@ pub(crate) async fn persisted_collection_exists(
     .bind(collection_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query persisted collection existence: {error}"))?;
+    .context("query persisted collection existence")?;
     Ok(row.is_some())
 }
 
 pub(crate) async fn load_persisted_collection_thumbnails(
     pool: &SqlitePool,
     collection_id: &str,
-) -> Result<Vec<CollectionThumbnailRecord>, String> {
+) -> anyhow::Result<Vec<CollectionThumbnailRecord>> {
     let rows = sqlx::query(
         r#"
         SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -39,7 +40,7 @@ pub(crate) async fn load_persisted_collection_thumbnails(
     .bind(collection_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted collection thumbnails: {error}"))?;
+    .context("query persisted collection thumbnails")?;
 
     rows.into_iter()
         .map(|row| {
@@ -61,7 +62,7 @@ pub(crate) async fn load_persisted_collection_thumbnails(
 pub(crate) async fn load_collection_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<CollectionThumbnailRecord>, String> {
+) -> anyhow::Result<Option<CollectionThumbnailRecord>> {
     sqlx::query(
         r#"
         SELECT ID, COLLECTION_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT, THUMBNAIL
@@ -73,7 +74,7 @@ pub(crate) async fn load_collection_thumbnail_by_id(
     .bind(thumbnail_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query single collection thumbnail: {error}"))
+    .context("query single collection thumbnail")
     .map(|row| {
         row.map(|row| CollectionThumbnailRecord {
             id: row.get::<String, _>("ID"),
@@ -102,11 +103,11 @@ pub(crate) async fn insert_collection_thumbnail(
     width: i64,
     height: i64,
     selected: bool,
-) -> Result<CollectionThumbnailRecord, String> {
+) -> anyhow::Result<CollectionThumbnailRecord> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin collection thumbnail create tx: {error}"))?;
+        .context("begin collection thumbnail create tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -119,13 +120,13 @@ pub(crate) async fn insert_collection_thumbnail(
     .bind(collection_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query collection existence for thumbnail create: {error}"))?
+    .context("query collection existence for thumbnail create")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback collection thumbnail create tx: {error}"))?;
-        return Err("collection does not exist".to_string());
+            .context("rollback collection thumbnail create tx")?;
+        return Err(anyhow::anyhow!("collection does not exist"));
     }
 
     if selected {
@@ -139,7 +140,7 @@ pub(crate) async fn insert_collection_thumbnail(
         .bind(collection_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("clear selected collection thumbnails: {error}"))?;
+        .context("clear selected collection thumbnails")?;
     }
 
     let id = generated_thumbnail_id("thumbnail-collection");
@@ -161,11 +162,11 @@ pub(crate) async fn insert_collection_thumbnail(
     .bind(height)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert collection thumbnail: {error}"))?;
+    .context("insert collection thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit collection thumbnail create tx: {error}"))?;
+        .context("commit collection thumbnail create tx")?;
 
     let record = CollectionThumbnailRecord {
         id,
@@ -186,11 +187,11 @@ pub(crate) async fn select_collection_thumbnail(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin collection thumbnail select tx: {error}"))?;
+        .context("begin collection thumbnail select tx")?;
 
     let target_collection_id = sqlx::query(
         r#"
@@ -203,12 +204,12 @@ pub(crate) async fn select_collection_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query target collection thumbnail for select: {error}"))?
+    .context("query target collection thumbnail for select")?
     .map(|row| row.get::<String, _>("COLLECTION_ID"));
     let Some(target_collection_id) = target_collection_id else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback collection thumbnail select tx: {error}"))?;
+            .context("rollback collection thumbnail select tx")?;
         return Ok(false);
     };
 
@@ -222,7 +223,7 @@ pub(crate) async fn select_collection_thumbnail(
     .bind(&target_collection_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("clear selected collection thumbnails for select: {error}"))?;
+    .context("clear selected collection thumbnails for select")?;
     sqlx::query(
         r#"
         UPDATE THUMBNAIL_COLLECTION
@@ -234,11 +235,11 @@ pub(crate) async fn select_collection_thumbnail(
     .bind(&target_collection_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("mark selected collection thumbnail: {error}"))?;
+    .context("mark selected collection thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit collection thumbnail select tx: {error}"))?;
+        .context("commit collection thumbnail select tx")?;
     emit_thumbnail_collection_event(runtime_events, &target_collection_id, true, true);
     Ok(true)
 }
@@ -248,11 +249,11 @@ pub(crate) async fn delete_collection_thumbnail(
     runtime_events: &dyn RuntimeSseEventSink,
     collection_id: &str,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin collection thumbnail delete tx: {error}"))?;
+        .context("begin collection thumbnail delete tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -265,12 +266,12 @@ pub(crate) async fn delete_collection_thumbnail(
     .bind(collection_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query collection existence for thumbnail delete: {error}"))?
+    .context("query collection existence for thumbnail delete")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback collection thumbnail delete tx: {error}"))?;
+            .context("rollback collection thumbnail delete tx")?;
         return Ok(false);
     }
 
@@ -285,11 +286,11 @@ pub(crate) async fn delete_collection_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query collection thumbnail delete target: {error}"))?;
+    .context("query collection thumbnail delete target")?;
     let Some(target) = target else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback collection thumbnail delete tx: {error}"))?;
+            .context("rollback collection thumbnail delete tx")?;
         return Ok(false);
     };
     let target_collection_id = target.get::<String, _>("COLLECTION_ID");
@@ -304,14 +305,14 @@ pub(crate) async fn delete_collection_thumbnail(
     .bind(thumbnail_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete collection thumbnail: {error}"))?;
+    .context("delete collection thumbnail")?;
 
     normalize_collection_thumbnail_selection(&mut tx, &target_collection_id, deleted_selected)
         .await?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit collection thumbnail delete tx: {error}"))?;
+        .context("commit collection thumbnail delete tx")?;
     emit_thumbnail_collection_event(
         runtime_events,
         &target_collection_id,
@@ -325,7 +326,7 @@ async fn normalize_collection_thumbnail_selection(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     collection_id: &str,
     deleted_selected: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let remaining_rows = sqlx::query(
         r#"
         SELECT ID, SELECTED
@@ -338,7 +339,8 @@ async fn normalize_collection_thumbnail_selection(
     .fetch_all(&mut **tx)
     .await
     .map_err(|error| {
-        format!("query remaining collection thumbnails for delete housekeeping: {error}")
+        anyhow::anyhow!(error)
+            .context("query remaining collection thumbnails for delete housekeeping: ")
     })?;
 
     let selected_ids = remaining_rows
@@ -372,7 +374,7 @@ async fn normalize_collection_thumbnail_selection(
     .bind(collection_id)
     .execute(&mut **tx)
     .await
-    .map_err(|error| format!("normalize collection thumbnail selection after delete: {error}"))?;
+    .context("normalize collection thumbnail selection after delete")?;
 
     Ok(())
 }

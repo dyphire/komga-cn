@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
@@ -19,16 +20,16 @@ pub(super) async fn upsert_comicinfo_readlist(
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     readlist: ComicInfoReadListEntry,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let readlist_id = sqlx::query("SELECT ID FROM READLIST WHERE NAME = ? LIMIT 1")
         .bind(&readlist.name)
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to load readlist '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to load readlist '{}' for '{}': ",
                 readlist.name, book_id
-            )
+            ))
         })?
         .map(|row| row.get::<String, _>("ID"));
 
@@ -46,11 +47,10 @@ pub(super) async fn upsert_comicinfo_readlist(
             .bind(&readlist.name)
             .execute(pool)
             .await
-            .map_err(|error| {
-                format!(
-                    "failed to create ComicInfo readlist '{}' for '{}': {error}",
+            .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                    "failed to create ComicInfo readlist '{}' for '{}': ",
                     readlist.name, book_id,
-                )
+                ))
             })?;
             ComicInfoReadListTarget {
                 id: generated_id,
@@ -66,10 +66,10 @@ pub(super) async fn upsert_comicinfo_readlist(
             .fetch_optional(pool)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to check ComicInfo readlist membership '{}' for '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to check ComicInfo readlist membership '{}' for '{}': ",
                     readlist.name, book_id,
-                )
+                ))
             })?
             .is_some();
     if book_already_in_readlist {
@@ -79,10 +79,10 @@ pub(super) async fn upsert_comicinfo_readlist(
     let assigned_number = assign_comicinfo_readlist_number(pool, &target.id, readlist.number)
         .await
         .map_err(|error| {
-            format!(
-                "failed to assign ComicInfo readlist number '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to assign ComicInfo readlist number '{}' for '{}': ",
                 readlist.name, book_id,
-            )
+            ))
         })?;
 
     sqlx::query("INSERT INTO READLIST_BOOK (READLIST_ID, BOOK_ID, NUMBER) VALUES (?, ?, ?)")
@@ -92,10 +92,10 @@ pub(super) async fn upsert_comicinfo_readlist(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to insert ComicInfo readlist membership '{}' for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to insert ComicInfo readlist membership '{}' for '{}': ",
                 readlist.name, book_id,
-            )
+            ))
         })?;
 
     sqlx::query(
@@ -111,10 +111,10 @@ pub(super) async fn upsert_comicinfo_readlist(
     .execute(pool)
     .await
     .map_err(|error| {
-        format!(
-            "failed to update ComicInfo readlist counters '{}' for '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to update ComicInfo readlist counters '{}' for '{}': ",
             readlist.name, book_id,
-        )
+        ))
     })?;
 
     let readlist_book_ids = load_readlist_book_ids(pool, &target.id).await?;
@@ -131,12 +131,16 @@ pub(super) async fn upsert_comicinfo_readlist(
 async fn load_readlist_book_ids(
     pool: &SqlitePool,
     readlist_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     sqlx::query("SELECT BOOK_ID FROM READLIST_BOOK WHERE READLIST_ID = ? ORDER BY NUMBER ASC")
         .bind(readlist_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("failed to load readlist books for '{readlist_id}': {error}"))
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to load readlist books for '{readlist_id}': "
+            ))
+        })
         .map(|rows| {
             rows.into_iter()
                 .map(|row| row.get::<String, _>("BOOK_ID"))
@@ -148,14 +152,14 @@ async fn assign_comicinfo_readlist_number(
     pool: &SqlitePool,
     readlist_id: &str,
     requested_number: Option<i64>,
-) -> Result<i64, String> {
+) -> anyhow::Result<i64> {
     let max_number = sqlx::query(
         "SELECT COALESCE(MAX(NUMBER), -1) AS MAX_NUMBER FROM READLIST_BOOK WHERE READLIST_ID = ?",
     )
     .bind(readlist_id)
     .fetch_one(pool)
     .await
-    .map_err(|error| format!("query ComicInfo readlist max position: {error}"))?
+    .context("query ComicInfo readlist max position")?
     .get::<i64, _>("MAX_NUMBER");
 
     let Some(requested_number) = requested_number else {
@@ -168,7 +172,7 @@ async fn assign_comicinfo_readlist_number(
             .bind(requested_number)
             .fetch_optional(pool)
             .await
-            .map_err(|error| format!("query ComicInfo readlist position collision: {error}"))?
+            .context("query ComicInfo readlist position collision")?
             .is_some();
 
     if number_taken {

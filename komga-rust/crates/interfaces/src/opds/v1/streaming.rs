@@ -26,7 +26,7 @@ pub(super) async fn build_book_feed_acquisition_entries(
     app: &OpdsState,
     headers: &HeaderMap,
     books: Vec<PersistedBookFeedItem>,
-) -> Result<Vec<OpdsV1AcquisitionEntry>, String> {
+) -> anyhow::Result<Vec<OpdsV1AcquisitionEntry>> {
     let mut entries = Vec::with_capacity(books.len());
     for book in books {
         let extra_links = book_feed_page_streaming_links(app, headers, &book).await?;
@@ -90,7 +90,7 @@ pub(super) async fn series_book_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
     book: &OpdsBookFeedEntry,
-) -> Result<Vec<OpdsV1XmlLink>, String> {
+) -> anyhow::Result<Vec<OpdsV1XmlLink>> {
     opds_book_page_streaming_links(
         app,
         headers,
@@ -110,7 +110,7 @@ async fn book_feed_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
     book: &PersistedBookFeedItem,
-) -> Result<Vec<OpdsV1XmlLink>, String> {
+) -> anyhow::Result<Vec<OpdsV1XmlLink>> {
     opds_book_page_streaming_links(
         app,
         headers,
@@ -139,7 +139,7 @@ async fn opds_book_page_streaming_links(
     app: &OpdsState,
     headers: &HeaderMap,
     book: StreamingBookInfo<'_>,
-) -> Result<Vec<OpdsV1XmlLink>, String> {
+) -> anyhow::Result<Vec<OpdsV1XmlLink>> {
     let media_types = opds_book_page_stream_media_types(
         app.book_media_reader.as_ref(),
         app.book_media_content.as_ref(),
@@ -203,7 +203,7 @@ async fn opds_book_page_stream_media_types(
     media_type: &str,
     page_count: i64,
     epub_divina_compatible: bool,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if page_count <= 0 && media_type != "application/pdf" && !media_type.starts_with("image/") {
         return Ok(vec![]);
     }
@@ -229,7 +229,7 @@ async fn load_divina_page_media_types_for_opds(
     reader: &dyn BookMediaReaderPort,
     content: &dyn BookMediaContentPort,
     book_id: &str,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let persisted = reader
         .book_pages(book_id)
         .await?

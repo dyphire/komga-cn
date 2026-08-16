@@ -4,7 +4,7 @@ pub(super) async fn load_sidecar_url_for_parent(
     pool: &SqlitePool,
     parent_url: &str,
     metadata_only: bool,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let sql = if metadata_only {
         r#"
         SELECT URL
@@ -37,6 +37,8 @@ pub(super) async fn load_sidecar_url_for_parent(
         .bind(parent_url)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to load sidecar for '{parent_url}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("failed to load sidecar for '{parent_url}'"))
+        })?;
     Ok(row.map(|row| row.get::<String, _>("URL")))
 }

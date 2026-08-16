@@ -50,7 +50,7 @@ impl TaskQueue for RuntimeTaskEngine {
         &self,
         records: Vec<TaskQueueRecord>,
         urgency: SubmitUrgency,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let scheduler = self.scheduler.lock().await;
         TaskQueue::enqueue_records(&*scheduler, records, SubmitUrgency::Normal).await?;
         if urgency == SubmitUrgency::Immediate {
@@ -59,7 +59,7 @@ impl TaskQueue for RuntimeTaskEngine {
         Ok(())
     }
 
-    async fn status(&self) -> Result<QueueStatus, String> {
+    async fn status(&self) -> anyhow::Result<QueueStatus> {
         let scheduler = self.scheduler.lock().await;
         TaskQueue::status(&*scheduler).await
     }
@@ -67,12 +67,12 @@ impl TaskQueue for RuntimeTaskEngine {
 
 #[async_trait::async_trait]
 impl TaskQueueAdmin for RuntimeTaskEngine {
-    async fn clear_unowned_tasks(&self) -> Result<usize, String> {
+    async fn clear_unowned_tasks(&self) -> anyhow::Result<usize> {
         let scheduler = self.scheduler.lock().await;
         TaskQueueAdmin::clear_unowned_tasks(&*scheduler).await
     }
 
-    async fn apply_pool_size(&self, value: usize) -> Result<(), String> {
+    async fn apply_pool_size(&self, value: usize) -> anyhow::Result<()> {
         self.execution_pool.resize(value);
         self.wakeup.notify_one();
         Ok(())
@@ -224,7 +224,7 @@ mod tests {
             .expect_err("task queue persistence initialization errors should be reported");
 
         assert!(
-            error.contains("open tasks sqlite pool"),
+            error.to_string().contains("open tasks sqlite pool"),
             "unexpected error: {error}"
         );
     }

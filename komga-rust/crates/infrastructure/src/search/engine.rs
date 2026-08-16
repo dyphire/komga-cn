@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -53,12 +54,12 @@ impl SearchIndexEngine {
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         let index = SearchQueryLifecycle::bootstrap(self.index_dir())
-            .map_err(|error| format!("failed to open search index for query: {error}"))?;
+            .context("failed to open search index for query")?;
         index
             .search_ids(query, entity_type, limit)
-            .map_err(|error| format!("failed to execute search query: {error}"))
+            .context("failed to execute search query")
     }
 
     pub(crate) fn search_scored_ids(
@@ -66,48 +67,48 @@ impl SearchIndexEngine {
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
-    ) -> Result<Vec<SearchScoredHit>, String> {
+    ) -> anyhow::Result<Vec<SearchScoredHit>> {
         let index = SearchQueryLifecycle::bootstrap(self.index_dir())
-            .map_err(|error| format!("failed to open search index for query: {error}"))?;
+            .context("failed to open search index for query")?;
         index
             .search_scored_ids(query, entity_type, limit)
-            .map_err(|error| format!("failed to execute scored search query: {error}"))
+            .context("failed to execute scored search query")
     }
 
-    pub(crate) async fn upsert_book(&self, book_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_book(&self, book_id: &str) -> anyhow::Result<bool> {
         self.upsert_entity(SearchEntityType::Book, book_id).await
     }
 
-    pub(crate) async fn upsert_series(&self, series_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_series(&self, series_id: &str) -> anyhow::Result<bool> {
         self.upsert_entity(SearchEntityType::Series, series_id)
             .await
     }
 
-    pub(crate) async fn upsert_collection(&self, collection_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_collection(&self, collection_id: &str) -> anyhow::Result<bool> {
         self.upsert_entity(SearchEntityType::Collection, collection_id)
             .await
     }
 
-    pub(crate) async fn upsert_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+    pub(crate) async fn upsert_readlist(&self, readlist_id: &str) -> anyhow::Result<bool> {
         self.upsert_entity(SearchEntityType::ReadList, readlist_id)
             .await
     }
 
-    pub(crate) async fn delete_book(&self, book_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_book(&self, book_id: &str) -> anyhow::Result<()> {
         self.delete_entity(SearchEntityType::Book, book_id).await
     }
 
-    pub(crate) async fn delete_series(&self, series_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_series(&self, series_id: &str) -> anyhow::Result<()> {
         self.delete_entity(SearchEntityType::Series, series_id)
             .await
     }
 
-    pub(crate) async fn delete_collection(&self, collection_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_collection(&self, collection_id: &str) -> anyhow::Result<()> {
         self.delete_entity(SearchEntityType::Collection, collection_id)
             .await
     }
 
-    pub(crate) async fn delete_readlist(&self, readlist_id: &str) -> Result<(), String> {
+    pub(crate) async fn delete_readlist(&self, readlist_id: &str) -> anyhow::Result<()> {
         self.delete_entity(SearchEntityType::ReadList, readlist_id)
             .await
     }
@@ -115,7 +116,7 @@ impl SearchIndexEngine {
     pub(crate) async fn refresh_series_after_metadata_update(
         &self,
         series_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         if !self.owns_search_index {
             return Ok(());
         }
@@ -128,7 +129,7 @@ impl SearchIndexEngine {
         .await
     }
 
-    pub(crate) async fn rebuild_all(&self) -> Result<(), String> {
+    pub(crate) async fn rebuild_all(&self) -> anyhow::Result<()> {
         if !self.owns_search_index {
             return Ok(());
         }
@@ -139,7 +140,7 @@ impl SearchIndexEngine {
     pub(crate) async fn rebuild_entities(
         &self,
         entity_types: &[SearchEntityType],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         if !self.owns_search_index || entity_types.is_empty() {
             return Ok(());
         }
@@ -151,7 +152,7 @@ impl SearchIndexEngine {
         &self,
         entity_type: SearchEntityType,
         entity_id: &str,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         if !self.owns_search_index {
             return Ok(false);
         }
@@ -169,7 +170,7 @@ impl SearchIndexEngine {
         &self,
         entity_type: SearchEntityType,
         entity_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         if !self.owns_search_index {
             return Ok(());
         }
@@ -184,10 +185,10 @@ impl<'a> SearchIndexMutationRunner<'a> {
         Self { pool, index_dir }
     }
 
-    async fn run<F, Fut>(&self, attempt: F) -> Result<(), String>
+    async fn run<F, Fut>(&self, attempt: F) -> anyhow::Result<()>
     where
         F: Fn() -> Fut,
-        Fut: Future<Output = Result<SearchEventAttempt, String>>,
+        Fut: Future<Output = anyhow::Result<SearchEventAttempt>>,
     {
         match attempt().await? {
             SearchEventAttempt::Applied => Ok(()),
@@ -196,19 +197,18 @@ impl<'a> SearchIndexMutationRunner<'a> {
 
                 match attempt().await? {
                     SearchEventAttempt::Applied => Ok(()),
-                    SearchEventAttempt::RebuildRequired => Err(format!(
+                    SearchEventAttempt::RebuildRequired => Err(anyhow::anyhow!(format!(
                         "failed to bootstrap search index after rebuild: corruption persisted at '{}'",
                         self.index_dir.display()
-                    )),
+                    ))),
                 }
             }
         }
     }
 }
 
-async fn recover_search_index(pool: &SqlitePool, index_dir: &Path) -> Result<(), String> {
-    prepare_for_rebuild(index_dir)
-        .map_err(|error| format!("failed to prepare search index rebuild: {error}"))?;
+async fn recover_search_index(pool: &SqlitePool, index_dir: &Path) -> anyhow::Result<()> {
+    prepare_for_rebuild(index_dir).context("failed to prepare search index rebuild")?;
 
     rebuild_index_from_database(pool, index_dir).await
 }
@@ -216,43 +216,45 @@ async fn recover_search_index(pool: &SqlitePool, index_dir: &Path) -> Result<(),
 pub async fn rebuild_index_from_database(
     pool: &SqlitePool,
     index_dir: &Path,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let docs = documents::load_rebuild_search_documents(pool.clone()).await?;
     rebuild_index_with_documents(index_dir, &docs)
 }
 
-fn rebuild_index_with_documents(index_dir: &Path, docs: &[SearchDocument]) -> Result<(), String> {
-    let index = SearchIndexLifecycle::bootstrap(index_dir)
-        .map_err(|error| format!("failed to bootstrap search index: {error}"))?;
+fn rebuild_index_with_documents(index_dir: &Path, docs: &[SearchDocument]) -> anyhow::Result<()> {
+    let index =
+        SearchIndexLifecycle::bootstrap(index_dir).context("failed to bootstrap search index")?;
     index
         .rebuild(docs)
-        .map_err(|error| format!("failed to rebuild search index: {error}"))?;
+        .context("failed to rebuild search index")?;
     index
         .shutdown()
-        .map_err(|error| format!("failed to finalize rebuilt search writer: {error}"))
+        .context("failed to finalize rebuilt search writer")
 }
 
 async fn try_rebuild_search_index_for_entities(
     pool: &SqlitePool,
     index_dir: &Path,
     entity_types: &[SearchEntityType],
-) -> Result<SearchEventAttempt, String> {
+) -> anyhow::Result<SearchEventAttempt> {
     let docs =
         documents::load_rebuild_search_documents_for_entities(pool.clone(), entity_types).await?;
     match SearchIndexLifecycle::bootstrap(index_dir) {
         Ok(index) => {
             index
                 .rebuild_entities(entity_types, &docs)
-                .map_err(|error| format!("failed to rebuild scoped search index: {error}"))?;
+                .context("failed to rebuild scoped search index")?;
             index
                 .shutdown()
-                .map_err(|error| format!("failed to finalize rebuilt search writer: {error}"))?;
+                .context("failed to finalize rebuilt search writer")?;
             Ok(SearchEventAttempt::Applied)
         }
         Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
             Ok(SearchEventAttempt::RebuildRequired)
         }
-        Err(error) => Err(format!("failed to bootstrap search index: {error}")),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "failed to bootstrap search index: {error}"
+        ))),
     }
 }
 
@@ -260,7 +262,7 @@ async fn rebuild_search_index_for_entities(
     pool: &SqlitePool,
     index_dir: &Path,
     entity_types: &[SearchEntityType],
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     SearchIndexMutationRunner::new(pool, index_dir)
         .run(|| try_rebuild_search_index_for_entities(pool, index_dir, entity_types))
         .await
@@ -269,21 +271,23 @@ async fn rebuild_search_index_for_entities(
 async fn try_apply_search_event(
     index_dir: &Path,
     event: SearchEvent,
-) -> Result<SearchEventAttempt, String> {
+) -> anyhow::Result<SearchEventAttempt> {
     match SearchIndexLifecycle::bootstrap(index_dir) {
         Ok(index) => {
             index
                 .apply_event(event)
-                .map_err(|error| format!("failed to apply search event: {error}"))?;
+                .context("failed to apply search event")?;
             index
                 .shutdown()
-                .map_err(|error| format!("failed to finalize search event writer: {error}"))?;
+                .context("failed to finalize search event writer")?;
             Ok(SearchEventAttempt::Applied)
         }
         Err(SearchError::CorruptedIndexRequiresExplicitRebuild(_, _)) => {
             Ok(SearchEventAttempt::RebuildRequired)
         }
-        Err(error) => Err(format!("failed to bootstrap search index: {error}")),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "failed to bootstrap search index: {error}"
+        ))),
     }
 }
 
@@ -291,7 +295,7 @@ async fn apply_search_event(
     pool: &SqlitePool,
     index_dir: &Path,
     event: SearchEvent,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     SearchIndexMutationRunner::new(pool, index_dir)
         .run(|| try_apply_search_event(index_dir, event.clone()))
         .await
@@ -302,7 +306,7 @@ async fn sync_entity_upsert_from_database(
     index_dir: &Path,
     entity_type: SearchEntityType,
     entity_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let document = match entity_type {
         SearchEntityType::Book => {
             documents::load_book_search_document(pool.clone(), entity_id).await?
@@ -330,7 +334,7 @@ async fn sync_series_and_oneshot_books_after_metadata_update(
     pool: &SqlitePool,
     index_dir: &Path,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let series_document = documents::load_series_search_document(pool.clone(), series_id).await?;
     let oneshot_documents =
         documents::load_oneshot_book_search_documents(pool.clone(), series_id).await?;
@@ -351,7 +355,7 @@ async fn sync_entity_delete_from_index(
     index_dir: &Path,
     entity_type: SearchEntityType,
     entity_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     apply_search_event(
         pool,
         index_dir,

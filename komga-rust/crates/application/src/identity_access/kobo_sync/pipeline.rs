@@ -16,15 +16,15 @@ pub struct KoboLibrarySyncService<'a> {
 
 #[async_trait::async_trait]
 pub trait KoboSyncStatePort: Send + Sync {
-    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> Result<KoboSyncPage, String>;
+    async fn load_sync_page(&self, request: KoboSyncPageRequest) -> anyhow::Result<KoboSyncPage>;
 
     async fn load_sync_book_states(
         &self,
         books: &[KoboSyncPointBook],
         user_id: &str,
-    ) -> Result<Vec<KoboSyncBookState>, String>;
+    ) -> anyhow::Result<Vec<KoboSyncBookState>>;
 
-    async fn remove_sync_point(&self, sync_point_id: &str) -> Result<(), String>;
+    async fn remove_sync_point(&self, sync_point_id: &str) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -34,7 +34,7 @@ pub trait KoboStoreSyncPort: Send + Sync {
         forwarded_headers: &[KoboProxyHeader],
         query: Option<&str>,
         raw_sync_token: &str,
-    ) -> Result<KoboStoreSyncMergeResult, String>;
+    ) -> anyhow::Result<KoboStoreSyncMergeResult>;
 }
 
 impl<'a> KoboLibrarySyncService<'a> {
@@ -45,7 +45,7 @@ impl<'a> KoboLibrarySyncService<'a> {
     pub async fn sync_library(
         &self,
         request: KoboLibrarySyncRequest,
-    ) -> Result<KoboLibrarySyncResponse, String> {
+    ) -> anyhow::Result<KoboLibrarySyncResponse> {
         let lifecycle = KoboSyncLifecycle::from_sync_token(request.sync_token.as_deref());
         let sync_page = self
             .state
@@ -102,7 +102,7 @@ impl<'a> KoboLibrarySyncService<'a> {
         &self,
         request: &KoboLibrarySyncRequest,
         page: &KoboSyncPage,
-    ) -> Result<Vec<KoboSyncEvent>, String> {
+    ) -> anyhow::Result<Vec<KoboSyncEvent>> {
         let user_id_value = user_id(&request.user);
         let book_states = self.load_sync_book_state_map(page, user_id_value).await?;
         let mut events = Vec::new();
@@ -174,7 +174,7 @@ impl<'a> KoboLibrarySyncService<'a> {
         &self,
         page: &KoboSyncPage,
         user_id: &str,
-    ) -> Result<HashMap<String, KoboSyncBookState>, String> {
+    ) -> anyhow::Result<HashMap<String, KoboSyncBookState>> {
         let books = page
             .books_added
             .iter()
@@ -193,17 +193,17 @@ impl<'a> KoboLibrarySyncService<'a> {
 fn required_book_state<'a>(
     states: &'a HashMap<String, KoboSyncBookState>,
     book_id: &str,
-) -> Result<&'a KoboSyncBookState, String> {
+) -> anyhow::Result<&'a KoboSyncBookState> {
     states
         .get(book_id)
-        .ok_or_else(|| format!("kobo sync book state not found for {book_id}"))
+        .ok_or_else(|| anyhow::anyhow!("kobo sync book state not found for {book_id}"))
 }
 
-fn required_book_snapshot(state: &KoboSyncBookState) -> Result<&KoboSyncBookSnapshot, String> {
+fn required_book_snapshot(state: &KoboSyncBookState) -> anyhow::Result<&KoboSyncBookSnapshot> {
     state
         .book
         .as_ref()
-        .ok_or_else(|| format!("kobo sync book snapshot not found for {}", state.book_id))
+        .ok_or_else(|| anyhow::anyhow!("kobo sync book snapshot not found for {}", state.book_id))
 }
 
 fn removed_book_snapshot(

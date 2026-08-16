@@ -7,7 +7,7 @@ pub(super) async fn load_epub_locator_for_page(
     app: &MediaAssetsState,
     book_id: &str,
     page: u64,
-) -> Result<Option<Value>, String> {
+) -> anyhow::Result<Option<Value>> {
     match load_book_epub_navigation(
         app.epub_navigation_reader.as_ref(),
         app.epub_navigation_content.as_ref(),

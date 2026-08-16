@@ -4,31 +4,31 @@ use std::path::Path;
 
 use komga_application::operational::{build_font_family_css, is_supported_font_file};
 
-pub(crate) fn list_font_families(fonts_directory: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn list_font_families(fonts_directory: &Path) -> anyhow::Result<Vec<String>> {
     let entries = match fs::read_dir(fonts_directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "read fonts directory '{}': {error}",
                 fonts_directory.display()
-            ));
+            )));
         }
     };
 
     let mut families = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
-                "read fonts directory entry '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read fonts directory entry '{}': ",
                 fonts_directory.display()
-            )
+            ))
         })?;
         let file_type = entry.file_type().map_err(|error| {
-            format!(
-                "read fonts directory entry type '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read fonts directory entry type '{}': ",
                 entry.path().display()
-            )
+            ))
         })?;
         if file_type.is_dir() {
             families.push(entry.file_name().to_string_lossy().to_string());
@@ -42,44 +42,47 @@ pub(crate) fn load_font_file(
     fonts_directory: &Path,
     font_family: &str,
     font_file: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let path = fonts_directory.join(font_family).join(font_file);
     match fs::read(&path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("read font file '{}': {error}", path.display())),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "read font file '{}': {error}",
+            path.display()
+        ))),
     }
 }
 
 pub(crate) fn load_font_family_css(
     fonts_directory: &Path,
     font_family: &str,
-) -> Result<Option<String>, String> {
+) -> anyhow::Result<Option<String>> {
     let family_dir = fonts_directory.join(font_family);
     let entries = match fs::read_dir(&family_dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "read font family directory '{}': {error}",
                 family_dir.display()
-            ));
+            )));
         }
     };
 
     let mut font_files = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
-            format!(
-                "read font family directory entry '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read font family directory entry '{}': ",
                 family_dir.display()
-            )
+            ))
         })?;
         let file_type = entry.file_type().map_err(|error| {
-            format!(
-                "read font family directory entry type '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read font family directory entry type '{}': ",
                 entry.path().display()
-            )
+            ))
         })?;
         if !file_type.is_file() {
             continue;
@@ -181,7 +184,7 @@ mod tests {
             .expect_err("read_dir errors must not become an empty font family list");
 
         assert!(
-            error.contains("read fonts directory"),
+            error.to_string().contains("read fonts directory"),
             "unexpected font family listing error: {error}"
         );
 
@@ -198,7 +201,7 @@ mod tests {
             .expect_err("font read errors must not become missing fonts");
 
         assert!(
-            error.contains("read font file"),
+            error.to_string().contains("read font file"),
             "unexpected font file read error: {error}"
         );
 
@@ -216,7 +219,7 @@ mod tests {
             .expect_err("font CSS read_dir errors must not become missing CSS");
 
         assert!(
-            error.contains("read font family directory"),
+            error.to_string().contains("read font family directory"),
             "unexpected font family CSS error: {error}"
         );
 

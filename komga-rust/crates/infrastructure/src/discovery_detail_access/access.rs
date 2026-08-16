@@ -61,7 +61,7 @@ impl PersistedSetVisibilityService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         CollectionProjectionService::new(self, self, self)
             .visible_collection_series_ids(context, collection_id)
             .await
@@ -71,7 +71,7 @@ impl PersistedSetVisibilityService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<Vec<String>>, String> {
+    ) -> anyhow::Result<Option<Vec<String>>> {
         ReadlistProjectionService::new(self, self, self)
             .visible_readlist_book_ids(context, readlist_id)
             .await
@@ -85,7 +85,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         visibility_context: &DiscoveryQueryContext,
         request_scope_context: Option<&DiscoveryQueryContext>,
         query: CollectionListQuery,
-    ) -> Result<PageEnvelope<CollectionReadModel>, String> {
+    ) -> anyhow::Result<PageEnvelope<CollectionReadModel>> {
         CollectionProjectionService::new(self, self, self)
             .list_collections(visibility_context, request_scope_context, query)
             .await
@@ -95,7 +95,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         CollectionProjectionService::new(self, self, self)
             .collection_detail(context, collection_id)
             .await
@@ -104,7 +104,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
     async fn collection_for_mutation(
         &self,
         collection_id: &str,
-    ) -> Result<Option<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Option<CollectionReadModel>> {
         let Some(row) =
             collections::load_persisted_collection_detail(self.db.read_pool(), collection_id)
                 .await?
@@ -129,7 +129,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         collections: Vec<CollectionReadModel>,
-    ) -> Result<Vec<CollectionReadModel>, String> {
+    ) -> anyhow::Result<Vec<CollectionReadModel>> {
         CollectionProjectionService::new(self, self, self)
             .visible_collections(context, collections)
             .await
@@ -168,7 +168,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         requested_context: &DiscoveryQueryContext,
         visibility_context: &DiscoveryQueryContext,
         query: ReadListsQuery,
-    ) -> Result<PageEnvelope<ReadListReadModel>, String> {
+    ) -> anyhow::Result<PageEnvelope<ReadListReadModel>> {
         ReadlistProjectionService::new(self, self, self)
             .list_readlists(requested_context, visibility_context, query)
             .await
@@ -178,7 +178,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Option<ReadListReadModel>> {
         ReadlistProjectionService::new(self, self, self)
             .readlist_detail(context, readlist_id)
             .await
@@ -187,7 +187,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
     async fn readlist_for_mutation(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Option<ReadListReadModel>> {
         let Some(row) =
             readlists::load_persisted_readlist_detail(self.db.read_pool(), readlist_id).await?
         else {
@@ -214,7 +214,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
     async fn match_comicrack_readlist(
         &self,
         request: &ComicRackReadListRequest,
-    ) -> Result<ComicRackReadListMatchResult, String> {
+    ) -> anyhow::Result<ComicRackReadListMatchResult> {
         ComicRackReadListMatchService::new(self)
             .match_readlist(request)
             .await
@@ -224,7 +224,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         &self,
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
-    ) -> Result<Option<PageEnvelope<BookReadModel>>, String> {
+    ) -> anyhow::Result<Option<PageEnvelope<BookReadModel>>> {
         ReadlistProjectionService::new(self, self, self)
             .list_readlist_books(context, query)
             .await
@@ -236,7 +236,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         readlist_id: &str,
         book_id: &str,
         next: bool,
-    ) -> Result<Option<BookReadModel>, String> {
+    ) -> anyhow::Result<Option<BookReadModel>> {
         ReadlistProjectionService::new(self, self, self)
             .readlist_book_sibling(context, readlist_id, book_id, next)
             .await
@@ -247,7 +247,7 @@ impl PersistedSetService for DiscoveryDetailAccess {
         candidate_library_ids: Option<&[String]>,
         visibility_context: &DiscoveryQueryContext,
         book_id: &str,
-    ) -> Result<Vec<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Vec<ReadListReadModel>> {
         ReadlistProjectionService::new(self, self, self)
             .readlists_for_book(candidate_library_ids, visibility_context, book_id)
             .await
@@ -285,7 +285,7 @@ impl CollectionSearchPort for DiscoveryDetailAccess {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         self.search
             .search_ids(query, SearchEntityType::Collection, limit)
     }
@@ -297,7 +297,7 @@ impl ReadlistSearchPort for DiscoveryDetailAccess {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ScoredSearchHit>, String> {
+    ) -> anyhow::Result<Vec<ScoredSearchHit>> {
         Ok(self
             .search
             .search_scored_ids(query, SearchEntityType::ReadList, limit)?
@@ -315,7 +315,7 @@ impl BookDetailPort for DiscoveryDetailAccess {
     async fn load_persisted_book_resource(
         &self,
         book_id: &str,
-    ) -> Result<Option<PersistedBookResourceRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedBookResourceRecord>> {
         books::load_persisted_book_resource(self.db.read_pool(), book_id).await
     }
 
@@ -323,7 +323,7 @@ impl BookDetailPort for DiscoveryDetailAccess {
         &self,
         book_id: &str,
         user_id: Option<&str>,
-    ) -> Result<Option<BookReadModel>, String> {
+    ) -> anyhow::Result<Option<BookReadModel>> {
         books::load_persisted_book_detail(self.db.read_pool(), book_id, user_id).await
     }
 
@@ -331,14 +331,14 @@ impl BookDetailPort for DiscoveryDetailAccess {
         &self,
         book_id: &str,
         direction: PersistedBookSiblingDirectionRecord,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         books::load_persisted_book_sibling_id(self.db.read_pool(), book_id, direction).await
     }
 }
 
 #[async_trait::async_trait]
 impl PersistedBookIdResolverPort for DiscoveryDetailAccess {
-    async fn persisted_book_resource_exists(&self, book_id: &str) -> Result<bool, String> {
+    async fn persisted_book_resource_exists(&self, book_id: &str) -> anyhow::Result<bool> {
         books::load_persisted_book_resource(self.db.read_pool(), book_id)
             .await
             .map(|record| record.is_some())
@@ -347,71 +347,71 @@ impl PersistedBookIdResolverPort for DiscoveryDetailAccess {
     async fn load_book_id_by_sorted_position(
         &self,
         index: usize,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         books::load_book_id_by_sorted_position(self.db.read_pool(), index).await
     }
 }
 
 #[async_trait::async_trait]
 impl SeriesDetailPort for DiscoveryDetailAccess {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>> {
         collections::load_series_library_id(self.db.read_pool(), series_id).await
     }
 
     async fn load_series_restrictions(
         &self,
         series_id: &str,
-    ) -> Result<PersistedSeriesRestrictionRecord, String> {
+    ) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
         collections::load_series_restrictions(self.db.read_pool(), series_id).await
     }
 
     async fn load_persisted_series_resource(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesResourceRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedSeriesResourceRecord>> {
         series::load_persisted_series_resource(self.db.read_pool(), series_id).await
     }
 
     async fn load_persisted_series_detail(
         &self,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesDetailRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedSeriesDetailRecord>> {
         series::load_persisted_series_detail(self.db.read_pool(), series_id).await
     }
 
-    async fn load_persisted_series_summaries(&self) -> Result<Vec<SeriesReadModel>, String> {
+    async fn load_persisted_series_summaries(&self) -> anyhow::Result<Vec<SeriesReadModel>> {
         load_persisted_series_read_models(self.db.read_pool()).await
     }
 
-    async fn load_series_total_book_counts(&self) -> Result<HashMap<String, i64>, String> {
+    async fn load_series_total_book_counts(&self) -> anyhow::Result<HashMap<String, i64>> {
         runtime_queries::load_series_total_book_counts(self.db.read_pool()).await
     }
 
     async fn load_series_read_progress_counts(
         &self,
         user_id: &str,
-    ) -> Result<HashMap<String, SeriesReadProgressCounts>, String> {
+    ) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>> {
         runtime_queries::load_series_read_progress_counts(self.db.read_pool(), user_id).await
     }
 
     async fn load_persisted_series_collections(
         &self,
         series_id: &str,
-    ) -> Result<Vec<PersistedSeriesCollectionRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesCollectionRecord>> {
         series::load_persisted_series_collections(self.db.read_pool(), series_id).await
     }
 
     async fn load_existing_series_metadata(
         &self,
         series_id: &str,
-    ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
+    ) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>> {
         series::load_existing_series_metadata(self.db.read_pool(), series_id).await
     }
 }
 
 #[async_trait::async_trait]
 impl PersistedSeriesIdResolverPort for DiscoveryDetailAccess {
-    async fn persisted_series_resource_exists(&self, series_id: &str) -> Result<bool, String> {
+    async fn persisted_series_resource_exists(&self, series_id: &str) -> anyhow::Result<bool> {
         series::load_persisted_series_resource(self.db.read_pool(), series_id)
             .await
             .map(|record| record.is_some())
@@ -420,21 +420,21 @@ impl PersistedSeriesIdResolverPort for DiscoveryDetailAccess {
     async fn load_series_id_by_sorted_position(
         &self,
         index: usize,
-    ) -> Result<Option<String>, String> {
+    ) -> anyhow::Result<Option<String>> {
         series::load_series_id_by_sorted_position(self.db.read_pool(), index).await
     }
 }
 
 #[async_trait::async_trait]
 impl SeriesMetadataWritePort for DiscoveryDetailAccess {
-    async fn load_series_library_id(&self, series_id: &str) -> Result<Option<String>, String> {
+    async fn load_series_library_id(&self, series_id: &str) -> anyhow::Result<Option<String>> {
         collections::load_series_library_id(self.db.read_pool(), series_id).await
     }
 
     async fn load_existing_series_metadata(
         &self,
         series_id: &str,
-    ) -> Result<Option<ExistingSeriesMetadataRecord>, String> {
+    ) -> anyhow::Result<Option<ExistingSeriesMetadataRecord>> {
         series::load_existing_series_metadata(self.db.read_pool(), series_id).await
     }
 
@@ -442,14 +442,14 @@ impl SeriesMetadataWritePort for DiscoveryDetailAccess {
         &self,
         series_id: &str,
         update: SeriesMetadataUpdateRecord,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         series::persist_series_metadata_update(self.db.write_pool(), series_id, update).await
     }
 
     async fn refresh_series_search_documents_after_metadata_update(
         &self,
         series_id: &str,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         series::refresh_series_after_metadata_update(self.db.write_pool(), series_id).await?;
 
         self.search
@@ -460,27 +460,27 @@ impl SeriesMetadataWritePort for DiscoveryDetailAccess {
 
 #[async_trait::async_trait]
 impl CollectionPort for DiscoveryDetailAccess {
-    async fn persisted_collections_exist(&self) -> Result<bool, String> {
+    async fn persisted_collections_exist(&self) -> anyhow::Result<bool> {
         collections::persisted_collections_exist(self.db.read_pool()).await
     }
 
     async fn load_persisted_collections(
         &self,
-    ) -> Result<Vec<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedCollectionAccessRecord>> {
         collections::load_persisted_collections(self.db.read_pool()).await
     }
 
     async fn load_persisted_collection_series_ids(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         collections::load_persisted_collection_series_ids(self.db.read_pool(), collection_id).await
     }
 
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
-    ) -> Result<Option<PersistedCollectionAccessRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedCollectionAccessRecord>> {
         collections::load_persisted_collection_detail(self.db.read_pool(), collection_id).await
     }
 
@@ -490,7 +490,7 @@ impl CollectionPort for DiscoveryDetailAccess {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         collections::persist_collection_create(
             self.db.write_pool(),
             collection_id,
@@ -507,7 +507,7 @@ impl CollectionPort for DiscoveryDetailAccess {
         name: &str,
         ordered: bool,
         series_ids: &[String],
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         collections::persist_collection_update(
             self.db.write_pool(),
             collection_id,
@@ -518,15 +518,15 @@ impl CollectionPort for DiscoveryDetailAccess {
         .await
     }
 
-    async fn delete_persisted_collection(&self, collection_id: &str) -> Result<bool, String> {
+    async fn delete_persisted_collection(&self, collection_id: &str) -> anyhow::Result<bool> {
         collections::delete_persisted_collection(self.db.write_pool(), collection_id).await
     }
 
-    async fn upsert_collection_search_document(&self, collection_id: &str) -> Result<bool, String> {
+    async fn upsert_collection_search_document(&self, collection_id: &str) -> anyhow::Result<bool> {
         self.search.upsert_collection(collection_id).await
     }
 
-    async fn delete_collection_search_document(&self, collection_id: &str) -> Result<(), String> {
+    async fn delete_collection_search_document(&self, collection_id: &str) -> anyhow::Result<()> {
         self.search.delete_collection(collection_id).await
     }
 }
@@ -535,21 +535,21 @@ impl CollectionPort for DiscoveryDetailAccess {
 impl ReadlistProjectionPort for DiscoveryDetailAccess {
     async fn load_persisted_readlists(
         &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>> {
         readlists::load_persisted_readlists(self.db.read_pool()).await
     }
 
     async fn load_persisted_readlist_detail(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Option<DiscoveryPersistedReadlistRecord>> {
         readlists::load_persisted_readlist_detail(self.db.read_pool(), readlist_id).await
     }
 
     async fn load_persisted_readlist_book_rows(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>> {
         readlists::load_persisted_readlist_book_rows(self.db.read_pool(), readlist_id).await
     }
 }
@@ -558,13 +558,13 @@ impl ReadlistProjectionPort for DiscoveryDetailAccess {
 impl ReadlistComicRackMatchPort for DiscoveryDetailAccess {
     async fn load_persisted_readlists(
         &self,
-    ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>> {
         readlists::load_persisted_readlists(self.db.read_pool()).await
     }
 
     async fn load_comicrack_match_candidates(
         &self,
-    ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedComicrackMatchCandidateRecord>> {
         readlists::load_comicrack_match_candidates(self.db.read_pool()).await
     }
 }
@@ -578,7 +578,7 @@ impl ReadlistMutationPort for DiscoveryDetailAccess {
         summary: &str,
         ordered: bool,
         book_ids: &[String],
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         readlists::persist_readlist_create(
             self.db.write_pool(),
             readlist_id,
@@ -597,7 +597,7 @@ impl ReadlistMutationPort for DiscoveryDetailAccess {
         summary: &str,
         ordered: bool,
         book_ids: &[String],
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         readlists::persist_readlist_update(
             self.db.write_pool(),
             readlist_id,
@@ -609,15 +609,15 @@ impl ReadlistMutationPort for DiscoveryDetailAccess {
         .await
     }
 
-    async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+    async fn delete_persisted_readlist(&self, readlist_id: &str) -> anyhow::Result<bool> {
         readlists::delete_persisted_readlist(self.db.write_pool(), readlist_id).await
     }
 
-    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
+    async fn upsert_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<bool> {
         self.search.upsert_readlist(readlist_id).await
     }
 
-    async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
+    async fn delete_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<()> {
         self.search.delete_readlist(readlist_id).await
     }
 }

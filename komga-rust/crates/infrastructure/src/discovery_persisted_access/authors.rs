@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::BTreeSet;
 
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
@@ -9,7 +10,7 @@ pub(super) async fn load_persisted_author_names(
     pool: &SqlitePool,
     search: &str,
     authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(authorized_library_ids) = authorized_library_ids
         && authorized_library_ids.is_empty()
     {
@@ -37,7 +38,7 @@ pub(super) async fn load_persisted_author_names(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted author names: {error}"))?;
+        .context("query persisted author names")?;
 
     let search = author_search_key(search);
     Ok(rows
@@ -50,7 +51,7 @@ pub(super) async fn load_persisted_author_names(
 pub(super) async fn load_persisted_author_roles(
     pool: &SqlitePool,
     authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     if let Some(authorized_library_ids) = authorized_library_ids
         && authorized_library_ids.is_empty()
     {
@@ -78,7 +79,7 @@ pub(super) async fn load_persisted_author_roles(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted author roles: {error}"))?;
+        .context("query persisted author roles")?;
 
     Ok(rows
         .into_iter()
@@ -98,7 +99,7 @@ pub(super) async fn load_persisted_authors_by_scope(
     pool: &SqlitePool,
     scope: &AuthorsScope,
     authorized_library_ids: Option<&[String]>,
-) -> Result<Vec<AuthorEntry>, String> {
+) -> anyhow::Result<Vec<AuthorEntry>> {
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"SELECT a.NAME, a.ROLE
          FROM BOOK_METADATA_AUTHOR a
@@ -188,7 +189,7 @@ pub(super) async fn load_persisted_authors_by_scope(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("query persisted v2 authors: {error}"))?;
+        .context("query persisted v2 authors")?;
 
     let mut authors = Vec::with_capacity(rows.len());
     let mut seen = BTreeSet::new();

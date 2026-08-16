@@ -79,7 +79,7 @@ async fn opds_manifest_variant(
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("load persisted OPDS manifest: {error}") })),
+            Json(json!({ "error": format!("load persisted OPDS manifest: {error:#}") })),
         )
             .into_response(),
     }

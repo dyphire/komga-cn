@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -15,12 +16,12 @@ use super::scan_models::{
     RestoredBookMatches, RestoredSeriesMatch,
 };
 
-fn compute_file_sha256(path: &Path) -> Result<String, String> {
+fn compute_file_sha256(path: &Path) -> anyhow::Result<String> {
     let bytes = fs::read(path).map_err(|error| {
-        format!(
-            "failed to read book file for restore '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read book file for restore '{}': ",
             path.display()
-        )
+        ))
     })?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
@@ -34,7 +35,7 @@ pub(super) async fn try_restore_deleted_books(
     pool: &SqlitePool,
     library_root: &Path,
     inserted_books: &[InsertedBookCandidate],
-) -> Result<RestoredBookMatches, String> {
+) -> anyhow::Result<RestoredBookMatches> {
     let mut restored_series_ids = HashSet::<String>::new();
     let mut book_metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
 
@@ -50,7 +51,7 @@ ORDER BY ID ASC"#,
         .bind(inserted.file_size)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("failed to load deleted book restore candidates: {error}"))?;
+        .context("failed to load deleted book restore candidates")?;
         if deleted_candidates.is_empty() {
             continue;
         }
@@ -66,7 +67,7 @@ WHERE ID = ?"#,
         .bind(&inserted.book_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to persist inserted book hash during restore: {error}"))?;
+        .context("failed to persist inserted book hash during restore: ")?;
 
         let Some(matched_deleted_book_id) = deleted_candidates.into_iter().find_map(|row| {
             let file_hash = row.get::<String, _>("FILE_HASH");
@@ -85,10 +86,10 @@ WHERE BOOK_ID = ?"#,
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore MEDIA rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore MEDIA rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
         sqlx::query(
             r#"UPDATE MEDIA_FILE
@@ -100,10 +101,10 @@ WHERE BOOK_ID = ?"#,
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore MEDIA_FILE rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore MEDIA_FILE rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
         sqlx::query(
             r#"UPDATE MEDIA_PAGE
@@ -115,10 +116,10 @@ WHERE BOOK_ID = ?"#,
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore MEDIA_PAGE rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore MEDIA_PAGE rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
         sqlx::query(
             r#"UPDATE THUMBNAIL_BOOK
@@ -133,10 +134,10 @@ WHERE BOOK_ID = ?
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore THUMBNAIL_BOOK rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore THUMBNAIL_BOOK rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
         sqlx::query(
             r#"UPDATE READ_PROGRESS
@@ -148,10 +149,10 @@ WHERE BOOK_ID = ?"#,
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore READ_PROGRESS rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore READ_PROGRESS rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
         sqlx::query(
             r#"UPDATE READLIST_BOOK
@@ -163,10 +164,10 @@ WHERE BOOK_ID = ?"#,
         .execute(pool)
         .await
         .map_err(|error| {
-            format!(
-                "failed to restore READLIST_BOOK rows for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to restore READLIST_BOOK rows for '{}': ",
                 inserted.book_id
-            )
+            ))
         })?;
 
         let metadata_row = sqlx::query(
@@ -180,14 +181,15 @@ LIMIT 1"#,
         .bind(&matched_deleted_book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to load deleted BOOK_METADATA for restore: {error}"))?;
+        .context("failed to load deleted BOOK_METADATA for restore: ")?;
         let inserted_metadata_row =
             sqlx::query(r#"SELECT TITLE FROM BOOK_METADATA WHERE BOOK_ID = ? LIMIT 1"#)
                 .bind(&inserted.book_id)
                 .fetch_optional(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to load inserted BOOK_METADATA for restore: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to load inserted BOOK_METADATA for restore: ")
                 })?;
         if let (Some(deleted_metadata), Some(inserted_metadata)) =
             (metadata_row, inserted_metadata_row)
@@ -224,10 +226,10 @@ WHERE BOOK_ID = ?"#,
             .execute(pool)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to restore BOOK_METADATA row for '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to restore BOOK_METADATA row for '{}': ",
                     inserted.book_id
-                )
+                ))
             })?;
             if !deleted_title_locked {
                 book_metadata_refreshes.push(BookMetadataRefreshRequest {
@@ -241,7 +243,8 @@ WHERE BOOK_ID = ?"#,
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear BOOK_METADATA_AUTHOR rows during restore: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to clear BOOK_METADATA_AUTHOR rows during restore: ")
                 })?;
             sqlx::query(
                 r#"INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE)
@@ -251,13 +254,14 @@ SELECT ?, NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?"#,
             .bind(&matched_deleted_book_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore BOOK_METADATA_AUTHOR rows: {error}"))?;
+            .context("failed to restore BOOK_METADATA_AUTHOR rows")?;
             sqlx::query("DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?")
                 .bind(&inserted.book_id)
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear BOOK_METADATA_TAG rows during restore: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to clear BOOK_METADATA_TAG rows during restore: ")
                 })?;
             sqlx::query(
                 r#"INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG)
@@ -267,13 +271,14 @@ SELECT ?, TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?"#,
             .bind(&matched_deleted_book_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore BOOK_METADATA_TAG rows: {error}"))?;
+            .context("failed to restore BOOK_METADATA_TAG rows")?;
             sqlx::query("DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?")
                 .bind(&inserted.book_id)
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear BOOK_METADATA_LINK rows during restore: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to clear BOOK_METADATA_LINK rows during restore: ")
                 })?;
             sqlx::query(
                 r#"INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL)
@@ -283,7 +288,7 @@ SELECT ?, LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?"#,
             .bind(&matched_deleted_book_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore BOOK_METADATA_LINK rows: {error}"))?;
+            .context("failed to restore BOOK_METADATA_LINK rows")?;
         }
 
         for sql in DELETE_BOOK_DEPENDENCY_SQL {
@@ -292,14 +297,15 @@ SELECT ?, LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?"#,
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to delete restored legacy book dependencies: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to delete restored legacy book dependencies: ")
                 })?;
         }
         sqlx::query("DELETE FROM BOOK WHERE ID = ?")
             .bind(&matched_deleted_book_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to delete restored legacy BOOK row: {error}"))?;
+            .context("failed to delete restored legacy BOOK row")?;
 
         let progress_user_rows = sqlx::query(
             "SELECT DISTINCT USER_ID FROM READ_PROGRESS WHERE BOOK_ID = ? ORDER BY USER_ID ASC",
@@ -307,7 +313,7 @@ SELECT ?, LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?"#,
         .bind(&inserted.book_id)
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("failed to load restored READ_PROGRESS users: {error}"))?;
+        .context("failed to load restored READ_PROGRESS users")?;
         for row in progress_user_rows {
             let user_id = row.get::<String, _>("USER_ID");
             let aggregate = sqlx::query(
@@ -324,7 +330,8 @@ WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL"#,
             .fetch_one(pool)
             .await
             .map_err(|error| {
-                format!("failed to aggregate restored READ_PROGRESS_SERIES rows: {error}")
+                anyhow::anyhow!(error)
+                    .context("failed to aggregate restored READ_PROGRESS_SERIES rows: ")
             })?;
             let progress_count = aggregate.get::<i64, _>("PROGRESS_COUNT");
             if progress_count == 0 {
@@ -334,8 +341,8 @@ WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL"#,
                     .execute(pool)
                     .await
                     .map_err(|error| {
-                        format!(
-                            "failed to delete empty READ_PROGRESS_SERIES row after restore: {error}"
+                        anyhow::anyhow!(error).context(
+                            "failed to delete empty READ_PROGRESS_SERIES row after restore: ",
                         )
                     })?;
             } else {
@@ -355,7 +362,7 @@ SET READ_COUNT = excluded.READ_COUNT,
                 .bind(aggregate.get::<Option<String>, _>("MOST_RECENT_READ_DATE"))
                 .execute(pool)
                 .await
-                .map_err(|error| format!("failed to upsert READ_PROGRESS_SERIES row after restore: {error}"))?;
+                .context("failed to upsert READ_PROGRESS_SERIES row after restore")?;
             }
         }
 
@@ -372,7 +379,7 @@ pub(super) async fn try_restore_deleted_series(
     pool: &SqlitePool,
     library_root: &Path,
     inserted_series: &[InsertedSeriesCandidate],
-) -> Result<Vec<RestoredSeriesMatch>, String> {
+) -> anyhow::Result<Vec<RestoredSeriesMatch>> {
     let mut restored_series_ids = Vec::new();
 
     for inserted in inserted_series {
@@ -388,7 +395,7 @@ ORDER BY s.ID ASC"#,
         )
         .fetch_all(pool)
         .await
-        .map_err(|error| format!("failed to load deleted series restore candidates: {error}"))?;
+        .context("failed to load deleted series restore candidates: ")?;
         if deleted_series_rows.is_empty() {
             continue;
         }
@@ -413,7 +420,7 @@ ORDER BY ID ASC"#,
             .bind(&deleted_series_id)
             .fetch_all(pool)
             .await
-            .map_err(|error| format!("failed to load deleted series books for restore: {error}"))?;
+            .context("failed to load deleted series books for restore")?;
             if deleted_books.len() != inserted_books_with_hash.len() {
                 continue;
             }
@@ -471,14 +478,14 @@ LIMIT 1"#,
         .bind(&deleted_series_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to load deleted SERIES_METADATA for restore: {error}"))?;
+        .context("failed to load deleted SERIES_METADATA for restore: ")?;
         let inserted_series_metadata = sqlx::query(
             r#"SELECT TITLE, TITLE_SORT FROM SERIES_METADATA WHERE SERIES_ID = ? LIMIT 1"#,
         )
         .bind(&inserted.series_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to load inserted SERIES_METADATA for restore: {error}"))?;
+        .context("failed to load inserted SERIES_METADATA for restore: ")?;
         if let (Some(deleted_metadata), Some(inserted_metadata)) =
             (deleted_series_metadata, inserted_series_metadata)
         {
@@ -492,10 +499,10 @@ WHERE ID = ?"#,
             .execute(pool)
             .await
             .map_err(|error| {
-                format!(
-                    "failed to touch restored SERIES row for '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to touch restored SERIES row for '{}': ",
                     inserted.series_id
-                )
+                ))
             })?;
             sqlx::query(
                 r#"UPDATE SERIES_METADATA
@@ -540,7 +547,7 @@ WHERE SERIES_ID = ?"#,
             .bind(&inserted.series_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore SERIES_METADATA row for '{}': {error}", inserted.series_id))?;
+            .map_err(|error| anyhow::anyhow!(error).context( format!("failed to restore SERIES_METADATA row for '{}': ", inserted.series_id)))?;
             for table in [
                 "SERIES_METADATA_GENRE",
                 "SERIES_METADATA_TAG",
@@ -553,7 +560,8 @@ WHERE SERIES_ID = ?"#,
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear restored series metadata strings: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to clear restored series metadata strings: ")
                 })?;
             }
             sqlx::query(
@@ -564,7 +572,7 @@ SELECT ?, GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ?"#,
             .bind(&deleted_series_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore SERIES_METADATA_GENRE rows: {error}"))?;
+            .context("failed to restore SERIES_METADATA_GENRE rows")?;
             sqlx::query(
                 r#"INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG)
 SELECT ?, TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ?"#,
@@ -573,7 +581,7 @@ SELECT ?, TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ?"#,
             .bind(&deleted_series_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore SERIES_METADATA_TAG rows: {error}"))?;
+            .context("failed to restore SERIES_METADATA_TAG rows")?;
             sqlx::query(
                 r#"INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL)
 SELECT ?, LABEL FROM SERIES_METADATA_SHARING WHERE SERIES_ID = ?"#,
@@ -582,13 +590,14 @@ SELECT ?, LABEL FROM SERIES_METADATA_SHARING WHERE SERIES_ID = ?"#,
             .bind(&deleted_series_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore SERIES_METADATA_SHARING rows: {error}"))?;
+            .context("failed to restore SERIES_METADATA_SHARING rows")?;
             sqlx::query("DELETE FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?")
                 .bind(&inserted.series_id)
                 .execute(pool)
                 .await
                 .map_err(|error| {
-                    format!("failed to clear SERIES_METADATA_LINK rows during restore: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to clear SERIES_METADATA_LINK rows during restore: ")
                 })?;
             sqlx::query(
                 r#"INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL)
@@ -598,12 +607,16 @@ SELECT ?, LABEL, URL FROM SERIES_METADATA_LINK WHERE SERIES_ID = ?"#,
             .bind(&deleted_series_id)
             .execute(pool)
             .await
-            .map_err(|error| format!("failed to restore SERIES_METADATA_LINK rows: {error}"))?;
+            .context("failed to restore SERIES_METADATA_LINK rows")?;
             sqlx::query("DELETE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?")
                 .bind(&inserted.series_id)
                 .execute(pool)
                 .await
-                .map_err(|error| format!("failed to clear SERIES_METADATA_ALTERNATE_TITLE rows during restore: {error}"))?;
+                .map_err(|error| {
+                    anyhow::anyhow!(error).context(
+                        "failed to clear SERIES_METADATA_ALTERNATE_TITLE rows during restore: ",
+                    )
+                })?;
             sqlx::query(
                 r#"INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE)
 SELECT ?, LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"#,
@@ -613,7 +626,8 @@ SELECT ?, LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE WHERE SERIES_ID = ?"
             .execute(pool)
             .await
             .map_err(|error| {
-                format!("failed to restore SERIES_METADATA_ALTERNATE_TITLE rows: {error}")
+                anyhow::anyhow!(error)
+                    .context("failed to restore SERIES_METADATA_ALTERNATE_TITLE rows: ")
             })?;
         }
 
@@ -628,7 +642,7 @@ WHERE SERIES_ID = ?
         .bind(ThumbnailType::UserUploaded.persisted_name())
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to restore THUMBNAIL_SERIES rows: {error}"))?;
+        .context("failed to restore THUMBNAIL_SERIES rows")?;
         sqlx::query(
             r#"UPDATE COLLECTION_SERIES
 SET SERIES_ID = ?
@@ -638,7 +652,7 @@ WHERE SERIES_ID = ?"#,
         .bind(&deleted_series_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to restore COLLECTION_SERIES rows: {error}"))?;
+        .context("failed to restore COLLECTION_SERIES rows")?;
 
         restored_series_ids.push(RestoredSeriesMatch {
             inserted_series_id: inserted.series_id.clone(),

@@ -27,9 +27,9 @@ impl ServerSettingChange {
 /// Port for reading and writing server settings.
 #[async_trait::async_trait]
 pub trait ServerSettingsPort: Send + Sync {
-    async fn load_map(&self) -> Result<BTreeMap<String, Option<String>>, String>;
+    async fn load_map(&self) -> anyhow::Result<BTreeMap<String, Option<String>>>;
 
-    async fn load_settings(&self) -> Result<PersistedServerSettings, String>;
+    async fn load_settings(&self) -> anyhow::Result<PersistedServerSettings>;
 
-    async fn apply_changes(&self, changes: &[ServerSettingChange]) -> Result<(), String>;
+    async fn apply_changes(&self, changes: &[ServerSettingChange]) -> anyhow::Result<()>;
 }

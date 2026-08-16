@@ -179,7 +179,7 @@ async fn book_progression_update_propagates_restriction_load_errors() {
 
     assert_eq!(
         outcome,
-        BookProgressionOutcome::Internal("restriction lookup failed".to_string())
+        BookProgressionOutcome::Internal(anyhow::anyhow!("restriction lookup failed"))
     );
     assert!(progress.persisted.lock().unwrap().is_empty());
 }
@@ -195,16 +195,16 @@ struct TestProgressionReader {
 
 #[async_trait::async_trait]
 impl BookProgressionReaderPort for TestProgressionReader {
-    async fn book_media(&self, _book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, _book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         Ok(self.media.clone())
     }
 
     async fn book_restrictions(
         &self,
         _book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String> {
+    ) -> anyhow::Result<Option<BookAccessRestrictions>> {
         if let Some(error) = self.restriction_error.clone() {
-            return Err(error);
+            return Err(anyhow::anyhow!(error));
         }
         Ok(None)
     }
@@ -213,7 +213,7 @@ impl BookProgressionReaderPort for TestProgressionReader {
         &self,
         _book_id: &str,
         _user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String> {
+    ) -> anyhow::Result<Option<BookProgressionRecord>> {
         Ok(self.book_progression.clone())
     }
 }
@@ -223,14 +223,14 @@ impl EpubNavigationExtensionReaderPort for TestProgressionReader {
     async fn epub_extension_blob(
         &self,
         _book_id: &str,
-    ) -> Result<Option<EpubExtensionBlob>, String> {
+    ) -> anyhow::Result<Option<EpubExtensionBlob>> {
         Ok(self.epub_extension_blob.clone())
     }
 }
 
 #[async_trait::async_trait]
 impl EpubNavigationReaderPort for TestProgressionReader {
-    async fn book_media_files(&self, _book_id: &str) -> Result<Vec<String>, String> {
+    async fn book_media_files(&self, _book_id: &str) -> anyhow::Result<Vec<String>> {
         Ok(self.media_files.clone())
     }
 }
@@ -243,7 +243,7 @@ impl EpubNavigationContentPort for TestContentResolver {
     fn decode_epub_navigation_extension(
         &self,
         _blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String> {
+    ) -> anyhow::Result<EpubNavigationExtension> {
         Ok(self.positions_extension.clone())
     }
 }
@@ -255,7 +255,7 @@ struct TestProgressWriter {
 
 #[async_trait::async_trait]
 impl BookProgressionWriterPort for TestProgressWriter {
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String> {
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()> {
         self.persisted.lock().unwrap().push(input);
         Ok(())
     }

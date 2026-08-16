@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
@@ -20,9 +21,11 @@ pub(super) async fn scan_library(
     pool: &SqlitePool,
     library_id: &str,
     deep_scan: bool,
-) -> Result<ScannedLibrary, String> {
+) -> anyhow::Result<ScannedLibrary> {
     let Some(scan_config) = load_library_scan_config(pool, library_id).await? else {
-        return Err(format!("library '{library_id}' does not exist"));
+        return Err(anyhow::anyhow!(format!(
+            "library '{library_id}' does not exist"
+        )));
     };
 
     let existing_books_by_url = load_existing_scanned_books_by_url(pool, library_id).await?;
@@ -41,7 +44,7 @@ pub(super) fn build_scanned_library(
     existing_books_by_url: HashMap<String, ExistingScannedBookRow>,
     existing_series_by_url: HashMap<String, ExistingScannedSeriesRow>,
     deep_scan: bool,
-) -> Result<ScannedLibrary, String> {
+) -> anyhow::Result<ScannedLibrary> {
     let oneshots_directory: Option<String> = scan_config
         .oneshots_directory
         .as_ref()
@@ -54,10 +57,10 @@ pub(super) fn build_scanned_library(
             return Ok(unavailable_scanned_library());
         }
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "failed to inspect library scan root '{}': {error}",
                 root.display()
-            ));
+            )));
         }
     }
     let existing_books_by_url = existing_books_by_url
@@ -88,19 +91,19 @@ pub(super) fn build_scanned_library(
             .as_ref()
             .is_some_and(|value| series_url.to_ascii_lowercase().contains(value));
         let series_dir_metadata = fs::metadata(&series_dir).map_err(|error| {
-            format!(
-                "failed to read series directory metadata for '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to read series directory metadata for '{}': ",
                 series_dir.display()
-            )
+            ))
         })?;
         let series_dir_last_modified_unix_seconds =
             metadata_updated_unix_seconds(&series_dir_metadata, series_dir.as_path())?;
 
         let entries = fs::read_dir(&series_dir).map_err(|error| {
-            format!(
-                "failed to scan series directory '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to scan series directory '{}': ",
                 series_dir.display()
-            )
+            ))
         })?;
 
         let mut books = Vec::new();
@@ -108,10 +111,10 @@ pub(super) fn build_scanned_library(
         let mut sidecar_candidates = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read directory entry in '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "failed to read directory entry in '{}': ",
                     series_dir.display()
-                )
+                ))
             })?;
             let path = entry.path();
 
@@ -120,7 +123,10 @@ pub(super) fn build_scanned_library(
             }
 
             let metadata = entry.metadata().map_err(|error| {
-                format!("failed to read metadata for '{}': {error}", path.display())
+                anyhow::anyhow!(error).context(format!(
+                    "failed to read metadata for '{}': ",
+                    path.display()
+                ))
             })?;
 
             if !metadata.is_file() {
@@ -300,7 +306,7 @@ fn unavailable_scanned_library() -> ScannedLibrary {
 pub(super) async fn load_library_scan_config(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<Option<LibraryScanConfig>, String> {
+) -> anyhow::Result<Option<LibraryScanConfig>> {
     let row = sqlx::query(
         r#"SELECT ROOT, SCAN_CBX, SCAN_PDF, SCAN_EPUB, SCAN_FORCE_MODIFIED_TIME, ONESHOTS_DIRECTORY
 FROM LIBRARY
@@ -310,7 +316,7 @@ LIMIT 1"#,
     .bind(library_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("failed to load library root: {error}"))?;
+    .context("failed to load library root")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -324,7 +330,11 @@ WHERE LIBRARY_ID = ?"#,
     .bind(library_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("failed to load library exclusions for '{library_id}': {error}"))?
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load library exclusions for '{library_id}': "
+        ))
+    })?
     .into_iter()
     .map(|row| row.get::<String, _>("EXCLUSION"))
     .collect::<Vec<_>>();
@@ -343,7 +353,7 @@ WHERE LIBRARY_ID = ?"#,
 async fn load_existing_scanned_books_by_url(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<HashMap<String, ExistingScannedBookRow>, String> {
+) -> anyhow::Result<HashMap<String, ExistingScannedBookRow>> {
     let rows = sqlx::query(
         r#"SELECT ID, URL, SERIES_ID, oneshot AS ONESHOT, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM BOOK
@@ -353,8 +363,7 @@ WHERE LIBRARY_ID = ?
     .bind(library_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| {
-        format!("failed to load existing BOOK rows for deep scan in '{library_id}': {error}")
+    .map_err(|error| { anyhow::anyhow!(error).context( format!("failed to load existing BOOK rows for deep scan in '{library_id}'"))
     })?;
 
     Ok(rows
@@ -375,7 +384,7 @@ WHERE LIBRARY_ID = ?
 async fn load_existing_scanned_series_by_url(
     pool: &SqlitePool,
     library_id: &str,
-) -> Result<HashMap<String, ExistingScannedSeriesRow>, String> {
+) -> anyhow::Result<HashMap<String, ExistingScannedSeriesRow>> {
     let rows = sqlx::query(
         r#"SELECT URL, oneshot AS ONESHOT, unixepoch(FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED
 FROM SERIES
@@ -386,7 +395,9 @@ WHERE LIBRARY_ID = ?
     .fetch_all(pool)
     .await
     .map_err(|error| {
-        format!("failed to load existing SERIES rows for scan in '{library_id}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to load existing SERIES rows for scan in '{library_id}': "
+        ))
     })?;
 
     Ok(rows
@@ -444,7 +455,11 @@ mod tests {
         )
         .expect_err("scanner root metadata errors should be propagated");
 
-        assert!(error.contains("failed to inspect library scan root"));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to inspect library scan root")
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

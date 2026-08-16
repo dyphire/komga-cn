@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::Path;
@@ -20,16 +21,16 @@ pub(crate) async fn resolve_book_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let mut candidates = Vec::new();
     let media_path_is_directory = match tokio::fs::metadata(&media.file_path).await {
         Ok(metadata) => metadata.is_dir(),
         Err(error) if error.kind() == ErrorKind::NotFound => false,
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "read media path metadata '{}': {error}",
                 media.file_path.display()
-            ));
+            )));
         }
     };
     if media_path_is_directory {
@@ -60,7 +61,7 @@ pub(crate) async fn render_book_page_thumbnail(
     page: &BookPageRecord,
     page_number: u64,
     max_edge: u32,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if book_media_is_pdf(media) {
         return render_pdf_page_thumbnail(media, page_number, max_edge);
     }
@@ -74,7 +75,7 @@ pub(crate) async fn render_book_page_thumbnail(
 pub(crate) async fn load_archive_page_row(
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<Option<BookPageRecord>, String> {
+) -> anyhow::Result<Option<BookPageRecord>> {
     if page_number == 0 {
         return Ok(None);
     }
@@ -83,13 +84,15 @@ pub(crate) async fn load_archive_page_row(
         .unwrap_or_default()
         .into_iter()
         .nth(usize::try_from(page_number - 1).map_err(|error| {
-            format!("convert archive page number {page_number} to index: {error}")
+            anyhow::anyhow!(error).context(format!(
+                "convert archive page number {page_number} to index: "
+            ))
         })?))
 }
 
 pub(crate) async fn load_archive_page_rows(
     media: &BookMediaRecord,
-) -> Result<Option<Vec<BookPageRecord>>, String> {
+) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
     if book_media_is_zip_archive(media) {
         return load_zip_archive_page_rows(media).await;
     }
@@ -102,19 +105,21 @@ pub(crate) async fn load_archive_page_rows(
 pub(crate) fn load_pdf_page_row(
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<Option<BookPageRecord>, String> {
+) -> anyhow::Result<Option<BookPageRecord>> {
     if page_number == 0 {
         return Ok(None);
     }
     Ok(load_generated_pdf_page_rows(media)?.into_iter().nth(
-        usize::try_from(page_number - 1)
-            .map_err(|error| format!("convert pdf page number {page_number} to index: {error}"))?,
+        usize::try_from(page_number - 1).map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("convert pdf page number {page_number} to index"))
+        })?,
     ))
 }
 
 pub(crate) fn load_generated_pdf_page_rows(
     media: &BookMediaRecord,
-) -> Result<Vec<BookPageRecord>, String> {
+) -> anyhow::Result<Vec<BookPageRecord>> {
     if !book_media_is_pdf(media) {
         return Ok(vec![]);
     }
@@ -126,8 +131,9 @@ pub(crate) fn load_generated_pdf_page_rows(
     if page_count == 0 {
         return Ok(vec![]);
     }
-    let document = PdfDocument::load(&media.file_path)
-        .map_err(|error| format!("open pdf '{}': {error}", media.file_path.display()))?;
+    let document = PdfDocument::load(&media.file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+    })?;
     Ok((1..=page_count)
         .map(|number| {
             let dimensions = document
@@ -151,12 +157,13 @@ pub(crate) fn load_generated_pdf_page_rows(
 fn read_pdf_page_bytes(
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
-    let document = PdfDocument::load(&media.file_path)
-        .map_err(|error| format!("open pdf '{}': {error}", media.file_path.display()))?;
+    let document = PdfDocument::load(&media.file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+    })?;
     let pages = document.get_pages();
     let Some(object_id) = pages.get(&(page_number as u32)).copied() else {
         return Ok(None);
@@ -167,12 +174,13 @@ fn read_pdf_page_bytes(
 pub(crate) fn read_pdf_page_as_single_page_pdf(
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
-    let mut document = PdfDocument::load(&media.file_path)
-        .map_err(|error| format!("open pdf '{}': {error}", media.file_path.display()))?;
+    let mut document = PdfDocument::load(&media.file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+    })?;
     let pages = document.get_pages();
     if !pages.contains_key(&(page_number as u32)) {
         return Ok(None);
@@ -186,10 +194,10 @@ pub(crate) fn read_pdf_page_as_single_page_pdf(
     document.prune_objects();
     let mut bytes = Vec::new();
     document.save_to(&mut bytes).map_err(|error| {
-        format!(
-            "save pdf page {page_number} from '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "save pdf page {page_number} from '{}': ",
             media.file_path.display()
-        )
+        ))
     })?;
     Ok(Some(bytes))
 }
@@ -198,7 +206,7 @@ fn render_pdf_page_thumbnail(
     media: &BookMediaRecord,
     page_number: u64,
     max_edge: u32,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
@@ -206,18 +214,21 @@ fn render_pdf_page_thumbnail(
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(&media.file_path, None)
-        .map_err(|error| format!("open pdf '{}': {error}", media.file_path.display()))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+        })?;
     let page = document
         .pages()
         .get(
-            i32::try_from(page_number.saturating_sub(1))
-                .map_err(|error| format!("convert pdf page number {page_number}: {error}"))?,
+            i32::try_from(page_number.saturating_sub(1)).map_err(|error| {
+                anyhow::anyhow!(error).context(format!("convert pdf page number {page_number}"))
+            })?,
         )
         .map_err(|error| {
-            format!(
-                "load pdf page {page_number} from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "load pdf page {page_number} from '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?;
     let rendered = page
         .render_with_config(
@@ -226,17 +237,17 @@ fn render_pdf_page_thumbnail(
                 .set_maximum_height(i32::try_from(max_edge).unwrap_or(i32::MAX)),
         )
         .map_err(|error| {
-            format!(
-                "render pdf page {page_number} from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "render pdf page {page_number} from '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?
         .as_image()
         .map_err(|error| {
-            format!(
-                "convert pdf page {page_number} from '{}' to image: {error}",
+            anyhow::anyhow!(error).context(format!(
+                "convert pdf page {page_number} from '{}' to image: ",
                 media.file_path.display()
-            )
+            ))
         })?
         .into_rgb8();
 
@@ -244,17 +255,17 @@ fn render_pdf_page_thumbnail(
     image::DynamicImage::ImageRgb8(rendered)
         .write_to(&mut output, image::ImageFormat::Jpeg)
         .map_err(|error| {
-            format!(
-                "encode pdf page {page_number} thumbnail from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "encode pdf page {page_number} thumbnail from '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?;
     Ok(Some(output.into_inner()))
 }
 
-fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> {
-    let image = image::load_from_memory(bytes)
-        .map_err(|error| format!("render image thumbnail: decode image bytes: {error}"))?;
+fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result<Vec<u8>> {
+    let image =
+        image::load_from_memory(bytes).context("render image thumbnail: decode image bytes")?;
     let dimensions = RasterImageDimensions::from_image(&image);
     let resized = if dimensions.max_edge() > max_edge {
         image.resize(max_edge, max_edge, FilterType::Lanczos3)
@@ -264,16 +275,17 @@ fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>
     let mut output = std::io::Cursor::new(Vec::new());
     resized
         .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| format!("render image thumbnail: encode jpeg: {error}"))?;
+        .context("render image thumbnail: encode jpeg")?;
     Ok(output.into_inner())
 }
 
-pub(crate) fn detect_pdf_page_count(media: &BookMediaRecord) -> Result<Option<u64>, String> {
+pub(crate) fn detect_pdf_page_count(media: &BookMediaRecord) -> anyhow::Result<Option<u64>> {
     if !book_media_is_pdf(media) {
         return Ok(None);
     }
-    let document = PdfDocument::load(&media.file_path)
-        .map_err(|error| format!("open pdf '{}': {error}", media.file_path.display()))?;
+    let document = PdfDocument::load(&media.file_path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+    })?;
     Ok(Some(document.get_pages().len() as u64))
 }
 
@@ -354,22 +366,26 @@ async fn read_zip_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_zip_archive(media) || page_number == 0 {
         return Ok(None);
     }
     let path = media.file_path.clone();
     let page_file_name = page.file_name.clone();
-    tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("open zip archive '{}': {error}", path.display()));
+                return Err(anyhow::anyhow!(format!(
+                    "open zip archive '{}': {error}",
+                    path.display()
+                )));
             }
         };
-        let mut archive = ZipArchive::new(file)
-            .map_err(|error| format!("read zip archive '{}': {error}", path.display()))?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read zip archive '{}': ", path.display()))
+        })?;
         if !page_file_name.is_empty()
             && let Ok(mut entry) = archive.by_name(&page_file_name)
             && let Ok(entry_name) = entry.name()
@@ -377,31 +393,32 @@ async fn read_zip_archive_page_bytes(
         {
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).map_err(|error| {
-                format!(
-                    "read zip archive entry '{}' from '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read zip archive entry '{}' from '{}': ",
                     page_file_name,
                     path.display()
-                )
+                ))
             })?;
             return Ok(Some(bytes));
         }
-        let target_index = usize::try_from(page_number.saturating_sub(1))
-            .map_err(|error| format!("convert zip page number {page_number}: {error}"))?;
+        let target_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("convert zip page number {page_number}"))
+        })?;
         let mut logical_index = 0usize;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|error| {
-                format!(
-                    "read zip archive entry #{index} from '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read zip archive entry #{index} from '{}': ",
                     path.display()
-                )
+                ))
             })?;
             let entry_name = entry
                 .name()
                 .map_err(|error| {
-                    format!(
-                        "read zip archive entry #{index} name from '{}': {error}",
+                    anyhow::anyhow!(error).context(format!(
+                        "read zip archive entry #{index} name from '{}': ",
                         path.display()
-                    )
+                    ))
                 })?
                 .into_owned();
             if !is_supported_page_image_file_name(&entry_name) {
@@ -413,49 +430,53 @@ async fn read_zip_archive_page_bytes(
             }
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).map_err(|error| {
-                format!(
-                    "read zip archive entry '{}' from '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read zip archive entry '{}' from '{}': ",
                     entry_name,
                     path.display()
-                )
+                ))
             })?;
             return Ok(Some(bytes));
         }
         Ok(None)
     })
     .await
-    .map_err(|error| format!("join zip archive page read task: {error}"))?
+    .context("join zip archive page read task")?
 }
 
 async fn load_zip_archive_page_rows(
     media: &BookMediaRecord,
-) -> Result<Option<Vec<BookPageRecord>>, String> {
+) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
     let path = media.file_path.clone();
-    tokio::task::spawn_blocking(move || -> Result<Option<Vec<BookPageRecord>>, String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
             Err(error) => {
-                return Err(format!("open zip archive '{}': {error}", path.display()));
+                return Err(anyhow::anyhow!(format!(
+                    "open zip archive '{}': {error}",
+                    path.display()
+                )));
             }
         };
-        let mut archive = ZipArchive::new(file)
-            .map_err(|error| format!("read zip archive '{}': {error}", path.display()))?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("read zip archive '{}': ", path.display()))
+        })?;
         let mut rows = Vec::new();
         for index in 0..archive.len() {
             let entry = archive.by_index(index).map_err(|error| {
-                format!(
-                    "read zip archive entry #{index} from '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read zip archive entry #{index} from '{}': ",
                     path.display()
-                )
+                ))
             })?;
             let file_name = entry
                 .name()
                 .map_err(|error| {
-                    format!(
-                        "read zip archive entry #{index} name from '{}': {error}",
+                    anyhow::anyhow!(error).context(format!(
+                        "read zip archive entry #{index} name from '{}': ",
                         path.display()
-                    )
+                    ))
                 })?
                 .into_owned();
             if !is_supported_page_image_file_name(&file_name) {
@@ -473,14 +494,19 @@ async fn load_zip_archive_page_rows(
         Ok((!rows.is_empty()).then_some(rows))
     })
     .await
-    .map_err(|error| format!("join zip archive row read task: {error}"))?
+    .context("join zip archive row read task")?
 }
 
 fn load_rar_archive_page_rows(
     media: &BookMediaRecord,
-) -> Result<Option<Vec<BookPageRecord>>, String> {
+) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
     let rows = list_rar_entries(&media.file_path)
-        .map_err(|error| format!("read rar archive '{}': {error}", media.file_path.display()))?
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "read rar archive '{}': ",
+                media.file_path.display()
+            ))
+        })?
         .into_iter()
         .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
         .enumerate()
@@ -500,7 +526,7 @@ fn read_rar_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_rar_archive(media) || page_number == 0 {
         return Ok(None);
     }
@@ -509,8 +535,9 @@ fn read_rar_archive_page_bytes(
     {
         return Ok(Some(bytes));
     }
-    let page_index = usize::try_from(page_number.saturating_sub(1))
-        .map_err(|error| format!("convert rar page number {page_number}: {error}"))?;
+    let page_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("convert rar page number {page_number}"))
+    })?;
     let Some(page_file_name) = load_rar_archive_page_rows(media)?
         .unwrap_or_default()
         .into_iter()
@@ -522,39 +549,46 @@ fn read_rar_archive_page_bytes(
     read_rar_entry_bytes(&media.file_path, &page_file_name)
 }
 
-pub(crate) async fn read_media_file_bytes(path: &Path) -> Result<Option<Vec<u8>>, String> {
+pub(crate) async fn read_media_file_bytes(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
     match tokio::fs::read(path).await {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("read media file '{}': {error}", path.display())),
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "read media file '{}': {error}",
+            path.display()
+        ))),
     }
 }
 
-pub(crate) async fn read_media_file_size(path: &Path) -> Result<Option<i64>, String> {
+pub(crate) async fn read_media_file_size(path: &Path) -> anyhow::Result<Option<i64>> {
     match tokio::fs::metadata(path).await {
-        Ok(value) if value.is_file() => i64::try_from(value.len())
-            .map(Some)
-            .map_err(|error| format!("convert media file size '{}': {error}", path.display())),
-        Ok(_) => Err(format!("media path '{}' is not a file", path.display())),
+        Ok(value) if value.is_file() => i64::try_from(value.len()).map(Some).map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("convert media file size '{}': ", path.display()))
+        }),
+        Ok(_) => Err(anyhow::anyhow!(format!(
+            "media path '{}' is not a file",
+            path.display()
+        ))),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!(
+        Err(error) => Err(anyhow::anyhow!(format!(
             "read media file metadata '{}': {error}",
             path.display()
-        )),
+        ))),
     }
 }
 
 pub(crate) async fn read_media_image_dimensions(
     path: &Path,
-) -> Result<Option<MediaImageDimensions>, String> {
+) -> anyhow::Result<Option<MediaImageDimensions>> {
     let Some(bytes) = read_media_file_bytes(path).await? else {
         return Ok(None);
     };
     let image = image::load_from_memory(&bytes).map_err(|error| {
-        format!(
-            "decode media image dimensions '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "decode media image dimensions '{}': ",
             path.display()
-        )
+        ))
     })?;
     Ok(Some(MediaImageDimensions {
         width: i64::from(image.width()),
@@ -566,7 +600,7 @@ pub(crate) fn convert_image_bytes(
     bytes: &[u8],
     source_content_type: &str,
     target_content_type: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if source_content_type.eq_ignore_ascii_case(target_content_type) {
         return Ok(Some(bytes.to_vec()));
     }
@@ -578,8 +612,8 @@ pub(crate) fn convert_image_bytes(
         return Ok(None);
     }
 
-    let source = image::load_from_memory(bytes)
-        .map_err(|error| format!("convert image bytes: decode image bytes: {error}"))?;
+    let source =
+        image::load_from_memory(bytes).context("convert image bytes: decode image bytes")?;
     let target_format = match target_content_type {
         "image/jpeg" => image::ImageFormat::Jpeg,
         "image/png" => image::ImageFormat::Png,
@@ -588,12 +622,13 @@ pub(crate) fn convert_image_bytes(
     let mut output = std::io::Cursor::new(Vec::new());
     source
         .write_to(&mut output, target_format)
-        .map_err(|error| format!("convert image bytes: encode image bytes: {error}"))?;
+        .context("convert image bytes: encode image bytes")?;
     Ok(Some(output.into_inner()))
 }
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -618,7 +653,7 @@ mod tests {
         std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
     }
 
-    fn build_test_zip_archive(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
+    fn build_test_zip_archive(entries: Vec<(String, Vec<u8>)>) -> anyhow::Result<Vec<u8>> {
         let cursor = std::io::Cursor::new(Vec::new());
         let mut writer = ZipWriter::new(cursor);
 
@@ -627,16 +662,18 @@ mod tests {
                 SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
             writer
                 .start_file(file_name.as_str(), options)
-                .map_err(|error| format!("start zip entry '{file_name}': {error}"))?;
-            writer
-                .write_all(&bytes)
-                .map_err(|error| format!("write zip entry '{file_name}': {error}"))?;
+                .map_err(|error| {
+                    anyhow::anyhow!(error).context(format!("start zip entry '{file_name}'"))
+                })?;
+            writer.write_all(&bytes).map_err(|error| {
+                anyhow::anyhow!(error).context(format!("write zip entry '{file_name}'"))
+            })?;
         }
 
         writer
             .finish()
             .map(|cursor| cursor.into_inner())
-            .map_err(|error| format!("finalize zip archive: {error}"))
+            .context("finalize zip archive")
     }
 
     fn write_single_page_pdf(path: &Path) {
@@ -762,7 +799,7 @@ mod tests {
             .expect_err("invalid image bytes must not become a missing thumbnail");
 
         assert!(
-            error.contains("render image thumbnail"),
+            error.to_string().contains("render image thumbnail"),
             "unexpected thumbnail render error: {error}"
         );
 
@@ -775,7 +812,7 @@ mod tests {
             .expect_err("invalid image bytes must not become a missing converted page");
 
         assert!(
-            error.contains("convert image bytes"),
+            error.to_string().contains("convert image bytes"),
             "unexpected conversion error: {error}"
         );
     }
@@ -810,7 +847,7 @@ mod tests {
             .expect_err("media path probe errors must not become missing page bytes");
 
         assert!(
-            error.contains("read media path metadata"),
+            error.to_string().contains("read media path metadata"),
             "unexpected media path probe error: {error}"
         );
 
@@ -828,7 +865,7 @@ mod tests {
             .expect_err("directory media path should fail image byte loading");
 
         assert!(
-            error.contains("read media file"),
+            error.to_string().contains("read media file"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_dir(path);
@@ -843,7 +880,10 @@ mod tests {
             .await
             .expect_err("directory media path should fail size loading");
 
-        assert!(error.contains("not a file"), "unexpected error: {error}");
+        assert!(
+            error.to_string().contains("not a file"),
+            "unexpected error: {error}"
+        );
         let _ = fs::remove_dir(path);
     }
 
@@ -857,7 +897,7 @@ mod tests {
             .expect_err("invalid image bytes should fail dimension loading");
 
         assert!(
-            error.contains("decode media image dimensions"),
+            error.to_string().contains("decode media image dimensions"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_file(path);
@@ -978,7 +1018,7 @@ mod tests {
             .expect_err("invalid zip must not become missing page bytes");
 
         assert!(
-            error.contains("read zip archive"),
+            error.to_string().contains("read zip archive"),
             "unexpected zip page error: {error}"
         );
 
@@ -1003,7 +1043,7 @@ mod tests {
             .expect_err("invalid zip must not become missing archive rows");
 
         assert!(
-            error.contains("read zip archive"),
+            error.to_string().contains("read zip archive"),
             "unexpected zip row error: {error}"
         );
 
@@ -1027,7 +1067,7 @@ mod tests {
             .expect_err("invalid pdf must not become missing raw page");
 
         assert!(
-            error.contains("open pdf"),
+            error.to_string().contains("open pdf"),
             "unexpected raw pdf page error: {error}"
         );
 
@@ -1060,7 +1100,7 @@ mod tests {
             .expect_err("invalid pdf must not become missing page bytes");
 
         assert!(
-            error.contains("open pdf"),
+            error.to_string().contains("open pdf"),
             "unexpected pdf page bytes error: {error}"
         );
 
@@ -1084,7 +1124,7 @@ mod tests {
             .expect_err("invalid pdf must not become empty generated page rows");
 
         assert!(
-            error.contains("open pdf"),
+            error.to_string().contains("open pdf"),
             "unexpected generated pdf row error: {error}"
         );
 
@@ -1106,7 +1146,7 @@ mod tests {
             .expect_err("directory read error must not become a missing file");
 
         assert!(
-            error.contains("read media file"),
+            error.to_string().contains("read media file"),
             "unexpected media file read error: {error}"
         );
 

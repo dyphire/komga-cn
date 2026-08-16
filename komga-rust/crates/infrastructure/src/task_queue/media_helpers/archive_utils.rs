@@ -141,21 +141,21 @@ pub(in crate::task_queue) fn push_u32_le(buffer: &mut Vec<u8>, value: u32) {
     buffer.extend_from_slice(&value.to_le_bytes());
 }
 
-fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> Result<i64, String> {
+fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> anyhow::Result<i64> {
     match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => i64::try_from(duration.as_secs()).map_err(|_| {
-            format!(
+        Ok(duration) => i64::try_from(duration.as_secs()).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
                 "filesystem timestamp for '{}' is outside i64 range",
                 path.display()
-            )
+            ))
         }),
         Err(error) => {
             let duration = error.duration();
-            let seconds = i64::try_from(duration.as_secs()).map_err(|_| {
-                format!(
+            let seconds = i64::try_from(duration.as_secs()).map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
                     "filesystem timestamp for '{}' is outside i64 range",
                     path.display()
-                )
+                ))
             })?;
             Ok(-seconds)
         }
@@ -165,7 +165,7 @@ fn to_unix_seconds(time: std::time::SystemTime, path: &Path) -> Result<i64, Stri
 pub(in crate::task_queue) fn metadata_updated_unix_seconds(
     metadata: &fs::Metadata,
     path: &Path,
-) -> Result<i64, String> {
+) -> anyhow::Result<i64> {
     [metadata.created().ok(), metadata.modified().ok()]
         .into_iter()
         .flatten()
@@ -174,9 +174,9 @@ pub(in crate::task_queue) fn metadata_updated_unix_seconds(
         .into_iter()
         .max()
         .ok_or_else(|| {
-            format!(
+            anyhow::anyhow!(format!(
                 "failed to read created or modified timestamp for '{}'",
                 path.display()
-            )
+            ))
         })
 }

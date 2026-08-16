@@ -27,9 +27,10 @@ async fn enqueue_task_records(
         .enqueue_records(task_records, SubmitUrgency::Immediate)
         .await
     {
+        tracing::error!(?error, "media asset task enqueue failed");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error })),
+            Json(json!({ "error": format!("{error:#}") })),
         )
             .into_response();
     }

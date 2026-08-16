@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -19,27 +20,35 @@ use zip::result::ZipError;
 pub(crate) async fn read_epub_resource_bytes(
     epub_path: &Path,
     resource_name: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let path = epub_path.to_path_buf();
     let resource_name = resource_name.to_string();
     let display_path = path.display().to_string();
-    tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("open EPUB '{}': {error}", path.display())),
+            Err(error) => {
+                return Err(anyhow::anyhow!(format!(
+                    "open EPUB '{}': {error}",
+                    path.display()
+                )));
+            }
         };
-        let mut archive = ZipArchive::new(file)
-            .map_err(|error| format!("open EPUB archive '{}': {error}", path.display()))?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open EPUB archive '{}': ", path.display()))
+        })?;
         read_zip_entry_bytes_result(&mut archive, &resource_name, &path)
     })
     .await
-    .map_err(|error| format!("join EPUB resource read for '{display_path}': {error}"))?
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("join EPUB resource read for '{display_path}'"))
+    })?
 }
 
 pub(crate) fn decode_epub_navigation_extension(
     blob: &[u8],
-) -> Result<EpubNavigationExtension, String> {
+) -> anyhow::Result<EpubNavigationExtension> {
     let extension = decode_epub_extension_json(blob)?;
     let positions = extension
         .get("positions")
@@ -66,15 +75,14 @@ pub(crate) fn decode_epub_navigation_extension(
     })
 }
 
-fn decode_epub_extension_json(blob: &[u8]) -> Result<Value, String> {
+fn decode_epub_extension_json(blob: &[u8]) -> anyhow::Result<Value> {
     let mut decoder = GzDecoder::new(blob);
     let mut decoded = Vec::new();
     decoder
         .read_to_end(&mut decoded)
-        .map_err(|error| format!("decode epub extension blob: {error}"))?;
+        .context("decode epub extension blob")?;
 
-    serde_json::from_slice::<Value>(&decoded)
-        .map_err(|error| format!("parse epub extension blob json: {error}"))
+    serde_json::from_slice::<Value>(&decoded).context("parse epub extension blob json")
 }
 
 fn epub_navigation_links(extension: &Value, field_name: &str) -> Vec<EpubNavigationLink> {
@@ -106,20 +114,26 @@ fn epub_navigation_link(value: &Value) -> Option<EpubNavigationLink> {
 
 pub(crate) async fn load_epub_cover_bytes(
     media: &BookMediaRecord,
-) -> Result<Option<EpubCoverImage>, String> {
+) -> anyhow::Result<Option<EpubCoverImage>> {
     if !book_media_is_epub(media) {
         return Ok(None);
     }
     let path = media.file_path.clone();
     let display_path = path.display().to_string();
-    tokio::task::spawn_blocking(move || -> Result<Option<EpubCoverImage>, String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Option<EpubCoverImage>> {
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("open EPUB '{}': {error}", path.display())),
+            Err(error) => {
+                return Err(anyhow::anyhow!(format!(
+                    "open EPUB '{}': {error}",
+                    path.display()
+                )));
+            }
         };
-        let mut archive = ZipArchive::new(file)
-            .map_err(|error| format!("open EPUB archive '{}': {error}", path.display()))?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open EPUB archive '{}': ", path.display()))
+        })?;
         let Some(container_xml) =
             read_zip_entry_bytes_normalized_result(&mut archive, "META-INF/container.xml", &path)?
         else {
@@ -166,29 +180,31 @@ pub(crate) async fn load_epub_cover_bytes(
         }))
     })
     .await
-    .map_err(|error| format!("join EPUB cover read for '{display_path}': {error}"))?
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("join EPUB cover read for '{display_path}'"))
+    })?
 }
 
 pub(crate) async fn load_epub_package_document(
     media: &BookMediaRecord,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_epub(media) {
         return Ok(None);
     }
     let path = media.file_path.clone();
     let display_path = path.display().to_string();
-    let result = tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
         let file = File::open(&path).map_err(|error| {
-            format!(
-                "failed to open EPUB package source '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to open EPUB package source '{}': ",
                 path.display()
-            )
+            ))
         })?;
         let mut archive = ZipArchive::new(file).map_err(|error| {
-            format!(
-                "failed to open EPUB package archive '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "failed to open EPUB package archive '{}': ",
                 path.display()
-            )
+            ))
         })?;
         let container_xml = read_zip_entry_bytes_normalized_required(
             &mut archive,
@@ -196,10 +212,10 @@ pub(crate) async fn load_epub_package_document(
             path.as_path(),
         )?;
         let rootfile_path = parse_epub_rootfile_path(&container_xml)?.ok_or_else(|| {
-            format!(
+            anyhow::anyhow!(format!(
                 "failed to resolve EPUB package document rootfile in '{}'",
                 path.display()
-            )
+            ))
         })?;
         let package_document =
             read_zip_entry_bytes_normalized_required(&mut archive, &rootfile_path, path.as_path())?;
@@ -207,17 +223,22 @@ pub(crate) async fn load_epub_package_document(
     })
     .await
     .map_err(|error| {
-        format!("failed to join EPUB package document load for '{display_path}': {error}")
+        anyhow::anyhow!(error).context(format!(
+            "failed to join EPUB package document load for '{display_path}': "
+        ))
     })?;
-    result
-        .map_err(|error| format!("failed to load EPUB package document '{display_path}': {error}"))
+    result.map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load EPUB package document '{display_path}': "
+        ))
+    })
 }
 
 fn read_zip_entry_bytes_normalized_result<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     path: &str,
     archive_path: &Path,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     if let Some(bytes) = read_zip_entry_bytes_result(archive, path, archive_path)? {
         return Ok(Some(bytes));
     }
@@ -233,23 +254,23 @@ fn read_zip_entry_bytes_result<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     entry_name: &str,
     archive_path: &Path,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let mut entry = match archive.by_name(entry_name) {
         Ok(entry) => entry,
         Err(ZipError::FileNotFound) => return Ok(None),
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "failed to open EPUB archive entry '{entry_name}' from '{}': {error}",
                 archive_path.display()
-            ));
+            )));
         }
     };
     let mut bytes = Vec::new();
     entry.read_to_end(&mut bytes).map_err(|error| {
-        format!(
-            "failed to read EPUB archive entry '{entry_name}' from '{}': {error}",
+        anyhow::anyhow!(error).context(format!(
+            "failed to read EPUB archive entry '{entry_name}' from '{}': ",
             archive_path.display()
-        )
+        ))
     })?;
     Ok(Some(bytes))
 }
@@ -258,7 +279,7 @@ fn read_zip_entry_bytes_normalized_required<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     path: &str,
     archive_path: &Path,
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     if let Some(bytes) = read_zip_entry_bytes_result(archive, path, archive_path)? {
         return Ok(bytes);
     }
@@ -270,10 +291,10 @@ fn read_zip_entry_bytes_normalized_required<R: Read + Seek>(
         return Ok(bytes);
     }
 
-    Err(format!(
+    Err(anyhow::anyhow!(format!(
         "missing EPUB archive entry '{path}' in '{}'",
         archive_path.display()
-    ))
+    )))
 }
 
 #[derive(Clone)]
@@ -287,7 +308,7 @@ struct EpubManifestItem {
 fn parse_epub_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
-) -> Result<HashMap<String, EpubManifestItem>, String> {
+) -> anyhow::Result<HashMap<String, EpubManifestItem>> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -305,7 +326,8 @@ fn parse_epub_manifest_items(
                 let mut properties = String::new();
                 for attribute in event.attributes() {
                     let attribute = attribute.map_err(|error| {
-                        format!("failed to parse EPUB package document attribute: {error}")
+                        anyhow::anyhow!(error)
+                            .context("failed to parse EPUB package document attribute")
                     })?;
                     if xml_name_matches(attribute.key.as_ref(), b"id") {
                         id = Some(epub_attribute_value(attribute, "EPUB package document")?);
@@ -333,7 +355,9 @@ fn parse_epub_manifest_items(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!("failed to parse EPUB package document: {error}"));
+                return Err(anyhow::anyhow!(format!(
+                    "failed to parse EPUB package document: {error}"
+                )));
             }
             _ => {}
         }
@@ -342,7 +366,7 @@ fn parse_epub_manifest_items(
     Ok(manifest)
 }
 
-fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Result<Option<String>, String> {
+fn parse_epub_metadata_cover_id(package_document: &[u8]) -> anyhow::Result<Option<String>> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -357,7 +381,8 @@ fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Result<Option<String
                 let mut content = None::<String>;
                 for attribute in event.attributes() {
                     let attribute = attribute.map_err(|error| {
-                        format!("failed to parse EPUB package document attribute: {error}")
+                        anyhow::anyhow!(error)
+                            .context("failed to parse EPUB package document attribute")
                     })?;
                     if xml_name_matches(attribute.key.as_ref(), b"name") {
                         name = Some(epub_attribute_value(attribute, "EPUB package document")?);
@@ -374,7 +399,9 @@ fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Result<Option<String
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!("failed to parse EPUB package document: {error}"));
+                return Err(anyhow::anyhow!(format!(
+                    "failed to parse EPUB package document: {error}"
+                )));
             }
             _ => {}
         }
@@ -383,7 +410,7 @@ fn parse_epub_metadata_cover_id(package_document: &[u8]) -> Result<Option<String
     Ok(None)
 }
 
-fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, String> {
+fn parse_epub_rootfile_path(container_xml: &[u8]) -> anyhow::Result<Option<String>> {
     let mut reader = XmlReader::from_reader(container_xml);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -396,7 +423,8 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, Stri
                 }
                 for attribute in event.attributes() {
                     let attribute = attribute.map_err(|error| {
-                        format!("failed to parse EPUB container document attribute: {error}")
+                        anyhow::anyhow!(error)
+                            .context("failed to parse EPUB container document attribute: ")
                     })?;
                     if xml_name_matches(attribute.key.as_ref(), b"full-path") {
                         let path = epub_attribute_value(attribute, "EPUB container document")?;
@@ -406,7 +434,9 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, Stri
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!("failed to parse EPUB container document: {error}"));
+                return Err(anyhow::anyhow!(format!(
+                    "failed to parse EPUB container document: {error}"
+                )));
             }
             _ => {}
         }
@@ -418,11 +448,14 @@ fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, Stri
 fn epub_attribute_value(
     attribute: quick_xml::events::attributes::Attribute<'_>,
     document_name: &str,
-) -> Result<String, String> {
+) -> anyhow::Result<String> {
     attribute
         .normalized_value(XmlVersion::Implicit1_0)
         .map(|value| value.into_owned())
-        .map_err(|error| format!("failed to parse {document_name} attribute value: {error}"))
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to parse {document_name} attribute value"))
+        })
 }
 
 pub(crate) fn parse_epub_fixed_layout(package_document: &[u8]) -> bool {
@@ -541,6 +574,7 @@ fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
     use std::fs;
     use std::io::Write;
     use std::path::PathBuf;
@@ -566,7 +600,7 @@ mod tests {
         std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
     }
 
-    fn build_test_zip_archive(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
+    fn build_test_zip_archive(entries: Vec<(String, Vec<u8>)>) -> anyhow::Result<Vec<u8>> {
         let cursor = std::io::Cursor::new(Vec::new());
         let mut writer = ZipWriter::new(cursor);
 
@@ -575,16 +609,18 @@ mod tests {
                 SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
             writer
                 .start_file(file_name.as_str(), options)
-                .map_err(|error| format!("start zip entry '{file_name}': {error}"))?;
-            writer
-                .write_all(&bytes)
-                .map_err(|error| format!("write zip entry '{file_name}': {error}"))?;
+                .map_err(|error| {
+                    anyhow::anyhow!(error).context(format!("start zip entry '{file_name}'"))
+                })?;
+            writer.write_all(&bytes).map_err(|error| {
+                anyhow::anyhow!(error).context(format!("write zip entry '{file_name}'"))
+            })?;
         }
 
         writer
             .finish()
             .map(|cursor| cursor.into_inner())
-            .map_err(|error| format!("finalize zip archive: {error}"))
+            .context("finalize zip archive")
     }
 
     fn epub_media(file_path: PathBuf) -> BookMediaRecord {
@@ -656,7 +692,7 @@ mod tests {
             .expect_err("invalid EPUB archive should be reported as an error");
 
         assert!(
-            error.contains("open EPUB archive"),
+            error.to_string().contains("open EPUB archive"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_file(file_path);
@@ -690,7 +726,7 @@ mod tests {
             .expect_err("invalid EPUB archive should be reported as an error");
 
         assert!(
-            error.contains("open EPUB archive"),
+            error.to_string().contains("open EPUB archive"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_file(file_path);
@@ -711,7 +747,7 @@ mod tests {
             .expect_err("malformed EPUB container should be reported as an error");
 
         assert!(
-            error.contains("EPUB container document"),
+            error.to_string().contains("EPUB container document"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_file(file_path);
@@ -736,7 +772,7 @@ mod tests {
             .expect_err("malformed EPUB package should be reported as an error");
 
         assert!(
-            error.contains("EPUB package document"),
+            error.to_string().contains("EPUB package document"),
             "unexpected error: {error}"
         );
         let _ = fs::remove_file(file_path);

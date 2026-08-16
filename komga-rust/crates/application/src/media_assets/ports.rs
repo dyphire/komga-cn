@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use serde_json::Value;
 
 use super::{
@@ -225,23 +226,23 @@ pub trait ProgressWriterPort: Send + Sync {
         page: u64,
         completed: bool,
         locator: Option<Value>,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
-    async fn persist_book_progression(&self, input: BookProgressionInput) -> Result<(), String>;
+    async fn persist_book_progression(&self, input: BookProgressionInput) -> anyhow::Result<()>;
 
-    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> Result<(), String>;
+    async fn delete_read_progress(&self, book_id: &str, user_id: &str) -> anyhow::Result<()>;
 
     async fn refresh_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 
     async fn delete_series_read_progress(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<(), String>;
+    ) -> anyhow::Result<()>;
 }
 
 /// Write operations for thumbnails across all entity types.
@@ -255,11 +256,11 @@ pub trait ThumbnailWriterPort: Send + Sync {
         width: i64,
         height: i64,
         selected: bool,
-    ) -> Result<EntityThumbnailRecord, String>;
+    ) -> anyhow::Result<EntityThumbnailRecord>;
 
-    async fn select_book(&self, thumbnail_id: &str) -> Result<bool, String>;
+    async fn select_book(&self, thumbnail_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_book(&self, thumbnail_id: &str) -> Result<bool, String>;
+    async fn delete_book(&self, thumbnail_id: &str) -> anyhow::Result<bool>;
 
     async fn insert_series(
         &self,
@@ -269,11 +270,11 @@ pub trait ThumbnailWriterPort: Send + Sync {
         width: i64,
         height: i64,
         selected: bool,
-    ) -> Result<SeriesThumbnailRecord, String>;
+    ) -> anyhow::Result<SeriesThumbnailRecord>;
 
-    async fn select_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String>;
+    async fn select_series(&self, series_id: &str, thumbnail_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_series(&self, series_id: &str, thumbnail_id: &str) -> Result<bool, String>;
+    async fn delete_series(&self, series_id: &str, thumbnail_id: &str) -> anyhow::Result<bool>;
 
     async fn insert_readlist(
         &self,
@@ -283,11 +284,11 @@ pub trait ThumbnailWriterPort: Send + Sync {
         width: i64,
         height: i64,
         selected: bool,
-    ) -> Result<ReadlistThumbnailRecord, String>;
+    ) -> anyhow::Result<ReadlistThumbnailRecord>;
 
-    async fn select_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String>;
+    async fn select_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> anyhow::Result<bool>;
 
-    async fn delete_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> Result<bool, String>;
+    async fn delete_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> anyhow::Result<bool>;
 
     async fn insert_collection(
         &self,
@@ -297,15 +298,15 @@ pub trait ThumbnailWriterPort: Send + Sync {
         width: i64,
         height: i64,
         selected: bool,
-    ) -> Result<CollectionThumbnailRecord, String>;
+    ) -> anyhow::Result<CollectionThumbnailRecord>;
 
-    async fn select_collection(&self, thumbnail_id: &str) -> Result<bool, String>;
+    async fn select_collection(&self, thumbnail_id: &str) -> anyhow::Result<bool>;
 
     async fn delete_collection(
         &self,
         collection_id: &str,
         thumbnail_id: &str,
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 }
 
 /// Stateless filesystem I/O for resolving page/resource content from archives and PDFs.
@@ -316,7 +317,7 @@ pub trait ContentResolverPort: Send + Sync {
         media: &BookMediaRecord,
         page: &BookPageRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     async fn render_page_thumbnail(
         &self,
@@ -324,51 +325,51 @@ pub trait ContentResolverPort: Send + Sync {
         page: &BookPageRecord,
         page_number: u64,
         max_edge: u32,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     async fn archive_page_row(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
 
     async fn archive_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<BookPageRecord>>, String>;
+    ) -> anyhow::Result<Option<Vec<BookPageRecord>>>;
 
     fn pdf_page_row(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
 
     fn generated_pdf_page_rows(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Vec<BookPageRecord>, String>;
+    ) -> anyhow::Result<Vec<BookPageRecord>>;
 
     fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> Result<Option<u64>, String>;
+    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>>;
 
-    fn media_file_exists(&self, path: &Path) -> Result<bool, String> {
+    fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()
-            .map_err(|error| format!("check media file existence '{}': {error}", path.display()))
+            .with_context(|| format!("check media file existence '{}'", path.display()))
     }
 
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String>;
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>>;
 
-    async fn read_media_file_size(&self, path: &Path) -> Result<Option<i64>, String>;
+    async fn read_media_file_size(&self, path: &Path) -> anyhow::Result<Option<i64>>;
 
     async fn read_media_image_dimensions(
         &self,
         _path: &Path,
-    ) -> Result<Option<MediaImageDimensions>, String> {
+    ) -> anyhow::Result<Option<MediaImageDimensions>> {
         Ok(None)
     }
 
@@ -377,7 +378,7 @@ pub trait ContentResolverPort: Send + Sync {
         bytes: &[u8],
         source_content_type: &str,
         target_content_type: &str,
-    ) -> Result<Option<Vec<u8>>, String> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         if source_content_type.eq_ignore_ascii_case(target_content_type) {
             return Ok(Some(bytes.to_vec()));
         }
@@ -388,22 +389,22 @@ pub trait ContentResolverPort: Send + Sync {
         &self,
         epub_path: &Path,
         resource_name: &str,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     fn decode_epub_navigation_extension(
         &self,
         blob: &[u8],
-    ) -> Result<EpubNavigationExtension, String>;
+    ) -> anyhow::Result<EpubNavigationExtension>;
 
     async fn epub_cover_bytes(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<EpubCoverImage>, String>;
+    ) -> anyhow::Result<Option<EpubCoverImage>>;
 
     async fn epub_package_document(
         &self,
         media: &BookMediaRecord,
-    ) -> Result<Option<Vec<u8>>, String>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     fn epub_fixed_layout(&self, package_document: &[u8]) -> bool;
 
@@ -431,21 +432,21 @@ pub struct MediaImageDimensions {
 /// Read access to book media metadata.
 #[async_trait::async_trait]
 pub trait BookMediaPort: Send + Sync {
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
-    async fn book_media_files(&self, book_id: &str) -> Result<Vec<String>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
+    async fn book_media_files(&self, book_id: &str) -> anyhow::Result<Vec<String>>;
     async fn media_file_records(
         &self,
         book_id: &str,
-    ) -> Result<Vec<PersistedMediaFileRecord>, String>;
-    async fn book_media_is_ready(&self, book_id: &str) -> Result<bool, String>;
-    async fn book_pages(&self, book_id: &str) -> Result<Vec<BookPageRecord>, String>;
+    ) -> anyhow::Result<Vec<PersistedMediaFileRecord>>;
+    async fn book_media_is_ready(&self, book_id: &str) -> anyhow::Result<bool>;
+    async fn book_pages(&self, book_id: &str) -> anyhow::Result<Vec<BookPageRecord>>;
     async fn book_page(
         &self,
         book_id: &str,
         page_number: u64,
-    ) -> Result<Option<BookPageRecord>, String>;
+    ) -> anyhow::Result<Option<BookPageRecord>>;
     async fn epub_extension_blob(&self, book_id: &str)
-    -> Result<Option<EpubExtensionBlob>, String>;
+    -> anyhow::Result<Option<EpubExtensionBlob>>;
 }
 
 /// Read access to series/book relationship data.
@@ -457,21 +458,21 @@ pub struct SeriesBookNumberSort {
 
 #[async_trait::async_trait]
 pub trait SeriesRelationPort: Send + Sync {
-    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
+    async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>>;
     async fn series_book_number_sorts(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesBookNumberSort>, String>;
-    async fn series_oneshot(&self, series_id: &str) -> Result<Option<bool>, String>;
+    ) -> anyhow::Result<Vec<SeriesBookNumberSort>>;
+    async fn series_oneshot(&self, series_id: &str) -> anyhow::Result<Option<bool>>;
 }
 
 /// Existence checks for entities.
 #[async_trait::async_trait]
 pub trait EntityExistencePort: Send + Sync {
-    async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
-    async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
-    async fn readlist_exists(&self, readlist_id: &str) -> Result<bool, String>;
-    async fn collection_exists(&self, collection_id: &str) -> Result<bool, String>;
+    async fn book_exists(&self, book_id: &str) -> anyhow::Result<bool>;
+    async fn series_exists(&self, series_id: &str) -> anyhow::Result<bool>;
+    async fn readlist_exists(&self, readlist_id: &str) -> anyhow::Result<bool>;
+    async fn collection_exists(&self, collection_id: &str) -> anyhow::Result<bool>;
 }
 
 /// Access control and content manifest queries.
@@ -486,13 +487,13 @@ pub trait ContentAccessPort: Send + Sync {
     async fn book_restrictions(
         &self,
         book_id: &str,
-    ) -> Result<Option<BookAccessRestrictions>, String>;
+    ) -> anyhow::Result<Option<BookAccessRestrictions>>;
     async fn series_archive_entries(
         &self,
         series_id: &str,
-    ) -> Result<Option<SeriesArchiveEntries>, String>;
-    async fn manifest_book(&self, book_id: &str) -> Result<Option<ManifestBookRecord>, String>;
-    async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String>;
+    ) -> anyhow::Result<Option<SeriesArchiveEntries>>;
+    async fn manifest_book(&self, book_id: &str) -> anyhow::Result<Option<ManifestBookRecord>>;
+    async fn readlist_name(&self, readlist_id: &str) -> anyhow::Result<Option<String>>;
 }
 
 /// Read access to thumbnails across all entity types.
@@ -501,40 +502,40 @@ pub trait ThumbnailReadPort: Send + Sync {
     async fn selected_book_thumbnail(
         &self,
         book_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
     async fn book_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
-    async fn book_thumbnails(&self, book_id: &str) -> Result<Vec<EntityThumbnailRecord>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
+    async fn book_thumbnails(&self, book_id: &str) -> anyhow::Result<Vec<EntityThumbnailRecord>>;
     async fn selected_series_thumbnail(
         &self,
         series_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
     async fn series_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<EntityThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<EntityThumbnailBinary>>;
     async fn series_thumbnails(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<SeriesThumbnailRecord>>;
     async fn readlist_thumbnails(
         &self,
         readlist_id: &str,
-    ) -> Result<Vec<ReadlistThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<ReadlistThumbnailRecord>>;
     async fn readlist_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<ReadlistThumbnailRecord>, String>;
+    ) -> anyhow::Result<Option<ReadlistThumbnailRecord>>;
     async fn collection_thumbnails(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<CollectionThumbnailRecord>, String>;
+    ) -> anyhow::Result<Vec<CollectionThumbnailRecord>>;
     async fn collection_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<CollectionThumbnailRecord>, String>;
+    ) -> anyhow::Result<Option<CollectionThumbnailRecord>>;
 }
 
 /// Read access to reading progress data.
@@ -544,57 +545,57 @@ pub trait ReadProgressReadPort: Send + Sync {
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<BookProgressionRecord>, String>;
+    ) -> anyhow::Result<Option<BookProgressionRecord>>;
     async fn book_read_progress_completed(
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<bool>, String>;
+    ) -> anyhow::Result<Option<bool>>;
     async fn series_tachiyomi_progress_books(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<Vec<SeriesTachiyomiProgressBook>, String>;
+    ) -> anyhow::Result<Vec<SeriesTachiyomiProgressBook>>;
     async fn read_progress_completed_by_book_ids(
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
-    ) -> Result<Vec<Option<bool>>, String>;
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+    ) -> anyhow::Result<Vec<Option<bool>>>;
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>>;
 }
 
 /// Read access needed by read-progress orchestration.
 #[async_trait::async_trait]
 pub trait ReadProgressSurfacePort: Send + Sync {
-    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String>;
+    async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>>;
     async fn series_book_number_sorts(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesBookNumberSort>, String>;
+    ) -> anyhow::Result<Vec<SeriesBookNumberSort>>;
     async fn book_read_progress_completed(
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<bool>, String>;
+    ) -> anyhow::Result<Option<bool>>;
     async fn series_tachiyomi_progress_books(
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<Vec<SeriesTachiyomiProgressBook>, String>;
+    ) -> anyhow::Result<Vec<SeriesTachiyomiProgressBook>>;
     async fn read_progress_completed_by_book_ids(
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
-    ) -> Result<Vec<Option<bool>>, String>;
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+    ) -> anyhow::Result<Vec<Option<bool>>>;
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>>;
 }
 
 /// Read access needed by direct read-progress routes.
 #[async_trait::async_trait]
 pub trait ReadProgressReaderPort: Send + Sync {
-    async fn book_exists(&self, book_id: &str) -> Result<bool, String>;
-    async fn series_exists(&self, series_id: &str) -> Result<bool, String>;
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String>;
+    async fn book_exists(&self, book_id: &str) -> anyhow::Result<bool>;
+    async fn series_exists(&self, series_id: &str) -> anyhow::Result<bool>;
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>>;
 }
 
 #[async_trait::async_trait]
@@ -602,15 +603,15 @@ impl<T> ReadProgressReaderPort for T
 where
     T: EntityExistencePort + ReadProgressReadPort + Send + Sync,
 {
-    async fn book_exists(&self, book_id: &str) -> Result<bool, String> {
+    async fn book_exists(&self, book_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::book_exists(self, book_id).await
     }
 
-    async fn series_exists(&self, series_id: &str) -> Result<bool, String> {
+    async fn series_exists(&self, series_id: &str) -> anyhow::Result<bool> {
         EntityExistencePort::series_exists(self, series_id).await
     }
 
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>> {
         ReadProgressReadPort::book_page_count(self, book_id).await
     }
 }
@@ -620,14 +621,14 @@ impl<T> ReadProgressSurfacePort for T
 where
     T: ReadProgressReadPort + SeriesRelationPort + Send + Sync,
 {
-    async fn series_book_ids(&self, series_id: &str) -> Result<Vec<String>, String> {
+    async fn series_book_ids(&self, series_id: &str) -> anyhow::Result<Vec<String>> {
         SeriesRelationPort::series_book_ids(self, series_id).await
     }
 
     async fn series_book_number_sorts(
         &self,
         series_id: &str,
-    ) -> Result<Vec<SeriesBookNumberSort>, String> {
+    ) -> anyhow::Result<Vec<SeriesBookNumberSort>> {
         SeriesRelationPort::series_book_number_sorts(self, series_id).await
     }
 
@@ -635,7 +636,7 @@ where
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<bool>, String> {
+    ) -> anyhow::Result<Option<bool>> {
         ReadProgressReadPort::book_read_progress_completed(self, book_id, user_id).await
     }
 
@@ -643,7 +644,7 @@ where
         &self,
         ordered_book_ids: &[String],
         user_id: &str,
-    ) -> Result<Vec<Option<bool>>, String> {
+    ) -> anyhow::Result<Vec<Option<bool>>> {
         ReadProgressReadPort::read_progress_completed_by_book_ids(self, ordered_book_ids, user_id)
             .await
     }
@@ -652,11 +653,11 @@ where
         &self,
         series_id: &str,
         user_id: &str,
-    ) -> Result<Vec<SeriesTachiyomiProgressBook>, String> {
+    ) -> anyhow::Result<Vec<SeriesTachiyomiProgressBook>> {
         ReadProgressReadPort::series_tachiyomi_progress_books(self, series_id, user_id).await
     }
 
-    async fn book_page_count(&self, book_id: &str) -> Result<Option<u64>, String> {
+    async fn book_page_count(&self, book_id: &str) -> anyhow::Result<Option<u64>> {
         ReadProgressReadPort::book_page_count(self, book_id).await
     }
 }

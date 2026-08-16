@@ -49,10 +49,13 @@ pub(in crate::discovery) fn decode_query_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-pub(in crate::discovery) fn internal_error_response(error: String) -> Response {
+pub(in crate::discovery) fn internal_error_response(
+    error: impl std::fmt::Display + std::fmt::Debug,
+) -> Response {
+    tracing::error!(?error, "internal persisted discovery error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": error })),
+        Json(json!({ "error": format!("{error:#}") })),
     )
         .into_response()
 }

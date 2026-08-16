@@ -70,10 +70,10 @@ pub struct BookMetadataBatchUpdateOutcome {
     pub affected_series_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum BookMetadataUpdateError {
     Validation(String),
-    Persistence(String),
+    Persistence(anyhow::Error),
 }
 
 impl BookMetadataUpdateError {
@@ -81,35 +81,45 @@ impl BookMetadataUpdateError {
         Self::Validation(message.into())
     }
 
-    pub(crate) fn persistence(message: impl Into<String>) -> Self {
-        Self::Persistence(message.into())
-    }
-
-    pub fn message(&self) -> &str {
-        match self {
-            Self::Validation(message) | Self::Persistence(message) => message,
-        }
+    pub(crate) fn persistence(error: anyhow::Error) -> Self {
+        Self::Persistence(error)
     }
 }
 
 impl fmt::Display for BookMetadataUpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
+        match self {
+            Self::Validation(message) => f.write_str(message),
+            Self::Persistence(error) => write!(f, "{error}"),
+        }
     }
 }
 
 impl std::error::Error for BookMetadataUpdateError {}
 
+#[cfg(test)]
+impl PartialEq for BookMetadataUpdateError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Validation(left), Self::Validation(right)) => left == right,
+            (Self::Persistence(left), Self::Persistence(right)) => {
+                left.to_string() == right.to_string()
+            }
+            _ => false,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait BookMetadataPort: Send + Sync {
-    async fn load_book_metadata(&self, book_id: &str) -> Result<Option<BookMetadata>, String>;
-    async fn load_book_series_id(&self, book_id: &str) -> Result<Option<String>, String>;
-    async fn load_book_library_id(&self, book_id: &str) -> Result<Option<String>, String>;
+    async fn load_book_metadata(&self, book_id: &str) -> anyhow::Result<Option<BookMetadata>>;
+    async fn load_book_series_id(&self, book_id: &str) -> anyhow::Result<Option<String>>;
+    async fn load_book_library_id(&self, book_id: &str) -> anyhow::Result<Option<String>>;
     async fn persist_book_metadata(
         &self,
         book_id: &str,
         metadata: &BookMetadata,
-    ) -> Result<bool, String>;
+    ) -> anyhow::Result<bool>;
 }
 
 pub struct BookMetadataService {
@@ -536,15 +546,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl BookMetadataPort for TestBookMetadataPort {
-        async fn load_book_metadata(&self, _book_id: &str) -> Result<Option<BookMetadata>, String> {
+        async fn load_book_metadata(&self, _book_id: &str) -> anyhow::Result<Option<BookMetadata>> {
             Ok(self.metadata.clone())
         }
 
-        async fn load_book_series_id(&self, _book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_series_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("series-1".to_string()))
         }
 
-        async fn load_book_library_id(&self, _book_id: &str) -> Result<Option<String>, String> {
+        async fn load_book_library_id(&self, _book_id: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("library-1".to_string()))
         }
 
@@ -552,7 +562,7 @@ mod tests {
             &self,
             book_id: &str,
             _metadata: &BookMetadata,
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             self.persisted_book_ids
                 .lock()
                 .unwrap()

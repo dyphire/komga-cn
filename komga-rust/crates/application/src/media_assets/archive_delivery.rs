@@ -5,11 +5,11 @@ use super::{
     SeriesArchiveEntries,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum ArchiveDelivery {
     Asset(ArchiveDeliveryAsset),
     NotFound,
-    Internal(String),
+    Internal(anyhow::Error),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,14 +37,14 @@ where
 
 #[async_trait::async_trait]
 pub trait ArchiveReaderPort: Send + Sync {
-    async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String>;
+    async fn readlist_name(&self, readlist_id: &str) -> anyhow::Result<Option<String>>;
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String>;
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>>;
 
     async fn series_archive_entries(
         &self,
         series_id: &str,
-    ) -> Result<Option<SeriesArchiveEntries>, String>;
+    ) -> anyhow::Result<Option<SeriesArchiveEntries>>;
 }
 
 #[async_trait::async_trait]
@@ -52,25 +52,25 @@ impl<T> ArchiveReaderPort for T
 where
     T: BookMediaPort + ContentAccessPort + Send + Sync + ?Sized,
 {
-    async fn readlist_name(&self, readlist_id: &str) -> Result<Option<String>, String> {
+    async fn readlist_name(&self, readlist_id: &str) -> anyhow::Result<Option<String>> {
         ContentAccessPort::readlist_name(self, readlist_id).await
     }
 
-    async fn book_media(&self, book_id: &str) -> Result<Option<BookMediaRecord>, String> {
+    async fn book_media(&self, book_id: &str) -> anyhow::Result<Option<BookMediaRecord>> {
         BookMediaPort::book_media(self, book_id).await
     }
 
     async fn series_archive_entries(
         &self,
         series_id: &str,
-    ) -> Result<Option<SeriesArchiveEntries>, String> {
+    ) -> anyhow::Result<Option<SeriesArchiveEntries>> {
         ContentAccessPort::series_archive_entries(self, series_id).await
     }
 }
 
 #[async_trait::async_trait]
 pub trait ArchiveContentPort: Send + Sync {
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String>;
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>>;
 }
 
 #[async_trait::async_trait]
@@ -78,13 +78,13 @@ impl<T> ArchiveContentPort for T
 where
     T: ContentResolverPort + Send + Sync + ?Sized,
 {
-    async fn read_media_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String> {
+    async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::read_media_file_bytes(self, path).await
     }
 }
 
 pub trait ArchiveBuilderPort: Send + Sync {
-    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> Result<Vec<u8>, String>;
+    fn build_archive(&self, entries: Vec<ArchiveFileEntry>) -> anyhow::Result<Vec<u8>>;
 }
 
 impl<'a, R, C, B> ArchiveDeliveryService<'a, R, C, B>

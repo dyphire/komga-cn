@@ -87,9 +87,8 @@ impl<'a> BackgroundTaskExecutionLoop<'a> {
             .submit(task.clone(), self.runtime.clone())
         {
             let task_queue = self.task_queue.lock().await;
-            task_queue
-                .fail_claimed_task(&task, error_message.as_str())
-                .await?;
+            let error_message = error_message.to_string();
+            task_queue.fail_claimed_task(&task, &error_message).await?;
             return Err(TaskProcessingError::runtime(error_message));
         }
 

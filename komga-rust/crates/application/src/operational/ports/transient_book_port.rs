@@ -50,26 +50,26 @@ pub struct TransientBookPageContent {
 
 #[async_trait::async_trait]
 pub trait TransientBookPort: Send + Sync {
-    fn analyze_transient_book(&self, path: &str) -> Result<TransientBookAnalysis, String>;
+    fn analyze_transient_book(&self, path: &str) -> anyhow::Result<TransientBookAnalysis>;
     async fn infer_transient_series_and_number(
         &self,
         transient_name: &str,
-    ) -> Result<TransientBookSeriesInference, String>;
+    ) -> anyhow::Result<TransientBookSeriesInference>;
     fn list_transient_book_entries(
         &self,
         root: &Path,
-    ) -> Result<Vec<TransientBookScanEntry>, String>;
-    async fn validate_transient_scan_root(&self, path: &str) -> Result<(), String>;
+    ) -> anyhow::Result<Vec<TransientBookScanEntry>>;
+    async fn validate_transient_scan_root(&self, path: &str) -> anyhow::Result<()>;
     fn load_transient_book_file_metadata(
         &self,
         path: &str,
-    ) -> Result<TransientBookFileMetadata, String>;
-    fn transient_book_exists(&self, path: &str) -> Result<bool, String>;
+    ) -> anyhow::Result<TransientBookFileMetadata>;
+    fn transient_book_exists(&self, path: &str) -> anyhow::Result<bool>;
     fn transient_book_page_content(
         &self,
         path: &str,
         media_type: &str,
         pages: &[TransientBookPage],
         page_number: u32,
-    ) -> Result<Option<TransientBookPageContent>, String>;
+    ) -> anyhow::Result<Option<TransientBookPageContent>>;
 }

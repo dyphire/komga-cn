@@ -30,10 +30,10 @@ pub struct PageHashDeleteMatch {
     pub media_type: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum PageHashDeleteError {
-    LoadTargets(String),
-    Enqueue(String),
+    LoadTargets(anyhow::Error),
+    Enqueue(anyhow::Error),
 }
 
 impl PageHashService {
@@ -77,28 +77,28 @@ impl PageHashService {
     pub async fn load_page_hashes(
         &self,
         query: PageHashKnownQuery,
-    ) -> Result<PageHashPage<PageHashKnownEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashKnownEntry>> {
         self.page_hashes.load_page_hashes_page(query).await
     }
 
     pub async fn load_unknown_page_hashes(
         &self,
         query: PageHashUnknownQuery,
-    ) -> Result<PageHashPage<PageHashUnknownEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashUnknownEntry>> {
         self.page_hashes.load_page_hashes_unknown_page(query).await
     }
 
     pub async fn load_page_hash_matches(
         &self,
         query: PageHashMatchesQuery,
-    ) -> Result<PageHashPage<PageHashMatchEntry>, String> {
+    ) -> anyhow::Result<PageHashPage<PageHashMatchEntry>> {
         self.page_hashes.load_page_hash_matches_page(query).await
     }
 
     pub async fn load_page_hash_thumbnail(
         &self,
         page_hash: &str,
-    ) -> Result<Option<PageHashThumbnail>, String> {
+    ) -> anyhow::Result<Option<PageHashThumbnail>> {
         self.page_hashes.load_page_hash_thumbnail(page_hash).await
     }
 
@@ -106,13 +106,13 @@ impl PageHashService {
         &self,
         page_hash: &str,
         resize_to: Option<u32>,
-    ) -> Result<Option<PageHashThumbnail>, String> {
+    ) -> anyhow::Result<Option<PageHashThumbnail>> {
         self.page_hashes
             .load_unknown_page_hash_thumbnail(page_hash, resize_to)
             .await
     }
 
-    pub async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> Result<(), String> {
+    pub async fn upsert_page_hash(&self, command: PageHashUpsertCommand) -> anyhow::Result<()> {
         self.page_hashes.upsert_page_hash(command).await
     }
 

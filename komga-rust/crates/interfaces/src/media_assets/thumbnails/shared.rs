@@ -141,7 +141,7 @@ pub(super) async fn load_book_thumbnail_source_bytes(
     app: &MediaAssetsState,
     book_id: &str,
     media: &PersistedBookMedia,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     match app
         .thumbnail_reader
         .selected_book_thumbnail(book_id)
@@ -173,7 +173,7 @@ pub(super) async fn load_book_thumbnail_source_bytes(
 pub(super) async fn load_series_thumbnail(
     app: &MediaAssetsState,
     series_id: &str,
-) -> Result<Option<EntityThumbnailBinary>, String> {
+) -> anyhow::Result<Option<EntityThumbnailBinary>> {
     if let Some(thumbnail) = app
         .thumbnail_reader
         .selected_series_thumbnail(series_id)
@@ -198,7 +198,7 @@ pub(super) async fn load_series_thumbnail(
 pub(super) async fn load_series_thumbnail_source_bytes(
     app: &MediaAssetsState,
     series_id: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     match load_series_thumbnail(app, series_id).await {
         Ok(Some(thumbnail)) => Ok(Some(thumbnail.thumbnail)),
         Ok(None) => Ok(None),
@@ -209,7 +209,7 @@ pub(super) async fn load_series_thumbnail_source_bytes(
 pub(super) async fn load_readlist_mosaic_bytes(
     app: &MediaAssetsState,
     visible_book_ids: Vec<String>,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let book_ids = repeated_thumbnail_source_ids(visible_book_ids);
     if book_ids.is_empty() {
         return Ok(None);
@@ -230,7 +230,7 @@ pub(super) async fn load_readlist_mosaic_bytes(
 pub(super) async fn load_collection_mosaic_bytes(
     app: &MediaAssetsState,
     visible_series_ids: Vec<String>,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let series_ids = repeated_thumbnail_source_ids(visible_series_ids);
     if series_ids.is_empty() {
         return Ok(None);
@@ -352,7 +352,7 @@ fn invalid_thumbnail_upload_response(entity_name: &str, error: impl std::fmt::Di
     (
         StatusCode::BAD_REQUEST,
         Json(json!({
-            "error": format!("invalid {entity_name} thumbnail upload: {error}"),
+            "error": format!("invalid {entity_name} thumbnail upload: {error:#}"),
         })),
     )
         .into_response()

@@ -11,12 +11,12 @@ pub struct DeviceThumbnailBinary {
 
 #[async_trait::async_trait]
 pub trait DeviceSyncPort: Send + Sync {
-    async fn load_book_created_timestamp(&self, book_id: &str) -> Result<Option<String>, String>;
+    async fn load_book_created_timestamp(&self, book_id: &str) -> anyhow::Result<Option<String>>;
 
     async fn load_kobo_metadata_record(
         &self,
         book_id: &str,
-    ) -> Result<Option<KoboMetadataRecord>, String>;
+    ) -> anyhow::Result<Option<KoboMetadataRecord>>;
 
     async fn load_koreader_book_target(
         &self,
@@ -27,12 +27,12 @@ pub trait DeviceSyncPort: Send + Sync {
         &self,
         book_id: &str,
         user_id: &str,
-    ) -> Result<Option<PersistedReadProgressRecord>, String>;
+    ) -> anyhow::Result<Option<PersistedReadProgressRecord>>;
 
     async fn load_thumbnail_by_id(
         &self,
         thumbnail_id: &str,
-    ) -> Result<Option<DeviceThumbnailBinary>, String>;
+    ) -> anyhow::Result<Option<DeviceThumbnailBinary>>;
 
-    async fn persisted_book_exists(&self, book_id: &str) -> Result<bool, String>;
+    async fn persisted_book_exists(&self, book_id: &str) -> anyhow::Result<bool>;
 }

@@ -43,7 +43,7 @@ pub(super) fn library_visible(allowed: &Option<HashSet<String>>, library_id: &st
     }
 }
 
-pub(super) async fn load_libraries<P>(backend: &P) -> Result<Vec<PersistedLibrary>, String>
+pub(super) async fn load_libraries<P>(backend: &P) -> anyhow::Result<Vec<PersistedLibrary>>
 where
     P: OpdsLibraryPersistedPort + ?Sized,
 {
@@ -54,7 +54,7 @@ where
 pub(super) async fn load_library<P>(
     backend: &P,
     library_id: &str,
-) -> Result<Option<PersistedLibrary>, String>
+) -> anyhow::Result<Option<PersistedLibrary>>
 where
     P: OpdsLibraryPersistedPort + ?Sized,
 {
@@ -62,7 +62,7 @@ where
     Ok(record.map(map_library_record))
 }
 
-pub(super) async fn load_series_tags<P>(backend: &P, series_id: &str) -> Result<Vec<String>, String>
+pub(super) async fn load_series_tags<P>(backend: &P, series_id: &str) -> anyhow::Result<Vec<String>>
 where
     P: OpdsSeriesPersistedPort + ?Sized,
 {
@@ -75,7 +75,7 @@ pub(super) async fn load_opds_v1_series_search_results<P>(
     allowed_library_ids: &Option<HashSet<String>>,
     search: &str,
     publishers: &[String],
-) -> Result<Vec<PersistedSeriesSearchResult>, String>
+) -> anyhow::Result<Vec<PersistedSeriesSearchResult>>
 where
     P: OpdsSearchPersistedPort + ?Sized,
 {
@@ -142,7 +142,7 @@ pub(super) async fn load_browse_series_navigation(
     publishers: &[String],
     page: usize,
     size: usize,
-) -> Result<OpdsJsonNavigationPage, String> {
+) -> anyhow::Result<OpdsJsonNavigationPage> {
     catalog_queries::load_browse_series_navigation(
         backend,
         headers,
@@ -160,7 +160,7 @@ pub(super) async fn load_browse_publisher_navigation(
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
-) -> Result<Vec<Value>, String> {
+) -> anyhow::Result<Vec<Value>> {
     catalog_queries::load_browse_publisher_navigation(
         backend,
         headers,
@@ -185,7 +185,7 @@ pub(super) async fn load_series_page(
     publishers: &[String],
     offset: i64,
     limit: i64,
-) -> Result<Vec<PersistedSeries>, String> {
+) -> anyhow::Result<Vec<PersistedSeries>> {
     catalog_queries::load_series_page(
         backend,
         allowed_library_ids,
@@ -213,7 +213,7 @@ where
             return Some(
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS library scope: {error}") })),
+                    Json(json!({ "error": format!("load OPDS library scope: {error:#}") })),
                 )
                     .into_response(),
             );

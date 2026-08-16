@@ -64,7 +64,7 @@ fn push_transient_series_title(series_titles: &mut Vec<String>, title: Option<St
 
 pub(crate) fn infer_transient_epub_provider_metadata(
     package_document: &[u8],
-) -> Result<TransientMetadataProviderInference, String> {
+) -> anyhow::Result<TransientMetadataProviderInference> {
     let book_patch = extract_epub_book_patch(package_document)?;
     let series_patch = extract_epub_series_patch(package_document)?;
     let mut series_titles = Vec::new();
@@ -97,7 +97,7 @@ pub(crate) async fn refresh_book_metadata(
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     capabilities: &BTreeSet<String>,
-) -> Result<RefreshBookMetadataOutcome, String> {
+) -> anyhow::Result<RefreshBookMetadataOutcome> {
     let book_id = book_id.to_string();
     let book_id_for_events = book_id.clone();
     let outcome = {
@@ -121,7 +121,9 @@ pub(crate) async fn refresh_book_metadata(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("failed to resolve book path for metadata refresh '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve book path for metadata refresh '{book_id}': "
+            ))
         })?;
 
         if let Some(book_row) = &book_row {
@@ -145,11 +147,11 @@ pub(crate) async fn refresh_book_metadata(
                     let xml = tokio::fs::read_to_string(&sidecar_path)
                         .await
                         .map_err(|error| {
-                            format!(
-                                "failed to read ComicInfo sidecar '{}' for book '{}': {error}",
+                            anyhow::anyhow!(error).context(format!(
+                                "failed to read ComicInfo sidecar '{}' for book '{}': ",
                                 sidecar_path.display(),
                                 book_id
-                            )
+                            ))
                         })?;
                     if import_comicinfo_book {
                         let patch = extract_comicinfo_book_patch(&xml);
@@ -197,7 +199,10 @@ pub(crate) async fn refresh_book_metadata(
         .bind(&book_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to refresh BOOK_METADATA for '{book_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to refresh BOOK_METADATA for '{book_id}'"))
+        })?;
 
         sqlx::query(
             r#"
@@ -210,7 +215,9 @@ pub(crate) async fn refresh_book_metadata(
         .execute(pool)
         .await
         .map_err(|error| {
-            format!("failed to refresh BOOK row timestamp for '{book_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh BOOK row timestamp for '{book_id}': "
+            ))
         })?;
 
         let book_context = sqlx::query(
@@ -224,7 +231,11 @@ pub(crate) async fn refresh_book_metadata(
         .bind(&book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("failed to resolve book SSE context for '{book_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve book SSE context for '{book_id}': "
+            ))
+        })?;
         let series_id = book_context
             .as_ref()
             .and_then(|row| row.get::<Option<String>, _>("SERIES_ID"));
@@ -285,7 +296,7 @@ async fn apply_book_metadata_import_patch(
     pool: &SqlitePool,
     book_id: &str,
     patch: BookMetadataImportPatch,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let Some(mut metadata) = load_book_metadata_for_refresh(pool, book_id).await? else {
         return Ok(());
     };
@@ -293,9 +304,9 @@ async fn apply_book_metadata_import_patch(
     if patch::apply_patch_to_metadata(&mut metadata, patch) {
         let persisted = persist_book_metadata_for_refresh(pool, book_id, &metadata).await?;
         if !persisted {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "book metadata row disappeared before metadata refresh for '{book_id}'"
-            ));
+            )));
         }
     }
 
@@ -311,7 +322,7 @@ pub(crate) async fn refresh_series_metadata(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let series_id = series_id.to_string();
     let series_id_for_events = series_id.clone();
 
@@ -336,8 +347,7 @@ pub(crate) async fn refresh_series_metadata(
         .bind(&series_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| {
-            format!("failed to resolve series path for metadata refresh '{series_id}': {error}")
+        .map_err(|error| { anyhow::anyhow!(error).context( format!("failed to resolve series path for metadata refresh '{series_id}'"))
         })?;
 
         if let Some(series_row) = &series_row {
@@ -392,7 +402,11 @@ pub(crate) async fn refresh_series_metadata(
         .bind(&series_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to refresh SERIES_METADATA for '{series_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to refresh SERIES_METADATA for '{series_id}': "
+            ))
+        })?;
 
         sqlx::query(
             r#"
@@ -404,7 +418,10 @@ pub(crate) async fn refresh_series_metadata(
         .bind(&series_id)
         .execute(pool)
         .await
-        .map_err(|error| format!("failed to refresh SERIES row for '{series_id}': {error}"))?;
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to refresh SERIES row for '{series_id}'"))
+        })?;
 
         sqlx::query(
             r#"
@@ -418,7 +435,9 @@ pub(crate) async fn refresh_series_metadata(
         .fetch_optional(pool)
         .await
         .map_err(|error| {
-            format!("failed to resolve LIBRARY_ID for refreshed series '{series_id}': {error}")
+            anyhow::anyhow!(error).context(format!(
+                "failed to resolve LIBRARY_ID for refreshed series '{series_id}': "
+            ))
         })
         .map(|row| SeriesMetadataRefreshContext {
             library_id: row.and_then(|row| row.get::<Option<String>, _>("LIBRARY_ID")),
@@ -498,7 +517,9 @@ mod tests {
             .expect_err("missing ComicInfo sidecar file should fail metadata refresh");
 
         assert!(
-            error.contains("failed to read ComicInfo sidecar"),
+            error
+                .to_string()
+                .contains("failed to read ComicInfo sidecar"),
             "{error}"
         );
         fixture.close().await;
@@ -540,7 +561,10 @@ mod tests {
             .await
             .expect_err("corrupt EPUB package should fail metadata refresh");
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
         let _ = fs::remove_dir_all(library_root);
         fixture.close().await;
     }

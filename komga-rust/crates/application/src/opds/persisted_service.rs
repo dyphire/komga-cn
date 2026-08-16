@@ -9,18 +9,40 @@ use crate::opds::{
 };
 use komga_domain::discovery::MediaStatus;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum OpdsLibraryScopeError {
-    Load(String),
+    Load(anyhow::Error),
     NotFound,
     Forbidden,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[cfg(test)]
+impl PartialEq for OpdsLibraryScopeError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Load(left), Self::Load(right)) => left.to_string() == right.to_string(),
+            (Self::NotFound, Self::NotFound) | (Self::Forbidden, Self::Forbidden) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum OpdsSeriesAccessError {
-    Load(String),
+    Load(anyhow::Error),
     NotFound,
     Forbidden,
+}
+
+#[cfg(test)]
+impl PartialEq for OpdsSeriesAccessError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Load(left), Self::Load(right)) => left.to_string() == right.to_string(),
+            (Self::NotFound, Self::NotFound) | (Self::Forbidden, Self::Forbidden) => true,
+            _ => false,
+        }
+    }
 }
 
 pub struct OpdsReadlistDetail {
@@ -54,14 +76,14 @@ impl<'a, P> OpdsPersistedService<'a, P>
 where
     P: OpdsLibraryPersistedPort + ?Sized,
 {
-    pub async fn libraries(&self) -> Result<Vec<PersistedLibraryRecord>, String> {
+    pub async fn libraries(&self) -> anyhow::Result<Vec<PersistedLibraryRecord>> {
         self.persisted.load_libraries().await
     }
 
     pub async fn visible_libraries(
         &self,
         user: &OpdsFeedUserContext,
-    ) -> Result<Vec<PersistedLibraryRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedLibraryRecord>> {
         Ok(self
             .libraries()
             .await?
@@ -73,7 +95,7 @@ where
     pub async fn library(
         &self,
         library_id: &str,
-    ) -> Result<Option<PersistedLibraryRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedLibraryRecord>> {
         self.persisted.load_library(library_id).await
     }
 
@@ -104,7 +126,7 @@ impl<'a, P> OpdsPersistedService<'a, P>
 where
     P: OpdsPublisherPersistedPort + ?Sized,
 {
-    pub async fn publishers(&self, user: &OpdsFeedUserContext) -> Result<Vec<String>, String> {
+    pub async fn publishers(&self, user: &OpdsFeedUserContext) -> anyhow::Result<Vec<String>> {
         self.persisted
             .load_publishers(user.allowed_library_ids())
             .await
@@ -120,7 +142,7 @@ where
         user: &OpdsFeedUserContext,
         library_id: Option<&str>,
         keep_empty_global_collections: bool,
-    ) -> Result<Vec<PersistedNamedRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedNamedRecord>> {
         let collections = self.persisted.load_collections(library_id).await?;
         let mut visible_collections = Vec::new();
 
@@ -149,7 +171,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         library_id: Option<&str>,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         let collections = self.persisted.load_collections(library_id).await?;
 
         for collection in collections {
@@ -174,7 +196,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         collection_id: &str,
-    ) -> Result<Option<OpdsCollectionDetail>, String> {
+    ) -> anyhow::Result<Option<OpdsCollectionDetail>> {
         let Some(collection) = self.persisted.load_collection(collection_id).await? else {
             return Ok(None);
         };
@@ -203,7 +225,7 @@ where
     pub async fn collection_books(
         &self,
         collection_id: &str,
-    ) -> Result<Vec<crate::opds::PersistedBookFeedRecord>, String> {
+    ) -> anyhow::Result<Vec<crate::opds::PersistedBookFeedRecord>> {
         self.persisted.load_collection_books(collection_id).await
     }
 }
@@ -216,7 +238,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         library_id: Option<&str>,
-    ) -> Result<Vec<PersistedReadlistRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
         if let Some(library_id) = library_id {
             return self.persisted.load_readlists_for_library(library_id).await;
         }
@@ -241,7 +263,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         library_id: Option<&str>,
-    ) -> Result<bool, String> {
+    ) -> anyhow::Result<bool> {
         let readlists = match library_id {
             Some(library_id) => self.persisted.load_readlists_for_library(library_id).await,
             None => self.persisted.load_all_readlists().await,
@@ -269,7 +291,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         readlist_id: &str,
-    ) -> Result<Option<OpdsReadlistDetail>, String> {
+    ) -> anyhow::Result<Option<OpdsReadlistDetail>> {
         let Some(readlist) = self.persisted.load_readlist(readlist_id).await? else {
             return Ok(None);
         };
@@ -309,7 +331,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         series_id: &str,
-    ) -> Result<Option<PersistedSeriesRecord>, String> {
+    ) -> anyhow::Result<Option<PersistedSeriesRecord>> {
         Ok(self
             .persisted
             .load_series(series_id)
@@ -343,7 +365,7 @@ where
         user_id: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
+    ) -> anyhow::Result<Vec<PersistedSeriesBookRecord>> {
         Ok(self
             .persisted
             .load_series_books_paged(series_id, user_id, offset, limit)
@@ -356,7 +378,7 @@ where
             .collect())
     }
 
-    pub async fn series_tags(&self, series_id: &str) -> Result<Vec<String>, String> {
+    pub async fn series_tags(&self, series_id: &str) -> anyhow::Result<Vec<String>> {
         self.persisted.load_series_tags(series_id).await
     }
 }
@@ -369,7 +391,7 @@ where
         &self,
         user: &OpdsFeedUserContext,
         query: &str,
-    ) -> Result<OpdsUnifiedSearchResults, String> {
+    ) -> anyhow::Result<OpdsUnifiedSearchResults> {
         let records = self.persisted.load_unified_search_results(query).await?;
 
         let mut visible_series = records
@@ -592,9 +614,11 @@ mod tests {
         fn load_readlist_books_for(
             &self,
             readlist_id: &str,
-        ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
             if self.readlist_book_errors.contains(readlist_id) {
-                return Err(format!("load readlist books {readlist_id}"));
+                return Err(anyhow::anyhow!(format!(
+                    "load readlist books {readlist_id}"
+                )));
             }
 
             Ok(self.readlist_books_for(readlist_id))
@@ -610,9 +634,11 @@ mod tests {
         fn load_collection_series_for(
             &self,
             collection_id: &str,
-        ) -> Result<Vec<PersistedSeriesRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedSeriesRecord>> {
             if self.collection_series_errors.contains(collection_id) {
-                return Err(format!("load collection series {collection_id}"));
+                return Err(anyhow::anyhow!(format!(
+                    "load collection series {collection_id}"
+                )));
             }
 
             Ok(self.collection_series_for(collection_id))
@@ -628,9 +654,11 @@ mod tests {
         fn load_collection_books_for(
             &self,
             collection_id: &str,
-        ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedBookFeedRecord>> {
             if self.collection_book_errors.contains(collection_id) {
-                return Err(format!("load collection books {collection_id}"));
+                return Err(anyhow::anyhow!(format!(
+                    "load collection books {collection_id}"
+                )));
             }
 
             Ok(self.collection_books_for(collection_id))
@@ -642,7 +670,7 @@ mod tests {
         async fn load_collections(
             &self,
             _library_id: Option<&str>,
-        ) -> Result<Vec<PersistedNamedRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedNamedRecord>> {
             Ok(self.collections.clone())
         }
 
@@ -650,7 +678,7 @@ mod tests {
             &self,
             collection_id: &str,
             _ordered: bool,
-        ) -> Result<Vec<PersistedSeriesRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedSeriesRecord>> {
             self.load_collection_series_for(collection_id)
         }
     }
@@ -660,18 +688,18 @@ mod tests {
         async fn load_readlists_for_library(
             &self,
             _library_id: &str,
-        ) -> Result<Vec<PersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
             Ok(Vec::new())
         }
 
-        async fn load_all_readlists(&self) -> Result<Vec<PersistedReadlistRecord>, String> {
+        async fn load_all_readlists(&self) -> anyhow::Result<Vec<PersistedReadlistRecord>> {
             Ok(self.all_readlists.clone())
         }
 
         async fn load_readlist_books(
             &self,
             readlist_id: &str,
-        ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
             self.load_readlist_books_for(readlist_id)
         }
     }
@@ -681,14 +709,14 @@ mod tests {
         async fn load_readlist(
             &self,
             readlist_id: &str,
-        ) -> Result<Option<PersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedReadlistRecord>> {
             Ok(self.readlists.get(readlist_id).cloned())
         }
 
         async fn load_readlist_books(
             &self,
             readlist_id: &str,
-        ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
             self.load_readlist_books_for(readlist_id)
         }
     }
@@ -698,7 +726,7 @@ mod tests {
         async fn load_series(
             &self,
             series_id: &str,
-        ) -> Result<Option<PersistedSeriesRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedSeriesRecord>> {
             Ok(self.series.get(series_id).cloned())
         }
 
@@ -708,7 +736,7 @@ mod tests {
             _user_id: &str,
             _offset: i64,
             _limit: i64,
-        ) -> Result<Vec<PersistedSeriesBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedSeriesBookRecord>> {
             Ok(self
                 .series_books
                 .get(series_id)
@@ -716,7 +744,7 @@ mod tests {
                 .unwrap_or_default())
         }
 
-        async fn load_series_tags(&self, _series_id: &str) -> Result<Vec<String>, String> {
+        async fn load_series_tags(&self, _series_id: &str) -> anyhow::Result<Vec<String>> {
             Ok(Vec::new())
         }
     }
@@ -726,7 +754,7 @@ mod tests {
         async fn load_unified_search_results(
             &self,
             _query: &str,
-        ) -> Result<OpdsPersistedUnifiedSearchRecords, String> {
+        ) -> anyhow::Result<OpdsPersistedUnifiedSearchRecords> {
             Ok(OpdsPersistedUnifiedSearchRecords {
                 series: self.search_series.clone(),
                 books: self.search_books.clone(),
@@ -738,14 +766,14 @@ mod tests {
         async fn load_collection_books(
             &self,
             collection_id: &str,
-        ) -> Result<Vec<PersistedBookFeedRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedBookFeedRecord>> {
             self.load_collection_books_for(collection_id)
         }
 
         async fn load_readlist_books(
             &self,
             readlist_id: &str,
-        ) -> Result<Vec<PersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedReadlistBookRecord>> {
             self.load_readlist_books_for(readlist_id)
         }
     }
@@ -1059,11 +1087,11 @@ mod tests {
         }
     }
 
-    fn assert_error_contains<T>(result: Result<T, String>, expected: &str, context: &str) {
+    fn assert_error_contains<T>(result: anyhow::Result<T>, expected: &str, context: &str) {
         let Err(error) = result else {
             panic!("{context}");
         };
-        assert!(error.contains(expected), "{error}");
+        assert!(error.to_string().contains(expected), "{error}");
     }
 
     fn readlist(id: &str, ordered: bool) -> PersistedReadlistRecord {

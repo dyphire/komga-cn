@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     EntityThumbnailBinary, EntityThumbnailRecord, ThumbnailType,
 };
@@ -10,7 +11,7 @@ use crate::parsing::parse_thumbnail_type;
 pub(crate) async fn load_persisted_book_thumbnails(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Vec<EntityThumbnailRecord>, String> {
+) -> anyhow::Result<Vec<EntityThumbnailRecord>> {
     let rows = sqlx::query(
         r#"
         SELECT ID, BOOK_ID, TYPE, SELECTED, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT
@@ -21,7 +22,7 @@ pub(crate) async fn load_persisted_book_thumbnails(
     .bind(book_id)
     .fetch_all(pool)
     .await
-    .map_err(|error| format!("query persisted book thumbnails: {error}"))?;
+    .context("query persisted book thumbnails")?;
 
     rows.into_iter()
         .map(|row| {
@@ -42,7 +43,7 @@ pub(crate) async fn load_persisted_book_thumbnails(
 pub(crate) async fn load_selected_book_thumbnail(
     pool: &SqlitePool,
     book_id: &str,
-) -> Result<Option<EntityThumbnailBinary>, String> {
+) -> anyhow::Result<Option<EntityThumbnailBinary>> {
     let row = sqlx::query(
         r#"
         SELECT tb.BOOK_ID, tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
@@ -57,7 +58,7 @@ pub(crate) async fn load_selected_book_thumbnail(
     .bind(book_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query selected book thumbnail: {error}"))?;
+    .context("query selected book thumbnail")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -83,7 +84,7 @@ pub(crate) async fn load_selected_book_thumbnail(
 pub(crate) async fn load_book_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<EntityThumbnailBinary>, String> {
+) -> anyhow::Result<Option<EntityThumbnailBinary>> {
     let row = sqlx::query(
         r#"
         SELECT tb.BOOK_ID, tb.TYPE, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
@@ -97,7 +98,7 @@ pub(crate) async fn load_book_thumbnail_by_id(
     .bind(thumbnail_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("query single book thumbnail: {error}"))?;
+    .context("query single book thumbnail")?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -120,12 +121,12 @@ pub(crate) async fn load_book_thumbnail_by_id(
     }))
 }
 
-async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> Result<Option<String>, String> {
+async fn load_book_series_id(pool: &SqlitePool, book_id: &str) -> anyhow::Result<Option<String>> {
     sqlx::query("SELECT SERIES_ID FROM BOOK WHERE ID = ? LIMIT 1")
         .bind(book_id)
         .fetch_optional(pool)
         .await
-        .map_err(|error| format!("query book series id for thumbnail SSE: {error}"))
+        .context("query book series id for thumbnail SSE")
         .map(|row| row.map(|row| row.get::<String, _>("SERIES_ID")))
 }
 
@@ -142,11 +143,11 @@ pub(crate) async fn insert_book_thumbnail(
     width: i64,
     height: i64,
     selected: bool,
-) -> Result<EntityThumbnailRecord, String> {
+) -> anyhow::Result<EntityThumbnailRecord> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin book thumbnail create tx: {error}"))?;
+        .context("begin book thumbnail create tx")?;
 
     let exists = sqlx::query(
         r#"
@@ -159,13 +160,13 @@ pub(crate) async fn insert_book_thumbnail(
     .bind(book_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query book existence for thumbnail create: {error}"))?
+    .context("query book existence for thumbnail create")?
     .is_some();
     if !exists {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback book thumbnail create tx: {error}"))?;
-        return Err("book does not exist".to_string());
+            .context("rollback book thumbnail create tx")?;
+        return Err(anyhow::anyhow!("book does not exist"));
     }
 
     if selected {
@@ -179,7 +180,7 @@ pub(crate) async fn insert_book_thumbnail(
         .bind(book_id)
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("clear selected book thumbnails: {error}"))?;
+        .context("clear selected book thumbnails")?;
     }
 
     let selected = if selected {
@@ -196,7 +197,7 @@ pub(crate) async fn insert_book_thumbnail(
         .bind(book_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| format!("query selected book thumbnails for housekeeping: {error}"))?
+        .context("query selected book thumbnails for housekeeping")?
         .is_none()
     };
 
@@ -219,11 +220,11 @@ pub(crate) async fn insert_book_thumbnail(
     .bind(height)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("insert book thumbnail: {error}"))?;
+    .context("insert book thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit book thumbnail create tx: {error}"))?;
+        .context("commit book thumbnail create tx")?;
 
     let series_id = load_book_series_id(pool, book_id)
         .await?
@@ -252,11 +253,11 @@ pub(crate) async fn select_book_thumbnail(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin book thumbnail select tx: {error}"))?;
+        .context("begin book thumbnail select tx")?;
 
     let target_book_id = sqlx::query(
         r#"
@@ -269,12 +270,12 @@ pub(crate) async fn select_book_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query target book thumbnail for select: {error}"))?
+    .context("query target book thumbnail for select")?
     .map(|row| row.get::<String, _>("BOOK_ID"));
     let Some(target_book_id) = target_book_id else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback book thumbnail select tx: {error}"))?;
+            .context("rollback book thumbnail select tx")?;
         return Ok(false);
     };
 
@@ -288,7 +289,7 @@ pub(crate) async fn select_book_thumbnail(
     .bind(&target_book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("clear selected book thumbnails for select: {error}"))?;
+    .context("clear selected book thumbnails for select")?;
     sqlx::query(
         r#"
         UPDATE THUMBNAIL_BOOK
@@ -300,11 +301,11 @@ pub(crate) async fn select_book_thumbnail(
     .bind(&target_book_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("mark selected book thumbnail: {error}"))?;
+    .context("mark selected book thumbnail")?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit book thumbnail select tx: {error}"))?;
+        .context("commit book thumbnail select tx")?;
     let selected_series_id = load_book_series_id(pool, &target_book_id)
         .await?
         .unwrap_or_default();
@@ -322,11 +323,11 @@ pub(crate) async fn delete_book_thumbnail(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     thumbnail_id: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let mut tx = pool
         .begin()
         .await
-        .map_err(|error| format!("begin book thumbnail delete tx: {error}"))?;
+        .context("begin book thumbnail delete tx")?;
 
     let target = sqlx::query(
         r#"
@@ -339,11 +340,11 @@ pub(crate) async fn delete_book_thumbnail(
     .bind(thumbnail_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|error| format!("query book thumbnail delete target: {error}"))?;
+    .context("query book thumbnail delete target")?;
     let Some(target) = target else {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback book thumbnail delete tx: {error}"))?;
+            .context("rollback book thumbnail delete tx")?;
         return Ok(false);
     };
     let target_book_id = target.get::<String, _>("BOOK_ID");
@@ -353,14 +354,14 @@ pub(crate) async fn delete_book_thumbnail(
         .bind(&target_book_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(|error| format!("query book series id for thumbnail delete: {error}"))?
+        .context("query book series id for thumbnail delete")?
         .map(|row| row.get::<String, _>("SERIES_ID"))
         .unwrap_or_default();
     if target_type != ThumbnailType::UserUploaded {
         tx.rollback()
             .await
-            .map_err(|error| format!("rollback generated book thumbnail delete tx: {error}"))?;
-        return Err("only uploaded thumbnails can be deleted".to_string());
+            .context("rollback generated book thumbnail delete tx")?;
+        return Err(anyhow::anyhow!("only uploaded thumbnails can be deleted"));
     }
 
     sqlx::query(
@@ -372,13 +373,13 @@ pub(crate) async fn delete_book_thumbnail(
     .bind(thumbnail_id)
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("delete book thumbnail: {error}"))?;
+    .context("delete book thumbnail")?;
 
     normalize_book_thumbnail_selection(&mut tx, &target_book_id, deleted_selected).await?;
 
     tx.commit()
         .await
-        .map_err(|error| format!("commit book thumbnail delete tx: {error}"))?;
+        .context("commit book thumbnail delete tx")?;
     emit_thumbnail_book_event(
         runtime_events,
         &target_book_id,
@@ -393,7 +394,7 @@ async fn normalize_book_thumbnail_selection(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     book_id: &str,
     deleted_selected: bool,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let remaining_rows = sqlx::query(
         r#"
         SELECT ID, SELECTED
@@ -405,7 +406,7 @@ async fn normalize_book_thumbnail_selection(
     .bind(book_id)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|error| format!("query remaining book thumbnails for delete housekeeping: {error}"))?;
+    .context("query remaining book thumbnails for delete housekeeping: ")?;
 
     let selected_ids = remaining_rows
         .iter()
@@ -438,7 +439,7 @@ async fn normalize_book_thumbnail_selection(
     .bind(book_id)
     .execute(&mut **tx)
     .await
-    .map_err(|error| format!("normalize book thumbnail selection after delete: {error}"))?;
+    .context("normalize book thumbnail selection after delete")?;
 
     Ok(())
 }

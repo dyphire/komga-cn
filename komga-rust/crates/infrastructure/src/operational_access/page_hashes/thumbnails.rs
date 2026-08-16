@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::fs;
 use std::io::ErrorKind;
 use std::io::Read;
@@ -148,7 +149,7 @@ pub(super) async fn upsert_page_hash(
 async fn read_unknown_thumbnail_bytes(
     source_path: &Path,
     file_name: &str,
-) -> Result<Option<Vec<u8>>, String> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     let extension = source_path
         .extension()
         .and_then(|value| value.to_str())
@@ -163,61 +164,61 @@ async fn read_unknown_thumbnail_bytes(
             .await
             .map(Some)
             .map_err(|error| {
-                format!(
-                    "read page-hash thumbnail source '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read page-hash thumbnail source '{}': ",
                     source_path.display()
-                )
+                ))
             });
     }
 
     if matches!(extension.as_str(), "cbz" | "zip" | "epub") {
         let path = source_path.to_path_buf();
         let file_name = file_name.to_string();
-        return tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+        return tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
             let file = fs::File::open(&path).map_err(|error| {
-                format!(
-                    "open page-hash thumbnail archive '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "open page-hash thumbnail archive '{}': ",
                     path.display()
-                )
+                ))
             })?;
             let mut archive = ZipArchive::new(file).map_err(|error| {
-                format!(
-                    "read page-hash thumbnail archive '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read page-hash thumbnail archive '{}': ",
                     path.display()
-                )
+                ))
             })?;
             let mut entry = match archive.by_name(&file_name) {
                 Ok(entry) => entry,
                 Err(zip::result::ZipError::FileNotFound) => return Ok(None),
                 Err(error) => {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(format!(
                         "open page-hash thumbnail archive entry '{}' from '{}': {error}",
                         file_name,
                         path.display()
-                    ));
+                    )));
                 }
             };
             let mut bytes = Vec::new();
             Read::read_to_end(&mut entry, &mut bytes).map_err(|error| {
-                format!(
-                    "read page-hash thumbnail archive entry '{}' from '{}': {error}",
+                anyhow::anyhow!(error).context(format!(
+                    "read page-hash thumbnail archive entry '{}' from '{}': ",
                     file_name,
                     path.display()
-                )
+                ))
             })?;
             Ok(Some(bytes))
         })
         .await
-        .map_err(|error| format!("join page-hash thumbnail archive read task: {error}"))?;
+        .context("join page-hash thumbnail archive read task")?;
     }
 
     if matches!(extension.as_str(), "cbr" | "rar") {
         return read_rar_entry_bytes(source_path, file_name).map_err(|error| {
-            format!(
-                "read page-hash thumbnail rar entry '{}' from '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read page-hash thumbnail rar entry '{}' from '{}': ",
                 file_name,
                 source_path.display()
-            )
+            ))
         });
     }
 
@@ -229,7 +230,7 @@ async fn load_page_hash_page_row(
     book_id: &str,
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<Option<BookPageRecord>, String> {
+) -> anyhow::Result<Option<BookPageRecord>> {
     if let Some(row) = load_persisted_book_page_row(pool, book_id, page_number).await? {
         return Ok(Some(row));
     }
@@ -248,26 +249,26 @@ async fn load_page_hash_page_row(
 fn single_image_page_row(
     media: &BookMediaRecord,
     page_number: u64,
-) -> Result<BookPageRecord, String> {
+) -> anyhow::Result<BookPageRecord> {
     let file_size = match fs::metadata(&media.file_path) {
         Ok(metadata) if metadata.is_file() => i64::try_from(metadata.len()).map_err(|error| {
-            format!(
-                "convert page-hash media file size '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "convert page-hash media file size '{}': ",
                 media.file_path.display()
-            )
+            ))
         })?,
         Ok(_) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "page-hash media path '{}' is not a file",
                 media.file_path.display()
-            ));
+            )));
         }
         Err(error) if error.kind() == ErrorKind::NotFound => 0,
         Err(error) => {
-            return Err(format!(
+            return Err(anyhow::anyhow!(format!(
                 "read page-hash media file metadata '{}': {error}",
                 media.file_path.display()
-            ));
+            )));
         }
     };
 
@@ -295,8 +296,8 @@ fn pdf_render_max_edge(page: &BookPageRecord) -> u32 {
     width.max(height).max(KOTLIN_PDF_MIN_EDGE)
 }
 
-fn as_sqlx_protocol_error(error: String) -> sqlx::Error {
-    sqlx::Error::Protocol(error)
+fn as_sqlx_protocol_error(error: impl std::fmt::Display) -> sqlx::Error {
+    sqlx::Error::Protocol(error.to_string())
 }
 
 async fn page_hash_exists(pool: &SqlitePool, page_hash: &str) -> Result<bool, sqlx::Error> {
@@ -358,14 +359,14 @@ async fn insert_page_hash_thumbnail(
     Ok(())
 }
 
-fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> {
-    let image = image::load_from_memory(bytes)
-        .map_err(|error| format!("decode page-hash thumbnail source image: {error}"))?;
+fn encode_image_bytes_as_thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result<Vec<u8>> {
+    let image =
+        image::load_from_memory(bytes).context("decode page-hash thumbnail source image")?;
     let resized = image.thumbnail(max_edge.max(1), max_edge.max(1));
     let mut output = Cursor::new(Vec::new());
     resized
         .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| format!("encode page-hash thumbnail JPEG: {error}"))?;
+        .context("encode page-hash thumbnail JPEG")?;
     Ok(output.into_inner())
 }
 
@@ -504,7 +505,10 @@ mod tests {
         let error = single_image_page_row(&media, 1)
             .expect_err("directory media path should not produce a page row");
 
-        assert!(error.contains("not a file"), "unexpected error: {error}");
+        assert!(
+            error.to_string().contains("not a file"),
+            "unexpected error: {error}"
+        );
         let _ = fs::remove_dir(path);
     }
 
@@ -520,7 +524,9 @@ mod tests {
             .expect_err("invalid page-hash source archive must not become no thumbnail");
 
         assert!(
-            error.contains("read page-hash thumbnail archive"),
+            error
+                .to_string()
+                .contains("read page-hash thumbnail archive"),
             "unexpected page-hash source error: {error}"
         );
 

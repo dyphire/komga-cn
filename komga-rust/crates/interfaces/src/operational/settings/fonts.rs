@@ -52,7 +52,7 @@ pub(crate) async fn get_fonts_families(
 fn merged_font_families(
     fonts: &dyn FontPort,
     fonts_directory: &Path,
-) -> Result<Vec<String>, String> {
+) -> anyhow::Result<Vec<String>> {
     let mut families = embedded_font_families()
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -95,15 +95,15 @@ fn load_embedded_font_family_css(font_family: &str) -> Option<String> {
 fn filesystem_font_family_exists(
     fonts_directory: &Path,
     font_family: &str,
-) -> Result<bool, String> {
+) -> anyhow::Result<bool> {
     let path = fonts_directory.join(font_family);
     match fs::metadata(&path) {
         Ok(metadata) => Ok(metadata.is_dir()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!(
-            "read font family metadata '{}': {error}",
+        Err(error) => Err(anyhow::anyhow!(format!(
+            "read font family metadata '{}': {error:#}",
             path.display()
-        )),
+        ))),
     }
 }
 

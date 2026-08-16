@@ -1,3 +1,4 @@
+use anyhow::Context;
 use komga_application::library_catalog::{
     LibraryBookSeriesRecord, LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
     LibraryScanInterval, LibrarySeriesAndBookIds, LibrarySeriesCover,
@@ -50,7 +51,7 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
             .into_iter()
             .map(library_record_from_read_model)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(DiscoveryError::Persistence)
+            .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 
     async fn get_library(
@@ -62,37 +63,37 @@ impl LibraryCatalogReadPort for SqliteLibraryCatalogAdapter {
         library
             .map(library_record_from_read_model)
             .transpose()
-            .map_err(DiscoveryError::Persistence)
+            .map_err(|error| DiscoveryError::Persistence(error.to_string()))
     }
 }
 
 #[async_trait::async_trait]
 impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
-    async fn load_library(&self, library_id: &str) -> Result<Option<LibraryRecord>, String> {
+    async fn load_library(&self, library_id: &str) -> anyhow::Result<Option<LibraryRecord>> {
         let library = load_persisted_library_write_model(&self.read_pool, library_id)
             .await
-            .map_err(|error| format!("load persisted library: {error}"))?;
+            .context("load persisted library")?;
         library.map(library_record_from_write_model).transpose()
     }
 
-    async fn validate_library(&self, library: &LibraryRecord) -> Result<(), String> {
+    async fn validate_library(&self, library: &LibraryRecord) -> anyhow::Result<()> {
         validate_library_before_persist(&self.read_pool, &library.clone().into()).await
     }
 
-    async fn create_library(&self, library: &LibraryRecord) -> Result<(), String> {
+    async fn create_library(&self, library: &LibraryRecord) -> anyhow::Result<()> {
         persist_library_create(&self.write_pool, &library.clone().into())
             .await
-            .map_err(|error| format!("persist library create: {error}"))?;
+            .context("persist library create")?;
         self.runtime_events.register(RuntimeSseEvent::LibraryAdded {
             library_id: library.id.clone(),
         });
         Ok(())
     }
 
-    async fn update_library(&self, library: &LibraryRecord) -> Result<bool, String> {
+    async fn update_library(&self, library: &LibraryRecord) -> anyhow::Result<bool> {
         let updated = persist_library_update(&self.write_pool, &library.clone().into())
             .await
-            .map_err(|error| format!("persist library update: {error}"))?;
+            .context("persist library update")?;
         if updated {
             self.runtime_events
                 .register(RuntimeSseEvent::LibraryChanged {
@@ -102,10 +103,10 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         Ok(updated)
     }
 
-    async fn delete_library(&self, library_id: &str) -> Result<bool, String> {
+    async fn delete_library(&self, library_id: &str) -> anyhow::Result<bool> {
         let deleted = delete_persisted_library(&self.write_pool, library_id)
             .await
-            .map_err(|error| format!("delete persisted library: {error}"))?;
+            .context("delete persisted library")?;
         if deleted {
             self.runtime_events
                 .register(RuntimeSseEvent::LibraryDeleted {
@@ -119,33 +120,33 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
         &self,
         library_id: &str,
         koreader: bool,
-    ) -> Result<Vec<String>, String> {
+    ) -> anyhow::Result<Vec<String>> {
         library_book_ids_with_empty_hash(&self.read_pool, library_id, koreader).await
     }
 
     async fn library_books_with_mismatched_extensions(
         &self,
         library_id: &str,
-    ) -> Result<Vec<LibraryBookSeriesRecord>, String> {
+    ) -> anyhow::Result<Vec<LibraryBookSeriesRecord>> {
         library_books_with_mismatched_extensions(&self.read_pool, library_id)
             .await
             .map(|books| books.into_iter().map(convert_book_series_record).collect())
     }
 
-    async fn library_book_ids(&self, library_id: &str) -> Result<Option<Vec<String>>, String> {
+    async fn library_book_ids(&self, library_id: &str) -> anyhow::Result<Option<Vec<String>>> {
         library_book_ids(&self.read_pool, library_id)
             .await
-            .map_err(|error| format!("load library book ids: {error}"))
+            .context("load library book ids")
     }
 
     async fn library_series_and_book_ids(
         &self,
         library_id: &str,
-    ) -> Result<Option<LibrarySeriesAndBookIds>, String> {
+    ) -> anyhow::Result<Option<LibrarySeriesAndBookIds>> {
         library_series_and_book_ids(&self.read_pool, library_id)
             .await
             .map(|ids| ids.map(convert_series_and_book_ids))
-            .map_err(|error| format!("load library series and book ids: {error}"))
+            .context("load library series and book ids")
     }
 }
 
@@ -169,7 +170,7 @@ fn convert_series_and_book_ids(value: PersistedLibrarySeriesAndBookIds) -> Libra
 
 fn library_record_from_read_model(
     value: PersistedLibraryReadModel,
-) -> Result<LibraryRecord, String> {
+) -> anyhow::Result<LibraryRecord> {
     Ok(LibraryRecord {
         id: value.id,
         name: value.name,
@@ -206,7 +207,7 @@ fn library_record_from_read_model(
 
 fn library_record_from_write_model(
     value: PersistedLibraryWriteModel,
-) -> Result<LibraryRecord, String> {
+) -> anyhow::Result<LibraryRecord> {
     Ok(LibraryRecord {
         id: value.id,
         name: value.name,
@@ -241,16 +242,16 @@ fn library_record_from_write_model(
     })
 }
 
-fn scan_interval_from_persisted(value: &str) -> Result<LibraryScanInterval, String> {
+fn scan_interval_from_persisted(value: &str) -> anyhow::Result<LibraryScanInterval> {
     let normalized = value.trim().to_ascii_uppercase();
     LibraryScanInterval::from_persisted_name(normalized.as_str())
-        .ok_or_else(|| format!("unsupported library scan interval: {value}"))
+        .ok_or_else(|| anyhow::anyhow!(format!("unsupported library scan interval: {value}")))
 }
 
-fn series_cover_from_persisted(value: &str) -> Result<LibrarySeriesCover, String> {
+fn series_cover_from_persisted(value: &str) -> anyhow::Result<LibrarySeriesCover> {
     let normalized = value.trim().to_ascii_uppercase();
     LibrarySeriesCover::from_persisted_name(normalized.as_str())
-        .ok_or_else(|| format!("unsupported library series cover: {value}"))
+        .ok_or_else(|| anyhow::anyhow!(format!("unsupported library series cover: {value}")))
 }
 
 impl From<LibraryRecord> for PersistedLibraryWriteModel {

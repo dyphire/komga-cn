@@ -77,10 +77,10 @@ pub struct ReadlistCreateResult {
     pub readlist_id: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum ReadlistMutationError {
     DuplicateName,
-    Persistence(String),
+    Persistence(anyhow::Error),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -221,7 +221,7 @@ impl<'a> ReadlistProjectionService<'a> {
         requested_context: &DiscoveryQueryContext,
         visibility_context: &DiscoveryQueryContext,
         query: ReadListsQuery,
-    ) -> Result<PageEnvelope<ReadListReadModel>, String> {
+    ) -> anyhow::Result<PageEnvelope<ReadListReadModel>> {
         let requested_library_ids =
             library_ids_to_strings(requested_context.authorized_library_ids.as_ref());
         let mut content = self
@@ -275,7 +275,7 @@ impl<'a> ReadlistProjectionService<'a> {
         Ok(paginate_readlists(visible_content, &query))
     }
 
-    async fn search_ranks(&self, search: &str) -> Result<Option<HashMap<String, usize>>, String> {
+    async fn search_ranks(&self, search: &str) -> anyhow::Result<Option<HashMap<String, usize>>> {
         let search_groups = search
             .split(',')
             .map(str::trim)
@@ -321,7 +321,7 @@ impl<'a> ComicRackReadListMatchService<'a> {
     pub async fn match_readlist(
         &self,
         request: &ComicRackReadListRequest,
-    ) -> Result<ComicRackReadListMatchResult, String> {
+    ) -> anyhow::Result<ComicRackReadListMatchResult> {
         let readlists = self.readlists.load_persisted_readlists().await?;
         let error = readlists
             .iter()
@@ -348,7 +348,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Option<ReadListReadModel>> {
         let query = readlist_books_visibility_query(readlist_id, None);
         let Some(projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
@@ -364,7 +364,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         context: &DiscoveryQueryContext,
         query: ReadListBooksQuery,
-    ) -> Result<Option<PageEnvelope<BookReadModel>>, String> {
+    ) -> anyhow::Result<Option<PageEnvelope<BookReadModel>>> {
         let Some(mut projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
         };
@@ -377,7 +377,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         context: &DiscoveryQueryContext,
         readlist_id: &str,
-    ) -> Result<Option<Vec<String>>, String> {
+    ) -> anyhow::Result<Option<Vec<String>>> {
         let query = readlist_books_visibility_query(readlist_id, None);
         let Some(projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
@@ -392,7 +392,7 @@ impl<'a> ReadlistProjectionService<'a> {
         readlist_id: &str,
         book_id: &str,
         next: bool,
-    ) -> Result<Option<BookReadModel>, String> {
+    ) -> anyhow::Result<Option<BookReadModel>> {
         let query = readlist_books_visibility_query(readlist_id, None);
         let Some(mut projection) = self.visible_readlist_projection(context, &query).await? else {
             return Ok(None);
@@ -419,7 +419,7 @@ impl<'a> ReadlistProjectionService<'a> {
         candidate_library_ids: Option<&[String]>,
         visibility_context: &DiscoveryQueryContext,
         book_id: &str,
-    ) -> Result<Vec<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Vec<ReadListReadModel>> {
         let mut readlists = self.load_readlists(candidate_library_ids).await?;
         readlists.retain(|readlist| readlist.book_ids.iter().any(|id| id == book_id));
 
@@ -445,7 +445,7 @@ impl<'a> ReadlistProjectionService<'a> {
     async fn load_readlists(
         &self,
         library_ids: Option<&[String]>,
-    ) -> Result<Vec<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Vec<ReadListReadModel>> {
         let rows = self.readlists.load_persisted_readlists().await?;
 
         let mut readlists = Vec::with_capacity(rows.len());
@@ -470,7 +470,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         readlist_id: &str,
         context: &DiscoveryQueryContext,
-    ) -> Result<Option<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Option<ReadListReadModel>> {
         let Some(row) = self
             .readlists
             .load_persisted_readlist_detail(readlist_id)
@@ -499,7 +499,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         context: &DiscoveryQueryContext,
         query: &ReadListBooksQuery,
-    ) -> Result<Option<VisibleReadlistProjection>, String> {
+    ) -> anyhow::Result<Option<VisibleReadlistProjection>> {
         let Some(mut readlist) = self
             .load_readlist_detail(&query.readlist_id, context)
             .await?
@@ -522,7 +522,7 @@ impl<'a> ReadlistProjectionService<'a> {
         &self,
         context: &DiscoveryQueryContext,
         query: &ReadListBooksQuery,
-    ) -> Result<Vec<BookReadModel>, String> {
+    ) -> anyhow::Result<Vec<BookReadModel>> {
         let authorized_library_ids =
             library_ids_to_strings(context.authorized_library_ids.as_ref());
         let user_id = context.user_id.as_ref().map(|user_id| user_id.as_str());
@@ -708,7 +708,7 @@ impl<'a> ReadlistMutationService<'a> {
     async fn load_readlist_for_mutation(
         &self,
         readlist_id: &str,
-    ) -> Result<Option<ReadListReadModel>, String> {
+    ) -> anyhow::Result<Option<ReadListReadModel>> {
         let Some(row) = self
             .readlists
             .load_persisted_readlist_detail(readlist_id)
@@ -905,7 +905,7 @@ async fn load_readlist_book_ids(
     readlists: &dyn ReadlistProjectionPort,
     readlist_id: &str,
     library_ids: Option<&[String]>,
-) -> Result<ReadlistBookVisibility, String> {
+) -> anyhow::Result<ReadlistBookVisibility> {
     let rows = readlists
         .load_persisted_readlist_book_rows(readlist_id)
         .await?;
@@ -1609,14 +1609,14 @@ mod tests {
     impl ReadlistProjectionPort for TestReadlistPorts {
         async fn load_persisted_readlists(
             &self,
-        ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>> {
             Ok(self.readlists.clone())
         }
 
         async fn load_persisted_readlist_detail(
             &self,
             readlist_id: &str,
-        ) -> Result<Option<DiscoveryPersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Option<DiscoveryPersistedReadlistRecord>> {
             Ok(self
                 .readlists
                 .iter()
@@ -1627,7 +1627,7 @@ mod tests {
         async fn load_persisted_readlist_book_rows(
             &self,
             readlist_id: &str,
-        ) -> Result<Vec<DiscoveryPersistedReadlistBookRecord>, String> {
+        ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>> {
             Ok(self
                 .readlist_books
                 .get(readlist_id)
@@ -1645,7 +1645,7 @@ mod tests {
             _summary: &str,
             _ordered: bool,
             _book_ids: &[String],
-        ) -> Result<(), String> {
+        ) -> anyhow::Result<()> {
             self.created_readlists
                 .lock()
                 .expect("created readlists lock should not be poisoned")
@@ -1660,7 +1660,7 @@ mod tests {
             _summary: &str,
             _ordered: bool,
             _book_ids: &[String],
-        ) -> Result<bool, String> {
+        ) -> anyhow::Result<bool> {
             self.updated_readlists
                 .lock()
                 .expect("updated readlists lock should not be poisoned")
@@ -1671,7 +1671,7 @@ mod tests {
                 .any(|readlist| readlist.id == readlist_id))
         }
 
-        async fn delete_persisted_readlist(&self, readlist_id: &str) -> Result<bool, String> {
+        async fn delete_persisted_readlist(&self, readlist_id: &str) -> anyhow::Result<bool> {
             self.deleted_readlists
                 .lock()
                 .expect("deleted readlists lock should not be poisoned")
@@ -1682,7 +1682,7 @@ mod tests {
                 .any(|readlist| readlist.id == readlist_id))
         }
 
-        async fn upsert_readlist_search_document(&self, readlist_id: &str) -> Result<bool, String> {
+        async fn upsert_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<bool> {
             self.search_upserts
                 .lock()
                 .expect("search upserts lock should not be poisoned")
@@ -1690,7 +1690,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn delete_readlist_search_document(&self, readlist_id: &str) -> Result<(), String> {
+        async fn delete_readlist_search_document(&self, readlist_id: &str) -> anyhow::Result<()> {
             self.search_deletes
                 .lock()
                 .expect("search deletes lock should not be poisoned")
@@ -1704,7 +1704,7 @@ mod tests {
         async fn load_persisted_book_resource(
             &self,
             book_id: &str,
-        ) -> Result<Option<PersistedBookResourceRecord>, String> {
+        ) -> anyhow::Result<Option<PersistedBookResourceRecord>> {
             Ok(self.book_resources.get(book_id).cloned())
         }
 
@@ -1712,7 +1712,7 @@ mod tests {
             &self,
             book_id: &str,
             _user_id: Option<&str>,
-        ) -> Result<Option<BookReadModel>, String> {
+        ) -> anyhow::Result<Option<BookReadModel>> {
             Ok(self.books.get(book_id).cloned())
         }
     }
@@ -1723,7 +1723,7 @@ mod tests {
             &self,
             query: &str,
             _limit: usize,
-        ) -> Result<Vec<ScoredSearchHit>, String> {
+        ) -> anyhow::Result<Vec<ScoredSearchHit>> {
             Ok(self.search_hits.get(query).cloned().unwrap_or_default())
         }
     }
@@ -1732,13 +1732,13 @@ mod tests {
     impl ReadlistComicRackMatchPort for TestReadlistPorts {
         async fn load_persisted_readlists(
             &self,
-        ) -> Result<Vec<DiscoveryPersistedReadlistRecord>, String> {
+        ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistRecord>> {
             Ok(self.readlists.clone())
         }
 
         async fn load_comicrack_match_candidates(
             &self,
-        ) -> Result<Vec<PersistedComicrackMatchCandidateRecord>, String> {
+        ) -> anyhow::Result<Vec<PersistedComicrackMatchCandidateRecord>> {
             Ok(self.comicrack_candidates.clone())
         }
     }

@@ -27,28 +27,28 @@ pub struct LibraryMetricValue {
 /// Port for reading operational metrics (library counts, task stats, pool state).
 #[async_trait::async_trait]
 pub trait OperationalMetricsPort: Send + Sync {
-    async fn load_task_execution_values(&self) -> Result<Vec<TaskExecutionMetricValue>, String>;
+    async fn load_task_execution_values(&self) -> anyhow::Result<Vec<TaskExecutionMetricValue>>;
 
-    async fn load_libraries_count(&self) -> Result<f64, String>;
+    async fn load_libraries_count(&self) -> anyhow::Result<f64>;
 
-    async fn load_series_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String>;
+    async fn load_series_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>>;
 
-    async fn load_books_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String>;
+    async fn load_books_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>>;
 
     async fn load_books_filesize_grouped_by_library(
         &self,
-    ) -> Result<Vec<LibraryMetricValue>, String>;
+    ) -> anyhow::Result<Vec<LibraryMetricValue>>;
 
-    async fn load_sidecars_grouped_by_library(&self) -> Result<Vec<LibraryMetricValue>, String>;
+    async fn load_sidecars_grouped_by_library(&self) -> anyhow::Result<Vec<LibraryMetricValue>>;
 
-    async fn load_collections_count(&self) -> Result<f64, String>;
+    async fn load_collections_count(&self) -> anyhow::Result<f64>;
 
-    async fn load_readlists_count(&self) -> Result<f64, String>;
+    async fn load_readlists_count(&self) -> anyhow::Result<f64>;
 
-    async fn load_task_failure_count(&self) -> Result<f64, String>;
+    async fn load_task_failure_count(&self) -> anyhow::Result<f64>;
 
     async fn load_database_pool_snapshots(
         &self,
         paths: &[PathBuf],
-    ) -> Result<Vec<DatabasePoolSnapshot>, String>;
+    ) -> anyhow::Result<Vec<DatabasePoolSnapshot>>;
 }

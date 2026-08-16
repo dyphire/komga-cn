@@ -86,17 +86,17 @@ pub struct ServerSettingsService {
     task_queue: Arc<dyn TaskQueueAdmin>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum ServerSettingsLoadError {
-    Load(String),
+    Load(anyhow::Error),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum ServerSettingsUpdateError {
     InvalidPayload(String),
-    Load(String),
-    Persist(String),
-    ApplyTaskPool(String),
+    Load(anyhow::Error),
+    Persist(anyhow::Error),
+    ApplyTaskPool(anyhow::Error),
 }
 
 impl ServerSettingsService {

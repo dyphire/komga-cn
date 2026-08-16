@@ -17,10 +17,11 @@ pub(super) fn parse_group_concat_values(raw: &str) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn internal_error_response(error: String) -> Response {
+pub(super) fn internal_error_response(error: impl std::fmt::Display + std::fmt::Debug) -> Response {
+    tracing::error!(?error, "internal discovery detail error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": error })),
+        Json(json!({ "error": format!("{error:#}") })),
     )
         .into_response()
 }

@@ -116,7 +116,7 @@ pub(crate) async fn load_kobo_metadata_record(
 pub(crate) async fn load_thumbnail_by_id(
     pool: &SqlitePool,
     thumbnail_id: &str,
-) -> Result<Option<DeviceThumbnailBinary>, String> {
+) -> anyhow::Result<Option<DeviceThumbnailBinary>> {
     let row = sqlx::query(
         r#"SELECT tb.BOOK_ID, tb.MEDIA_TYPE, tb.THUMBNAIL, tb.URL, l.ROOT AS LIBRARY_ROOT
  FROM THUMBNAIL_BOOK tb
@@ -128,7 +128,9 @@ pub(crate) async fn load_thumbnail_by_id(
     .bind(thumbnail_id)
     .fetch_optional(pool)
     .await
-    .map_err(|error| format!("load Kobo thumbnail '{thumbnail_id}': {error}"))?;
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!("load Kobo thumbnail '{thumbnail_id}'"))
+    })?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -150,14 +152,16 @@ pub(crate) async fn load_thumbnail_by_id(
     let library_root = row.get::<Option<String>, _>("LIBRARY_ROOT");
     let sidecar_path = resolve_optional_library_item_path(library_root.as_deref(), &url)
         .ok_or_else(|| {
-            format!("persisted Kobo thumbnail sidecar URL requires a library root: {url}")
+            anyhow::anyhow!(format!(
+                "persisted Kobo thumbnail sidecar URL requires a library root: {url}"
+            ))
         })?;
 
     let bytes = std::fs::read(&sidecar_path).map_err(|error| {
-        format!(
-            "read Kobo thumbnail sidecar {}: {error}",
+        anyhow::anyhow!(error).context(format!(
+            "read Kobo thumbnail sidecar {}: ",
             sidecar_path.display()
-        )
+        ))
     })?;
     Ok(Some(DeviceThumbnailBinary {
         book_id,

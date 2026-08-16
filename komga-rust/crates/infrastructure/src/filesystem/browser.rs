@@ -105,16 +105,16 @@ fn current_root_directories() -> Vec<String> {
 fn list_directory_entries(
     path: &Path,
     directories_only: bool,
-) -> Result<Vec<FilesystemEntry>, String> {
+) -> anyhow::Result<Vec<FilesystemEntry>> {
     let mut entries = Vec::new();
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("read filesystem directory '{}': {error}", path.display()))?
-    {
+    for entry in fs::read_dir(path).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read filesystem directory '{}': ", path.display()))
+    })? {
         let entry = entry.map_err(|error| {
-            format!(
-                "read filesystem directory entry '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read filesystem directory entry '{}': ",
                 path.display()
-            )
+            ))
         })?;
         let name = entry.file_name().to_string_lossy().to_string();
         if entry_is_hidden(&entry, &name)? {
@@ -122,10 +122,10 @@ fn list_directory_entries(
         }
 
         let file_type = entry.file_type().map_err(|error| {
-            format!(
-                "read filesystem directory entry type '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read filesystem directory entry type '{}': ",
                 entry.path().display()
-            )
+            ))
         })?;
         let is_directory = file_type.is_dir();
         if directories_only != is_directory {
@@ -151,7 +151,7 @@ fn list_directory_entries(
 }
 
 #[cfg(windows)]
-fn entry_is_hidden(entry: &fs::DirEntry, name: &str) -> Result<bool, String> {
+fn entry_is_hidden(entry: &fs::DirEntry, name: &str) -> anyhow::Result<bool> {
     if name.starts_with('.') {
         return Ok(true);
     }
@@ -159,15 +159,15 @@ fn entry_is_hidden(entry: &fs::DirEntry, name: &str) -> Result<bool, String> {
         .metadata()
         .map(|metadata| metadata.file_attributes() & 0x2 != 0)
         .map_err(|error| {
-            format!(
-                "read filesystem directory entry metadata '{}': {error}",
+            anyhow::anyhow!(error).context(format!(
+                "read filesystem directory entry metadata '{}': ",
                 entry.path().display()
-            )
+            ))
         })
 }
 
 #[cfg(not(windows))]
-fn entry_is_hidden(_entry: &fs::DirEntry, name: &str) -> Result<bool, String> {
+fn entry_is_hidden(_entry: &fs::DirEntry, name: &str) -> anyhow::Result<bool> {
     Ok(name.starts_with('.'))
 }
 
@@ -198,7 +198,7 @@ mod tests {
             .expect_err("read_dir errors must not become empty listings");
 
         assert!(
-            error.contains("read filesystem directory"),
+            error.to_string().contains("read filesystem directory"),
             "unexpected filesystem browse error: {error}"
         );
 

@@ -19,7 +19,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         self.catalog
             .load_book_feed_page(OpdsBookFeedQuery {
                 user,
@@ -37,7 +37,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         self.catalog
             .load_book_feed_page(OpdsBookFeedQuery {
                 user,
@@ -55,7 +55,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         self.load_latest_books_page(user, library_id, page, size, false)
             .await
     }
@@ -66,7 +66,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         self.load_latest_books_page(user, library_id, page, size, true)
             .await
     }
@@ -78,7 +78,7 @@ impl<'a> OpdsFeedService<'a> {
         page: usize,
         size: usize,
         include_read_progress: bool,
-    ) -> Result<OpdsPagedBooks, String> {
+    ) -> anyhow::Result<OpdsPagedBooks> {
         self.catalog
             .load_book_feed_page(OpdsBookFeedQuery {
                 user,
@@ -98,7 +98,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedSeries, String> {
+    ) -> anyhow::Result<OpdsPagedSeries> {
         self.load_latest_series_page(user, library_id, page, size, false)
             .await
     }
@@ -109,7 +109,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: Option<&str>,
         page: usize,
         size: usize,
-    ) -> Result<OpdsPagedSeries, String> {
+    ) -> anyhow::Result<OpdsPagedSeries> {
         self.load_latest_series_page(user, library_id, page, size, true)
             .await
     }
@@ -120,7 +120,7 @@ impl<'a> OpdsFeedService<'a> {
         library_id: &str,
         page: usize,
         size: usize,
-    ) -> Result<OpdsSeriesFeedPage, String> {
+    ) -> anyhow::Result<OpdsSeriesFeedPage> {
         self.catalog
             .load_library_series_feed_page(OpdsLibrarySeriesQuery {
                 user,
@@ -138,7 +138,7 @@ impl<'a> OpdsFeedService<'a> {
         page: usize,
         size: usize,
         include_one_shots: bool,
-    ) -> Result<OpdsPagedSeries, String> {
+    ) -> anyhow::Result<OpdsPagedSeries> {
         self.catalog
             .load_latest_series_feed_page(OpdsLatestSeriesFeedQuery {
                 user,
@@ -200,7 +200,7 @@ mod tests {
         async fn load_book_feed_page(
             &self,
             query: OpdsBookFeedQuery<'_>,
-        ) -> Result<OpdsPagedBooks, String> {
+        ) -> anyhow::Result<OpdsPagedBooks> {
             self.book_feed_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")
@@ -227,7 +227,7 @@ mod tests {
         async fn load_latest_series_feed_page(
             &self,
             query: OpdsLatestSeriesFeedQuery<'_>,
-        ) -> Result<OpdsPagedSeries, String> {
+        ) -> anyhow::Result<OpdsPagedSeries> {
             self.latest_series_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")
@@ -252,7 +252,7 @@ mod tests {
         async fn load_library_series_feed_page(
             &self,
             query: OpdsLibrarySeriesQuery<'_>,
-        ) -> Result<OpdsSeriesFeedPage, String> {
+        ) -> anyhow::Result<OpdsSeriesFeedPage> {
             self.library_series_calls
                 .lock()
                 .expect("test calls lock should not be poisoned")

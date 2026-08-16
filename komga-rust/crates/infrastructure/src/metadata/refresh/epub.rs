@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 
 use komga_application::discovery::SeriesReadingDirection;
@@ -42,7 +43,7 @@ struct EpubMetadataAccumulator {
 
 pub(super) fn extract_epub_book_patch(
     package_document: &[u8],
-) -> Result<BookMetadataImportPatch, String> {
+) -> anyhow::Result<BookMetadataImportPatch> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
 
@@ -99,9 +100,9 @@ pub(super) fn extract_epub_book_patch(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "failed to parse EPUB package document for book metadata: {error}"
-                ));
+                )));
             }
             _ => {}
         }
@@ -138,7 +139,7 @@ pub(super) fn extract_epub_book_patch(
 
 fn epub_text_target_from_start(
     event: &XmlBytesStart<'_>,
-) -> Result<Option<EpubTextTarget>, String> {
+) -> anyhow::Result<Option<EpubTextTarget>> {
     let name = event.name();
     let name = name.as_ref();
     if xml_name_matches_local(name, b"title") {
@@ -180,7 +181,7 @@ fn handle_epub_meta_event(
     refined_roles: &mut HashMap<String, String>,
     collection_id: &mut Option<String>,
     group_positions: &mut HashMap<String, String>,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let property = attribute_value(event, b"property")?;
     let content = attribute_value(event, b"content")?;
 
@@ -367,7 +368,7 @@ enum EpubSeriesTextTarget {
 
 pub(super) fn extract_epub_series_patch(
     package_document: &[u8],
-) -> Result<SeriesMetadataImportPatch, String> {
+) -> anyhow::Result<SeriesMetadataImportPatch> {
     let mut reader = XmlReader::from_reader(package_document);
     reader.config_mut().trim_text(true);
 
@@ -454,9 +455,9 @@ pub(super) fn extract_epub_series_patch(
             }
             Ok(XmlEvent::Eof) => break,
             Err(error) => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(format!(
                     "failed to parse EPUB package document for series metadata: {error}"
-                ));
+                )));
             }
             _ => {}
         }
@@ -483,7 +484,7 @@ pub(super) fn extract_epub_series_patch(
 
 fn epub_series_text_target_from_meta(
     event: &XmlBytesStart<'_>,
-) -> Result<Option<EpubSeriesTextTarget>, String> {
+) -> anyhow::Result<Option<EpubSeriesTextTarget>> {
     match attribute_value(event, b"property")?
         .as_deref()
         .unwrap_or_default()
@@ -554,7 +555,7 @@ fn apply_epub_series_text_target(
 
 fn page_progression_direction(
     event: &XmlBytesStart<'_>,
-) -> Result<Option<SeriesReadingDirection>, String> {
+) -> anyhow::Result<Option<SeriesReadingDirection>> {
     match attribute_value(event, b"page-progression-direction")
         .map(|value| value.unwrap_or_default())?
         .trim()
@@ -567,16 +568,16 @@ fn page_progression_direction(
     }
 }
 
-fn attribute_value(event: &XmlBytesStart<'_>, key: &[u8]) -> Result<Option<String>, String> {
+fn attribute_value(event: &XmlBytesStart<'_>, key: &[u8]) -> anyhow::Result<Option<String>> {
     for attribute in event.attributes() {
-        let attribute = attribute
-            .map_err(|error| format!("failed to parse EPUB package document attribute: {error}"))?;
+        let attribute = attribute.context("failed to parse EPUB package document attribute")?;
         if xml_name_matches_local(attribute.key.as_ref(), key) {
             return attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map(|value| Some(value.into_owned()))
                 .map_err(|error| {
-                    format!("failed to parse EPUB package document attribute value: {error}")
+                    anyhow::anyhow!(error)
+                        .context("failed to parse EPUB package document attribute value: ")
                 });
         }
     }
@@ -605,7 +606,10 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -617,7 +621,10 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -629,7 +636,10 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -641,6 +651,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.contains("EPUB package document"), "{error}");
+        assert!(
+            error.to_string().contains("EPUB package document"),
+            "{error}"
+        );
     }
 }

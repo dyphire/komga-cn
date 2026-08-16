@@ -95,17 +95,17 @@ pub(crate) use persisted_paths::{
 };
 pub(crate) use random_tokens::random_hex_token;
 
-static PDFIUM: OnceLock<Result<Pdfium, String>> = OnceLock::new();
+static PDFIUM: OnceLock<anyhow::Result<Pdfium>> = OnceLock::new();
 const DEFAULT_PDFIUM_LIBRARY_PATH: &str = env!("KOMGA_PDFIUM_LIB_PATH");
 
-pub(crate) fn load_pdfium() -> Result<&'static Pdfium, String> {
+pub(crate) fn load_pdfium() -> anyhow::Result<&'static Pdfium> {
     match PDFIUM.get_or_init(init_pdfium) {
         Ok(pdfium) => Ok(pdfium),
-        Err(error) => Err(error.clone()),
+        Err(error) => Err(anyhow::anyhow!(error.to_string())),
     }
 }
 
-fn init_pdfium() -> Result<Pdfium, String> {
+fn init_pdfium() -> anyhow::Result<Pdfium> {
     let mut attempted_paths = Vec::new();
 
     for library_path in pdfium_library_candidates(
@@ -122,14 +122,15 @@ fn init_pdfium() -> Result<Pdfium, String> {
     Pdfium::bind_to_system_library()
         .map(Pdfium::new)
         .map_err(|error| {
-            if attempted_paths.is_empty() {
+            let message = if attempted_paths.is_empty() {
                 format!("failed to bind Pdfium from system libraries: {error}")
             } else {
                 format!(
                     "failed to bind Pdfium from bundled candidates [{}] and system libraries: {error}",
                     attempted_paths.join(", ")
                 )
-            }
+            };
+            anyhow::anyhow!(message)
         })
 }
 
