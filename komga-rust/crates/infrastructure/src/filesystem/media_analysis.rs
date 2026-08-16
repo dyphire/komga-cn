@@ -659,7 +659,7 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
     ]);
 
     Ok(AnalyzedMediaFileContents {
-        page_count: pages.len() as u64,
+        page_count: publication.page_count,
         pages,
         files,
         media_files,

@@ -391,7 +391,7 @@ fn analyze_transient_mobi(path: &str) -> TransientBookAnalysis {
     TransientBookAnalysis {
         status: MediaStatus::Ready,
         media_type: MOBI_MEDIA_TYPE.to_string(),
-        page_count: pages.len() as u32,
+        page_count: publication.page_count as u32,
         pages,
         files,
         comment: String::new(),
