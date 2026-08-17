@@ -577,6 +577,64 @@ fn media_type_from_sidecar_path(path: &Path) -> &'static str {
     }
 }
 
+pub(super) fn is_suitable_cover_image(bytes: &[u8]) -> anyhow::Result<bool> {
+    const MAX_IMAGE_SIZE: usize = 20 * 1024 * 1024;
+    const MAX_DIMENSION: u32 = 5000;
+    const MAX_PIXELS: u64 = 25_000_000;
+    const WHITE_THRESHOLD: u8 = 240;
+    const BLACK_THRESHOLD: u8 = 15;
+    const SUITABLE_RATIO: f64 = 0.95;
+
+    if bytes.len() > MAX_IMAGE_SIZE {
+        return Ok(true);
+    }
+
+    let image = image::load_from_memory(bytes)
+        .context("decode image for cover suitability")?;
+
+    let width = image.width();
+    let height = image.height();
+
+    if width > MAX_DIMENSION
+        || height > MAX_DIMENSION
+        || width as u64 * height as u64 > MAX_PIXELS
+    {
+        return Ok(true);
+    }
+
+    let thumbnail = image.thumbnail(128, 128);
+    let rgb = thumbnail.to_rgb8();
+
+    let total = rgb.width() * rgb.height();
+
+    if total == 0 {
+        return Ok(false);
+    }
+
+    let mut white = 0;
+    let mut black = 0;
+
+    for pixel in rgb.pixels() {
+        let [r, g, b] = pixel.0;
+
+        if r > WHITE_THRESHOLD && g > WHITE_THRESHOLD && b > WHITE_THRESHOLD {
+            white += 1;
+        }
+
+        if r < BLACK_THRESHOLD && g < BLACK_THRESHOLD && b < BLACK_THRESHOLD {
+            black += 1;
+        }
+    }
+
+    let white_ratio = white as f64 / total as f64;
+    let black_ratio = black as f64 / total as f64;
+
+    Ok(
+        white_ratio < SUITABLE_RATIO
+        && black_ratio < SUITABLE_RATIO
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
