@@ -13,7 +13,7 @@ use zip::ZipArchive;
 
 use crate::{
     EpubManifestItem, EpubNavigationLink, EpubParseError, normalize_epub_resource_href,
-    normalize_epub_zip_path, parse_epub_fixed_layout, parse_epub_manifest_items,
+    normalize_epub_zip_path, parse_epub_fixed_layout_with_heuristic, parse_epub_manifest_items,
     parse_epub_rootfile_path, parse_epub_spine_itemrefs,
 };
 
@@ -107,8 +107,13 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     }
 
     let pages = divina_pages(&mut archive, &manifest, &spine, &entries)?;
-    let is_fixed_layout = parse_epub_fixed_layout(&package)
-        .map_err(parse_error("parse EPUB fixed-layout metadata"))?
+    let is_fixed_layout = parse_epub_fixed_layout_with_heuristic(
+        &package,
+        &manifest,
+        &mut archive,
+        &rootfile_path,
+    )
+    .map_err(parse_error("parse EPUB fixed-layout metadata"))?
         || !pages.is_empty();
     let page_count = if pages.is_empty() {
         spine
