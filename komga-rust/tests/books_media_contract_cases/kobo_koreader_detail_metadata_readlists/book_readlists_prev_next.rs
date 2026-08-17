@@ -530,7 +530,12 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
         .await
         .expect("book previous tie request should complete");
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("id"),
+        Some(&Value::String("book-0a".to_string()))
+    );
 }
 
 #[tokio::test]
@@ -822,7 +827,12 @@ async fn router_book_next_skips_equal_number_sort_ties() {
         .await
         .expect("book next tie request should complete");
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(
+        payload.get("id"),
+        Some(&Value::String("book-1z".to_string()))
+    );
 }
 
 #[tokio::test]
