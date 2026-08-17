@@ -171,6 +171,40 @@ pub fn parse_epub_metadata_cover_id(
     Ok(None)
 }
 
+pub fn parse_epub_guide_cover_href(
+    package_document: &[u8],
+) -> Result<Option<String>, EpubParseError> {
+    let mut reader = reader_for(package_document);
+    let mut buffer = Vec::new();
+    let mut in_guide = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) if xml_name_matches(event.name().as_ref(), b"guide") => {
+                in_guide = true;
+            }
+            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), b"guide") => {
+                in_guide = false;
+            }
+            Ok(Event::Start(event)) | Ok(Event::Empty(event))
+                if in_guide
+                    && xml_name_matches(event.name().as_ref(), b"reference")
+                    && attribute_value(&event, b"type", PACKAGE_DOCUMENT)?
+                        .as_deref()
+                        .is_some_and(|value| value.eq_ignore_ascii_case("cover")) =>
+            {
+                return Ok(attribute_value(&event, b"href", PACKAGE_DOCUMENT)?);
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(xml_error(PACKAGE_DOCUMENT, error)),
+            _ => {}
+        }
+        buffer.clear();
+    }
+
+    Ok(None)
+}
+
 pub fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, EpubParseError> {
     let mut reader = reader_for(container_xml);
     let mut buffer = Vec::new();
@@ -349,9 +383,10 @@ pub fn parse_epub_fixed_layout_with_heuristic<R: Read + Seek>(
 }
 
 pub fn normalize_epub_resource_href(rootfile_path: &str, href: &str) -> String {
+    let href = percent_decode(href);
     let href = href.split('#').next().unwrap_or_default();
     if href.starts_with('/') {
-        return normalize_epub_zip_path(href);
+        return normalize_epub_zip_path(&href);
     }
 
     let base = rootfile_path
@@ -365,6 +400,29 @@ pub fn normalize_epub_resource_href(rootfile_path: &str, href: &str) -> String {
         format!("{base}/{href}")
     };
     normalize_epub_zip_path(&joined)
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let high = (bytes[index + 1] as char).to_digit(16);
+            let low = (bytes[index + 2] as char).to_digit(16);
+            if let (Some(high), Some(low)) = (high, low) {
+                decoded.push(((high << 4) | low) as u8);
+                index += 3;
+                continue;
+            }
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).unwrap_or_else(|_| value.to_string())
 }
 
 pub fn normalize_epub_zip_path(path: &str) -> String {
@@ -465,6 +523,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_guide_cover_href() {
+        let package = br#"<package><guide><reference type="cover" href="cover.xhtml"/></guide></package>"#;
+        assert_eq!(
+            parse_epub_guide_cover_href(package).expect("guide should parse"),
+            Some("cover.xhtml".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_guide_cover_href_with_other_references() {
+        let package = br#"<package><guide><reference type="text" href="toc.xhtml"/><reference type="cover" href="images/cover.jpg"/><reference type="copyright" href="copy.xhtml"/></guide></package>"#;
+        assert_eq!(
+            parse_epub_guide_cover_href(package).expect("guide should parse"),
+            Some("images/cover.jpg".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_guide_cover_href_returns_none_when_absent() {
+        let package = br#"<package><guide><reference type="text" href="toc.xhtml"/></guide></package>"#;
+        assert_eq!(
+            parse_epub_guide_cover_href(package).expect("guide should parse"),
+            None
+        );
+    }
+
+    #[test]
     fn detects_fixed_layout_variants() {
         let by_property =
             br#"<package><metadata><meta property="rendition:layout">pre-paginated</meta></metadata></package>"#;
@@ -492,6 +577,22 @@ mod tests {
         assert_eq!(
             normalize_epub_zip_path("OPS\\text\\chapter.xhtml"),
             "/OPS/text/chapter.xhtml"
+        );
+    }
+
+    #[test]
+    fn percent_decodes_resource_hrefs() {
+        assert_eq!(
+            normalize_epub_resource_href("/OPS/content.opf", "images/cover%20final.jpg"),
+            "/OPS/images/cover final.jpg"
+        );
+        assert_eq!(
+            normalize_epub_resource_href("/OPS/content.opf", "chapter%2Bappendix.xhtml"),
+            "/OPS/chapter+appendix.xhtml"
+        );
+        assert_eq!(
+            normalize_epub_resource_href("/OPS/content.opf", "caf%C3%A9.png"),
+            "/OPS/café.png"
         );
     }
 
