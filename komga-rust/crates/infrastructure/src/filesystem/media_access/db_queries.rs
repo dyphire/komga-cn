@@ -73,7 +73,7 @@ pub(crate) async fn load_persisted_book_media_files(
     pool: &SqlitePool,
     book_id: &str,
 ) -> anyhow::Result<Vec<String>> {
-    sqlx::query("SELECT FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC")
+    sqlx::query("SELECT FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY rowid ASC")
         .bind(book_id)
         .fetch_all(pool)
         .await
@@ -91,7 +91,7 @@ pub(crate) async fn load_persisted_media_file_records(
 ) -> anyhow::Result<Vec<PersistedMediaFileRow>> {
     sqlx::query(
         r#"SELECT FILE_NAME, COALESCE(MEDIA_TYPE, '') AS MEDIA_TYPE, SUB_TYPE
-         FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY FILE_NAME ASC"#,
+         FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY rowid ASC"#,
     )
     .bind(book_id)
     .fetch_all(pool)

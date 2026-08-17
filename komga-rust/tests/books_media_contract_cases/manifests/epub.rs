@@ -48,6 +48,185 @@ async fn seed_epub_manifest_media(
     pool.close().await;
 }
 
+async fn seed_epub_manifest_media_in_spine_order(paths: &RuntimeDbPaths) {
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for epub manifest order seed");
+    for file_name in [
+        "OEBPS/Vol1.htm",
+        "OEBPS/v1ch001.html",
+        "OEBPS/Vol2.htm",
+        "OEBPS/Vol10.html",
+        "OEBPS/Vol11.html",
+        "OEBPS/Appendix.html",
+    ] {
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind("application/xhtml+xml")
+        .bind("EPUB_PAGE")
+        .bind(128_i64)
+        .execute(&pool)
+        .await
+        .expect("ordered epub manifest media file row should be inserted");
+    }
+    pool.close().await;
+}
+
+async fn seed_mobi_manifest_media_in_publication_order(paths: &RuntimeDbPaths) {
+    let pool = connect_test_pool(paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for mobi manifest order seed");
+    sqlx::query("UPDATE MEDIA SET MEDIA_TYPE = ?, PAGE_COUNT = ? WHERE BOOK_ID = ?")
+        .bind("application/x-mobipocket-ebook")
+        .bind(3_i64)
+        .bind("book-1")
+        .execute(&pool)
+        .await
+        .expect("mobi media metadata should be seeded");
+    for file_name in [
+        "OEBPS/text/cover.xhtml",
+        "OEBPS/text/chapter-0000.xhtml",
+        "OEBPS/text/chapter-0001.xhtml",
+        "OEBPS/images/cover.jpg",
+        "OEBPS/content.opf",
+        "OEBPS/nav.xhtml",
+    ] {
+        let (media_type, sub_type) = if file_name.starts_with("OEBPS/text/") {
+            ("application/xhtml+xml", "EPUB_PAGE")
+        } else if file_name.ends_with(".jpg") {
+            ("image/jpeg", "EPUB_ASSET")
+        } else if file_name.ends_with(".opf") {
+            ("application/oebps-package+xml", "EPUB_ASSET")
+        } else {
+            ("application/xhtml+xml", "EPUB_ASSET")
+        };
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind(media_type)
+        .bind(sub_type)
+        .bind(128_i64)
+        .execute(&pool)
+        .await
+        .expect("ordered mobi manifest media file row should be inserted");
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn router_book_manifest_epub_preserves_persisted_spine_order() {
+    let ctx = TestFixture::builder("router-book-manifest-epub-spine-order")
+        .with_seed(|paths| async move {
+            seed_epub_manifest_media_in_spine_order(&paths).await;
+        })
+        .build()
+        .await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest/epub")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("epub manifest order request should build"),
+        )
+        .await
+        .expect("epub manifest order request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let reading_order = payload
+        .get("readingOrder")
+        .and_then(Value::as_array)
+        .expect("epub manifest should expose readingOrder");
+    let hrefs = reading_order
+        .iter()
+        .map(|entry| {
+            entry
+                .get("href")
+                .and_then(Value::as_str)
+                .expect("readingOrder item should expose href")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        hrefs,
+        [
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/Vol1.htm",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/v1ch001.html",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/Vol2.htm",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/Vol10.html",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/Vol11.html",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/Appendix.html",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn router_book_manifest_mobi_preserves_generated_chapter_order() {
+    let ctx = TestFixture::builder("router-book-manifest-mobi-chapter-order")
+        .with_seed(|paths| async move {
+            seed_mobi_manifest_media_in_publication_order(&paths).await;
+        })
+        .build()
+        .await;
+    write_router_epub_with_cover(ctx.paths(), "books/book-1.epub");
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/manifest/epub")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("mobi manifest order request should build"),
+        )
+        .await
+        .expect("mobi manifest order request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let reading_order = payload
+        .get("readingOrder")
+        .and_then(Value::as_array)
+        .expect("mobi manifest should expose readingOrder");
+    let hrefs = reading_order
+        .iter()
+        .map(|entry| {
+            entry
+                .get("href")
+                .and_then(Value::as_str)
+                .expect("mobi readingOrder item should expose href")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        hrefs,
+        [
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/text/cover.xhtml",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/text/chapter-0000.xhtml",
+            "http://localhost/api/v1/books/book-1/resource/OEBPS/text/chapter-0001.xhtml",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn router_book_manifest_epub_exposes_epub_specific_shape() {
     let ctx = TestFixture::builder("router-book-manifest-epub-specific-shape")
