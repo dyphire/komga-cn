@@ -95,5 +95,9 @@ async fn router_opds_book_page_routes_do_not_negotiate_pdf_for_pdf_books() {
             content_type.starts_with("image/"),
             "route: {route}, content-type was: {content_type}"
         );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("opds page body should be readable");
+        image::load_from_memory(&body).expect("opds page body should decode as image");
     }
 }

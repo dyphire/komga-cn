@@ -737,7 +737,11 @@ where
         allow_pdf_fallback: bool,
     ) -> anyhow::Result<Option<BookPageRecord>> {
         match self.reader.book_page(book_id, page_number).await {
-            Ok(Some(row)) => Ok(Some(row)),
+            Ok(Some(row)) => Ok(Some(if book_media_is_pdf(media) {
+                map_pdf_page_for_delivery(row)
+            } else {
+                row
+            })),
             Ok(None) if book_media_is_single_image(media) && page_number == 1 => {
                 Ok(Some(self.single_image_page_row(media, page_number).await?))
             }
@@ -763,7 +767,7 @@ where
 
         if !page_rows.is_empty() {
             let page_rows = if book_media_is_pdf(media) {
-                map_kotlin_pdf_pages(page_rows)
+                map_pdf_pages_for_delivery(page_rows)
             } else {
                 page_rows
             };
@@ -981,19 +985,21 @@ fn page_row_media_type(page_row: &BookPageRecord, media: &BookMediaRecord) -> St
     }
 }
 
-fn map_kotlin_pdf_pages(page_rows: Vec<BookPageRecord>) -> Vec<BookPageRecord> {
+fn map_pdf_pages_for_delivery(page_rows: Vec<BookPageRecord>) -> Vec<BookPageRecord> {
     page_rows
         .into_iter()
-        .map(|page| {
-            let dimensions = scale_pdf_dimensions(page.width, page.height);
-            BookPageRecord {
-                media_type: "image/jpeg".to_string(),
-                width: dimensions.width,
-                height: dimensions.height,
-                ..page
-            }
-        })
+        .map(map_pdf_page_for_delivery)
         .collect()
+}
+
+fn map_pdf_page_for_delivery(page: BookPageRecord) -> BookPageRecord {
+    let dimensions = scale_pdf_dimensions(page.width, page.height);
+    BookPageRecord {
+        media_type: "image/jpeg".to_string(),
+        width: dimensions.width,
+        height: dimensions.height,
+        ..page
+    }
 }
 
 struct PageDimensions {

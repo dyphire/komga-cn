@@ -541,6 +541,141 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
 }
 
 #[tokio::test]
+async fn router_persisted_pdf_page_uses_jpeg_delivery_metadata() {
+    let ctx = TestFixture::builder("router-persisted-pdf-page-jpeg")
+        .with_seed(|paths| async move {
+            seed_router_pdf_book(
+                &paths,
+                "book-pdf-1",
+                "series-1",
+                "fixture-page.pdf",
+                "Fixture PDF",
+            )
+            .await;
+            seed_router_persisted_pdf_page(
+                &paths,
+                "book-pdf-1",
+                0,
+                "page-0000.pdf",
+                595,
+                842,
+                None,
+            )
+            .await;
+        })
+        .build()
+        .await;
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("persisted pdf page request should build"),
+        )
+        .await
+        .expect("persisted pdf page request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains(".jpeg")),
+        "pdf page should advertise a jpeg filename"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("persisted pdf page body should be readable");
+    let image =
+        image::load_from_memory(&body).expect("persisted pdf page body should decode as image");
+    assert_eq!(image.width(), 3_200);
+    assert_eq!(image.height(), 4_528);
+}
+
+#[tokio::test]
+async fn router_book_page_pdf_negotiation_returns_pdf_only_when_requested() {
+    let ctx = TestFixture::new("router-book-page-pdf-negotiation").await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Fixture PDF",
+    )
+    .await;
+
+    let auth_token = ctx.login_admin().await;
+    let pdf_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1")
+                .header("x-auth-token", &auth_token)
+                .header(header::ACCEPT, "application/pdf")
+                .body(Body::empty())
+                .expect("negotiated pdf page request should build"),
+        )
+        .await
+        .expect("negotiated pdf page request should complete");
+    assert_eq!(pdf_response.status(), StatusCode::OK);
+    assert_eq!(
+        pdf_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/pdf")
+    );
+    let pdf_body = to_bytes(pdf_response.into_body(), usize::MAX)
+        .await
+        .expect("negotiated pdf page body should be readable");
+    lopdf::Document::load_mem(&pdf_body).expect("negotiated pdf page should be valid pdf");
+
+    let image_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1?contentNegotiation=false")
+                .header("x-auth-token", &auth_token)
+                .header(header::ACCEPT, "application/pdf")
+                .body(Body::empty())
+                .expect("disabled pdf negotiation request should build"),
+        )
+        .await
+        .expect("disabled pdf negotiation request should complete");
+    assert_eq!(image_response.status(), StatusCode::OK);
+    assert_eq!(
+        image_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
+    let image_body = to_bytes(image_response.into_body(), usize::MAX)
+        .await
+        .expect("disabled pdf negotiation body should be readable");
+    image::load_from_memory(&image_body)
+        .expect("disabled pdf negotiation body should decode as image");
+}
+
+#[tokio::test]
 async fn router_book_page_returns_bad_request_with_message_for_missing_pdf_page_number() {
     let ctx = TestFixture::new("router-book-page-missing-pdf-page-nonraw").await;
     seed_router_pdf_book(

@@ -17,11 +17,17 @@ use zip::ZipArchive;
 use crate::load_pdfium;
 use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 
+const PDF_RENDER_RESOLUTION: u32 = 3_200;
+
 pub(crate) async fn resolve_book_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
 ) -> anyhow::Result<Option<Vec<u8>>> {
+    if book_media_is_pdf(media) {
+        return render_pdf_page_as_jpeg(media, page_number);
+    }
+
     let mut candidates = Vec::new();
     let media_path_is_directory = match tokio::fs::metadata(&media.file_path).await {
         Ok(metadata) => metadata.is_dir(),
@@ -56,7 +62,7 @@ pub(crate) async fn resolve_book_page_bytes(
     if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number)? {
         return Ok(Some(bytes));
     }
-    read_pdf_page_bytes(media, page_number)
+    Ok(None)
 }
 
 pub(crate) async fn render_book_page_thumbnail(
@@ -157,21 +163,34 @@ pub(crate) fn load_generated_pdf_page_rows(
         .collect())
 }
 
-fn read_pdf_page_bytes(
+fn render_pdf_page_as_jpeg(
     media: &BookMediaRecord,
     page_number: u64,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
+
     let document = PdfDocument::load(&media.file_path).map_err(|error| {
         anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
     })?;
-    let pages = document.get_pages();
-    let Some(object_id) = pages.get(&(page_number as u32)).copied() else {
+    if !document.get_pages().contains_key(&(page_number as u32)) {
         return Ok(None);
-    };
-    Ok(Some(document.get_page_content(object_id)))
+    }
+    let dimensions = pdf_page_dimensions(&document, page_number as u32)
+        .map(scale_pdf_page_dimensions)
+        .unwrap_or(PdfPageDimensions {
+            width: PDF_RENDER_RESOLUTION,
+            height: PDF_RENDER_RESOLUTION,
+        });
+
+    render_pdf_page_jpeg_at_size(
+        media,
+        page_number,
+        dimensions.width,
+        dimensions.height,
+        "page",
+    )
 }
 
 pub(crate) fn read_pdf_page_as_single_page_pdf(
@@ -205,20 +224,21 @@ pub(crate) fn read_pdf_page_as_single_page_pdf(
     Ok(Some(bytes))
 }
 
-fn render_pdf_page_thumbnail(
+fn render_pdf_page_jpeg_at_size(
     media: &BookMediaRecord,
     page_number: u64,
-    max_edge: u32,
+    target_width: u32,
+    maximum_height: u32,
+    output_description: &str,
 ) -> anyhow::Result<Option<Vec<u8>>> {
-    if !book_media_is_pdf(media) || page_number == 0 {
-        return Ok(None);
-    }
-
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(&media.file_path, None)
         .map_err(|error| {
-            anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+            anyhow::anyhow!(error).context(format!(
+                "open pdf '{}' for page rendering: ",
+                media.file_path.display()
+            ))
         })?;
     let page = document
         .pages()
@@ -236,8 +256,8 @@ fn render_pdf_page_thumbnail(
     let rendered = page
         .render_with_config(
             &PdfRenderConfig::new()
-                .set_target_width(i32::try_from(max_edge).unwrap_or(i32::MAX))
-                .set_maximum_height(i32::try_from(max_edge).unwrap_or(i32::MAX)),
+                .set_target_width(i32::try_from(target_width).unwrap_or(i32::MAX))
+                .set_maximum_height(i32::try_from(maximum_height).unwrap_or(i32::MAX)),
         )
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
@@ -259,11 +279,23 @@ fn render_pdf_page_thumbnail(
         .write_to(&mut output, image::ImageFormat::Jpeg)
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
-                "encode pdf page {page_number} thumbnail from '{}': ",
+                "encode pdf page {page_number} {output_description} from '{}': ",
                 media.file_path.display()
             ))
         })?;
     Ok(Some(output.into_inner()))
+}
+
+fn render_pdf_page_thumbnail(
+    media: &BookMediaRecord,
+    page_number: u64,
+    max_edge: u32,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    if !book_media_is_pdf(media) || page_number == 0 {
+        return Ok(None);
+    }
+
+    render_pdf_page_jpeg_at_size(media, page_number, max_edge, max_edge, "thumbnail")
 }
 
 fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result<Vec<u8>> {
@@ -343,14 +375,12 @@ fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<PdfPa
 }
 
 fn scale_pdf_page_dimensions(dimensions: PdfPageDimensions) -> PdfPageDimensions {
-    const PDF_RESOLUTION: f64 = 3200.0;
-
     let min_edge = f64::from(dimensions.width.min(dimensions.height));
     if min_edge <= 0.0 {
         return dimensions;
     }
 
-    let scale = PDF_RESOLUTION / min_edge;
+    let scale = f64::from(PDF_RENDER_RESOLUTION) / min_edge;
     PdfPageDimensions {
         width: (f64::from(dimensions.width) * scale).round().max(1.0) as u32,
         height: (f64::from(dimensions.height) * scale).round().max(1.0) as u32,
