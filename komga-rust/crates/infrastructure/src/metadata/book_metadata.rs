@@ -199,12 +199,6 @@ async fn persist_book_metadata(
     .await
     .context("update book metadata")?;
 
-    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
-        .bind(book_id)
-        .execute(&mut *tx)
-        .await
-        .context("touch book last modified after metadata update")?;
-
     sqlx::query("DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?")
         .bind(book_id)
         .execute(&mut *tx)

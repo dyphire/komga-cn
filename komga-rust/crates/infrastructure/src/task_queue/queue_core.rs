@@ -93,16 +93,14 @@ impl SqliteTaskQueueStore {
                 GROUP_ID,
                 CLASS,
                 SIMPLE_TYPE,
-                PAYLOAD,
-                OWNER
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                PAYLOAD
+            ) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(ID) DO UPDATE
             SET PRIORITY = excluded.PRIORITY,
                 GROUP_ID = excluded.GROUP_ID,
                 CLASS = excluded.CLASS,
                 SIMPLE_TYPE = excluded.SIMPLE_TYPE,
                 PAYLOAD = excluded.PAYLOAD,
-                OWNER = excluded.OWNER,
                 LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
         )
         .bind(row.id)
@@ -111,7 +109,6 @@ impl SqliteTaskQueueStore {
         .bind(row.class_name)
         .bind(row.simple_type)
         .bind(row.payload)
-        .bind(row.owner)
         .execute(&self.tasks_pool)
         .await
         .map_err(|error| {

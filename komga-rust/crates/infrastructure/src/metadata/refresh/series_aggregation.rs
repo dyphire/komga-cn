@@ -136,8 +136,7 @@ pub(crate) async fn aggregate_series_metadata(
                                 FROM BOOK
                                 WHERE BOOK.SERIES_ID = SERIES.ID
                                   AND BOOK.DELETED_DATE IS NULL
-                            ),
-                            LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                            )
                         WHERE ID = ?
                         "#,
                 )

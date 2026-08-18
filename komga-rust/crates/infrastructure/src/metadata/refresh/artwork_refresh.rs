@@ -10,7 +10,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_cover_bytes;
 use crate::filesystem::media_access::page_content::{
-    load_archive_page_row, resolve_book_page_bytes,
+    load_archive_page_row, load_archive_page_rows, resolve_book_page_bytes,
 };
 use crate::metadata::thumbnails::{emit_thumbnail_book_event, emit_thumbnail_series_event};
 use crate::parsing::parse_thumbnail_type;
@@ -18,7 +18,8 @@ use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
     MarkSelectedPreference, book_thumbnail_housekeeping, import_book_local_artwork_thumbnail,
-    import_series_local_artwork_thumbnail, load_book_local_artwork_urls,
+    import_series_local_artwork_thumbnail, is_suitable_cover_image,
+    load_book_local_artwork_urls,
     load_series_local_artwork_urls, render_generated_thumbnail_from_image_bytes,
     render_pdf_thumbnail,
 };
@@ -216,35 +217,10 @@ pub async fn generate_book_thumbnail(
                 configured_max_edge,
             )?
         } else {
-            let page_row = if let Some(row) =
-                super::load_book_page_row_for_refresh(pool, &book_id, 1).await?
-            {
-                Some(row)
-            } else if book_media_is_single_image(&media) {
-                let file_size = tokio::fs::metadata(&media.file_path)
-                    .await
-                    .map_err(|error| { anyhow::anyhow!(error).context( format!(
-                            "failed to inspect single-image media '{}' for thumbnail generation '{book_id}': ",
-                            media.file_path.display()
-                        ))
-                    })?
-                    .len() as i64;
-                Some(BookPageRecord {
-                    number: 1,
-                    file_name: media.file_name.clone(),
-                    media_type: content_type_from_filename(&media.file_name, &media.media_type),
-                    width: None,
-                    height: None,
-                    file_size,
-                })
-            } else {
-                load_archive_page_row(&media, 1).await?
-            };
-
-            let Some(page_row) = page_row else {
+            let Some(page_row) = find_best_cover_page(pool, &book_id, &media).await? else {
                 break 'result Ok(());
             };
-            let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, 1).await? else {
+            let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, page_row.number).await? else {
                 break 'result Ok(());
             };
             let thumbnail_media_type = if page_row.media_type.is_empty() {
@@ -343,6 +319,58 @@ pub async fn generate_book_thumbnail(
         Ok(())
     };
     result
+}
+
+async fn find_best_cover_page(
+    pool: &SqlitePool,
+    book_id: &str,
+    media: &BookMediaRecord,
+) -> anyhow::Result<Option<BookPageRecord>> {
+    let mut candidates = Vec::new();
+
+    if book_media_is_single_image(media) {
+        let file_size = tokio::fs::metadata(&media.file_path)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to inspect single-image media '{}' for cover selection: ",
+                    media.file_path.display()
+                ))
+            })?
+            .len() as i64;
+        candidates.push(BookPageRecord {
+            number: 1,
+            file_name: media.file_name.clone(),
+            media_type: content_type_from_filename(&media.file_name, &media.media_type),
+            width: None,
+            height: None,
+            file_size,
+        });
+    } else {
+        for page_number in 1..=3 {
+            if let Some(row) =
+                super::load_book_page_row_for_refresh(pool, book_id, page_number).await?
+            {
+                candidates.push(row);
+            }
+        }
+
+        if candidates.is_empty() {
+            if let Some(rows) = page_content::load_archive_page_rows(media).await? {
+                candidates.extend(rows.into_iter().take(3));
+            }
+        }
+    }
+
+    for page in &candidates {
+        if let Some(bytes) = page_content::resolve_book_page_bytes(media, page, page.number).await? {
+            if is_suitable_cover_image(&bytes)? {
+                return Ok(Some(page.clone()));
+            }
+        }
+    }
+
+    Ok(candidates.into_iter().next())
 }
 
 pub(crate) async fn refresh_series_local_artwork(

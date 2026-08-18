@@ -228,12 +228,14 @@ pub(super) async fn load_persisted_book_sibling_id(
                  FROM BOOK b
                  JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
                  WHERE b.SERIES_ID = ?
-                 AND bm.NUMBER_SORT < ?
-                 ORDER BY bm.NUMBER_SORT DESC
+                 AND (bm.NUMBER_SORT < ? OR (bm.NUMBER_SORT = ? AND b.ID < ?))
+                 ORDER BY bm.NUMBER_SORT DESC, b.ID DESC
                  LIMIT 1"#,
             )
             .bind(&series_id)
             .bind(number_sort)
+            .bind(number_sort)
+            .bind(book_id)
             .fetch_optional(pool)
             .await
         }
@@ -243,12 +245,14 @@ pub(super) async fn load_persisted_book_sibling_id(
                  FROM BOOK b
                  JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
                  WHERE b.SERIES_ID = ?
-                 AND bm.NUMBER_SORT > ?
-                 ORDER BY bm.NUMBER_SORT ASC
+                 AND (bm.NUMBER_SORT > ? OR (bm.NUMBER_SORT = ? AND b.ID > ?))
+                 ORDER BY bm.NUMBER_SORT ASC, b.ID ASC
                  LIMIT 1"#,
             )
             .bind(&series_id)
             .bind(number_sort)
+            .bind(number_sort)
+            .bind(book_id)
             .fetch_optional(pool)
             .await
         }

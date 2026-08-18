@@ -3,8 +3,8 @@ use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventLog};
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]
-async fn router_discovery_series_metadata_update_refreshes_series_last_modified() {
-    let ctx = TestFixture::new("router-discovery-series-metadata-refresh").await;
+async fn router_discovery_series_metadata_update_does_not_refresh_series_last_modified() {
+    let ctx = TestFixture::new("router-discovery-series-metadata-no-refresh").await;
     let auth_token = ctx.login_admin().await;
 
     let before_response = ctx
@@ -70,7 +70,7 @@ async fn router_discovery_series_metadata_update_refreshes_series_last_modified(
         .get("lastModified")
         .and_then(Value::as_str)
         .expect("series detail payload should expose lastModified after metadata update");
-    assert_ne!(after_last_modified, before_last_modified);
+    assert_eq!(after_last_modified, before_last_modified);
     assert_eq!(
         after_payload
             .get("metadata")
