@@ -56,7 +56,7 @@ pub(crate) async fn resolve_book_page_bytes(
     if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number)? {
         return Ok(Some(bytes));
     }
-    read_pdf_page_bytes(media, page_number)
+    read_pdf_page_bytes(media, page_number, page.width)
 }
 
 pub(crate) async fn render_book_page_thumbnail(
@@ -160,18 +160,82 @@ pub(crate) fn load_generated_pdf_page_rows(
 fn read_pdf_page_bytes(
     media: &BookMediaRecord,
     page_number: u64,
+    target_width: Option<i64>,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
-    let document = PdfDocument::load(&media.file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
-    })?;
-    let pages = document.get_pages();
-    let Some(object_id) = pages.get(&(page_number as u32)).copied() else {
-        return Ok(None);
-    };
-    Ok(Some(document.get_page_content(object_id)))
+
+    let target_width = target_width
+        .and_then(|width| u32::try_from(width).ok())
+        .filter(|&width| width > 0)
+        .unwrap_or(3200);
+
+    render_pdf_page_as_jpeg(media, page_number, target_width, None, "")
+}
+
+fn render_pdf_page_as_jpeg(
+    media: &BookMediaRecord,
+    page_number: u64,
+    target_width: u32,
+    max_height: Option<u32>,
+    label: &str,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let pdfium = load_pdfium()?;
+    let document = pdfium
+        .load_pdf_from_file(&media.file_path, None)
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+        })?;
+    let page = document
+        .pages()
+        .get(
+            i32::try_from(page_number.saturating_sub(1)).map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "convert pdf page number {page_number}"
+                ))
+            })?,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "load pdf page {page_number} from '{}': ",
+                media.file_path.display()
+            ))
+        })?;
+
+    let mut config = PdfRenderConfig::new()
+        .set_target_width(i32::try_from(target_width).unwrap_or(i32::MAX));
+    if let Some(max_height) = max_height {
+        config = config.set_maximum_height(i32::try_from(max_height).unwrap_or(i32::MAX));
+    }
+
+    let rendered = page
+        .render_with_config(&config)
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "render pdf page {page_number} {label}from '{}': ",
+                media.file_path.display()
+            ))
+        })?
+        .as_image()
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "convert pdf page {page_number} {label}from '{}' to image: ",
+                media.file_path.display()
+            ))
+        })?
+        .into_rgb8();
+
+    let mut output = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(rendered)
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "encode pdf page {page_number} {label}from '{}' as jpeg: ",
+                media.file_path.display()
+            ))
+        })?;
+    Ok(Some(output.into_inner()))
 }
 
 pub(crate) fn read_pdf_page_as_single_page_pdf(
@@ -214,56 +278,7 @@ fn render_pdf_page_thumbnail(
         return Ok(None);
     }
 
-    let pdfium = load_pdfium()?;
-    let document = pdfium
-        .load_pdf_from_file(&media.file_path, None)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
-        })?;
-    let page = document
-        .pages()
-        .get(
-            i32::try_from(page_number.saturating_sub(1)).map_err(|error| {
-                anyhow::anyhow!(error).context(format!("convert pdf page number {page_number}"))
-            })?,
-        )
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "load pdf page {page_number} from '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    let rendered = page
-        .render_with_config(
-            &PdfRenderConfig::new()
-                .set_target_width(i32::try_from(max_edge).unwrap_or(i32::MAX))
-                .set_maximum_height(i32::try_from(max_edge).unwrap_or(i32::MAX)),
-        )
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "render pdf page {page_number} from '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .as_image()
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "convert pdf page {page_number} from '{}' to image: ",
-                media.file_path.display()
-            ))
-        })?
-        .into_rgb8();
-
-    let mut output = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(rendered)
-        .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "encode pdf page {page_number} thumbnail from '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    Ok(Some(output.into_inner()))
+    render_pdf_page_as_jpeg(media, page_number, max_edge, Some(max_edge), "thumbnail ")
 }
 
 fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result<Vec<u8>> {
