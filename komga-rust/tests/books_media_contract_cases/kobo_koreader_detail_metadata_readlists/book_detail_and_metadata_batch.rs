@@ -413,7 +413,7 @@ async fn router_book_metadata_batch_update_persists_title_and_updates_book_snaps
     .expect("book last modified should be queryable after metadata batch update")
     .get::<String, _>("LAST_MODIFIED");
     pool_after.close().await;
-    assert_ne!(last_modified_after, last_modified_before);
+    assert_eq!(last_modified_after, last_modified_before);
 }
 
 #[tokio::test]

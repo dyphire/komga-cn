@@ -509,15 +509,5 @@ pub(super) async fn refresh_series_after_metadata_update(
     .await
     .context("refresh series metadata timestamp")?;
 
-    sqlx::query(
-        r#"UPDATE SERIES
-         SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-         WHERE ID = ?"#,
-    )
-    .bind(series_id)
-    .execute(pool)
-    .await
-    .context("refresh series row timestamp")?;
-
     Ok(())
 }
