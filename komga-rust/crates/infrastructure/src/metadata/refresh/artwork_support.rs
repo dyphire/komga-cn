@@ -577,7 +577,7 @@ fn media_type_from_sidecar_path(path: &Path) -> &'static str {
     }
 }
 
-pub(super) fn is_suitable_cover_image(bytes: &[u8]) -> anyhow::Result<bool> {
+pub(super) fn is_suitable_cover_image(bytes: &[u8]) -> bool {
     const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024;
     const MAX_DIMENSION: u32 = 5000;
     const WHITE_THRESHOLD: u8 = 240;
@@ -585,21 +585,23 @@ pub(super) fn is_suitable_cover_image(bytes: &[u8]) -> anyhow::Result<bool> {
     const SUITABLE_RATIO: f64 = 0.95;
 
     if bytes.len() > MAX_IMAGE_SIZE {
-        return Ok(true);
+        return true;
     }
 
-    let image = image::load_from_memory(bytes).context("decode image for cover suitability")?;
+    let Ok(image) = image::load_from_memory(bytes) else {
+        return false;
+    };
     let width = image.width();
     let height = image.height();
 
     if width > MAX_DIMENSION || height > MAX_DIMENSION {
-        return Ok(true);
+        return true;
     }
 
     let rgb_image = image.to_rgb8();
     let sample_step = (width.min(height) / 100).max(1);
-    let cols = (width + sample_step - 1) / sample_step;
-    let rows = (height + sample_step - 1) / sample_step;
+    let cols = width.div_ceil(sample_step);
+    let rows = height.div_ceil(sample_step);
     let total_samples = (cols as u64) * (rows as u64);
 
     let mut white_pixels = 0u64;
@@ -620,10 +622,11 @@ pub(super) fn is_suitable_cover_image(bytes: &[u8]) -> anyhow::Result<bool> {
         }
     }
 
+    let total_samples = total_samples as f64;
     let white_ratio = white_pixels as f64 / total_samples;
     let black_ratio = black_pixels as f64 / total_samples;
 
-    Ok(white_ratio < SUITABLE_RATIO && black_ratio < SUITABLE_RATIO)
+    white_ratio < SUITABLE_RATIO && black_ratio < SUITABLE_RATIO
 }
 
 #[cfg(test)]

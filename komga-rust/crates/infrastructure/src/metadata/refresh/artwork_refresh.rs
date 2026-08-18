@@ -10,7 +10,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::filesystem::media_access::epub::load_epub_cover_bytes;
 use crate::filesystem::media_access::page_content::{
-    load_archive_page_row, load_archive_page_rows, resolve_book_page_bytes,
+    load_archive_page_rows, resolve_book_page_bytes,
 };
 use crate::metadata::thumbnails::{emit_thumbnail_book_event, emit_thumbnail_series_event};
 use crate::parsing::parse_thumbnail_type;
@@ -18,8 +18,7 @@ use crate::{resolve_library_item_path, resolve_stored_path};
 
 use super::artwork_support::{
     MarkSelectedPreference, book_thumbnail_housekeeping, import_book_local_artwork_thumbnail,
-    import_series_local_artwork_thumbnail, is_suitable_cover_image,
-    load_book_local_artwork_urls,
+    import_series_local_artwork_thumbnail, is_suitable_cover_image, load_book_local_artwork_urls,
     load_series_local_artwork_urls, render_generated_thumbnail_from_image_bytes,
     render_pdf_thumbnail,
 };
@@ -220,7 +219,9 @@ pub async fn generate_book_thumbnail(
             let Some(page_row) = find_best_cover_page(pool, &book_id, &media).await? else {
                 break 'result Ok(());
             };
-            let Some(thumbnail_bytes) = resolve_book_page_bytes(&media, &page_row, page_row.number).await? else {
+            let Some(thumbnail_bytes) =
+                resolve_book_page_bytes(&media, &page_row, page_row.number).await?
+            else {
                 break 'result Ok(());
             };
             let thumbnail_media_type = if page_row.media_type.is_empty() {
@@ -355,18 +356,18 @@ async fn find_best_cover_page(
             }
         }
 
-        if candidates.is_empty() {
-            if let Some(rows) = page_content::load_archive_page_rows(media).await? {
-                candidates.extend(rows.into_iter().take(3));
-            }
+        if candidates.is_empty()
+            && let Some(rows) = load_archive_page_rows(media).await?
+        {
+            candidates.extend(rows.into_iter().take(3));
         }
     }
 
     for page in &candidates {
-        if let Some(bytes) = page_content::resolve_book_page_bytes(media, page, page.number).await? {
-            if is_suitable_cover_image(&bytes)? {
-                return Ok(Some(page.clone()));
-            }
+        if let Some(bytes) = resolve_book_page_bytes(media, page, page.number).await?
+            && is_suitable_cover_image(&bytes)
+        {
+            return Ok(Some(page.clone()));
         }
     }
 
@@ -474,15 +475,19 @@ pub(crate) async fn refresh_series_local_artwork(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use image::{ImageBuffer, Rgba};
+    use komga_application::media_assets::BookMediaRecord;
     use komga_application::runtime_sse::RuntimeSseEventStore;
     use komga_application::task_processing::ThumbnailRegenerationPolicy;
     use sqlx::Row;
+    use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
 
-    use super::generate_book_thumbnail;
+    use super::{find_best_cover_page, generate_book_thumbnail};
     use crate::test_support::{BootstrappedBookFixture, MediaPageFixture};
 
     fn unique_temp_dir(case: &str) -> PathBuf {
@@ -495,7 +500,7 @@ mod tests {
 
     fn png_bytes(width: u32, height: u32) -> Vec<u8> {
         let image =
-            ImageBuffer::<Rgba<u8>, Vec<u8>>::from_pixel(width, height, Rgba([1, 2, 3, 255]));
+            ImageBuffer::<Rgba<u8>, Vec<u8>>::from_pixel(width, height, Rgba([80, 100, 120, 255]));
         let mut output = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image)
             .write_to(&mut output, image::ImageFormat::Png)
@@ -554,6 +559,57 @@ mod tests {
         assert_eq!("image/jpeg", row.get::<String, _>("MEDIA_TYPE"));
         assert_eq!(6, row.get::<i64, _>("WIDTH"));
         assert_eq!(4, row.get::<i64, _>("HEIGHT"));
+
+        fixture.close().await;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn find_best_cover_page_skips_unreadable_candidates() {
+        let root = unique_temp_dir("cover-candidate-decode-error");
+        let series_dir = root.join("series");
+        fs::create_dir_all(&series_dir).expect("series directory should be created");
+        let archive_path = series_dir.join("book-1.zip");
+        let file = fs::File::create(&archive_path).expect("cover candidate archive should open");
+        let mut writer = ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer
+            .start_file("1.png", options)
+            .expect("invalid first page should be created");
+        writer
+            .write_all(b"not an image")
+            .expect("invalid first page should be written");
+        writer
+            .start_file("2.png", options)
+            .expect("valid second page should be created");
+        writer
+            .write_all(&png_bytes(6, 4))
+            .expect("valid second page should be written");
+        writer
+            .finish()
+            .expect("cover candidate archive should finish");
+
+        let fixture = BootstrappedBookFixture::open("cover-candidate-decode-error").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+        fixture
+            .insert_media_with_page_count("book-1", Some("application/zip"), "READY", 2)
+            .await;
+        let media = BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book-1.zip".to_string(),
+            file_path: archive_path,
+            media_type: "application/zip".to_string(),
+            page_count: 2,
+        };
+
+        let page = find_best_cover_page(&fixture.pool, "book-1", &media)
+            .await
+            .expect("cover candidates should be readable")
+            .expect("a valid second page should be selected");
+
+        assert_eq!(page.number, 2);
+        assert_eq!(page.file_name, "2.png");
 
         fixture.close().await;
         let _ = fs::remove_dir_all(root);

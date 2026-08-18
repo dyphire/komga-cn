@@ -381,6 +381,20 @@ mod tests {
         assert_eq!(targetless_task.target(), None);
     }
 
+    #[test]
+    fn enqueue_owned_duplicate_keeps_original_task_payload() {
+        let mut queue = TaskQueueOrchestrator::new("worker", true);
+        queue.enqueue(TaskQueueRecord::new("Task_task-1", 1, None).with_payload("original"));
+        assert!(queue.claim("Task_task-1", "worker"));
+
+        queue.enqueue(TaskQueueRecord::new("Task_task-1", 9, None).with_payload("duplicate"));
+
+        assert_eq!(queue.tasks().len(), 1);
+        assert_eq!(queue.tasks()[0].payload.as_deref(), Some("original"));
+        assert_eq!(queue.tasks()[0].priority, 1);
+        assert_eq!(queue.tasks()[0].owner.as_deref(), Some("worker"));
+    }
+
     #[tokio::test]
     async fn finalize_task_execution_enqueues_follow_ups_before_completing_claimed_task() {
         let port = RecordingFinalizationPort::default();

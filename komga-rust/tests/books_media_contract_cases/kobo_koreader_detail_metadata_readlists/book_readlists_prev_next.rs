@@ -1,5 +1,62 @@
 use super::*;
 
+async fn seed_number_sort_tie_book(ctx: &TestFixture, book_id: &str, title: &str) {
+    let file_name = format!("{book_id}.cbz");
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("number-sort tie db should open");
+    sqlx::query(
+        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(book_id)
+    .bind(0_i64)
+    .bind(&file_name)
+    .bind(format!("books/{file_name}"))
+    .bind("series-1")
+    .bind(4_096_i64)
+    .bind(50_i64)
+    .bind("library-1")
+    .execute(&pool)
+    .await
+    .expect("number-sort tie book row should be inserted");
+    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
+        .bind("application/vnd.comicbook+zip")
+        .bind("READY")
+        .bind(book_id)
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .expect("number-sort tie media row should be inserted");
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("50")
+    .bind(1.0_f64)
+    .bind(title)
+    .bind("2024-01-01")
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .expect("number-sort tie metadata row should be inserted");
+    pool.close().await;
+
+    let books_dir = ctx.paths().config_dir.join("books");
+    std::fs::create_dir_all(&books_dir).expect("number-sort tie books directory should be created");
+    let file = File::create(books_dir.join(&file_name))
+        .expect("number-sort tie cbz fixture should be created");
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    zip.start_file("page-1.png", options)
+        .expect("number-sort tie page entry should be created");
+    zip.write_all(&fixture_png_bytes())
+        .expect("number-sort tie page payload should be written");
+    zip.finish()
+        .expect("number-sort tie cbz fixture should finish successfully");
+}
+
 #[tokio::test]
 async fn router_discovery_book_readlists_returns_existing_persisted_readlists() {
     let ctx = TestFixture::new("router-discovery-book-readlists-persisted").await;
@@ -450,7 +507,7 @@ async fn router_book_previous_returns_deleted_books_when_they_sort_closer() {
 }
 
 #[tokio::test]
-async fn router_book_previous_skips_equal_number_sort_ties() {
+async fn router_book_previous_orders_equal_number_sort_ties_by_id() {
     let ctx = TestFixture::new("router-book-previous-number-sort-tie").await;
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -462,57 +519,9 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
         .execute(&pool)
         .await
         .expect("book-1 number_sort should update for tie test");
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("book-0a")
-    .bind(0_i64)
-    .bind("book-0a.cbz")
-    .bind("books/book-0a.cbz")
-    .bind("series-1")
-    .bind(4_096_i64)
-    .bind(50_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("tie previous sibling book row should be inserted");
-    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("application/vnd.comicbook+zip")
-        .bind("READY")
-        .bind("book-0a")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("tie previous sibling media row should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("50")
-    .bind(1.0_f64)
-    .bind("Previous Tie")
-    .bind("2024-01-01")
-    .bind("book-0a")
-    .execute(&pool)
-    .await
-    .expect("tie previous sibling metadata row should be inserted");
     pool.close().await;
-
-    let books_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&books_dir)
-        .expect("books directory should be created for tie previous fixture");
-    let file = File::create(books_dir.join("book-0a.cbz"))
-        .expect("tie previous sibling cbz fixture should be created");
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Stored)
-        .unix_permissions(0o644);
-    zip.start_file("page-1.png", options)
-        .expect("tie previous sibling page entry should be created");
-    zip.write_all(&fixture_png_bytes())
-        .expect("tie previous sibling page payload should be written");
-    zip.finish()
-        .expect("tie previous sibling cbz fixture should finish successfully");
+    seed_number_sort_tie_book(&ctx, "book-0a", "Previous Tie Lower").await;
+    seed_number_sort_tie_book(&ctx, "book-0b", "Previous Tie Upper").await;
 
     let auth_token = ctx.login_admin().await;
 
@@ -534,7 +543,7 @@ async fn router_book_previous_skips_equal_number_sort_ties() {
     let payload = response_json(response).await;
     assert_eq!(
         payload.get("id"),
-        Some(&Value::String("book-0a".to_string()))
+        Some(&Value::String("book-0b".to_string()))
     );
 }
 
@@ -747,7 +756,7 @@ async fn router_book_next_returns_deleted_books_when_they_sort_closer() {
 }
 
 #[tokio::test]
-async fn router_book_next_skips_equal_number_sort_ties() {
+async fn router_book_next_orders_equal_number_sort_ties_by_id() {
     let ctx = TestFixture::new("router-book-next-number-sort-tie").await;
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -759,57 +768,9 @@ async fn router_book_next_skips_equal_number_sort_ties() {
         .execute(&pool)
         .await
         .expect("book-1 number_sort should update for tie test");
-    sqlx::query(
-        "INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind("book-1z")
-    .bind(0_i64)
-    .bind("book-1z.cbz")
-    .bind("books/book-1z.cbz")
-    .bind("series-1")
-    .bind(4_096_i64)
-    .bind(50_i64)
-    .bind("library-1")
-    .execute(&pool)
-    .await
-    .expect("tie next sibling book row should be inserted");
-    sqlx::query("INSERT INTO MEDIA (MEDIA_TYPE, STATUS, BOOK_ID, PAGE_COUNT) VALUES (?, ?, ?, ?)")
-        .bind("application/vnd.comicbook+zip")
-        .bind("READY")
-        .bind("book-1z")
-        .bind(1_i64)
-        .execute(&pool)
-        .await
-        .expect("tie next sibling media row should be inserted");
-    sqlx::query(
-        "INSERT INTO BOOK_METADATA (NUMBER, NUMBER_SORT, TITLE, RELEASE_DATE, BOOK_ID) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind("50")
-    .bind(1.0_f64)
-    .bind("Next Tie")
-    .bind("2024-01-01")
-    .bind("book-1z")
-    .execute(&pool)
-    .await
-    .expect("tie next sibling metadata row should be inserted");
     pool.close().await;
-
-    let books_dir = ctx.paths().config_dir.join("books");
-    std::fs::create_dir_all(&books_dir)
-        .expect("books directory should be created for tie next fixture");
-    let file = File::create(books_dir.join("book-1z.cbz"))
-        .expect("tie next sibling cbz fixture should be created");
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Stored)
-        .unix_permissions(0o644);
-    zip.start_file("page-1.png", options)
-        .expect("tie next sibling page entry should be created");
-    zip.write_all(&fixture_png_bytes())
-        .expect("tie next sibling page payload should be written");
-    zip.finish()
-        .expect("tie next sibling cbz fixture should finish successfully");
+    seed_number_sort_tie_book(&ctx, "book-1a", "Next Tie Lower").await;
+    seed_number_sort_tie_book(&ctx, "book-1z", "Next Tie Upper").await;
 
     let auth_token = ctx.login_admin().await;
 
@@ -831,7 +792,7 @@ async fn router_book_next_skips_equal_number_sort_ties() {
     let payload = response_json(response).await;
     assert_eq!(
         payload.get("id"),
-        Some(&Value::String("book-1z".to_string()))
+        Some(&Value::String("book-1a".to_string()))
     );
 }
 

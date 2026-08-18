@@ -1,6 +1,6 @@
 use komga_epub::{
-    NormalizedPublication, normalize_mobi, parse_epub_manifest_items, parse_epub_metadata_cover_id,
-    parse_epub_guide_cover_href, parse_epub_rootfile_path,
+    NormalizedPublication, normalize_mobi, parse_epub_guide_cover_href, parse_epub_manifest_items,
+    parse_epub_metadata_cover_id, parse_epub_rootfile_path,
 };
 use regex::Regex;
 use std::fs::File;
@@ -136,20 +136,33 @@ fn extract_image_from_html_page<R: Read + Seek>(
         None => return Ok(None),
     };
 
-    let img_src_regex = Regex::new(r#"<img[^>]*\ssrc\s*=\s*["']([^"']+)["']"#).expect("valid img src regex");
-    let svg_xlink_regex =
-        Regex::new(r#"<svg:image[^>]*\sxlink:href\s*=\s*["']([^"']+)["']"#).expect("valid svg xlink regex");
-    let svg_image_xlink_regex =
-        Regex::new(r#"<image[^>]*\sxlink:href\s*=\s*["']([^"']+)["']"#).expect("valid image xlink regex");
+    let img_src_regex =
+        Regex::new(r#"<img[^>]*\ssrc\s*=\s*["']([^"']+)["']"#).expect("valid img src regex");
+    let svg_xlink_regex = Regex::new(r#"<svg:image[^>]*\sxlink:href\s*=\s*["']([^"']+)["']"#)
+        .expect("valid svg xlink regex");
+    let svg_image_xlink_regex = Regex::new(r#"<image[^>]*\sxlink:href\s*=\s*["']([^"']+)["']"#)
+        .expect("valid image xlink regex");
     let svg_image_regex =
         Regex::new(r#"<image[^>]*\shref\s*=\s*["']([^"']+)["']"#).expect("valid image href regex");
 
     let img_href = img_src_regex
         .captures(&html_content)
         .and_then(|cap| cap.get(1))
-        .or_else(|| svg_xlink_regex.captures(&html_content).and_then(|cap| cap.get(1)))
-        .or_else(|| svg_image_xlink_regex.captures(&html_content).and_then(|cap| cap.get(1)))
-        .or_else(|| svg_image_regex.captures(&html_content).and_then(|cap| cap.get(1)));
+        .or_else(|| {
+            svg_xlink_regex
+                .captures(&html_content)
+                .and_then(|cap| cap.get(1))
+        })
+        .or_else(|| {
+            svg_image_xlink_regex
+                .captures(&html_content)
+                .and_then(|cap| cap.get(1))
+        })
+        .or_else(|| {
+            svg_image_regex
+                .captures(&html_content)
+                .and_then(|cap| cap.get(1))
+        });
 
     let img_href = match img_href {
         Some(href) => href.as_str(),
@@ -169,7 +182,9 @@ fn extract_image_from_html_page<R: Read + Seek>(
 
     Ok(manifest
         .values()
-        .find(|item| komga_epub::normalize_epub_resource_href(opf_dir, &item.href) == normalized_img_path)
+        .find(|item| {
+            komga_epub::normalize_epub_resource_href(opf_dir, &item.href) == normalized_img_path
+        })
         .cloned())
 }
 
@@ -239,63 +254,61 @@ pub(crate) async fn load_epub_cover_bytes(
             }
         });
 
-        let Some(cover_item) = manifest
-            .values()
-            .find(|item| {
-                item.properties
-                    .split_ascii_whitespace()
-                    .any(|property| property.eq_ignore_ascii_case("cover-image"))
-            })
-            .cloned()
-            .or(metadata_cover_item)
-            .or_else(|| {
-                manifest
-                    .values()
-                    .find(|item| item.id == "cover-image")
-                    .cloned()
-            })
-            .or(guide_cover_item)
-            .or_else(|| {
-                manifest
-                    .values()
-                    .filter(|item| {
-                        item.id.to_lowercase().contains("cover")
-                            && item.media_type.starts_with("image/")
-                    })
-                    .min_by(|a, b| {
-                        a.id.to_lowercase()
-                            .cmp(&b.id.to_lowercase())
-                            .then_with(|| a.href.cmp(&b.href))
-                    })
-                    .cloned()
-            })
-            .or_else(|| {
-                manifest
-                    .values()
-                    .filter(|item| {
-                        item.href.to_lowercase().contains("cover")
-                            && item.media_type.starts_with("image/")
-                    })
-                    .min_by(|a, b| {
-                        a.href.to_lowercase()
-                            .cmp(&b.href.to_lowercase())
-                            .then_with(|| a.id.cmp(&b.id))
-                    })
-                    .cloned()
-            })
-        else {
-            return Ok(None);
-        };
+        let cover_items = [
+            manifest
+                .values()
+                .find(|item| {
+                    item.properties
+                        .split_ascii_whitespace()
+                        .any(|property| property.eq_ignore_ascii_case("cover-image"))
+                })
+                .cloned(),
+            metadata_cover_item,
+            manifest
+                .values()
+                .find(|item| item.id == "cover-image")
+                .cloned(),
+            guide_cover_item,
+            manifest
+                .values()
+                .filter(|item| {
+                    item.id.to_lowercase().contains("cover")
+                        && item.media_type.starts_with("image/")
+                })
+                .min_by(|a, b| {
+                    a.id.to_lowercase()
+                        .cmp(&b.id.to_lowercase())
+                        .then_with(|| a.href.cmp(&b.href))
+                })
+                .cloned(),
+            manifest
+                .values()
+                .filter(|item| {
+                    item.href.to_lowercase().contains("cover")
+                        && item.media_type.starts_with("image/")
+                })
+                .min_by(|a, b| {
+                    a.href
+                        .to_lowercase()
+                        .cmp(&b.href.to_lowercase())
+                        .then_with(|| a.id.cmp(&b.id))
+                })
+                .cloned(),
+        ];
 
-        let Some(bytes) =
-            read_zip_entry_bytes_normalized_result(&mut archive, &cover_item.href, &path)?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(EpubCoverImage {
-            bytes,
-            media_type: cover_item.media_type,
-        }))
+        for cover_item in cover_items.into_iter().flatten() {
+            let Some(bytes) =
+                read_zip_entry_bytes_normalized_result(&mut archive, &cover_item.href, &path)?
+            else {
+                continue;
+            };
+            return Ok(Some(EpubCoverImage {
+                bytes,
+                media_type: cover_item.media_type,
+            }));
+        }
+
+        Ok(None)
     })
     .await
     .map_err(|error| {
@@ -641,7 +654,8 @@ mod tests {
             ),
             (
                 "OEBPS/cover.xhtml".to_string(),
-                br#"<?xml version="1.0"?><html><body><img src="images/cover.png"/></body></html>"#,
+                br#"<?xml version="1.0"?><html><body><img src="images/cover.png"/></body></html>"#
+                    .to_vec(),
             ),
             (
                 "OEBPS/images/cover.png".to_string(),
@@ -736,6 +750,50 @@ mod tests {
             .expect("epub cover bytes should be readable")
             .expect("epub cover should exist via href fallback");
         assert_eq!(cover.bytes, b"cover-png-bytes");
+        assert_eq!(cover.media_type, "image/png");
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn load_epub_cover_bytes_skips_missing_high_priority_candidate() {
+        let file_path = unique_temp_path("komga-media-epub-cover-missing-priority");
+        let package_document = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <metadata>
+    <meta name="cover" content="legacy-cover"/>
+  </metadata>
+  <manifest>
+    <item id="legacy-cover" href="images/missing.png" media-type="image/png"/>
+    <item id="front" href="images/front-cover.png" media-type="image/png"/>
+    <item id="chap-1" href="chapter-1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chap-1"/>
+  </spine>
+</package>"#;
+        let archive = build_test_zip_archive(vec![
+            (
+                "META-INF/container.xml".to_string(),
+                basic_container_xml().as_bytes().to_vec(),
+            ),
+            (
+                "OEBPS/content.opf".to_string(),
+                package_document.as_bytes().to_vec(),
+            ),
+            (
+                "OEBPS/images/front-cover.png".to_string(),
+                b"front-cover-bytes".to_vec(),
+            ),
+        ])
+        .expect("epub archive should be created");
+        fs::write(&file_path, archive).expect("epub test file should be written");
+
+        let cover = load_epub_cover_bytes(&epub_media(file_path.clone()))
+            .await
+            .expect("epub cover bytes should be readable")
+            .expect("epub cover should fall back after missing metadata entry");
+        assert_eq!(cover.bytes, b"front-cover-bytes");
         assert_eq!(cover.media_type, "image/png");
 
         let _ = fs::remove_file(file_path);
@@ -939,7 +997,7 @@ mod tests {
             ),
             (
                 "OEBPS/cover.xhtml".to_string(),
-                br#"<?xml version="1.0"?><html><body><img src="images/caf%C3%A9.png"/></body></html>"#,
+                br#"<?xml version="1.0"?><html><body><img src="images/caf%C3%A9.png"/></body></html>"#.to_vec(),
             ),
             (
                 "OEBPS/images/café.png".to_string(),

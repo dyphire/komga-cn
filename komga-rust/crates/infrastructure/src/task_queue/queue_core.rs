@@ -101,7 +101,8 @@ impl SqliteTaskQueueStore {
                 CLASS = excluded.CLASS,
                 SIMPLE_TYPE = excluded.SIMPLE_TYPE,
                 PAYLOAD = excluded.PAYLOAD,
-                LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
+                LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+            WHERE OWNER IS NULL"#,
         )
         .bind(row.id)
         .bind(row.priority)
@@ -203,6 +204,7 @@ fn persisted_row_shape(row: sqlx::sqlite::SqliteRow) -> PersistedTaskRowShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sqlite::{bootstrap_tasks_pool, connect_task_write_pool};
 
     #[test]
     fn known_persisted_row_uses_kotlin_class_name() {
@@ -238,6 +240,66 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn persist_task_keeps_owned_duplicate_payload() {
+        let tasks_db_file = unique_temp_dir("owned-duplicate-payload");
+        let bootstrap_pool = connect_task_write_pool(&tasks_db_file)
+            .await
+            .expect("tasks db should open");
+        bootstrap_tasks_pool(&bootstrap_pool)
+            .await
+            .expect("tasks db should bootstrap");
+
+        let store = SqliteTaskQueueStore::new(tasks_db_file.clone())
+            .await
+            .expect("task store should open")
+            .expect("task store should exist");
+        let original = PersistedTaskStoreRecord {
+            id: "RefreshBookMetadata_book-1".to_string(),
+            simple_type: "RefreshBookMetadata".to_string(),
+            priority: 6,
+            group: None,
+            payload: Some(r#"{"bookId":"book-1","capabilities":["TITLE"]}"#.to_string()),
+            owner: None,
+        };
+        store
+            .persist_task(&original)
+            .await
+            .expect("original task should persist");
+        store
+            .claim_task(&original.id, "rust-worker")
+            .await
+            .expect("original task should be claimed");
+
+        let duplicate = PersistedTaskStoreRecord {
+            payload: Some(r#"{"bookId":"book-1","capabilities":["AUTHORS"]}"#.to_string()),
+            ..original.clone()
+        };
+        store
+            .persist_task(&duplicate)
+            .await
+            .expect("owned duplicate should be accepted as a no-op");
+
+        let records = store
+            .load_records()
+            .await
+            .expect("task rows should remain readable");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].owner.as_deref(), Some("rust-worker"));
+        let payload = records[0]
+            .payload
+            .as_deref()
+            .expect("owned task payload should remain present");
+        assert!(payload.contains("TITLE"));
+        assert!(!payload.contains("AUTHORS"));
+
+        store.tasks_pool.close().await;
+        bootstrap_pool.close().await;
+        let _ = std::fs::remove_file(&tasks_db_file);
+        let _ = std::fs::remove_file(format!("{}-wal", tasks_db_file.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", tasks_db_file.display()));
     }
 
     fn unique_temp_dir(case_id: &str) -> std::path::PathBuf {

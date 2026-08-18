@@ -193,7 +193,7 @@ pub fn parse_epub_guide_cover_href(
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("cover")) =>
             {
-                return Ok(attribute_value(&event, b"href", PACKAGE_DOCUMENT)?);
+                return attribute_value(&event, b"href", PACKAGE_DOCUMENT);
             }
             Ok(Event::Eof) => break,
             Err(error) => return Err(xml_error(PACKAGE_DOCUMENT, error)),
@@ -321,10 +321,8 @@ pub fn parse_epub_fixed_layout_with_heuristic<R: Read + Seek>(
     }
 
     let spine_ids = parse_epub_spine_itemrefs(package_document)?;
-    let spine_items: Vec<&EpubManifestItem> = spine_ids
-        .iter()
-        .filter_map(|id| manifest.get(id))
-        .collect();
+    let spine_items: Vec<&EpubManifestItem> =
+        spine_ids.iter().filter_map(|id| manifest.get(id)).collect();
 
     let sample_indices = {
         let len = spine_items.len();
@@ -375,16 +373,12 @@ pub fn parse_epub_fixed_layout_with_heuristic<R: Read + Seek>(
         return Ok(false);
     }
 
-    if sampled_pages > 0 {
-        return Ok(true);
-    }
-
-    Ok(true)
+    Ok(sampled_pages > 0)
 }
 
 pub fn normalize_epub_resource_href(rootfile_path: &str, href: &str) -> String {
-    let href = percent_decode(href);
     let href = href.split('#').next().unwrap_or_default();
+    let href = percent_decode(href);
     if href.starts_with('/') {
         return normalize_epub_zip_path(&href);
     }
@@ -524,7 +518,8 @@ mod tests {
 
     #[test]
     fn parses_guide_cover_href() {
-        let package = br#"<package><guide><reference type="cover" href="cover.xhtml"/></guide></package>"#;
+        let package =
+            br#"<package><guide><reference type="cover" href="cover.xhtml"/></guide></package>"#;
         assert_eq!(
             parse_epub_guide_cover_href(package).expect("guide should parse"),
             Some("cover.xhtml".to_string())
@@ -542,7 +537,8 @@ mod tests {
 
     #[test]
     fn parses_guide_cover_href_returns_none_when_absent() {
-        let package = br#"<package><guide><reference type="text" href="toc.xhtml"/></guide></package>"#;
+        let package =
+            br#"<package><guide><reference type="text" href="toc.xhtml"/></guide></package>"#;
         assert_eq!(
             parse_epub_guide_cover_href(package).expect("guide should parse"),
             None
@@ -594,265 +590,91 @@ mod tests {
             normalize_epub_resource_href("/OPS/content.opf", "caf%C3%A9.png"),
             "/OPS/café.png"
         );
+        assert_eq!(
+            normalize_epub_resource_href("/OPS/content.opf", "images/cover%23final.jpg"),
+            "/OPS/images/cover#final.jpg"
+        );
+    }
+
+    fn assert_heuristic(package: &[u8], entries: &[(&str, &[u8])], expected: bool) {
+        let manifest = parse_epub_manifest_items(package, "/OPS/content.opf")
+            .expect("heuristic manifest should parse");
+        let mut archive = build_heuristic_archive(package, entries);
+        let actual = parse_epub_fixed_layout_with_heuristic(
+            package,
+            &manifest,
+            &mut archive,
+            "OPS/content.opf",
+        )
+        .expect("heuristic package should parse");
+        assert_eq!(actual, expected);
+    }
+
+    fn build_heuristic_archive(
+        package: &[u8],
+        entries: &[(&str, &[u8])],
+    ) -> ZipArchive<Cursor<Vec<u8>>> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer
+            .start_file("OPS/content.opf", stored)
+            .expect("package entry should be created");
+        writer
+            .write_all(package)
+            .expect("package entry should be written");
+        for &(file_name, bytes) in entries {
+            writer
+                .start_file(file_name, stored)
+                .expect("heuristic entry should be created");
+            writer
+                .write_all(bytes)
+                .expect("heuristic entry should be written");
+        }
+        ZipArchive::new(writer.finish().expect("heuristic archive should finish"))
+            .expect("heuristic archive should open")
     }
 
     #[test]
     fn heuristic_detects_image_only_comic_as_fixed_layout() {
-        let mut buf = Vec::new();
-        {
-            let mut writer = ZipWriter::new(Cursor::new(&mut buf));
-            let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-
-            writer.start_file("/META-INF/container.xml", stored).unwrap();
-            writer
-                .write_all(
-                    b"<?xml version=\"1.0\"?><container><rootfiles><rootfile full-path=\"OPS/content.opf\"/></rootfiles></container>",
-                )
-                .unwrap();
-
-            writer.start_file("/OPS/content.opf", stored).unwrap();
-            writer.write_all(
-                b"<?xml version=\"1.0\"?><package><manifest><item id=\"img1\" href=\"img1.jpg\" media-type=\"image/jpeg\"/><item id=\"img2\" href=\"img2.jpg\" media-type=\"image/jpeg\"/><item id=\"img3\" href=\"img3.jpg\" media-type=\"image/jpeg\"/><item id=\"page\" href=\"page.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"page\"/></spine></package>",
-            ).unwrap();
-
-            writer.start_file("/OPS/page.xhtml", stored).unwrap();
-            writer
-                .write_all(b"<?xml version=\"1.0\"?><html><body><img src=\"img1.jpg\"/></body></html>")
-                .unwrap();
-
-            for i in 1..=3 {
-                writer.start_file(&format!("/OPS/img{}.jpg", i), stored).unwrap();
-                writer.write_all(&[0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
-            }
-
-            writer.finish().unwrap();
-        }
-
-        let manifest = HashMap::from([
-            (
-                "img1".to_string(),
-                EpubManifestItem {
-                    id: "img1".to_string(),
-                    href: "img1.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "img2".to_string(),
-                EpubManifestItem {
-                    id: "img2".to_string(),
-                    href: "img2.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "img3".to_string(),
-                EpubManifestItem {
-                    id: "img3".to_string(),
-                    href: "img3.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "page".to_string(),
-                EpubManifestItem {
-                    id: "page".to_string(),
-                    href: "page.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-        ]);
-
-        let mut archive = ZipArchive::new(Cursor::new(buf)).unwrap();
-        let mut package_content = String::new();
-        archive
-            .by_name("/OPS/content.opf")
-            .unwrap()
-            .read_to_string(&mut package_content)
-            .unwrap();
-
-        assert!(
-            parse_epub_fixed_layout_with_heuristic(package_content.as_bytes(), &manifest, &mut archive, "OPS/content.opf")
-                .unwrap()
+        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="img3" href="img3.jpg" media-type="image/jpeg"/><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="page"/></spine></package>"#;
+        assert_heuristic(
+            package,
+            &[(
+                "OPS/page.xhtml",
+                br#"<?xml version="1.0"?><html><body><img src="img1.jpg"/></body></html>"#,
+            )],
+            true,
         );
     }
 
     #[test]
     fn heuristic_does_not_flag_text_based_book_as_fixed_layout() {
-        let mut buf = Vec::new();
-        {
-            let mut writer = ZipWriter::new(Cursor::new(&mut buf));
-            let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-
-            writer.start_file("/META-INF/container.xml", stored).unwrap();
-            writer
-                .write_all(
-                    b"<?xml version=\"1.0\"?><container><rootfiles><rootfile full-path=\"OPS/content.opf\"/></rootfiles></container>",
-                )
-                .unwrap();
-
-            writer.start_file("/OPS/content.opf", stored).unwrap();
-            writer.write_all(
-                b"<?xml version=\"1.0\"?><package><manifest><item id=\"img1\" href=\"img1.jpg\" media-type=\"image/jpeg\"/><item id=\"img2\" href=\"img2.jpg\" media-type=\"image/jpeg\"/><item id=\"txt1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"txt2\" href=\"chapter2.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"txt1\"/><itemref idref=\"txt2\"/></spine></package>",
-            ).unwrap();
-
-            writer.start_file("/OPS/chapter1.xhtml", stored).unwrap();
-            writer
-                .write_all(b"<?xml version=\"1.0\"?><html><body><p>Hello world</p></body></html>")
-                .unwrap();
-
-            writer.start_file("/OPS/chapter2.xhtml", stored).unwrap();
-            writer
-                .write_all(b"<?xml version=\"1.0\"?><html><body><p>More text here</p></body></html>")
-                .unwrap();
-
-            for i in 1..=2 {
-                writer.start_file(&format!("/OPS/img{}.jpg", i), stored).unwrap();
-                writer.write_all(&[0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
-            }
-
-            writer.finish().unwrap();
-        }
-
-        let manifest = HashMap::from([
-            (
-                "img1".to_string(),
-                EpubManifestItem {
-                    id: "img1".to_string(),
-                    href: "img1.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "img2".to_string(),
-                EpubManifestItem {
-                    id: "img2".to_string(),
-                    href: "img2.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "txt1".to_string(),
-                EpubManifestItem {
-                    id: "txt1".to_string(),
-                    href: "chapter1.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "txt2".to_string(),
-                EpubManifestItem {
-                    id: "txt2".to_string(),
-                    href: "chapter2.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-        ]);
-
-        let mut archive = ZipArchive::new(Cursor::new(buf)).unwrap();
-        let mut package_content = String::new();
-        archive
-            .by_name("/OPS/content.opf")
-            .unwrap()
-            .read_to_string(&mut package_content)
-            .unwrap();
-
-        assert!(
-            !parse_epub_fixed_layout_with_heuristic(package_content.as_bytes(), &manifest, &mut archive, "OPS/content.opf")
-                .unwrap()
+        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="txt1" href="chapter1.xhtml" media-type="application/xhtml+xml"/><item id="txt2" href="chapter2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="txt1"/><itemref idref="txt2"/></spine></package>"#;
+        assert_heuristic(
+            package,
+            &[
+                (
+                    "OPS/chapter1.xhtml",
+                    br#"<?xml version="1.0"?><html><body><p>Hello world</p></body></html>"#,
+                ),
+                (
+                    "OPS/chapter2.xhtml",
+                    br#"<?xml version="1.0"?><html><body><p>More text here</p></body></html>"#,
+                ),
+            ],
+            false,
         );
     }
 
     #[test]
+    fn heuristic_returns_false_when_no_spine_page_is_readable() {
+        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="page"/></spine></package>"#;
+        assert_heuristic(package, &[], false);
+    }
+
+    #[test]
     fn heuristic_does_not_flag_low_image_ratio_as_fixed_layout() {
-        let mut buf = Vec::new();
-        {
-            let mut writer = ZipWriter::new(Cursor::new(&mut buf));
-            let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-
-            writer.start_file("/META-INF/container.xml", stored).unwrap();
-            writer
-                .write_all(
-                    b"<?xml version=\"1.0\"?><container><rootfiles><rootfile full-path=\"OPS/content.opf\"/></rootfiles></container>",
-                )
-                .unwrap();
-
-            writer.start_file("/OPS/content.opf", stored).unwrap();
-            writer.write_all(
-                b"<?xml version=\"1.0\"?><package><manifest><item id=\"img1\" href=\"img1.jpg\" media-type=\"image/jpeg\"/><item id=\"txt1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"txt2\" href=\"chapter2.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"txt3\" href=\"chapter3.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"txt1\"/><itemref idref=\"txt2\"/><itemref idref=\"txt3\"/></spine></package>",
-            ).unwrap();
-
-            for i in 1..=3 {
-                writer.start_file(&format!("/OPS/chapter{}.xhtml", i), stored).unwrap();
-                writer
-                    .write_all(format!("<?xml version=\"1.0\"?><html><body><p>Chapter {} text</p></body></html>", i).as_bytes())
-                    .unwrap();
-            }
-
-            writer.start_file("/OPS/img1.jpg", stored).unwrap();
-            writer.write_all(&[0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
-
-            writer.finish().unwrap();
-        }
-
-        let manifest = HashMap::from([
-            (
-                "img1".to_string(),
-                EpubManifestItem {
-                    id: "img1".to_string(),
-                    href: "img1.jpg".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "txt1".to_string(),
-                EpubManifestItem {
-                    id: "txt1".to_string(),
-                    href: "chapter1.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "txt2".to_string(),
-                EpubManifestItem {
-                    id: "txt2".to_string(),
-                    href: "chapter2.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-            (
-                "txt3".to_string(),
-                EpubManifestItem {
-                    id: "txt3".to_string(),
-                    href: "chapter3.xhtml".to_string(),
-                    media_type: "application/xhtml+xml".to_string(),
-                    properties: String::new(),
-                },
-            ),
-        ]);
-
-        let mut archive = ZipArchive::new(Cursor::new(buf)).unwrap();
-        let mut package_content = String::new();
-        archive
-            .by_name("/OPS/content.opf")
-            .unwrap()
-            .read_to_string(&mut package_content)
-            .unwrap();
-
-        assert!(
-            !parse_epub_fixed_layout_with_heuristic(package_content.as_bytes(), &manifest, &mut archive, "OPS/content.opf")
-                .unwrap()
-        );
+        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="txt1" href="chapter1.xhtml" media-type="application/xhtml+xml"/><item id="txt2" href="chapter2.xhtml" media-type="application/xhtml+xml"/><item id="txt3" href="chapter3.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="txt1"/><itemref idref="txt2"/><itemref idref="txt3"/></spine></package>"#;
+        assert_heuristic(package, &[], false);
     }
 }
