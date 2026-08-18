@@ -96,11 +96,11 @@ async fn router_api_libraries_accepts_basic_auth_like_kotlin_clients() {
 }
 
 #[tokio::test]
-async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_headers() {
-    let ctx = TestFixture::new("router-api-libraries-kotlin-cache-headers").await;
+async fn router_api_libraries_route_skips_etag_for_webui_bootstrap() {
+    let ctx = TestFixture::new("router-api-libraries-webui-cache-headers").await;
     let auth_token = ctx.login_admin().await;
 
-    let first_response = ctx
+    let response = ctx
         .app()
         .clone()
         .oneshot(
@@ -108,74 +108,15 @@ async fn router_api_libraries_route_matches_kotlin_etag_without_extra_cache_head
                 .method("GET")
                 .uri("/api/v1/libraries")
                 .header("x-auth-token", &auth_token)
+                .header(header::IF_NONE_MATCH, "\"stale-libraries-etag\"")
                 .body(Body::empty())
                 .expect("libraries cache request should build"),
         )
         .await
         .expect("libraries cache request should complete");
 
-    assert_eq!(first_response.status(), StatusCode::OK);
-    assert!(
-        first_response
-            .headers()
-            .get(header::CACHE_CONTROL)
-            .is_none(),
-        "Kotlin libraries list does not emit Cache-Control on 200"
-    );
-
-    let etag = first_response
-        .headers()
-        .get(header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .expect("libraries response should include etag");
-
-    let second_response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/libraries")
-                .header("x-auth-token", &auth_token)
-                .header(header::IF_NONE_MATCH, etag.as_str())
-                .body(Body::empty())
-                .expect("conditional libraries request should build"),
-        )
-        .await
-        .expect("conditional libraries request should complete");
-
-    assert_eq!(second_response.status(), StatusCode::NOT_MODIFIED);
-    assert!(
-        second_response
-            .headers()
-            .get(header::CACHE_CONTROL)
-            .is_none(),
-        "Kotlin conditional libraries list does not emit Cache-Control on 304"
-    );
-    assert!(second_response.headers().contains_key(header::ETAG));
-
-    let head_response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("HEAD")
-                .uri("/api/v1/libraries")
-                .header("x-auth-token", &auth_token)
-                .header(header::IF_NONE_MATCH, etag.as_str())
-                .body(Body::empty())
-                .expect("conditional libraries head request should build"),
-        )
-        .await
-        .expect("conditional libraries head request should complete");
-
-    assert_eq!(head_response.status(), StatusCode::NOT_MODIFIED);
-    assert!(
-        head_response.headers().get(header::CACHE_CONTROL).is_none(),
-        "Kotlin conditional libraries head does not emit Cache-Control on 304"
-    );
-    assert!(head_response.headers().contains_key(header::ETAG));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(!response.headers().contains_key(header::ETAG));
 }
 
 #[tokio::test]

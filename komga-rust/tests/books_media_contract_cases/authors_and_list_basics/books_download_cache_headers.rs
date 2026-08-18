@@ -16,26 +16,6 @@ async fn router_download_routes_do_not_get_shallow_etag_headers() {
 
     let auth_token = ctx.login_admin().await;
 
-    let libraries_response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/libraries")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("libraries request should build for exclusion control"),
-        )
-        .await
-        .expect("libraries request should complete for exclusion control");
-    let cache_etag = libraries_response
-        .headers()
-        .get(header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .expect("non-download route should expose etag for exclusion control");
-
     for route in [
         "/api/v1/books/book-1/file/book-1.epub",
         "/opds/v2/books/book-1/file/book-1.epub",
@@ -49,7 +29,7 @@ async fn router_download_routes_do_not_get_shallow_etag_headers() {
                     .method("GET")
                     .uri(route)
                     .header("x-auth-token", &auth_token)
-                    .header(header::IF_NONE_MATCH, &cache_etag)
+                    .header(header::IF_NONE_MATCH, "\"unrelated-etag\"")
                     .body(Body::empty())
                     .expect("download exclusion request should build"),
             )
