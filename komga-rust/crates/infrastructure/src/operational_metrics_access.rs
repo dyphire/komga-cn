@@ -184,10 +184,9 @@ async fn load_sidecars_grouped_by_library(
     pool: &SqlitePool,
 ) -> anyhow::Result<Vec<LibraryMetricValue>> {
     let rows = sqlx::query(
-        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(sc.ID) AS COUNT
+        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(sc.URL) AS COUNT
 FROM SIDECAR sc
-JOIN BOOK b ON b.ID = sc.BOOK_ID
-JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+JOIN LIBRARY l ON l.ID = sc.LIBRARY_ID
 GROUP BY l.NAME"#,
     )
     .fetch_all(pool)
