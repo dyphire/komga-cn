@@ -13,7 +13,7 @@ use zip::ZipArchive;
 
 use crate::{
     EpubManifestItem, EpubNavigationLink, EpubParseError, normalize_epub_resource_href,
-    normalize_epub_zip_path, parse_epub_fixed_layout_with_heuristic, parse_epub_manifest_items,
+    normalize_epub_zip_path, parse_epub_fixed_layout, parse_epub_manifest_items,
     parse_epub_rootfile_path, parse_epub_spine_itemrefs,
 };
 
@@ -107,13 +107,8 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     }
 
     let pages = divina_pages(&mut archive, &manifest, &spine, &entries)?;
-    let is_fixed_layout = parse_epub_fixed_layout_with_heuristic(
-        &package,
-        &manifest,
-        &mut archive,
-        &rootfile_path,
-    )
-    .map_err(parse_error("parse EPUB fixed-layout metadata"))?
+    let is_fixed_layout = parse_epub_fixed_layout(&package)
+        .map_err(parse_error("parse EPUB fixed-layout metadata"))?
         || !pages.is_empty();
     let page_count = if pages.is_empty() {
         spine
@@ -965,10 +960,16 @@ fn percent_decode(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Write;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::analyze_epub_file;
     use crate::decode_epub_navigation_extension;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     fn repository_resource(relative_path: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1017,5 +1018,47 @@ mod tests {
             fixed_layout_navigation.toc[0].title.as_deref(),
             Some("Page 1")
         );
+    }
+
+    #[test]
+    fn image_ratio_without_complete_page_mapping_remains_reflowable() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should follow the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "komga-epub-incomplete-image-layout-{}-{unique}.epub",
+            std::process::id()
+        ));
+        let file = File::create(&path).expect("temporary EPUB should be created");
+        let mut zip = ZipWriter::new(file);
+        let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (name, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+            ),
+            (
+                "content.opf",
+                br#"<package><manifest><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/><item id="image" href="image.jpg" media-type="image/jpeg"/></manifest><spine><itemref idref="page"/></spine></package>"#,
+            ),
+            ("page.xhtml", br#"<html><body/></html>"#),
+            ("image.jpg", b"not-used".as_slice()),
+        ] {
+            zip.start_file(name, stored)
+                .expect("temporary EPUB entry should be created");
+            zip.write_all(bytes)
+                .expect("temporary EPUB entry should be written");
+        }
+        zip.finish().expect("temporary EPUB should finish");
+
+        let analysis = analyze_epub_file(&path).expect("temporary EPUB should analyze");
+        std::fs::remove_file(&path).expect("temporary EPUB should be removed");
+        let navigation = decode_epub_navigation_extension(&analysis.extension_blob)
+            .expect("EPUB extension should decode");
+
+        assert!(analysis.pages.is_empty());
+        assert!(!navigation.is_fixed_layout);
     }
 }

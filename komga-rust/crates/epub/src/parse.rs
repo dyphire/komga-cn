@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{Read, Seek};
 
 use quick_xml::Reader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
-use regex::Regex;
-use zip::ZipArchive;
 
 const DEFAULT_MANIFEST_MEDIA_TYPE: &str = "application/octet-stream";
 const DEFAULT_SPINE_MEDIA_TYPE: &str = "application/xhtml+xml";
@@ -286,96 +283,6 @@ fn is_fixed_layout_meta(event: &BytesStart<'_>) -> Result<bool, EpubParseError> 
     }))
 }
 
-pub fn parse_epub_fixed_layout_with_heuristic<R: Read + Seek>(
-    package_document: &[u8],
-    manifest: &HashMap<String, EpubManifestItem>,
-    archive: &mut ZipArchive<R>,
-    rootfile_path: &str,
-) -> Result<bool, EpubParseError> {
-    if parse_epub_fixed_layout(package_document)? {
-        return Ok(true);
-    }
-
-    const IMAGE_MEDIA_TYPES: &[&str] = &[
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/avif",
-        "image/jxl",
-    ];
-
-    let image_count = manifest
-        .values()
-        .filter(|item| IMAGE_MEDIA_TYPES.contains(&item.media_type.as_str()))
-        .count();
-    let total_count = manifest.len();
-
-    if total_count == 0 {
-        return Ok(false);
-    }
-
-    let image_ratio = image_count as f64 / total_count as f64;
-    if image_ratio < 0.40 {
-        return Ok(false);
-    }
-
-    let spine_ids = parse_epub_spine_itemrefs(package_document)?;
-    let spine_items: Vec<&EpubManifestItem> =
-        spine_ids.iter().filter_map(|id| manifest.get(id)).collect();
-
-    let sample_indices = {
-        let len = spine_items.len();
-
-        if len <= 15 {
-            (0..len).collect::<Vec<_>>()
-        } else {
-            let mut indices = Vec::with_capacity(15);
-
-            indices.extend(0..5);
-
-            let middle_start = (len - 5) / 2;
-            indices.extend(middle_start..middle_start + 5);
-
-            indices.extend(len - 5..len);
-
-            indices
-        }
-    };
-
-    let mut sampled_pages = 0;
-    let mut has_text_content = false;
-
-    let tag_regex = Regex::new(r"<[^>]*>").expect("valid HTML tag regex");
-
-    for index in sample_indices {
-        if has_text_content {
-            break;
-        }
-
-        let item = &spine_items[index];
-        let href = normalize_epub_resource_href(rootfile_path, &item.href);
-
-        let entry_name = href.trim_start_matches('/');
-        if let Ok(mut zip_entry) = archive.by_name(entry_name) {
-            let mut content = String::new();
-            if zip_entry.read_to_string(&mut content).is_ok() {
-                let text = tag_regex.replace_all(&content, "").to_string();
-                if text.chars().any(|c| !c.is_whitespace()) {
-                    has_text_content = true;
-                }
-                sampled_pages += 1;
-            }
-        }
-    }
-
-    if has_text_content {
-        return Ok(false);
-    }
-
-    Ok(sampled_pages > 0)
-}
-
 pub fn normalize_epub_resource_href(rootfile_path: &str, href: &str) -> String {
     let href = href.split('#').next().unwrap_or_default();
     let href = percent_decode(href);
@@ -483,9 +390,6 @@ fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Cursor, Write};
-    use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
     #[test]
     fn parses_manifest_rootfile_and_spine() {
@@ -594,87 +498,5 @@ mod tests {
             normalize_epub_resource_href("/OPS/content.opf", "images/cover%23final.jpg"),
             "/OPS/images/cover#final.jpg"
         );
-    }
-
-    fn assert_heuristic(package: &[u8], entries: &[(&str, &[u8])], expected: bool) {
-        let manifest = parse_epub_manifest_items(package, "/OPS/content.opf")
-            .expect("heuristic manifest should parse");
-        let mut archive = build_heuristic_archive(package, entries);
-        let actual = parse_epub_fixed_layout_with_heuristic(
-            package,
-            &manifest,
-            &mut archive,
-            "OPS/content.opf",
-        )
-        .expect("heuristic package should parse");
-        assert_eq!(actual, expected);
-    }
-
-    fn build_heuristic_archive(
-        package: &[u8],
-        entries: &[(&str, &[u8])],
-    ) -> ZipArchive<Cursor<Vec<u8>>> {
-        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
-        let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        writer
-            .start_file("OPS/content.opf", stored)
-            .expect("package entry should be created");
-        writer
-            .write_all(package)
-            .expect("package entry should be written");
-        for &(file_name, bytes) in entries {
-            writer
-                .start_file(file_name, stored)
-                .expect("heuristic entry should be created");
-            writer
-                .write_all(bytes)
-                .expect("heuristic entry should be written");
-        }
-        ZipArchive::new(writer.finish().expect("heuristic archive should finish"))
-            .expect("heuristic archive should open")
-    }
-
-    #[test]
-    fn heuristic_detects_image_only_comic_as_fixed_layout() {
-        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="img3" href="img3.jpg" media-type="image/jpeg"/><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="page"/></spine></package>"#;
-        assert_heuristic(
-            package,
-            &[(
-                "OPS/page.xhtml",
-                br#"<?xml version="1.0"?><html><body><img src="img1.jpg"/></body></html>"#,
-            )],
-            true,
-        );
-    }
-
-    #[test]
-    fn heuristic_does_not_flag_text_based_book_as_fixed_layout() {
-        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="txt1" href="chapter1.xhtml" media-type="application/xhtml+xml"/><item id="txt2" href="chapter2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="txt1"/><itemref idref="txt2"/></spine></package>"#;
-        assert_heuristic(
-            package,
-            &[
-                (
-                    "OPS/chapter1.xhtml",
-                    br#"<?xml version="1.0"?><html><body><p>Hello world</p></body></html>"#,
-                ),
-                (
-                    "OPS/chapter2.xhtml",
-                    br#"<?xml version="1.0"?><html><body><p>More text here</p></body></html>"#,
-                ),
-            ],
-            false,
-        );
-    }
-
-    #[test]
-    fn heuristic_returns_false_when_no_spine_page_is_readable() {
-        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="img2" href="img2.jpg" media-type="image/jpeg"/><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="page"/></spine></package>"#;
-        assert_heuristic(package, &[], false);
-    }
-
-    #[test]
-    fn heuristic_does_not_flag_low_image_ratio_as_fixed_layout() {
-        let package = br#"<?xml version="1.0"?><package><manifest><item id="img1" href="img1.jpg" media-type="image/jpeg"/><item id="txt1" href="chapter1.xhtml" media-type="application/xhtml+xml"/><item id="txt2" href="chapter2.xhtml" media-type="application/xhtml+xml"/><item id="txt3" href="chapter3.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="txt1"/><itemref idref="txt2"/><itemref idref="txt3"/></spine></package>"#;
-        assert_heuristic(package, &[], false);
     }
 }

@@ -1,5 +1,132 @@
 use super::*;
 
+async fn seed_epub_layout_records(
+    ctx: &TestFixture,
+    epub_pages: &[&str],
+    image_dimensions: &[(Option<i64>, Option<i64>)],
+) {
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for fixed-layout resource seed");
+    for file_name in epub_pages {
+        sqlx::query(
+            "INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, MEDIA_TYPE, SUB_TYPE, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(file_name)
+        .bind("book-1")
+        .bind("application/xhtml+xml")
+        .bind("EPUB_PAGE")
+        .bind(128_i64)
+        .execute(&pool)
+        .await
+        .expect("EPUB page should be seeded");
+    }
+    for (index, (width, height)) in image_dimensions.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO MEDIA_PAGE \
+             (BOOK_ID, NUMBER, FILE_HASH, FILE_NAME, MEDIA_TYPE, WIDTH, HEIGHT, FILE_SIZE) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind(index as i64)
+        .bind("")
+        .bind(format!("OEBPS/image-{index}.jpg"))
+        .bind("image/jpeg")
+        .bind(width)
+        .bind(height)
+        .bind(4_096_i64)
+        .execute(&pool)
+        .await
+        .expect("EPUB image page should be seeded");
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn router_book_resource_normalizes_divina_xhtml_layout_on_all_webpub_surfaces() {
+    let ctx = TestFixture::new("router-book-resource-divina-layout").await;
+    write_router_epub_resource(
+        ctx.paths(),
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        br#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Page</title></head><body><img src="image-0.jpg"/></body></html>"#,
+    );
+    seed_epub_layout_records(
+        &ctx,
+        &["OEBPS/chapter.xhtml"],
+        &[(Some(1_200), Some(1_816))],
+    )
+    .await;
+
+    let auth_token = ctx.login_admin().await;
+
+    for route in [
+        "/api/v1/books/book-1/resource/OEBPS/chapter.xhtml",
+        "/opds/v2/books/book-1/resource/OEBPS/chapter.xhtml",
+    ] {
+        let response = ctx
+            .app()
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(route)
+                    .header("x-auth-token", &auth_token)
+                    .body(Body::empty())
+                    .expect("resource request should build"),
+            )
+            .await
+            .expect("resource request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK, "route: {route}");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("resource body should be readable");
+        let body = String::from_utf8(body.to_vec()).expect("XHTML should remain UTF-8");
+        let expected = r#"<meta name="viewport" content="width=1200, height=1816"/><style data-komga-fixed-layout="true">html, body { width: 1200px !important; height: 1816px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; } body img, body svg { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: contain !important; margin: auto !important; }</style>"#;
+        assert!(body.contains(expected), "route: {route}, body: {body}");
+    }
+}
+
+#[tokio::test]
+async fn router_book_resource_keeps_xhtml_when_divina_dimensions_are_incomplete() {
+    let ctx = TestFixture::new("router-book-resource-incomplete-divina-layout").await;
+    let original = br#"<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body><img src="image-0.jpg"/></body></html>"#;
+    write_router_epub_resource(
+        ctx.paths(),
+        "books/book-1.epub",
+        "OEBPS/chapter.xhtml",
+        original,
+    );
+    seed_epub_layout_records(
+        &ctx,
+        &["OEBPS/chapter.xhtml", "OEBPS/chapter-2.xhtml"],
+        &[(Some(1_200), Some(1_816)), (None, None)],
+    )
+    .await;
+
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-1/resource/OEBPS/chapter.xhtml")
+                .header("x-auth-token", ctx.login_admin().await)
+                .body(Body::empty())
+                .expect("resource request should build"),
+        )
+        .await
+        .expect("resource request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("resource body should be readable");
+    assert_eq!(body.as_ref(), original);
+}
+
 #[tokio::test]
 async fn router_book_resource_supports_not_modified_and_inline_content_disposition() {
     let ctx = TestFixture::new("router-book-resource-inline-not-modified").await;

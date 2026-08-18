@@ -2746,7 +2746,6 @@ dependencies = [
  "iepub",
  "image",
  "quick-xml",
- "regex",
  "serde_json",
  "zip 9.0.0-pre3",
 ]

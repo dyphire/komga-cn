@@ -15,7 +15,7 @@ pub use mobi::{
 pub use navigation::{EpubNavigation, EpubNavigationLink, decode_epub_navigation_extension};
 pub use parse::{
     EpubManifestItem, EpubParseError, EpubSpineItem, normalize_epub_resource_href,
-    normalize_epub_zip_path, parse_epub_fixed_layout, parse_epub_fixed_layout_with_heuristic,
-    parse_epub_guide_cover_href, parse_epub_manifest_items, parse_epub_metadata_cover_id,
-    parse_epub_rootfile_path, parse_epub_spine_itemrefs, parse_epub_spine_items,
+    normalize_epub_zip_path, parse_epub_fixed_layout, parse_epub_guide_cover_href,
+    parse_epub_manifest_items, parse_epub_metadata_cover_id, parse_epub_rootfile_path,
+    parse_epub_spine_itemrefs, parse_epub_spine_items,
 };
