@@ -238,7 +238,13 @@ impl TaskQueueOrchestrator {
     pub fn enqueue(&mut self, mut task: TaskQueueRecord) {
         task.order = self.next_order;
         self.next_order += 1;
-        self.tasks.push(task);
+        if let Some(existing) = self.tasks.iter_mut().find(|t| t.id == task.id) {
+            if existing.owner.is_none() {
+                *existing = task;
+            }
+        } else {
+            self.tasks.push(task);
+        }
     }
 
     pub fn take_available(&mut self, owner: &str) -> Option<TaskQueueRecord> {
