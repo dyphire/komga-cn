@@ -2543,15 +2543,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3670,9 +3661,8 @@ dependencies = [
 
 [[package]]
 name = "pdfium-render"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "826f8f64bc88cb15381cbb5aa245c1500632cd8a453b244bc2b0cbaff7098077"
+version = "0.9.4"
+source = "git+https://github.com/ajrcarey/pdfium-render.git?rev=6cee8b9a3951832ac0ff62ce4c32800278001cb8#6cee8b9a3951832ac0ff62ce4c32800278001cb8"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
@@ -3681,7 +3671,7 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "image",
- "itertools 0.15.0",
+ "itertools 0.10.5",
  "js-sys",
  "libloading",
  "log",

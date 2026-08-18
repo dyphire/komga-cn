@@ -56,6 +56,19 @@ fn prepare_pdfium_vendor(manifest_dir: &Path) {
                 manifest_dir.display()
             )
         });
+    let release_file = workspace_root.join("vendor/pdfium-release");
+    println!("cargo:rerun-if-changed={}", release_file.display());
+    let release_tag = fs::read_to_string(&release_file)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", release_file.display()))
+        .trim()
+        .to_owned();
+    if release_tag.is_empty() {
+        panic!(
+            "Pdfium release tag in {} must not be empty",
+            release_file.display()
+        );
+    }
+
     let vendor_root = workspace_root.join("vendor/pdfium-binaries");
     fs::create_dir_all(&vendor_root)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", vendor_root.display()));
@@ -71,7 +84,8 @@ fn prepare_pdfium_vendor(manifest_dir: &Path) {
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV");
 
     let asset_name = pdfium_asset_name();
-    let platform_dir = vendor_root.join(pdfium_platform_key());
+    let versioned_vendor_root = vendor_root.join(pdfium_vendor_directory_name(&release_tag));
+    let platform_dir = versioned_vendor_root.join(pdfium_platform_key());
     let extract_dir = platform_dir.join(asset_name.trim_end_matches(".tgz"));
     let library_path = extract_dir.join(pdfium_library_relative_path());
 
@@ -84,7 +98,7 @@ fn prepare_pdfium_vendor(manifest_dir: &Path) {
         fs::create_dir_all(&extract_dir)
             .unwrap_or_else(|error| panic!("failed to create {}: {error}", extract_dir.display()));
 
-        let archive_bytes = download_pdfium_archive(asset_name);
+        let archive_bytes = download_pdfium_archive(asset_name, &release_tag);
         extract_pdfium_archive(&archive_bytes, &extract_dir);
     }
 
@@ -151,10 +165,8 @@ fn pdfium_library_relative_path() -> &'static str {
     }
 }
 
-fn download_pdfium_archive(asset_name: &str) -> Vec<u8> {
-    let url = format!(
-        "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{asset_name}"
-    );
+fn download_pdfium_archive(asset_name: &str, release_tag: &str) -> Vec<u8> {
+    let url = pdfium_release_download_url(release_tag, asset_name);
     let client = Client::builder()
         .build()
         .unwrap_or_else(|error| panic!("failed to build http client for Pdfium download: {error}"));
@@ -170,6 +182,17 @@ fn download_pdfium_archive(asset_name: &str) -> Vec<u8> {
         .bytes()
         .unwrap_or_else(|error| panic!("failed to read Pdfium archive body from {url}: {error}"))
         .to_vec()
+}
+
+fn pdfium_release_download_url(release_tag: &str, asset_name: &str) -> String {
+    let encoded_release_tag = release_tag.replace('/', "%2F");
+    format!(
+        "https://github.com/bblanchon/pdfium-binaries/releases/download/{encoded_release_tag}/{asset_name}"
+    )
+}
+
+fn pdfium_vendor_directory_name(release_tag: &str) -> String {
+    release_tag.replace('/', "-")
 }
 
 fn extract_pdfium_archive(archive_bytes: &[u8], extract_dir: &Path) {
@@ -459,4 +482,19 @@ fn combine_trigger_blocks(statements: Vec<String>) -> Vec<String> {
     }
 
     combined
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pdfium_release_download_url, pdfium_vendor_directory_name};
+
+    #[test]
+    fn pdfium_release_tag_is_encoded_and_mapped_to_vendor_directory() {
+        let release_tag = "chromium/test";
+        assert_eq!(
+            pdfium_release_download_url(release_tag, "pdfium-win-x64.tgz"),
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2Ftest/pdfium-win-x64.tgz"
+        );
+        assert_eq!(pdfium_vendor_directory_name(release_tag), "chromium-test");
+    }
 }

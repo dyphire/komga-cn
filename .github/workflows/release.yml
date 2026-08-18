@@ -274,7 +274,10 @@ jobs:
           if [[ "${{ matrix.platform }}" != 'windows' ]]; then
             chmod +x "$release_dir/${{ matrix.binary_name }}"
           fi
-          pdfium_lib="komga-rust/vendor/pdfium-binaries/${{ matrix.pdfium_platform_key }}/${{ matrix.pdfium_asset_dir }}/${{ matrix.pdfium_library_path }}"
+          pdfium_release_tag="$(tr -d '\r\n' < komga-rust/vendor/pdfium-release)"
+          test -n "$pdfium_release_tag"
+          pdfium_vendor_directory="$(printf '%s' "$pdfium_release_tag" | tr '/' '-')"
+          pdfium_lib="komga-rust/vendor/pdfium-binaries/${pdfium_vendor_directory}/${{ matrix.pdfium_platform_key }}/${{ matrix.pdfium_asset_dir }}/${{ matrix.pdfium_library_path }}"
           test -f "$pdfium_lib"
           cp "$pdfium_lib" "$release_dir/${{ matrix.pdfium_library_name }}"
           pdfium_license_dir=$(dirname "$pdfium_lib")/../licenses

@@ -62,7 +62,7 @@ rust-embed = { version = "8.12.0", features = ["debug-embed"] }
 getrandom = "0.4.3"
 language-tags = "0.3.2"
 rusqlite = "0.39.0"
-pdfium-render = { version = "0.9.3", features = ["thread_safe"] }
+pdfium-render = { version = "0.9.4", git = "https://github.com/ajrcarey/pdfium-render.git", rev = "6cee8b9a3951832ac0ff62ce4c32800278001cb8", features = ["thread_safe"] }
 unrar = "0.5.8"
 unicode-normalization = "0.1.25"
 icu = "2.3.0"
