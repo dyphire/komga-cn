@@ -121,7 +121,7 @@ async fn fetch_persisted_series_summary_rows(
                    sm.LINKS_LOCK AS LINKS_LOCK,
                    sm.ALTERNATE_TITLES_LOCK AS ALTERNATE_TITLES_LOCK,
                    COALESCE(
-                     (SELECT GROUP_CONCAT(LABEL || char(30) || URL, char(30))
+                     (SELECT GROUP_CONCAT(LABEL || char(30) || URL, char(31))
                       FROM SERIES_METADATA_LINK sml
                       WHERE sml.SERIES_ID = s.ID),
                      ''
@@ -222,10 +222,10 @@ fn series_read_model(summary: SeriesSummary) -> SeriesReadModel {
 fn map_series_summary(row: SqliteRow) -> SeriesSummary {
     let links = row
         .get::<String, _>("LINKS")
-        .split_terminator(char::from(30))
-        .filter(|s| !s.is_empty())
-        .map(|entry| {
-            let (label, url) = entry.split_once(char::from(30)).unwrap_or((entry, ""));
+        .split(char::from(31))
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| {
+            let (label, url) = entry.split_once(char::from(30))?;
             SeriesSummaryLink {
                 label: label.to_string(),
                 url: url.to_string(),
