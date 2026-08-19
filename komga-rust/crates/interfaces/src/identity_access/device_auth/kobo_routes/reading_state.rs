@@ -181,6 +181,8 @@ fn kobo_reading_state_payload(reading_state: KoboReadingStateSnapshot) -> Value 
             "LastModified": reading_state.last_modified,
             "Status": reading_state.status.as_str(),
             "TimesStartedReading": reading_state.times_started_reading,
+            "LastTimeFinished": Value::Null,
+            "LastTimeStartedReading": Value::Null,
         },
     })
 }
