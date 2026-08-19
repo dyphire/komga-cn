@@ -113,6 +113,21 @@ pub(super) struct PersistedSeriesSummary {
     pub(super) books_metadata_last_modified: String,
     pub(super) deleted: bool,
     pub(super) oneshot: bool,
+    pub(super) status_lock: bool,
+    pub(super) title_lock: bool,
+    pub(super) title_sort_lock: bool,
+    pub(super) summary_lock: bool,
+    pub(super) reading_direction_lock: bool,
+    pub(super) publisher_lock: bool,
+    pub(super) age_rating_lock: bool,
+    pub(super) language_lock: bool,
+    pub(super) genres_lock: bool,
+    pub(super) tags_lock: bool,
+    pub(super) total_book_count_lock: bool,
+    pub(super) sharing_labels_lock: bool,
+    pub(super) links_lock: bool,
+    pub(super) alternate_titles_lock: bool,
+    pub(super) links: Vec<PersistedWebLinkEntry>,
 }
 
 #[derive(Clone, Debug, Default)]

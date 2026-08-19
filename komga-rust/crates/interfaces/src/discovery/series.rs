@@ -59,7 +59,8 @@ async fn series_feed(
         Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let context = to_domain_query_context(interfaces_context);
+    let context = to_domain_query_context(interfaces_context.clone());
+    let is_admin = interfaces_context.is_admin;
 
     match app
         .discovery_browse
@@ -76,6 +77,7 @@ async fn series_feed(
                 page,
                 resolved.response.paged,
                 resolved.response.sorted,
+                is_admin,
             ))
             .into_response()
         }
@@ -126,7 +128,8 @@ pub(crate) async fn series_deprecated_get(
         Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let context = to_domain_query_context(interfaces_context);
+    let context = to_domain_query_context(interfaces_context.clone());
+    let is_admin = interfaces_context.is_admin;
 
     match app
         .discovery_browse
@@ -137,6 +140,7 @@ pub(crate) async fn series_deprecated_get(
             page,
             resolved.response.paged,
             resolved.response.sorted,
+            is_admin,
         ))
         .into_response(),
         Err(e) => internal_error_response(format!("{e:?}")),
@@ -247,7 +251,8 @@ pub(crate) async fn series_list(
         Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let context = to_domain_query_context(interfaces_context);
+    let context = to_domain_query_context(interfaces_context.clone());
+    let is_admin = interfaces_context.is_admin;
 
     let resolved = match super::query::resolve_series_list_request(&uri, payload) {
         Ok(resolved) => resolved,
@@ -263,6 +268,7 @@ pub(crate) async fn series_list(
             page,
             resolved.response.paged,
             resolved.response.sorted,
+            is_admin,
         ))
         .into_response(),
         Err(DiscoveryError::InvalidSemantics(e)) => {

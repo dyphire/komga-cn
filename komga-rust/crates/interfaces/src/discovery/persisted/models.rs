@@ -33,4 +33,25 @@ pub(in crate::discovery) struct PersistedSeriesSummary {
     pub(in crate::discovery) books_metadata_last_modified: String,
     pub(in crate::discovery) deleted: bool,
     pub(in crate::discovery) oneshot: bool,
+    pub(in crate::discovery) status_lock: bool,
+    pub(in crate::discovery) title_lock: bool,
+    pub(in crate::discovery) title_sort_lock: bool,
+    pub(in crate::discovery) summary_lock: bool,
+    pub(in crate::discovery) reading_direction_lock: bool,
+    pub(in crate::discovery) publisher_lock: bool,
+    pub(in crate::discovery) age_rating_lock: bool,
+    pub(in crate::discovery) language_lock: bool,
+    pub(in crate::discovery) genres_lock: bool,
+    pub(in crate::discovery) tags_lock: bool,
+    pub(in crate::discovery) total_book_count_lock: bool,
+    pub(in crate::discovery) sharing_labels_lock: bool,
+    pub(in crate::discovery) links_lock: bool,
+    pub(in crate::discovery) alternate_titles_lock: bool,
+    pub(in crate::discovery) links: Vec<PersistedSeriesSummaryLink>,
+}
+
+#[derive(Clone)]
+pub(in crate::discovery) struct PersistedSeriesSummaryLink {
+    pub(in crate::discovery) label: String,
+    pub(in crate::discovery) url: String,
 }

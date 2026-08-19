@@ -248,6 +248,8 @@ fn kobo_reading_state_from_snapshot(
                 "LastModified": progress.last_modified,
                 "Status": status,
                 "TimesStartedReading": 1,
+                "LastTimeFinished": Value::Null,
+                "LastTimeStartedReading": Value::Null,
             },
         }))
     } else {
@@ -266,6 +268,8 @@ fn kobo_reading_state_from_snapshot(
                 "LastModified": book.created,
                 "Status": "ReadyToRead",
                 "TimesStartedReading": 0,
+                "LastTimeFinished": Value::Null,
+                "LastTimeStartedReading": Value::Null,
             },
         }))
     }
