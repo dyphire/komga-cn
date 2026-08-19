@@ -299,7 +299,14 @@ fn divina_pages<R: Read + Seek>(
     spine: &[EpubManifestItem],
     entries: &HashMap<String, ZipEntryMetadata>,
 ) -> Result<Vec<EpubAnalysisPage>, EpubAnalysisError> {
-    let mut pages = Vec::new();
+    let image_manifest: HashMap<String, &EpubManifestItem> = manifest
+        .values()
+        .filter(|item| item.media_type.starts_with("image/"))
+        .map(|item| (resource_name(&item.href), item))
+        .collect();
+
+    let mut pages = Vec::with_capacity(spine.len());
+
     for item in spine {
         let page_name = resource_name(&item.href);
         let image_name = if item.media_type.starts_with("image/") {
@@ -315,10 +322,8 @@ fn divina_pages<R: Read + Seek>(
         } else {
             return Ok(Vec::new());
         };
-        let Some(image_item) = manifest.values().find(|candidate| {
-            resource_name(&candidate.href) == image_name
-                && candidate.media_type.starts_with("image/")
-        }) else {
+
+        let Some(image_item) = image_manifest.get(&image_name) else {
             return Ok(Vec::new());
         };
         let Some(entry) = entries.get(&image_name) else {
