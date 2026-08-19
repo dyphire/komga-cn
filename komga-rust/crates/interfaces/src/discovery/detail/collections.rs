@@ -48,7 +48,8 @@ pub(crate) async fn collection_series(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let query_string = uri.query().unwrap_or_default();
-    let domain_context = to_domain_query_context(visible_context);
+    let domain_context = to_domain_query_context(visible_context.clone());
+    let is_admin = visible_context.is_admin;
     let collection = match app
         .persisted_sets
         .collection_detail(&domain_context, &collection_id)
@@ -203,6 +204,7 @@ pub(crate) async fn collection_series(
             !unpaged
         },
         false,
+        is_admin,
     ))
     .into_response()
 }

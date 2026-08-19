@@ -9,7 +9,7 @@ use crate::search::engine::SearchIndexEngine;
 use crate::search::index_lifecycle::SearchEntityType;
 
 use komga_application::discovery::{
-    BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
+    BookMetadataLinkReadModel, BookReadModel, BookTagScope, BooksBrowseRequest, DiscoveryBrowseService, DiscoveryFacetService,
     FacetKind, FacetScope, LatestBooksRequest, ReferentialTagsInclude, ReferentialTagsScope,
     ScoredSearchHit, SeriesAlphabeticalGroup, SeriesAlphabeticalGroupsRequest, SeriesBrowseRequest,
     SeriesReadModel, SeriesReadProgressCounts, SeriesReadingDirection,
@@ -246,6 +246,28 @@ fn persisted_series_to_read_model(series: &PersistedSeriesSummary) -> SeriesRead
         books_metadata_last_modified: series.books_metadata_last_modified.clone(),
         deleted: series.deleted,
         oneshot: series.oneshot,
+        status_lock: series.status_lock,
+        title_lock: series.title_lock,
+        title_sort_lock: series.title_sort_lock,
+        summary_lock: series.summary_lock,
+        reading_direction_lock: series.reading_direction_lock,
+        publisher_lock: series.publisher_lock,
+        age_rating_lock: series.age_rating_lock,
+        language_lock: series.language_lock,
+        genres_lock: series.genres_lock,
+        tags_lock: series.tags_lock,
+        total_book_count_lock: series.total_book_count_lock,
+        sharing_labels_lock: series.sharing_labels_lock,
+        links_lock: series.links_lock,
+        alternate_titles_lock: series.alternate_titles_lock,
+        links: series
+            .links
+            .iter()
+            .map(|link| BookMetadataLinkReadModel {
+                label: link.label.clone(),
+                url: link.url.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -374,6 +396,28 @@ fn persisted_series_summary(row: persisted_models::SeriesSummary) -> PersistedSe
         books_metadata_last_modified: row.books_metadata_last_modified,
         deleted: row.deleted,
         oneshot: row.oneshot,
+        status_lock: row.status_lock,
+        title_lock: row.title_lock,
+        title_sort_lock: row.title_sort_lock,
+        summary_lock: row.summary_lock,
+        reading_direction_lock: row.reading_direction_lock,
+        publisher_lock: row.publisher_lock,
+        age_rating_lock: row.age_rating_lock,
+        language_lock: row.language_lock,
+        genres_lock: row.genres_lock,
+        tags_lock: row.tags_lock,
+        total_book_count_lock: row.total_book_count_lock,
+        sharing_labels_lock: row.sharing_labels_lock,
+        links_lock: row.links_lock,
+        alternate_titles_lock: row.alternate_titles_lock,
+        links: row
+            .links
+            .into_iter()
+            .map(|link| PersistedWebLinkEntry {
+                label: link.label,
+                url: link.url,
+            })
+            .collect(),
     }
 }
 

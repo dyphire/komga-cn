@@ -1,4 +1,4 @@
-use crate::discovery::persisted::models::PersistedSeriesSummary;
+use crate::discovery::persisted::models::{PersistedSeriesSummary, PersistedSeriesSummaryLink};
 use crate::discovery::persisted::series_queries::series_page_payload;
 use komga_application::discovery::SeriesReadModel;
 use komga_domain::discovery::PageEnvelope;
@@ -42,6 +42,28 @@ fn series_read_model_to_persisted(model: &SeriesReadModel) -> PersistedSeriesSum
         books_metadata_last_modified: model.books_metadata_last_modified.clone(),
         deleted: model.deleted,
         oneshot: model.oneshot,
+        status_lock: model.status_lock,
+        title_lock: model.title_lock,
+        title_sort_lock: model.title_sort_lock,
+        summary_lock: model.summary_lock,
+        reading_direction_lock: model.reading_direction_lock,
+        publisher_lock: model.publisher_lock,
+        age_rating_lock: model.age_rating_lock,
+        language_lock: model.language_lock,
+        genres_lock: model.genres_lock,
+        tags_lock: model.tags_lock,
+        total_book_count_lock: model.total_book_count_lock,
+        sharing_labels_lock: model.sharing_labels_lock,
+        links_lock: model.links_lock,
+        alternate_titles_lock: model.alternate_titles_lock,
+        links: model
+            .links
+            .iter()
+            .map(|link| PersistedSeriesSummaryLink {
+                label: link.label.clone(),
+                url: link.url.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -49,6 +71,7 @@ pub(in crate::discovery) fn series_read_model_page_payload(
     page: PageEnvelope<SeriesReadModel>,
     paged: bool,
     sorted: bool,
+    is_admin: bool,
 ) -> Value {
     let converted = PageEnvelope {
         content: page
@@ -61,5 +84,5 @@ pub(in crate::discovery) fn series_read_model_page_payload(
         total_elements: page.total_elements,
         total_pages: page.total_pages,
     };
-    series_page_payload(converted, paged, sorted)
+    series_page_payload(converted, paged, sorted, is_admin)
 }

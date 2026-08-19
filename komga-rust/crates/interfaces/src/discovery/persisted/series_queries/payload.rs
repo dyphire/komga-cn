@@ -9,8 +9,9 @@ pub(in crate::discovery) fn series_page_payload(
     page: PageEnvelope<PersistedSeriesSummary>,
     paged: bool,
     sorted: bool,
+    is_admin: bool,
 ) -> Value {
-    let content = page.content.iter().map(series_payload).collect::<Vec<_>>();
+    let content = page.content.iter().map(|series| series_payload(series, is_admin)).collect::<Vec<_>>();
     let offset = page.page.saturating_mul(page.size);
 
     page_payload(
@@ -27,36 +28,42 @@ pub(in crate::discovery) fn series_page_payload(
     )
 }
 
-fn series_payload(series: &PersistedSeriesSummary) -> Value {
+fn series_payload(series: &PersistedSeriesSummary, is_admin: bool) -> Value {
+    let url = if is_admin {
+        series.name.as_str()
+    } else {
+        ""
+    };
+
     let metadata = json!({
         "status": series.status.as_str(),
-        "statusLock": false,
+        "statusLock": series.status_lock,
         "title": series.title.as_str(),
-        "titleLock": false,
+        "titleLock": series.title_lock,
         "titleSort": series.title_sort.as_str(),
-        "titleSortLock": false,
+        "titleSortLock": series.title_sort_lock,
         "summary": series.summary.as_str(),
-        "summaryLock": false,
+        "summaryLock": series.summary_lock,
         "readingDirection": series.reading_direction.as_str(),
-        "readingDirectionLock": false,
+        "readingDirectionLock": series.reading_direction_lock,
         "publisher": series.publisher.as_str(),
-        "publisherLock": false,
+        "publisherLock": series.publisher_lock,
         "ageRating": series.age_rating,
-        "ageRatingLock": false,
+        "ageRatingLock": series.age_rating_lock,
         "language": series.language.as_str(),
-        "languageLock": false,
+        "languageLock": series.language_lock,
         "genres": series.genres.clone(),
-        "genresLock": false,
+        "genresLock": series.genres_lock,
         "tags": series.tags.clone(),
-        "tagsLock": false,
+        "tagsLock": series.tags_lock,
         "totalBookCount": null,
-        "totalBookCountLock": false,
+        "totalBookCountLock": series.total_book_count_lock,
         "sharingLabels": series.labels.clone(),
-        "sharingLabelsLock": false,
-        "links": [],
-        "linksLock": false,
+        "sharingLabelsLock": series.sharing_labels_lock,
+        "links": series.links.iter().map(|link| json!({ "label": link.label, "url": link.url })).collect::<Vec<_>>(),
+        "linksLock": series.links_lock,
         "alternateTitles": alternate_title_payloads(&series.alternate_titles),
-        "alternateTitlesLock": false,
+        "alternateTitlesLock": series.alternate_titles_lock,
         "created": normalized_date_time(&series.metadata_created),
         "lastModified": normalized_date_time(&series.metadata_last_modified)
     });
@@ -75,7 +82,7 @@ fn series_payload(series: &PersistedSeriesSummary) -> Value {
         "id": series.id.as_str(),
         "libraryId": series.library_id.as_str(),
         "name": series.name.as_str(),
-        "url": format!("series/{}", series.id),
+        "url": url,
         "created": normalized_date_time(&series.created),
         "lastModified": normalized_date_time(&series.last_modified),
         "fileLastModified": normalized_file_last_modified(&series.file_last_modified),
@@ -162,12 +169,28 @@ mod tests {
                     books_metadata_last_modified: "2024-01-06 00:00:00".to_string(),
                     deleted: false,
                     oneshot: true,
+                    status_lock: false,
+                    title_lock: false,
+                    title_sort_lock: false,
+                    summary_lock: false,
+                    reading_direction_lock: false,
+                    publisher_lock: false,
+                    age_rating_lock: false,
+                    language_lock: false,
+                    genres_lock: false,
+                    tags_lock: false,
+                    total_book_count_lock: false,
+                    sharing_labels_lock: false,
+                    links_lock: false,
+                    alternate_titles_lock: false,
+                    links: vec![],
                 }],
                 page: 0,
                 size: 20,
                 total_elements: 1,
                 total_pages: 1,
             },
+            true,
             true,
             true,
         );
