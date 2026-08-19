@@ -198,6 +198,35 @@ mod tests {
         zip.finish().expect("invalid cbz fixture should finish");
     }
 
+    fn write_kepub_fixture(path: &std::path::Path) {
+        let file = File::create(path).expect("KEPUB fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        for (name, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+            ),
+            (
+                "content.opf",
+                br#"<package><manifest><item id="page" href="page.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="page"/></spine></package>"#,
+            ),
+            (
+                "page.xhtml",
+                br#"<html><body><span class="koboSpan" id="kobo.1.1">Text</span></body></html>"#,
+            ),
+        ] {
+            zip.start_file(name, options)
+                .expect("KEPUB fixture entry should be created");
+            zip.write_all(bytes)
+                .expect("KEPUB fixture entry should be written");
+        }
+        zip.finish().expect("KEPUB fixture should finish");
+    }
+
     async fn open_bootstrapped_main_pool(database_file: &std::path::Path) -> SqlitePool {
         let context = connect_main_write_context(database_file)
             .await
@@ -371,6 +400,17 @@ mod tests {
             status: row.get("STATUS"),
             page_count: row.get("PAGE_COUNT"),
         }
+    }
+
+    async fn load_persisted_epub_capabilities(pool: &SqlitePool, book_id: &str) -> (bool, bool) {
+        let row = sqlx::query(
+            "SELECT EPUB_DIVINA_COMPATIBLE, EPUB_IS_KEPUB FROM MEDIA WHERE BOOK_ID = ? LIMIT 1",
+        )
+        .bind(book_id)
+        .fetch_one(pool)
+        .await
+        .expect("EPUB capabilities should be queryable");
+        (row.get("EPUB_DIVINA_COMPATIBLE"), row.get("EPUB_IS_KEPUB"))
     }
 
     fn analyzed_fixture_page_count(file_name: &str, _book_url: &str) -> i64 {
@@ -669,6 +709,68 @@ mod tests {
             ],
             "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
         );
+
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn analyze_book_persists_and_clears_epub_capabilities() {
+        let fixture = RuntimeTestFixture::new("analyze-book-epub-capabilities");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("EPUB analysis library root should be created");
+        let book_path = fixture.library_root.join("books/book-1.epub");
+        std::fs::copy(archive_fixture_path("epub3.epub"), &book_path)
+            .expect("fixed-layout EPUB fixture should be copied");
+
+        let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
+        insert_library(&pool, &fixture.library_root, false).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.epub",
+            "library-1",
+            "series-1",
+            None,
+        )
+        .await;
+        pool.close().await;
+
+        let runtime = fixture.runtime_context(false, false).await;
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("fixed-layout EPUB analysis should succeed");
+
+        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
+            .await
+            .expect("EPUB capabilities verify db should open");
+        assert_eq!(
+            load_persisted_epub_capabilities(&verify_pool, "book-1").await,
+            (true, false),
+        );
+
+        write_kepub_fixture(&book_path);
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("KEPUB analysis should succeed");
+        assert_eq!(
+            load_persisted_epub_capabilities(&verify_pool, "book-1").await,
+            (false, true),
+        );
+
+        let reflowable_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/epub/The Incomplete Theft - Ralph Burke.epub");
+        std::fs::copy(reflowable_path, &book_path)
+            .expect("reflowable EPUB fixture should replace KEPUB fixture");
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("reflowable EPUB reanalysis should succeed");
+        assert_eq!(
+            load_persisted_epub_capabilities(&verify_pool, "book-1").await,
+            (false, false),
+        );
+        verify_pool.close().await;
 
         fixture.cleanup().await;
     }

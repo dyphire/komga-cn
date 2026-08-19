@@ -26,6 +26,8 @@ pub(super) struct AnalyzedBookMedia {
     pub(super) status: MediaStatus,
     pub(super) media_type: String,
     pub(super) page_count: u64,
+    pub(super) epub_divina_compatible: bool,
+    pub(super) epub_is_kepub: bool,
     pub(super) pages: Vec<AnalyzedBookPage>,
     pub(super) media_files: Vec<AnalyzedBookMediaFile>,
     pub(super) epub_extension_blob: Option<Vec<u8>>,
@@ -163,18 +165,24 @@ pub(super) async fn persist_book_analysis(
             BOOK_ID,
             STATUS,
             MEDIA_TYPE,
-            PAGE_COUNT
-        ) VALUES (?, ?, ?, ?)
+            PAGE_COUNT,
+            EPUB_DIVINA_COMPATIBLE,
+            EPUB_IS_KEPUB
+        ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(BOOK_ID) DO UPDATE
         SET STATUS = excluded.STATUS,
             MEDIA_TYPE = excluded.MEDIA_TYPE,
             PAGE_COUNT = excluded.PAGE_COUNT,
+            EPUB_DIVINA_COMPATIBLE = excluded.EPUB_DIVINA_COMPATIBLE,
+            EPUB_IS_KEPUB = excluded.EPUB_IS_KEPUB,
             LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
     )
     .bind(book_id)
     .bind(analysis.status.persisted_name())
     .bind(&analysis.media_type)
     .bind(analysis.page_count.min(i32::MAX as u64) as i32)
+    .bind(analysis.epub_divina_compatible)
+    .bind(analysis.epub_is_kepub)
     .execute(&mut *tx)
     .await
     .context("failed to persist MEDIA analyze state")?;

@@ -85,6 +85,8 @@ pub(crate) struct MediaFileAnalysis {
     pub(crate) status: MediaStatus,
     pub(crate) media_type: String,
     pub(crate) page_count: u64,
+    pub(crate) epub_divina_compatible: bool,
+    pub(crate) epub_is_kepub: bool,
     pub(crate) pages: Vec<AnalyzedMediaPage>,
     pub(crate) files: Vec<String>,
     pub(crate) media_files: Vec<AnalyzedMediaFile>,
@@ -104,6 +106,8 @@ pub(crate) struct MediaFileAnalyzer;
 #[derive(Default)]
 struct AnalyzedMediaFileContents {
     page_count: u64,
+    epub_divina_compatible: bool,
+    epub_is_kepub: bool,
     pages: Vec<AnalyzedMediaPage>,
     files: Vec<String>,
     media_files: Vec<AnalyzedMediaFile>,
@@ -115,6 +119,8 @@ fn empty_media_analysis(status: MediaStatus, media_type: String) -> MediaFileAna
         status,
         media_type,
         page_count: 0,
+        epub_divina_compatible: false,
+        epub_is_kepub: false,
         pages: Vec::new(),
         files: Vec::new(),
         media_files: Vec::new(),
@@ -180,6 +186,8 @@ impl MediaFileAnalyzer {
             status,
             media_type,
             page_count,
+            epub_divina_compatible: contents.epub_divina_compatible,
+            epub_is_kepub: contents.epub_is_kepub,
             pages: contents.pages,
             files: contents.files,
             media_files: contents.media_files,
@@ -552,6 +560,8 @@ fn analyze_epub_media_pages(
 
     Ok(AnalyzedMediaFileContents {
         page_count: analysis.page_count,
+        epub_divina_compatible: analysis.divina_compatible,
+        epub_is_kepub: analysis.is_kepub,
         pages,
         files: analysis.files,
         media_files,
@@ -653,6 +663,8 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
 
     Ok(AnalyzedMediaFileContents {
         page_count: publication.page_count,
+        epub_divina_compatible: false,
+        epub_is_kepub: false,
         pages,
         files,
         media_files,
@@ -1169,6 +1181,8 @@ mod tests {
             .expect("EPUB fixture analysis should succeed");
 
         assert_eq!(analysis.status, MediaStatus::Ready);
+        assert!(!analysis.epub_divina_compatible);
+        assert!(!analysis.epub_is_kepub);
         assert!(
             analysis.pages.is_empty(),
             "reflowable EPUB content must not be persisted as image pages"
@@ -1178,6 +1192,25 @@ mod tests {
             analysis.epub_extension_blob.is_some(),
             "EPUB analysis must persist its extension metadata"
         );
+    }
+
+    #[test]
+    fn persisted_epub_analysis_marks_complete_image_mapping_as_divina_compatible() {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/epub3.epub");
+
+        let analysis = MediaFileAnalyzer
+            .analyze(
+                &fixture_path,
+                MediaAnalysisProfile::PersistedBook {
+                    include_dimensions: false,
+                },
+            )
+            .expect("fixed-layout EPUB fixture analysis should succeed");
+
+        assert_eq!(analysis.status, MediaStatus::Ready);
+        assert!(analysis.epub_divina_compatible);
+        assert_eq!(analysis.pages.len(), 2);
     }
 
     #[test]

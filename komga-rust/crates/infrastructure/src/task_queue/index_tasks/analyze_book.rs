@@ -50,6 +50,8 @@ pub(in crate::task_queue) async fn analyze_book(
         status: analysis.status,
         media_type: analysis.media_type,
         page_count: analysis.page_count,
+        epub_divina_compatible: analysis.epub_divina_compatible,
+        epub_is_kepub: analysis.epub_is_kepub,
         pages: analysis
             .pages
             .into_iter()

@@ -58,6 +58,8 @@ pub struct EpubAnalysisFile {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EpubAnalysis {
     pub page_count: u64,
+    pub divina_compatible: bool,
+    pub is_kepub: bool,
     pub pages: Vec<EpubAnalysisPage>,
     pub files: Vec<String>,
     pub media_files: Vec<EpubAnalysisFile>,
@@ -107,17 +109,18 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     }
 
     let pages = divina_pages(&mut archive, &manifest, &spine, &entries)?;
+    let divina_compatible = !pages.is_empty();
     let is_fixed_layout = parse_epub_fixed_layout(&package)
         .map_err(parse_error("parse EPUB fixed-layout metadata"))?
-        || !pages.is_empty();
-    let page_count = if pages.is_empty() {
+        || divina_compatible;
+    let page_count = if divina_compatible {
+        pages.len() as u64
+    } else {
         spine
             .iter()
             .filter_map(|item| entries.get(&resource_name(&item.href)))
             .map(|entry| entry.compressed_size.div_ceil(1024))
             .sum()
-    } else {
-        pages.len() as u64
     };
     let is_kepub = is_kepub(&mut archive, &spine)?;
     let positions = positions(
@@ -139,6 +142,8 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
 
     Ok(EpubAnalysis {
         page_count,
+        divina_compatible,
+        is_kepub,
         pages,
         files,
         media_files,
@@ -984,6 +989,7 @@ mod tests {
         ))
         .expect("reflowable EPUB should analyze");
         assert_eq!(reflowable.page_count, 14);
+        assert!(!reflowable.divina_compatible);
         assert!(reflowable.pages.is_empty());
         assert_eq!(
             reflowable
@@ -1008,6 +1014,7 @@ mod tests {
         let fixed_layout = analyze_epub_file(&repository_resource("archives/epub3.epub"))
             .expect("fixed-layout EPUB should analyze");
         assert_eq!(fixed_layout.page_count, 2);
+        assert!(fixed_layout.divina_compatible);
         assert_eq!(fixed_layout.pages.len(), 2);
         let fixed_layout_navigation =
             decode_epub_navigation_extension(&fixed_layout.extension_blob)
