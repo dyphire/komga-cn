@@ -222,16 +222,6 @@ pub(super) async fn persist_book_analysis(
         })?;
     }
 
-    sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?")
-        .bind(book_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to refresh BOOK last-modified during analyze for '{book_id}': "
-            ))
-        })?;
-
     tx.commit().await.map_err(|error| {
         anyhow::anyhow!(error).context(format!(
             "failed to commit analyze-book transaction for '{book_id}': "
