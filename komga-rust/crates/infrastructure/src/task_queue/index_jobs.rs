@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn analyze_book_enqueues_thumbnail_and_metadata_follow_ups_when_ready() {
+    async fn analyze_book_enqueues_follow_ups_without_touching_book_last_modified() {
         let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
         let runtime = fixture.runtime_context(false, false).await;
         let scheduler =
@@ -728,6 +728,18 @@ mod tests {
             .priority(90)
             .group("series-1")
             .into_queue_record();
+
+        let expected_last_modified = "2000-01-01 00:00:00";
+        let pool_before = connect_test_pool(fixture.database_file.as_path(), 1)
+            .await
+            .expect("analyze-book follow-up precondition db should open");
+        sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
+            .bind(expected_last_modified)
+            .bind("book-1")
+            .execute(&pool_before)
+            .await
+            .expect("analyze-book follow-up book timestamp should be pinned");
+        pool_before.close().await;
 
         let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
         assert!(matches!(result, Some(Ok(()))));
@@ -765,9 +777,10 @@ mod tests {
             ],
             "analyze-book should persist page dimensions when library ANALYZE_DIMENSIONS is enabled",
         );
-        assert!(
-            book_row.get::<String, _>("LAST_MODIFIED_DATE") != "2000-01-01 00:00:00",
-            "ready analyze-book should refresh BOOK last-modified for downstream SSE visibility",
+        assert_eq!(
+            book_row.get::<String, _>("LAST_MODIFIED_DATE"),
+            expected_last_modified,
+            "ready analyze-book should not refresh BOOK last-modified",
         );
 
         let mut queued = Vec::new();
