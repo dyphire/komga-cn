@@ -7,9 +7,9 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
-use serde_json::json;
 
 use crate::cache::asset_ok_response;
+use crate::contracts::media_assets::ReadListThumbnailDto;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::MediaAssetsState;
 
@@ -90,26 +90,15 @@ pub(crate) async fn readlist_thumbnails(
         Ok(rows) => {
             if !rows.is_empty() {
                 return Json(
-                    rows.into_iter()
-                        .map(|row| {
-                            json!({
-                                "id": row.id,
-                                "readListId": row.readlist_id,
-                                "type": row.thumbnail_type.persisted_name(),
-                                "selected": row.selected,
-                                "mediaType": row.media_type,
-                                "fileSize": row.file_size,
-                                "width": row.width,
-                                "height": row.height,
-                            })
-                        })
+                    rows.iter()
+                        .map(ReadListThumbnailDto::from_record)
                         .collect::<Vec<_>>(),
                 )
                 .into_response();
             }
 
             match readlist_exists(&app, &readlist_id).await {
-                Ok(true) => return Json(json!([])).into_response(),
+                Ok(true) => return Json(Vec::<ReadListThumbnailDto>::new()).into_response(),
                 Ok(false) => {}
                 Err(response) => return response,
             }
@@ -180,17 +169,7 @@ pub(crate) async fn readlist_thumbnail_upload(
         )
         .await
     {
-        Ok(thumbnail) => Json(json!({
-            "id": thumbnail.id,
-            "readListId": thumbnail.readlist_id,
-            "type": thumbnail.thumbnail_type.persisted_name(),
-            "selected": thumbnail.selected,
-            "mediaType": thumbnail.media_type,
-            "fileSize": thumbnail.file_size,
-            "width": thumbnail.width,
-            "height": thumbnail.height,
-        }))
-        .into_response(),
+        Ok(thumbnail) => Json(ReadListThumbnailDto::from_record(&thumbnail)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }

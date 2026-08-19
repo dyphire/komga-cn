@@ -4,11 +4,10 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::DeviceSyncPort;
-use serde_json::Value;
 
 use super::{
     ensure_kobo_book_access, proxied_missing_kobo_book_response,
-    wire::build_kobo_book_metadata_payload,
+    wire::{KoboBookMetadataWire, build_kobo_book_metadata_payload},
 };
 use crate::access_log::RequestConnectionInfo;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
@@ -70,7 +69,7 @@ pub(crate) async fn kobo_library_book_metadata(
                     Err(status) => return status.into_response(),
                 }
             }
-            return Json(Value::Array(Vec::new())).into_response();
+            return Json(Vec::<KoboBookMetadataWire>::new()).into_response();
         }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };

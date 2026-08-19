@@ -8,8 +8,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
 use komga_application::identity_access::AuthUser;
-use serde_json::json;
 
+use crate::contracts::media_assets::BookThumbnailDto;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::media_assets::types::PersistedBookMedia;
 use crate::state::MediaAssetsState;
@@ -161,7 +161,7 @@ pub(crate) async fn book_thumbnails(
             if rows.is_empty() {
                 match app.thumbnail_reader.book_exists(&book_id).await {
                     Ok(true) => {
-                        return Json(json!([])).into_response();
+                        return Json(Vec::<BookThumbnailDto>::new()).into_response();
                     }
                     Ok(false) => {}
                     Err(error) => return internal_error_response(error),
@@ -171,19 +171,8 @@ pub(crate) async fn book_thumbnails(
             }
 
             Json(
-                rows.into_iter()
-                    .map(|row| {
-                        json!({
-                            "id": row.id,
-                            "bookId": row.book_id,
-                            "type": row.thumbnail_type.persisted_name(),
-                            "selected": row.selected,
-                            "mediaType": row.media_type,
-                            "fileSize": row.file_size,
-                            "width": row.width,
-                            "height": row.height,
-                        })
-                    })
+                rows.iter()
+                    .map(BookThumbnailDto::from_record)
                     .collect::<Vec<_>>(),
             )
             .into_response()
@@ -224,17 +213,7 @@ pub(crate) async fn book_thumbnail_upload(
         )
         .await
     {
-        Ok(thumbnail) => Json(json!({
-            "id": thumbnail.id,
-            "bookId": thumbnail.book_id,
-            "type": thumbnail.thumbnail_type.persisted_name(),
-            "selected": thumbnail.selected,
-            "mediaType": thumbnail.media_type,
-            "fileSize": thumbnail.file_size,
-            "width": thumbnail.width,
-            "height": thumbnail.height,
-        }))
-        .into_response(),
+        Ok(thumbnail) => Json(BookThumbnailDto::from_record(&thumbnail)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }

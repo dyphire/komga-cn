@@ -8,9 +8,10 @@ use komga_application::media_assets::{
     BookImportSubmissionFailure, BookImportSubmissionFailureKind, BooksImportEntry,
     BooksImportPayload, ImportCopyMode,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::error;
 
+use crate::helpers::spring_error_response;
 use crate::identity_access::auth::Admin;
 use crate::state::MediaAssetsState;
 
@@ -22,11 +23,7 @@ pub(crate) async fn books_import(
     let payload = match parse_books_import_request_body(&body) {
         Ok(payload) => payload,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("{error:#}") })),
-            )
-                .into_response();
+            return spring_error_response(StatusCode::BAD_REQUEST, error);
         }
     };
 
@@ -60,11 +57,7 @@ fn books_import_submission_response(failures: Vec<BookImportSubmissionFailure>) 
     }
 
     if let Some(error) = first_error {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": error })),
-        )
-            .into_response();
+        return spring_error_response(StatusCode::INTERNAL_SERVER_ERROR, error);
     }
 
     StatusCode::ACCEPTED.into_response()

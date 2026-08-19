@@ -1,6 +1,5 @@
 mod actuator;
 mod cors;
-mod helpers;
 mod nextui_assets;
 mod settings;
 mod sse;

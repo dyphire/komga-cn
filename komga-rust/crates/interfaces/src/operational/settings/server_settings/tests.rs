@@ -10,14 +10,15 @@ use axum::body::{Bytes, to_bytes};
 use axum::http::StatusCode;
 use komga_application::identity_access::{AuthUser, AuthUserRole};
 use komga_application::operational::{
-    HttpServerRequestsState, ServerSettingChange, ServerSettingsPort, ServerSettingsService,
-    StartupTimingState,
+    HttpServerRequestsState, ServerSettingChange, ServerSettingPatch, ServerSettingsPort,
+    ServerSettingsService, StartupTimingState,
 };
 use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,
 };
 use komga_infrastructure::ServerSettingsStore;
+use serde_json::json;
 
 use crate::identity_access::auth::Admin;
 use crate::state::OperationalState;
@@ -28,10 +29,17 @@ use crate::state::{
 
 #[test]
 fn settings_update_command_parses_thumbnail_size_at_transport_boundary() {
-    let command = settings_update_command(&json!({ "thumbnailSize": "XLARGE" }))
-        .expect("valid thumbnail size should parse");
+    let command = settings_update_command(&json!({
+        "thumbnailSize": "XLARGE",
+        "kepubifyPath": "/usr/bin/kepubify",
+    }))
+    .expect("valid thumbnail size should parse");
 
     assert_eq!(command.thumbnail_size, Some(ThumbnailSize::XLarge));
+    assert_eq!(
+        command.kepubify_path,
+        ServerSettingPatch::Set("/usr/bin/kepubify".to_string())
+    );
     assert_eq!(
         settings_update_command(&json!({ "thumbnailSize": "small" }))
             .expect_err("invalid thumbnail size should fail")
@@ -117,7 +125,13 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
     let response = update_server_settings(
         State(test_server_settings_state(&app)),
         Admin(admin_user()),
-        Bytes::from(serde_json::json!({ "deleteEmptyCollections": true }).to_string()),
+        Bytes::from(
+            serde_json::json!({
+                "deleteEmptyCollections": true,
+                "kepubifyPath": "/usr/bin/kepubify",
+            })
+            .to_string(),
+        ),
     )
     .await;
 
@@ -135,6 +149,10 @@ async fn update_server_settings_skips_task_pool_apply_when_payload_omits_change(
     assert_eq!(
         persisted.get("DELETE_EMPTY_COLLECTIONS"),
         Some(&Some("true".to_string()))
+    );
+    assert_eq!(
+        persisted.get("KEPUBIFY_PATH"),
+        Some(&Some("/usr/bin/kepubify".to_string()))
     );
 
     cleanup_fixture(fixture.root).await;
@@ -174,7 +192,7 @@ async fn get_server_settings_does_not_apply_runtime_task_pool_size() {
 }
 
 #[tokio::test]
-async fn get_server_settings_returns_empty_string_placeholders_for_missing_string_sources() {
+async fn get_server_settings_preserves_null_string_sources() {
     let fixture = sqlite_fixture("string-placeholders").await;
 
     let state = test_operational_state(fixture.root.clone());
@@ -193,13 +211,22 @@ async fn get_server_settings_returns_empty_string_placeholders_for_missing_strin
     let response_body: Value =
         serde_json::from_slice(&response_body).expect("settings response should be valid JSON");
 
-    let placeholder = json!({
-        "configurationSource": "",
-        "databaseSource": "",
-        "effectiveValue": "",
-    });
-    assert_eq!(response_body.get("serverContextPath"), Some(&placeholder));
-    assert_eq!(response_body.get("kepubifyPath"), Some(&placeholder));
+    assert_eq!(
+        response_body.get("serverContextPath"),
+        Some(&json!({
+            "configurationSource": null,
+            "databaseSource": null,
+            "effectiveValue": "",
+        }))
+    );
+    assert_eq!(
+        response_body.get("kepubifyPath"),
+        Some(&json!({
+            "configurationSource": null,
+            "databaseSource": null,
+            "effectiveValue": null,
+        }))
+    );
 
     cleanup_fixture(fixture.root).await;
 }

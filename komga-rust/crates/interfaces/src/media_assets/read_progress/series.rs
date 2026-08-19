@@ -5,27 +5,16 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::resolve_persisted_series_id;
 use komga_application::identity_access::user_id;
-use serde_json::{Value, json};
+use serde_json::Value;
 
+use crate::contracts::media_assets::TachiyomiSeriesProgressDto;
+use crate::helpers::spring_error_response;
 use crate::identity_access::auth::Authenticated;
 use crate::media_assets::access_control::{
     user_can_access_series_media, user_has_unrestricted_all_libraries,
 };
 use crate::media_assets::http_helpers::internal_error_response;
 use crate::state::MediaAssetsState;
-
-fn series_tachiyomi_progress_payload(
-    progress: komga_application::media_assets::SeriesTachiyomiProgress,
-) -> Value {
-    json!({
-        "booksCount": progress.books_count,
-        "booksReadCount": progress.books_read_count,
-        "booksUnreadCount": progress.books_unread_count,
-        "booksInProgressCount": progress.books_in_progress_count,
-        "lastReadContinuousNumberSort": progress.last_read_continuous_number_sort,
-        "maxNumberSort": progress.max_number_sort,
-    })
-}
 
 async fn series_exists(app: &MediaAssetsState, series_id: &str) -> Result<bool, Response> {
     app.read_progress_reader
@@ -122,7 +111,7 @@ pub(crate) async fn series_tachiyomi_read_progress_get(
         .series_tachiyomi_progress(&resolved_series_id, user_id(&user))
         .await
     {
-        Ok(progress) => Json(series_tachiyomi_progress_payload(progress)).into_response(),
+        Ok(progress) => Json(TachiyomiSeriesProgressDto::from(progress)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -134,21 +123,19 @@ pub(crate) async fn series_tachiyomi_read_progress_put(
     body: Bytes,
 ) -> Response {
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return (
+        return spring_error_response(
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "invalid tachiyomi series read progress payload" })),
-        )
-            .into_response();
+            "invalid tachiyomi series read progress payload",
+        );
     };
     let Some(last_number_sort_read) = payload
         .get("lastBookNumberSortRead")
         .and_then(Value::as_f64)
     else {
-        return (
+        return spring_error_response(
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "lastBookNumberSortRead must be a number" })),
-        )
-            .into_response();
+            "lastBookNumberSortRead must be a number",
+        );
     };
 
     let resolved_series_id =

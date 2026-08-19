@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use komga_application::discovery::{
     BrowseContext, SeriesBrowseQuery, SeriesEvaluationContext, SeriesReadingDirection, SeriesRow,
-    SeriesSortMode, WebLinkEntry, collect_series_release_date_offsets, filter_and_paginate_series,
+    SeriesSortMode, collect_series_release_date_offsets, filter_and_paginate_series,
     series_condition_needs_collection_memberships, series_condition_needs_read_progress,
     series_condition_needs_total_book_counts,
 };
@@ -11,7 +11,7 @@ use komga_domain::discovery::{
 };
 
 use super::super::models::{
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary, PersistedWebLinkEntry,
+    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
 };
 use super::super::{DiscoveryQueryContext, PersistedDiscoveryBrowseDataSource};
 
@@ -211,6 +211,7 @@ fn to_series_row(row: PersistedSeriesSummary) -> SeriesRow {
         id: row.id,
         library_id: row.library_id,
         name: row.name,
+        url: row.url,
         title: row.title,
         title_sort: row.title_sort,
         labels: row.labels,
@@ -222,14 +223,30 @@ fn to_series_row(row: PersistedSeriesSummary) -> SeriesRow {
         books_unread_count: row.books_unread_count,
         books_in_progress_count: row.books_in_progress_count,
         status: SeriesStatus::parse(&row.status).unwrap_or(SeriesStatus::Ongoing),
+        status_lock: row.status_lock,
         summary: row.summary,
+        summary_lock: row.summary_lock,
         reading_direction: SeriesReadingDirection::parse(&row.reading_direction),
+        reading_direction_lock: row.reading_direction_lock,
         publisher: row.publisher,
+        publisher_lock: row.publisher_lock,
         age_rating: row.age_rating,
+        age_rating_lock: row.age_rating_lock,
         language: row.language,
+        language_lock: row.language_lock,
         genres: row.genres,
+        genres_lock: row.genres_lock,
         tags: row.tags,
+        tags_lock: row.tags_lock,
+        total_book_count: row.total_book_count,
+        total_book_count_lock: row.total_book_count_lock,
+        sharing_labels_lock: row.sharing_labels_lock,
+        links: row.links,
+        links_lock: row.links_lock,
         alternate_titles: row.alternate_titles,
+        alternate_titles_lock: row.alternate_titles_lock,
+        title_lock: row.title_lock,
+        title_sort_lock: row.title_sort_lock,
         metadata_created: row.metadata_created,
         metadata_last_modified: row.metadata_last_modified,
         books_metadata_authors: row.books_metadata_authors,
@@ -241,28 +258,6 @@ fn to_series_row(row: PersistedSeriesSummary) -> SeriesRow {
         books_metadata_last_modified: row.books_metadata_last_modified,
         deleted: row.deleted,
         oneshot: row.oneshot,
-        status_lock: row.status_lock,
-        title_lock: row.title_lock,
-        title_sort_lock: row.title_sort_lock,
-        summary_lock: row.summary_lock,
-        reading_direction_lock: row.reading_direction_lock,
-        publisher_lock: row.publisher_lock,
-        age_rating_lock: row.age_rating_lock,
-        language_lock: row.language_lock,
-        genres_lock: row.genres_lock,
-        tags_lock: row.tags_lock,
-        total_book_count_lock: row.total_book_count_lock,
-        sharing_labels_lock: row.sharing_labels_lock,
-        links_lock: row.links_lock,
-        alternate_titles_lock: row.alternate_titles_lock,
-        links: row
-            .links
-            .into_iter()
-            .map(|link| WebLinkEntry {
-                label: link.label,
-                url: link.url,
-            })
-            .collect(),
     }
 }
 
@@ -271,6 +266,7 @@ fn series_row_to_persisted(row: SeriesRow) -> PersistedSeriesSummary {
         id: row.id,
         library_id: row.library_id,
         name: row.name,
+        url: row.url,
         title: row.title,
         title_sort: row.title_sort,
         labels: row.labels,
@@ -282,17 +278,33 @@ fn series_row_to_persisted(row: SeriesRow) -> PersistedSeriesSummary {
         books_unread_count: row.books_unread_count,
         books_in_progress_count: row.books_in_progress_count,
         status: row.status.persisted_name().to_string(),
+        status_lock: row.status_lock,
         summary: row.summary,
+        summary_lock: row.summary_lock,
         reading_direction: row
             .reading_direction
             .map(|value| value.persisted_name().to_string())
             .unwrap_or_default(),
+        reading_direction_lock: row.reading_direction_lock,
         publisher: row.publisher,
+        publisher_lock: row.publisher_lock,
         age_rating: row.age_rating,
+        age_rating_lock: row.age_rating_lock,
         language: row.language,
+        language_lock: row.language_lock,
         genres: row.genres,
+        genres_lock: row.genres_lock,
         tags: row.tags,
+        tags_lock: row.tags_lock,
+        total_book_count: row.total_book_count,
+        total_book_count_lock: row.total_book_count_lock,
+        sharing_labels_lock: row.sharing_labels_lock,
+        links: row.links,
+        links_lock: row.links_lock,
         alternate_titles: row.alternate_titles,
+        alternate_titles_lock: row.alternate_titles_lock,
+        title_lock: row.title_lock,
+        title_sort_lock: row.title_sort_lock,
         metadata_created: row.metadata_created,
         metadata_last_modified: row.metadata_last_modified,
         books_metadata_authors: row.books_metadata_authors,
@@ -304,28 +316,6 @@ fn series_row_to_persisted(row: SeriesRow) -> PersistedSeriesSummary {
         books_metadata_last_modified: row.books_metadata_last_modified,
         deleted: row.deleted,
         oneshot: row.oneshot,
-        status_lock: row.status_lock,
-        title_lock: row.title_lock,
-        title_sort_lock: row.title_sort_lock,
-        summary_lock: row.summary_lock,
-        reading_direction_lock: row.reading_direction_lock,
-        publisher_lock: row.publisher_lock,
-        age_rating_lock: row.age_rating_lock,
-        language_lock: row.language_lock,
-        genres_lock: row.genres_lock,
-        tags_lock: row.tags_lock,
-        total_book_count_lock: row.total_book_count_lock,
-        sharing_labels_lock: row.sharing_labels_lock,
-        links_lock: row.links_lock,
-        alternate_titles_lock: row.alternate_titles_lock,
-        links: row
-            .links
-            .into_iter()
-            .map(|link| PersistedWebLinkEntry {
-                label: link.label,
-                url: link.url,
-            })
-            .collect(),
     }
 }
 

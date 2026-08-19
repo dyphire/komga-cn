@@ -1,27 +1,11 @@
-use super::common_helpers::{PagePayloadMetadata, page_payload};
-use komga_application::discovery::PersistedAuthorEntry;
-use serde_json::{Value, json};
+use crate::contracts::common::PageDto;
 
-pub(in crate::discovery) fn authors_v2_page_payload(
-    authors: Vec<PersistedAuthorEntry>,
+pub(in crate::discovery) fn paged_values_payload<T>(
+    values: Vec<T>,
     page: usize,
     size: usize,
     unpaged: bool,
-) -> Value {
-    paged_values_payload(
-        authors.into_iter().map(|author| json!(author)).collect(),
-        page,
-        size,
-        unpaged,
-    )
-}
-
-pub(in crate::discovery) fn paged_values_payload(
-    values: Vec<Value>,
-    page: usize,
-    size: usize,
-    unpaged: bool,
-) -> Value {
+) -> PageDto<T> {
     let total_elements = values.len();
     let page_size = if unpaged {
         total_elements.max(20)
@@ -50,16 +34,13 @@ pub(in crate::discovery) fn paged_values_payload(
         total_elements.div_ceil(page_size)
     };
 
-    page_payload(
+    PageDto::from_parts(
         content,
-        PagePayloadMetadata {
-            page: if unpaged { 0 } else { page },
-            size: page_size,
-            total_elements,
-            total_pages,
-            paged: true,
-            sorted: true,
-            offset: if unpaged { 0 } else { offset },
-        },
+        if unpaged { 0 } else { page },
+        page_size,
+        total_elements,
+        total_pages,
+        true,
+        true,
     )
 }

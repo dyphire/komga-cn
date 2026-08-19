@@ -1,9 +1,3 @@
-use axum::Json;
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use serde_json::json;
-
 use super::access_control::user_can_access_book_media;
 use super::http_helpers::internal_error_response;
 use super::media_helpers::book_media_is_epub;
@@ -11,10 +5,15 @@ use crate::book_page_query::BookPageQuery;
 use crate::cache::{
     asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
 };
+use crate::contracts::media_assets::ReadiumPositionListDto;
 use crate::identity_access::auth::Authenticated;
 use crate::media_responses::BookMediaResponses;
 use crate::opds_auth::OpdsV1Authenticated;
 use crate::state::MediaAssetsState;
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::resolve_persisted_book_id;
 use komga_application::identity_access::{AuthUserRole, user_has_role};
 use komga_application::media_assets::{EpubNavigationLoadError, load_book_epub_positions};
@@ -142,10 +141,10 @@ pub(crate) async fn book_positions(
             {
                 return asset_not_modified_response(None, Some(last_modified));
             }
-            let mut response = Json(json!({
-                "total": positions.len(),
-                "positions": positions,
-            }))
+            let mut response = Json(ReadiumPositionListDto {
+                total: positions.len(),
+                positions,
+            })
             .into_response();
             response.headers_mut().insert(
                 header::CONTENT_TYPE,

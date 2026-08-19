@@ -1,6 +1,7 @@
 mod access_log;
 mod book_page_query;
 mod cache;
+pub mod contracts;
 mod discovery;
 mod discovery_auth;
 mod helpers;

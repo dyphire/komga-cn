@@ -1,19 +1,19 @@
-use axum::Json;
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use serde_json::json;
-
 use crate::cache::{
     asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
 };
+use crate::contracts::media_assets::BookPageDto;
+use crate::helpers::spring_error_response;
 use crate::media_assets::http_helpers::{
-    attachment_disposition, format_size_bytes, inline_disposition, internal_error_response,
+    attachment_disposition, inline_disposition, internal_error_response,
 };
 use crate::media_assets::thumbnails::shared::{
     response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
     response_from_thumbnail_small_jpeg_bytes,
 };
 use crate::media_response_policy::MediaAssetResponse;
+use axum::Json;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
 use komga_application::identity_access::{AuthUser, AuthUserRole, user_has_role};
 use komga_application::media_assets::{
@@ -422,39 +422,17 @@ fn content_disposition(
 }
 
 fn json_error_response(status: StatusCode, error: &str) -> Response {
-    (status, Json(json!({ "error": error }))).into_response()
+    spring_error_response(status, error)
 }
 
 fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
     Json(
         page_rows
             .into_iter()
-            .map(page_row_payload)
+            .map(BookPageDto::from)
             .collect::<Vec<_>>(),
     )
     .into_response()
-}
-
-fn page_row_payload(page: BookPageRecord) -> serde_json::Value {
-    let size_bytes = if page.file_size < 0 {
-        serde_json::Value::Null
-    } else {
-        json!(page.file_size)
-    };
-    let size = if page.file_size < 0 {
-        serde_json::Value::String(String::new())
-    } else {
-        serde_json::Value::String(format_size_bytes(page.file_size as u64))
-    };
-    json!({
-        "number": page.number,
-        "fileName": page.file_name,
-        "mediaType": page.media_type,
-        "width": page.width,
-        "height": page.height,
-        "sizeBytes": size_bytes,
-        "size": size,
-    })
 }
 
 fn accept_header_prefers_pdf(headers: &HeaderMap) -> bool {

@@ -7,7 +7,6 @@ use komga_application::operational::{
     FontPort, build_font_family_css, font_media_type, is_supported_font_file,
 };
 use rust_embed::Embed;
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -43,10 +42,7 @@ pub(crate) async fn get_fonts_families(
         Ok(families) => families,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    Json(Value::Array(
-        families.into_iter().map(Value::String).collect(),
-    ))
-    .into_response()
+    Json(families).into_response()
 }
 
 fn merged_font_families(

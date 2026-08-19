@@ -1,8 +1,11 @@
+use crate::contracts::common::{SpringErrorDto, ViolationDto};
+use crate::contracts::discovery::CollectionDto;
 use crate::discovery::persisted::common_helpers::decode_query_component;
 use crate::discovery::series::series_read_model_page_payload;
 use crate::discovery::series_routes::author_query_to_author_match;
 use crate::helpers::{
-    query_bool, query_value, query_values, to_domain_query_context, validation_error_response,
+    query_bool, query_value, query_values, spring_error_response, to_domain_query_context,
+    validation_error_response,
 };
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
@@ -20,11 +23,17 @@ use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::collections_support::{
-    collection_payload, collections_page_payload, collections_unpaged_payload,
-};
+use super::collections_support::{collections_page_payload, collections_unpaged_payload};
 use super::detail_utils::internal_error_response;
 use crate::discovery::query::{parse_series_filter_from_json, resolve_collection_list_request};
+
+fn collection_response(collection: &CollectionReadModel) -> Response {
+    match CollectionDto::from_read_model(collection) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
+}
+
 struct CollectionPatchInput {
     name: Option<String>,
     ordered: Option<bool>,
@@ -48,8 +57,7 @@ pub(crate) async fn collection_series(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let query_string = uri.query().unwrap_or_default();
-    let domain_context = to_domain_query_context(visible_context.clone());
-    let is_admin = visible_context.is_admin;
+    let domain_context = to_domain_query_context(visible_context);
     let collection = match app
         .persisted_sets
         .collection_detail(&domain_context, &collection_id)
@@ -147,11 +155,10 @@ pub(crate) async fn collection_series(
     let filter = match parse_series_filter_from_json(body.get("condition")) {
         Ok(f) => f,
         Err(e) => {
-            return (
+            return spring_error_response(
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("invalid series filter: {e:?}") })),
-            )
-                .into_response();
+                format!("invalid series filter: {e:?}"),
+            );
         }
     };
 
@@ -196,7 +203,7 @@ pub(crate) async fn collection_series(
         );
     }
 
-    Json(series_read_model_page_payload(
+    match series_read_model_page_payload(
         result,
         if collection.ordered {
             !requested_unpaged
@@ -204,9 +211,12 @@ pub(crate) async fn collection_series(
             !unpaged
         },
         false,
-        is_admin,
-    ))
-    .into_response()
+        false,
+        domain_context.is_admin,
+    ) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
 }
 
 fn ordered_collection_series_page(
@@ -344,11 +354,16 @@ pub(crate) async fn collections(
     };
 
     if unpaged {
-        let payload = collections_unpaged_payload(page.content);
-        return Json(payload).into_response();
+        return match collections_unpaged_payload(page.content) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal_error_response(format!("{error:#}")),
+        };
     }
 
-    Json(collections_page_payload(page)).into_response()
+    match collections_page_payload(page) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
 }
 
 pub(crate) async fn collection_create(
@@ -377,7 +392,7 @@ pub(crate) async fn collection_create(
         .collection_for_mutation(&created.collection_id)
         .await
     {
-        Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
+        Ok(Some(collection)) => collection_response(&collection),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -427,16 +442,16 @@ fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationIn
 
     let mut violations = Vec::new();
     if name.trim().is_empty() {
-        violations.push(json!({
-            "fieldName": "name",
-            "message": "must not be blank",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("name".to_string()),
+            message: Some("must not be blank".to_string()),
+        });
     }
     if series_values.is_empty() {
-        violations.push(json!({
-            "fieldName": "seriesIds",
-            "message": "must not be empty",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("seriesIds".to_string()),
+            message: Some("must not be empty".to_string()),
+        });
     }
 
     let mut seen_series_ids = BTreeSet::new();
@@ -457,10 +472,10 @@ fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationIn
     }
 
     if saw_duplicate_series_id {
-        violations.push(json!({
-            "fieldName": "seriesIds",
-            "message": "must only contain unique elements",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("seriesIds".to_string()),
+            message: Some("must only contain unique elements".to_string()),
+        });
     }
 
     if !violations.is_empty() {
@@ -490,16 +505,16 @@ fn collection_mutation_error_response(error: CollectionMutationError, path: &str
 fn collection_bad_request(path: &str, message: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": "Bad Request",
-            "message": message,
-            "path": path,
-            "status": 400,
-            "timestamp": SystemTime::now()
+        Json(SpringErrorDto {
+            error: "Bad Request".to_string(),
+            message: message.to_string(),
+            path: path.to_string(),
+            status: 400,
+            timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis(),
-        })),
+                .as_millis() as u64,
+        }),
     )
         .into_response()
 }
@@ -555,19 +570,19 @@ fn parse_collection_update_input(
 
     let mut violations = Vec::new();
     if name.as_ref().is_some_and(|value| value.trim().is_empty()) {
-        violations.push(json!({
-            "fieldName": "name",
-            "message": "must not be blank",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("name".to_string()),
+            message: Some("must not be blank".to_string()),
+        });
     }
 
     let series_ids = match series_values {
         Some(series_values) => {
             if series_values.is_empty() {
-                violations.push(json!({
-                    "fieldName": "seriesIds",
-                    "message": "must not be empty",
-                }));
+                violations.push(ViolationDto {
+                    field_name: Some("seriesIds".to_string()),
+                    message: Some("must not be empty".to_string()),
+                });
             }
 
             let mut seen_series_ids = BTreeSet::new();
@@ -589,10 +604,10 @@ fn parse_collection_update_input(
             }
 
             if saw_duplicate_series_id {
-                violations.push(json!({
-                    "fieldName": "seriesIds",
-                    "message": "must only contain unique elements",
-                }));
+                violations.push(ViolationDto {
+                    field_name: Some("seriesIds".to_string()),
+                    message: Some("must only contain unique elements".to_string()),
+                });
             }
 
             Some(parsed_series_ids)
@@ -645,7 +660,7 @@ pub(crate) async fn collection_detail(
         .collection_detail(&to_domain_query_context(context), &collection_id)
         .await
     {
-        Ok(Some(collection)) => Json(collection_payload(&collection)).into_response(),
+        Ok(Some(collection)) => collection_response(&collection),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }

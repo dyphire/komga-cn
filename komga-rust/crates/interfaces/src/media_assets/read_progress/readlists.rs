@@ -3,8 +3,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{AuthUser, user_id};
-use serde_json::{Value, json};
+use serde_json::Value;
 
+use crate::contracts::media_assets::TachiyomiReadListProgressDto;
+use crate::helpers::spring_error_response;
 use crate::identity_access::auth::Authenticated;
 use crate::media_assets::access_control::visible_readlist_book_ids_for_user;
 use crate::media_assets::http_helpers::internal_error_response;
@@ -41,14 +43,7 @@ pub(crate) async fn readlist_tachiyomi_read_progress_get(
         Err(error) => return internal_error_response(error),
     };
 
-    Json(json!({
-        "booksCount": counters.books_count,
-        "booksReadCount": counters.books_read_count,
-        "booksUnreadCount": counters.books_unread_count,
-        "booksInProgressCount": counters.books_in_progress_count,
-        "lastReadContinuousIndex": counters.last_read_continuous_index,
-    }))
-    .into_response()
+    Json(TachiyomiReadListProgressDto::from(counters)).into_response()
 }
 
 pub(crate) async fn readlist_tachiyomi_read_progress_put(
@@ -62,11 +57,10 @@ pub(crate) async fn readlist_tachiyomi_read_progress_put(
         .and_then(Value::as_i64)
         .filter(|value| *value >= 0)
     else {
-        return (
+        return spring_error_response(
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "lastBookRead must be a non-negative integer" })),
-        )
-            .into_response();
+            "lastBookRead must be a non-negative integer",
+        );
     };
 
     let Some(ordered_book_ids) =

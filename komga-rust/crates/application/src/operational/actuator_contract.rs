@@ -577,12 +577,12 @@ fn metric_library_value(
     description: &str,
     base_unit: Option<&str>,
     values: Vec<LibraryMetricValue>,
-    requested_library: Option<&str>,
+    requested_library_id: Option<&str>,
 ) -> ActuatorMetricDetail {
-    let value = match requested_library {
-        Some(library) => values
+    let value = match requested_library_id {
+        Some(library_id) => values
             .iter()
-            .find(|value| value.library_name == library)
+            .find(|value| value.library_id == library_id)
             .map(|value| value.value)
             .unwrap_or(0.0),
         None => values.iter().map(|value| value.value).sum::<f64>(),
@@ -597,7 +597,7 @@ fn metric_library_value(
             "library",
             values
                 .iter()
-                .map(|value| value.library_name.clone())
+                .map(|value| value.library_id.clone())
                 .collect::<Vec<_>>(),
         )],
     }

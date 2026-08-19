@@ -17,6 +17,7 @@ pub struct PersistedServerSettings {
     pub server_context_path: Option<String>,
     pub kobo_proxy: bool,
     pub kobo_port: Option<u16>,
+    pub kepubify_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -31,6 +32,7 @@ pub struct ServerSettingsUpdateCommand {
     pub server_context_path: ServerSettingPatch<String>,
     pub kobo_proxy: Option<bool>,
     pub kobo_port: ServerSettingPatch<u64>,
+    pub kepubify_path: ServerSettingPatch<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -246,6 +248,21 @@ impl ServerSettingsService {
                 persistence_changes.push(server_setting_change(
                     "KOBO_PORT",
                     settings.kobo_port.map(|value| value.to_string()),
+                ));
+            }
+        }
+
+        match command.kepubify_path {
+            ServerSettingPatch::Unchanged => {}
+            patch => {
+                match patch {
+                    ServerSettingPatch::Unchanged => {}
+                    ServerSettingPatch::Clear => settings.kepubify_path = None,
+                    ServerSettingPatch::Set(value) => settings.kepubify_path = Some(value),
+                }
+                persistence_changes.push(server_setting_change(
+                    "KEPUBIFY_PATH",
+                    settings.kepubify_path.clone(),
                 ));
             }
         }

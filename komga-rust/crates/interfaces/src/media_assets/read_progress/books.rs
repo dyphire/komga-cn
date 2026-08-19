@@ -10,15 +10,13 @@ use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{AuthUser, user_id};
 use komga_application::media_assets::{
     BookProgressionGetOutcome, BookProgressionLocator, BookProgressionOutcome,
-    BookProgressionRecord, BookProgressionService, BookProgressionUpdate,
-    BookProgressionUpdateInput,
+    BookProgressionService, BookProgressionUpdate, BookProgressionUpdateInput,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::helpers::{
-    invalid_progression_payload, invalid_read_progress_payload,
-    read_progress_validation_error_response,
-};
+use crate::contracts::common::ViolationDto;
+use crate::contracts::media_assets::BookProgressionDto;
+use crate::helpers::{spring_error_response, validation_error_response};
 use crate::identity_access::auth::{resolved_auth_user, resolved_token};
 use crate::media_assets::access_control::user_can_access_book_media;
 use crate::media_assets::http_helpers::internal_error_response;
@@ -112,7 +110,7 @@ pub(crate) async fn book_read_progress(
     }
 
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return invalid_read_progress_payload();
+        return spring_error_response(StatusCode::BAD_REQUEST, "invalid read progress payload");
     };
 
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
@@ -134,10 +132,10 @@ pub(crate) async fn book_read_progress(
     let completed_true = payload.get("completed").and_then(|value| value.as_bool()) == Some(true);
 
     if matches!(page_value.and_then(Value::as_i64), Some(value) if value <= 0) {
-        return read_progress_validation_error_response(vec![json!({
-            "fieldName": "page",
-            "message": "must be greater than 0"
-        })]);
+        return validation_error_response(vec![ViolationDto {
+            field_name: Some("page".to_string()),
+            message: Some("must be greater than 0".to_string()),
+        }]);
     }
 
     if completed_true {
@@ -154,27 +152,22 @@ pub(crate) async fn book_read_progress(
     }
 
     if page_value.is_none_or(Value::is_null) {
-        return read_progress_validation_error_response(vec![]);
+        return validation_error_response(vec![]);
     }
 
     let Some(page) = payload.get("page").and_then(Value::as_u64) else {
-        return invalid_read_progress_payload();
+        return spring_error_response(StatusCode::BAD_REQUEST, "invalid read progress payload");
     };
 
     if page > page_count {
-        return (
+        return spring_error_response(
             StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": format!(
-                    "Page argument ({page}) must be within 1 and book page count ({page_count})"
-                )
-            })),
-        )
-            .into_response();
+            format!("Page argument ({page}) must be within 1 and book page count ({page_count})"),
+        );
     }
 
     if !(1..=page_count).contains(&page) {
-        return invalid_read_progress_payload();
+        return spring_error_response(StatusCode::BAD_REQUEST, "invalid read progress payload");
     }
 
     let locator = match load_epub_locator_for_page(&app, &book_id, page).await {
@@ -256,7 +249,7 @@ async fn book_progression_response(
     body: Bytes,
 ) -> Response {
     let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
-        return invalid_progression_payload();
+        return spring_error_response(StatusCode::BAD_REQUEST, "invalid progression payload");
     };
     let update = book_progression_update_input(&payload);
     let service = BookProgressionService::new(
@@ -268,13 +261,13 @@ async fn book_progression_response(
         BookProgressionOutcome::Updated => StatusCode::NO_CONTENT.into_response(),
         BookProgressionOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookProgressionOutcome::Forbidden => StatusCode::FORBIDDEN.into_response(),
-        BookProgressionOutcome::InvalidPayload => invalid_progression_payload(),
+        BookProgressionOutcome::InvalidPayload => {
+            spring_error_response(StatusCode::BAD_REQUEST, "invalid progression payload")
+        }
         BookProgressionOutcome::BadRequest(error) => progression_bad_request_response(error),
-        BookProgressionOutcome::Conflict => (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "Progression is older than existing" })),
-        )
-            .into_response(),
+        BookProgressionOutcome::Conflict => {
+            spring_error_response(StatusCode::CONFLICT, "Progression is older than existing")
+        }
         BookProgressionOutcome::Internal(error) => internal_error_response(error),
     }
 }
@@ -364,7 +357,7 @@ async fn book_progression_get_response(
                 header::CONTENT_TYPE,
                 HeaderValue::from_static(READIUM_PROGRESSION_MEDIA_TYPE),
             )],
-            Json(book_progression_payload(progression)),
+            Json(BookProgressionDto::from(progression)),
         )
             .into_response(),
         BookProgressionGetOutcome::NoContent => StatusCode::NO_CONTENT.into_response(),
@@ -375,20 +368,5 @@ async fn book_progression_get_response(
 }
 
 fn progression_bad_request_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": message.into() })),
-    )
-        .into_response()
-}
-
-fn book_progression_payload(progression: BookProgressionRecord) -> Value {
-    json!({
-        "modified": progression.modified,
-        "device": {
-            "id": progression.device_id,
-            "name": progression.device_name,
-        },
-        "locator": progression.locator,
-    })
+    spring_error_response(StatusCode::BAD_REQUEST, message.into())
 }

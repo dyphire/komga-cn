@@ -1,9 +1,9 @@
+use crate::contracts::common::MessageDto;
 use crate::request_urls::request_context_path;
 use axum::body::Bytes;
 use axum::extract::Path as AxumPath;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
@@ -126,9 +126,9 @@ fn serve_webui_asset(webui_path: &str, resource_base_url: &str) -> Response {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             [(header::CONTENT_TYPE, "application/json")],
-            axum::Json(json!({
-                "message": format!("embedded webui asset missing: {asset_path}"),
-            })),
+            axum::Json(MessageDto {
+                message: format!("embedded webui asset missing: {asset_path}"),
+            }),
         )
             .into_response();
     };

@@ -3,13 +3,16 @@ use axum::body::Bytes;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde::Serialize;
 
 use super::execute_kobo_proxy_request;
 use crate::access_log::RequestConnectionInfo;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::identity_access::device_auth::load_kobo_proxy_enabled;
 use crate::state::IdentityAccessState;
+
+#[derive(Serialize)]
+struct EmptyKoboResponse {}
 
 pub(crate) async fn kobo_catch_all(
     State(app): State<IdentityAccessState>,
@@ -36,7 +39,7 @@ pub(crate) async fn kobo_catch_all(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     if !proxy_enabled {
-        return Json(json!({})).into_response();
+        return Json(EmptyKoboResponse {}).into_response();
     }
 
     match execute_kobo_proxy_request(

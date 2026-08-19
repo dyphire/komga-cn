@@ -20,7 +20,7 @@ pub struct TaskExecutionMetricValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LibraryMetricValue {
-    pub library_name: String,
+    pub library_id: String,
     pub value: f64,
 }
 

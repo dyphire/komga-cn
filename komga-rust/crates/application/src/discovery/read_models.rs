@@ -1,3 +1,4 @@
+use super::detail_port::{SeriesAlternateTitleRecord, SeriesMetadataLinkRecord};
 use super::reading_direction::SeriesReadingDirection;
 use komga_domain::discovery::{MediaStatus, SeriesStatus};
 
@@ -13,6 +14,7 @@ pub struct SeriesReadModel {
     pub id: String,
     pub library_id: String,
     pub name: String,
+    pub url: String,
     pub title: String,
     pub title_sort: String,
     pub labels: Vec<String>,
@@ -24,14 +26,30 @@ pub struct SeriesReadModel {
     pub books_unread_count: u64,
     pub books_in_progress_count: u64,
     pub status: SeriesStatus,
+    pub status_lock: bool,
     pub summary: String,
+    pub summary_lock: bool,
     pub reading_direction: Option<SeriesReadingDirection>,
+    pub reading_direction_lock: bool,
     pub publisher: String,
+    pub publisher_lock: bool,
     pub age_rating: Option<u32>,
+    pub age_rating_lock: bool,
     pub language: String,
+    pub language_lock: bool,
     pub genres: Vec<String>,
+    pub genres_lock: bool,
     pub tags: Vec<String>,
-    pub alternate_titles: Vec<String>,
+    pub tags_lock: bool,
+    pub total_book_count: Option<u32>,
+    pub total_book_count_lock: bool,
+    pub sharing_labels_lock: bool,
+    pub links: Vec<SeriesMetadataLinkRecord>,
+    pub links_lock: bool,
+    pub alternate_titles: Vec<SeriesAlternateTitleRecord>,
+    pub alternate_titles_lock: bool,
+    pub title_lock: bool,
+    pub title_sort_lock: bool,
     pub metadata_created: String,
     pub metadata_last_modified: String,
     pub books_metadata_authors: Vec<String>,
@@ -43,21 +61,6 @@ pub struct SeriesReadModel {
     pub books_metadata_last_modified: String,
     pub deleted: bool,
     pub oneshot: bool,
-    pub status_lock: bool,
-    pub title_lock: bool,
-    pub title_sort_lock: bool,
-    pub summary_lock: bool,
-    pub reading_direction_lock: bool,
-    pub publisher_lock: bool,
-    pub age_rating_lock: bool,
-    pub language_lock: bool,
-    pub genres_lock: bool,
-    pub tags_lock: bool,
-    pub total_book_count_lock: bool,
-    pub sharing_labels_lock: bool,
-    pub links_lock: bool,
-    pub alternate_titles_lock: bool,
-    pub links: Vec<BookMetadataLinkReadModel>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,7 +69,7 @@ pub struct BookMetadataAuthorReadModel {
     pub role: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BookMetadataLinkReadModel {
     pub label: String,
     pub url: String,

@@ -1,12 +1,17 @@
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
 use komga_application::opds::{OpdsBookAuthorEntry, OpdsBookFeedEntry};
 
+use crate::contracts::opds::{
+    OpdsV2AuthenticationLinkDto, OpdsV2BelongsToDto, OpdsV2FeedMetadataDto, OpdsV2LinkDto,
+    OpdsV2LinkPropertiesDto, OpdsV2NavigationFeedDto, OpdsV2PublicationDto,
+    OpdsV2PublicationFeedDto, OpdsV2PublicationMetadataDto, OpdsV2PublicationSeriesDto,
+    OpdsV2UpdatedDto,
+};
 use crate::request_urls::app_absolute_url;
 
 use super::types::PersistedSeries;
@@ -402,6 +407,13 @@ pub(super) fn opds_now_timestamp() -> String {
     format_opds_timestamp(now_utc, offset)
 }
 
+pub(super) fn opds_v2_updated(value: Option<&str>) -> OpdsV2UpdatedDto {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(OpdsV2UpdatedDto::from_storage)
+        .unwrap_or_else(OpdsV2UpdatedDto::now)
+}
+
 pub(super) fn normalize_opds_updated(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -430,21 +442,26 @@ pub(super) fn opds_subsection_navigation_link(
     headers: &HeaderMap,
     title: &str,
     path: &str,
-) -> Value {
-    json!({
-        "title": title,
-        "rel": "subsection",
-        "href": app_absolute_url(headers, path),
-        "type": "application/opds+json",
-    })
+) -> OpdsV2LinkDto {
+    OpdsV2LinkDto {
+        title: Some(title.to_string()),
+        rel: Some("subsection".to_string()),
+        href: app_absolute_url(headers, path),
+        media_type: Some("application/opds+json".to_string()),
+        templated: None,
+        properties: None,
+    }
 }
 
-pub(super) fn opds_navigation_link(headers: &HeaderMap, title: &str, path: &str) -> Value {
-    json!({
-        "title": title,
-        "href": app_absolute_url(headers, path),
-        "type": "application/opds+json",
-    })
+pub(super) fn opds_navigation_link(headers: &HeaderMap, title: &str, path: &str) -> OpdsV2LinkDto {
+    OpdsV2LinkDto {
+        title: Some(title.to_string()),
+        rel: None,
+        href: app_absolute_url(headers, path),
+        media_type: Some("application/opds+json".to_string()),
+        templated: None,
+        properties: None,
+    }
 }
 
 pub(super) struct OpdsV2PagedFeed<'a> {
@@ -459,89 +476,117 @@ pub(super) struct OpdsV2PagedFeed<'a> {
 
 pub(super) fn opds_navigation_response_with_paging(
     feed: OpdsV2PagedFeed<'_>,
-    navigation: Vec<Value>,
+    navigation: Vec<OpdsV2LinkDto>,
 ) -> Response {
-    opds_v2_paged_response(feed, "navigation", navigation)
-}
-
-pub(super) fn opds_publications_response_with_paging(
-    feed: OpdsV2PagedFeed<'_>,
-    publications: Vec<Value>,
-) -> Response {
-    opds_v2_paged_response(feed, "publications", publications)
-}
-
-fn opds_v2_paged_response(feed: OpdsV2PagedFeed<'_>, key: &str, entries: Vec<Value>) -> Response {
-    let self_href = app_absolute_url(feed.headers, feed.self_path);
-    let modified = feed
-        .modified
-        .filter(|value| !value.is_empty())
-        .map(normalize_opds_updated)
-        .unwrap_or_else(opds_now_timestamp);
-
-    let mut links = vec![
-        json!({
-            "rel": "self",
-            "href": self_href,
-        }),
-        json!({
-            "title": "Home",
-            "rel": "start",
-            "href": app_absolute_url(feed.headers, "/opds/v2/catalog"),
-            "type": "application/opds+json",
-        }),
-        json!({
-            "title": "Search",
-            "rel": "search",
-            "href": app_absolute_url(feed.headers, "/opds/v2/search{?query}"),
-            "type": "application/opds+json",
-            "templated": true,
-        }),
-    ];
-
-    if feed.page > 0 {
-        links.push(json!({
-            "rel": "previous",
-            "href": app_absolute_url(feed.headers, page_link_path(feed.self_path, feed.page.saturating_sub(1)).as_str()),
-        }));
-    }
-    if feed.page.saturating_add(1).saturating_mul(feed.size) < feed.total {
-        links.push(json!({
-            "rel": "next",
-            "href": app_absolute_url(feed.headers, page_link_path(feed.self_path, feed.page + 1).as_str()),
-        }));
-    }
-
-    let mut payload = json!({
-        "metadata": {
-            "title": feed.title,
-            "modified": modified,
-            "itemsPerPage": feed.size,
-            "currentPage": feed.page + 1,
-            "numberOfItems": feed.total,
-        },
-        "links": links,
-    });
-    payload
-        .as_object_mut()
-        .unwrap()
-        .insert(key.to_string(), Value::Array(entries));
-
+    let metadata = opds_v2_feed_metadata(&feed);
     (
         StatusCode::OK,
         [(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/opds+json"),
         )],
-        Json(payload),
+        Json(OpdsV2NavigationFeedDto {
+            metadata,
+            links: opds_v2_feed_links(&feed),
+            navigation,
+        }),
     )
         .into_response()
+}
+
+pub(super) fn opds_publications_response_with_paging(
+    feed: OpdsV2PagedFeed<'_>,
+    publications: Vec<OpdsV2PublicationDto>,
+) -> Response {
+    let metadata = opds_v2_feed_metadata(&feed);
+    (
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/opds+json"),
+        )],
+        Json(OpdsV2PublicationFeedDto {
+            metadata,
+            links: opds_v2_feed_links(&feed),
+            publications,
+        }),
+    )
+        .into_response()
+}
+
+fn opds_v2_feed_metadata(feed: &OpdsV2PagedFeed<'_>) -> OpdsV2FeedMetadataDto {
+    OpdsV2FeedMetadataDto {
+        title: feed.title.to_string(),
+        modified: opds_v2_updated(feed.modified),
+        description: None,
+        items_per_page: feed.size,
+        current_page: feed.page + 1,
+        number_of_items: feed.total,
+    }
+}
+
+fn opds_v2_feed_links(feed: &OpdsV2PagedFeed<'_>) -> Vec<OpdsV2LinkDto> {
+    let mut links = vec![
+        OpdsV2LinkDto {
+            title: None,
+            rel: Some("self".to_string()),
+            href: app_absolute_url(feed.headers, feed.self_path),
+            media_type: None,
+            templated: None,
+            properties: None,
+        },
+        OpdsV2LinkDto {
+            title: Some("Home".to_string()),
+            rel: Some("start".to_string()),
+            href: app_absolute_url(feed.headers, "/opds/v2/catalog"),
+            media_type: Some("application/opds+json".to_string()),
+            templated: None,
+            properties: None,
+        },
+        OpdsV2LinkDto {
+            title: Some("Search".to_string()),
+            rel: Some("search".to_string()),
+            href: app_absolute_url(feed.headers, "/opds/v2/search{?query}"),
+            media_type: Some("application/opds+json".to_string()),
+            templated: Some(true),
+            properties: None,
+        },
+    ];
+
+    if feed.page > 0 {
+        links.push(OpdsV2LinkDto {
+            title: None,
+            rel: Some("previous".to_string()),
+            href: app_absolute_url(
+                feed.headers,
+                page_link_path(feed.self_path, feed.page.saturating_sub(1)).as_str(),
+            ),
+            media_type: None,
+            templated: None,
+            properties: None,
+        });
+    }
+    if feed.page.saturating_add(1).saturating_mul(feed.size) < feed.total {
+        links.push(OpdsV2LinkDto {
+            title: None,
+            rel: Some("next".to_string()),
+            href: app_absolute_url(
+                feed.headers,
+                page_link_path(feed.self_path, feed.page + 1).as_str(),
+            ),
+            media_type: None,
+            templated: None,
+            properties: None,
+        });
+    }
+
+    links
 }
 
 pub(super) fn opds_publication_for_feed_entry(
     headers: &HeaderMap,
     book: &OpdsBookFeedEntry,
-) -> Value {
+) -> OpdsV2PublicationDto {
     let auth_href = app_absolute_url(headers, "/opds/v2/auth");
     let manifest_href = app_absolute_url(
         headers,
@@ -557,138 +602,123 @@ pub(super) fn opds_publication_for_feed_entry(
         format!("/opds/v2/books/{}/thumbnail", book.id).as_str(),
     );
 
-    let mut metadata = serde_json::Map::new();
-    metadata.insert("title".to_string(), Value::String(book.title.clone()));
-    if let Some(isbn) = book.isbn.as_ref().filter(|value| !value.is_empty()) {
-        metadata.insert(
-            "identifier".to_string(),
-            Value::String(format!("urn:isbn:{isbn}")),
-        );
+    let mut roles = RoleContributors::default();
+    for author in &book.authors {
+        roles.push(author);
     }
-    if !book.summary.is_empty() {
-        metadata.insert(
-            "description".to_string(),
-            Value::String(book.summary.clone()),
-        );
-    }
-    if book.page_count > 0 {
-        metadata.insert(
-            "numberOfPages".to_string(),
-            Value::Number(book.page_count.into()),
-        );
-    }
-    if let Some(release_date) = book.release_date.as_ref().filter(|value| !value.is_empty()) {
-        metadata.insert("published".to_string(), Value::String(release_date.clone()));
-    }
-    if !book.last_modified.is_empty() {
-        metadata.insert(
-            "modified".to_string(),
-            Value::String(normalize_opds_updated(&book.last_modified)),
-        );
-    }
-    if !book.tags.is_empty() {
-        metadata.insert(
-            "subject".to_string(),
-            Value::Array(
-                book.tags
-                    .iter()
-                    .cloned()
-                    .map(Value::String)
-                    .collect::<Vec<_>>(),
-            ),
-        );
-    }
-    extend_metadata_with_role_authors(&mut metadata, &book.authors);
-    if !book.series_id.is_empty() && !book.series_title.is_empty() {
-        let mut series_entry = serde_json::Map::new();
-        series_entry.insert("name".to_string(), Value::String(book.series_title.clone()));
-        if let Some(number) = serde_json::Number::from_f64(book.number_sort) {
-            series_entry.insert("position".to_string(), Value::Number(number));
-        }
-        series_entry.insert(
-            "links".to_string(),
-            Value::Array(vec![json!({
-                "href": app_absolute_url(headers, format!("/opds/v2/series/{}", book.series_id).as_str()),
-                "type": "application/opds+json",
-            })]),
-        );
-        metadata.insert(
-            "belongsTo".to_string(),
-            Value::Object(serde_json::Map::from_iter([(
-                "series".to_string(),
-                Value::Array(vec![Value::Object(series_entry)]),
-            )])),
-        );
-    }
+    let belongs_to =
+        (!book.series_id.is_empty() && !book.series_title.is_empty()).then(|| OpdsV2BelongsToDto {
+            series: vec![OpdsV2PublicationSeriesDto {
+                name: book.series_title.clone(),
+                position: book.number_sort.is_finite().then_some(book.number_sort),
+                links: Some(vec![OpdsV2LinkDto {
+                    title: None,
+                    rel: None,
+                    href: app_absolute_url(
+                        headers,
+                        format!("/opds/v2/series/{}", book.series_id).as_str(),
+                    ),
+                    media_type: Some("application/opds+json".to_string()),
+                    templated: None,
+                    properties: None,
+                }]),
+            }],
+        });
 
+    let metadata = OpdsV2PublicationMetadataDto {
+        title: book.title.clone(),
+        identifier: book
+            .isbn
+            .as_ref()
+            .filter(|value| !value.is_empty())
+            .map(|isbn| format!("urn:isbn:{isbn}")),
+        description: (!book.summary.is_empty()).then(|| book.summary.clone()),
+        number_of_pages: (book.page_count > 0).then_some(book.page_count as u64),
+        published: book
+            .release_date
+            .as_ref()
+            .filter(|value| !value.is_empty())
+            .cloned(),
+        modified: (!book.last_modified.is_empty())
+            .then(|| OpdsV2UpdatedDto::from_storage(&book.last_modified)),
+        subject: (!book.tags.is_empty()).then(|| book.tags.clone()),
+        author: roles.author,
+        translator: roles.translator,
+        editor: roles.editor,
+        artist: roles.artist,
+        illustrator: roles.illustrator,
+        letterer: roles.letterer,
+        penciler: roles.penciler,
+        colorist: roles.colorist,
+        inker: roles.inker,
+        contributor: roles.contributor,
+        belongs_to,
+    };
+
+    let properties = || {
+        Some(OpdsV2LinkPropertiesDto {
+            authenticate: OpdsV2AuthenticationLinkDto {
+                href: auth_href.clone(),
+                media_type: "application/opds-authentication+json".to_string(),
+            },
+        })
+    };
     let mut links = vec![
-        json!({
-            "rel": "self",
-            "href": manifest_href,
-            "type": publication_manifest_type(book.media_type.as_str()),
-            "properties": {
-                "authenticate": {
-                    "href": auth_href.as_str(),
-                    "type": "application/opds-authentication+json",
-                },
-            },
-        }),
-        json!({
-            "rel": "http://opds-spec.org/acquisition",
-            "href": file_href,
-            "type": book.media_type,
-            "properties": {
-                "authenticate": {
-                    "href": auth_href.as_str(),
-                    "type": "application/opds-authentication+json",
-                },
-            },
-        }),
-        json!({
-            "rel": "http://www.cantook.com/api/progression",
-            "href": progression_href,
-            "type": "application/vnd.readium.progression+json",
-            "properties": {
-                "authenticate": {
-                    "href": auth_href.as_str(),
-                    "type": "application/opds-authentication+json",
-                },
-            },
-        }),
+        OpdsV2LinkDto {
+            title: None,
+            rel: Some("self".to_string()),
+            href: manifest_href,
+            media_type: Some(publication_manifest_type(book.media_type.as_str()).to_string()),
+            templated: None,
+            properties: properties(),
+        },
+        OpdsV2LinkDto {
+            title: None,
+            rel: Some("http://opds-spec.org/acquisition".to_string()),
+            href: file_href,
+            media_type: Some(book.media_type.clone()),
+            templated: None,
+            properties: properties(),
+        },
+        OpdsV2LinkDto {
+            title: None,
+            rel: Some("http://www.cantook.com/api/progression".to_string()),
+            href: progression_href,
+            media_type: Some("application/vnd.readium.progression+json".to_string()),
+            templated: None,
+            properties: properties(),
+        },
     ];
 
     if book.media_type == "application/pdf"
         || (book.media_type == "application/epub+zip" && book.epub_divina_compatible)
     {
-        links.push(json!({
-            "href": app_absolute_url(headers, format!("/opds/v2/books/{}/manifest/divina", book.id).as_str()),
-            "type": "application/divina+json",
-            "properties": {
-                "authenticate": {
-                    "href": auth_href.as_str(),
-                    "type": "application/opds-authentication+json",
-                },
-            },
-        }));
+        links.push(OpdsV2LinkDto {
+            title: None,
+            rel: None,
+            href: app_absolute_url(
+                headers,
+                format!("/opds/v2/books/{}/manifest/divina", book.id).as_str(),
+            ),
+            media_type: Some("application/divina+json".to_string()),
+            templated: None,
+            properties: properties(),
+        });
     }
 
-    json!({
-        "@context": "https://readium.org/webpub-manifest/context.jsonld",
-        "metadata": Value::Object(metadata),
-        "links": links,
-        "images": [
-            {
-                "href": thumbnail_href,
-                "type": "image/jpeg",
-                "properties": {
-                    "authenticate": {
-                        "href": auth_href.as_str(),
-                        "type": "application/opds-authentication+json",
-                    },
-                },
-            }
-        ],
-    })
+    OpdsV2PublicationDto {
+        context: "https://readium.org/webpub-manifest/context.jsonld".to_string(),
+        metadata,
+        links,
+        images: vec![OpdsV2LinkDto {
+            title: None,
+            rel: None,
+            href: thumbnail_href,
+            media_type: Some("image/jpeg".to_string()),
+            templated: None,
+            properties: properties(),
+        }],
+    }
 }
 
 fn publication_manifest_type(media_type: &str) -> &'static str {
@@ -701,52 +731,35 @@ fn publication_manifest_type(media_type: &str) -> &'static str {
     }
 }
 
-fn extend_metadata_with_role_authors(
-    metadata: &mut serde_json::Map<String, Value>,
-    authors: &[OpdsBookAuthorEntry],
-) {
-    let mut author = Vec::new();
-    let mut translator = Vec::new();
-    let mut editor = Vec::new();
-    let mut artist = Vec::new();
-    let mut illustrator = Vec::new();
-    let mut letterer = Vec::new();
-    let mut penciler = Vec::new();
-    let mut colorist = Vec::new();
-    let mut inker = Vec::new();
-    let mut contributor = Vec::new();
+#[derive(Default)]
+struct RoleContributors {
+    author: Option<Vec<String>>,
+    translator: Option<Vec<String>>,
+    editor: Option<Vec<String>>,
+    artist: Option<Vec<String>>,
+    illustrator: Option<Vec<String>>,
+    letterer: Option<Vec<String>>,
+    penciler: Option<Vec<String>>,
+    colorist: Option<Vec<String>>,
+    inker: Option<Vec<String>>,
+    contributor: Option<Vec<String>>,
+}
 
-    for entry in authors {
+impl RoleContributors {
+    fn push(&mut self, entry: &OpdsBookAuthorEntry) {
         let target = match entry.role.as_str() {
-            "author" => &mut author,
-            "translator" => &mut translator,
-            "editor" => &mut editor,
-            "artist" => &mut artist,
-            "illustrator" => &mut illustrator,
-            "letterer" => &mut letterer,
-            "penciler" | "penciller" => &mut penciler,
-            "colorist" => &mut colorist,
-            "inker" => &mut inker,
-            _ => &mut contributor,
+            "author" => &mut self.author,
+            "translator" => &mut self.translator,
+            "editor" => &mut self.editor,
+            "artist" => &mut self.artist,
+            "illustrator" => &mut self.illustrator,
+            "letterer" => &mut self.letterer,
+            "penciler" | "penciller" => &mut self.penciler,
+            "colorist" => &mut self.colorist,
+            "inker" => &mut self.inker,
+            _ => &mut self.contributor,
         };
-        target.push(Value::String(entry.name.clone()));
-    }
-
-    for (key, values) in [
-        ("author", author),
-        ("translator", translator),
-        ("editor", editor),
-        ("artist", artist),
-        ("illustrator", illustrator),
-        ("letterer", letterer),
-        ("penciler", penciler),
-        ("colorist", colorist),
-        ("inker", inker),
-        ("contributor", contributor),
-    ] {
-        if !values.is_empty() {
-            metadata.insert(key.to_string(), Value::Array(values));
-        }
+        target.get_or_insert_with(Vec::new).push(entry.name.clone());
     }
 }
 

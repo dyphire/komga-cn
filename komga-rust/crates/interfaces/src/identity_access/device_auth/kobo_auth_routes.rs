@@ -7,7 +7,8 @@ use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{
     AuthOutcome, AuthUser, AuthUserRole, generate_kobo_device_tokens, user_has_role,
 };
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 use std::net::SocketAddr;
 
 use crate::access_log::RequestConnectionInfo;
@@ -18,7 +19,6 @@ use crate::identity_access::device_auth::auth_resolvers::{
 use crate::identity_access::device_auth::helpers::record_successful_api_key_authentication_by_token;
 use crate::identity_access::device_auth::{kobo_request_base_url, load_kobo_proxy_enabled};
 use crate::state::{IdentityAccessState, IdentityState};
-use serde::Serialize;
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -28,6 +28,12 @@ struct KoboDeviceAuthResponse {
     token_type: &'static str,
     tracking_id: String,
     user_key: String,
+}
+
+#[derive(Serialize)]
+struct KoboInitializationResponse {
+    #[serde(rename = "Resources")]
+    resources: Value,
 }
 
 pub(crate) async fn kobo_ping(
@@ -83,7 +89,11 @@ pub(crate) async fn kobo_initialization(
     };
     apply_initialization_overrides(&mut resources, auth_token.as_str(), base_url.as_str());
 
-    let mut response = (StatusCode::OK, Json(json!({ "Resources": resources }))).into_response();
+    let mut response = (
+        StatusCode::OK,
+        Json(KoboInitializationResponse { resources }),
+    )
+        .into_response();
     response.headers_mut().insert(
         HeaderName::from_static("x-kobo-apitoken"),
         HeaderValue::from_static("e30="),

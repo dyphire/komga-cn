@@ -1,7 +1,8 @@
-use super::persisted::authors_queries::{authors_v2_page_payload, paged_values_payload};
+use super::persisted::authors_queries::paged_values_payload;
 use super::persisted::common_helpers::{
     decode_query_component, discovery_error_response, internal_error_response,
 };
+use crate::contracts::discovery::FacetValueDto;
 use crate::discovery_auth::context::DiscoveryQueryContext;
 use crate::discovery_auth::state::DiscoveryAuthState;
 use crate::helpers::{query_bool, query_value, query_values, to_domain_query_context};
@@ -15,7 +16,6 @@ use komga_application::discovery::{
     FacetKind, FacetScope, PersistedAuthorEntry, PersistedAuthorsScope, ReferentialTagsInclude,
     ReferentialTagsScope,
 };
-use serde_json::json;
 
 fn decoded_library_ids(query: &str) -> Vec<String> {
     query_values(query, "library_id")
@@ -112,7 +112,7 @@ pub(crate) async fn authors_names(
         .load_author_names(&search, context.authorized_library_ids.as_deref())
         .await
     {
-        Ok(values) => Json(json!(values)).into_response(),
+        Ok(values) => Json(values).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -140,7 +140,7 @@ pub(crate) async fn authors_roles(
         .load_author_roles(context.authorized_library_ids.as_deref())
         .await
     {
-        Ok(values) => Json(json!(values)).into_response(),
+        Ok(values) => Json(values).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -199,7 +199,7 @@ pub(crate) async fn authors_deprecated_get(
         authors.retain(|author| author.name.to_ascii_lowercase().contains(&search));
     }
 
-    Json(json!(authors)).into_response()
+    Json(authors).into_response()
 }
 
 pub(crate) async fn authors_v2(
@@ -214,7 +214,7 @@ pub(crate) async fn authors_v2(
         Err(response) => return response,
     };
 
-    Json(authors_v2_page_payload(authors, page, size, unpaged)).into_response()
+    Json(paged_values_payload(authors, page, size, unpaged)).into_response()
 }
 
 async fn scoped_authors_v2(
@@ -310,7 +310,7 @@ async fn author_values_v2_handler(
     values.dedup();
 
     Json(paged_values_payload(
-        values.into_iter().map(|value| json!(value)).collect(),
+        values.into_iter().map(FacetValueDto::String).collect(),
         page,
         size,
         unpaged,
@@ -361,7 +361,7 @@ async fn collection_facet_handler(
         .list_facet_values(&domain_context, kind, facet_scope)
         .await
     {
-        Ok(values) => Json(json!(values)).into_response(),
+        Ok(values) => Json(values).into_response(),
         Err(error) => discovery_error_response(error),
     }
 }
@@ -413,10 +413,10 @@ async fn scalar_facet_v2_handler(
         values
             .into_iter()
             .filter_map(|value| value.parse::<i64>().ok())
-            .map(|value| json!(value))
+            .map(FacetValueDto::Integer)
             .collect()
     } else {
-        values.into_iter().map(|value| json!(value)).collect()
+        values.into_iter().map(FacetValueDto::String).collect()
     };
 
     Json(paged_values_payload(
@@ -497,7 +497,7 @@ async fn tags_v2_handler(app: &DiscoveryState, headers: &HeaderMap, uri: &Uri) -
         .unwrap_or(20)
         .max(1);
     Json(paged_values_payload(
-        values.into_iter().map(|value| json!(value)).collect(),
+        values.into_iter().map(FacetValueDto::String).collect(),
         page,
         size,
         query_bool(query, "unpaged"),

@@ -4,18 +4,24 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::resolve_persisted_book_id;
-use serde_json::Value;
 
 use super::books_persistence::{
     PersistedBookSiblingDirection, load_persisted_book_resource, load_persisted_book_sibling_detail,
 };
 use super::detail_utils::internal_error_response;
-use super::readlists_support::readlist_payload;
-use super::{book_detail_payload, load_persisted_book_detail};
+use super::{BookDetailReadModel, load_persisted_book_detail};
+use crate::contracts::discovery::{BookDto, ReadListDto};
 use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
 use crate::helpers::{detail_access_denial_response, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
+
+fn book_detail_response(book: &BookDetailReadModel, is_admin: bool) -> Response {
+    match BookDto::from_read_model(book, is_admin) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
 
 pub(crate) async fn book_detail(
     State(app): State<DiscoveryState>,
@@ -50,7 +56,7 @@ pub(crate) async fn book_detail(
     let is_admin = detail_query_context.is_admin;
     match load_persisted_book_detail(&app, &book_id, detail_query_context.user_id.as_deref()).await
     {
-        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(Some(book)) => book_detail_response(&book, is_admin),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -97,7 +103,7 @@ pub(crate) async fn book_sibling_previous(
     )
     .await
     {
-        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(Some(book)) => book_detail_response(&book, is_admin),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -144,7 +150,7 @@ pub(crate) async fn book_sibling_next(
     )
     .await
     {
-        Ok(Some(book)) => Json(book_detail_payload(&book, is_admin)).into_response(),
+        Ok(Some(book)) => book_detail_response(&book, is_admin),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -205,11 +211,12 @@ pub(crate) async fn book_readlists(
         Err(error) => return internal_error_response(error),
     };
 
-    Json(Value::Array(
-        visible_readlists
-            .iter()
-            .map(readlist_payload)
-            .collect::<Vec<_>>(),
-    ))
-    .into_response()
+    match visible_readlists
+        .iter()
+        .map(ReadListDto::from_read_model)
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
 }

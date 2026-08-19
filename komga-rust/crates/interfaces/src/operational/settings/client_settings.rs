@@ -9,6 +9,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 
+use crate::contracts::client_settings::{client_settings_global_dto, client_settings_user_dto};
 use crate::identity_access::auth::{Admin, Authenticated, resolved_auth_user};
 use crate::state::OperationalApiState;
 use komga_application::identity_access::user_id;
@@ -32,7 +33,7 @@ pub(crate) async fn get_client_settings_global(
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    Json(client_settings_global_payload(&settings)).into_response()
+    Json(client_settings_global_dto(&settings)).into_response()
 }
 
 pub(crate) async fn get_client_settings_user(
@@ -47,34 +48,7 @@ pub(crate) async fn get_client_settings_user(
         Ok(settings) => settings,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    Json(client_settings_user_payload(&settings)).into_response()
-}
-
-fn client_settings_global_payload(settings: &ClientGlobalSettings) -> Value {
-    let mut payload = serde_json::Map::new();
-    for (key, setting) in settings {
-        payload.insert(
-            key.clone(),
-            serde_json::json!({
-                "value": &setting.value,
-                "allowUnauthorized": setting.allow_unauthorized,
-            }),
-        );
-    }
-    Value::Object(payload)
-}
-
-fn client_settings_user_payload(settings: &ClientUserSettings) -> Value {
-    let mut payload = serde_json::Map::new();
-    for (key, setting) in settings {
-        payload.insert(
-            key.clone(),
-            serde_json::json!({
-                "value": &setting.value,
-            }),
-        );
-    }
-    Value::Object(payload)
+    Json(client_settings_user_dto(&settings)).into_response()
 }
 
 pub(crate) async fn patch_client_settings_global(

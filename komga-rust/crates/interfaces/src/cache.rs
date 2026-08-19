@@ -264,7 +264,10 @@ mod tests {
             "/opds/v2/books/{book_id}/file",
             "/kobo/{auth_token}/v1/books/{book_id}/file/epub",
         ] {
-            assert!(is_etag_excluded_path(path), "path should be excluded: {path}");
+            assert!(
+                is_etag_excluded_path(path),
+                "path should be excluded: {path}"
+            );
         }
     }
 

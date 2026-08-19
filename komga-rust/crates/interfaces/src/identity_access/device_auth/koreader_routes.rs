@@ -7,10 +7,10 @@ use komga_application::identity_access::{
     DeviceProgressError, KoreaderProgressUpdate, now_sync_marker,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::access_log::RequestConnectionInfo;
+use crate::contracts::common::SpringErrorDto;
 use crate::identity_access::device_auth::auth_resolvers::{
     raw_koreader_header_user, required_koreader_user, required_koreader_user_id,
 };
@@ -29,6 +29,11 @@ struct KoreaderProgressPayload {
     progress: String,
     device: String,
     device_id: String,
+}
+
+#[derive(Serialize)]
+struct KoreaderAuthorizationDto {
+    authorized: &'static str,
 }
 
 fn koreader_auth_failure(status: StatusCode, header_user_presented: bool) -> Response {
@@ -72,16 +77,13 @@ fn koreader_progress_error_response(
             HeaderValue::from_str(koreader_response_content_type(headers))
                 .expect("koreader response content type should be valid"),
         )],
-        Json(json!({
-            "error": reason,
-            "message": message,
-            "path": path,
-            "status": status.as_u16(),
-            "timestamp": SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-        })),
+        Json(SpringErrorDto {
+            error: reason.to_string(),
+            message: message.to_string(),
+            path: path.to_string(),
+            status: status.as_u16(),
+            timestamp: now_epoch_millis(),
+        }),
     )
         .into_response()
 }
@@ -100,16 +102,13 @@ pub(crate) async fn koreader_user_create(
 
     (
         StatusCode::FORBIDDEN,
-        Json(json!({
-            "error": "Forbidden",
-            "message": "User creation is disabled",
-            "path": "/koreader/users/create",
-            "status": 403,
-            "timestamp": SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-        })),
+        Json(SpringErrorDto {
+            error: "Forbidden".to_string(),
+            message: "User creation is disabled".to_string(),
+            path: "/koreader/users/create".to_string(),
+            status: StatusCode::FORBIDDEN.as_u16(),
+            timestamp: now_epoch_millis(),
+        }),
     )
         .into_response()
 }
@@ -132,7 +131,7 @@ pub(crate) async fn koreader_user_auth(
             HeaderValue::from_str(koreader_response_content_type(&headers))
                 .expect("koreader response content type should be valid"),
         )],
-        Json(json!({ "authorized": "OK" })),
+        Json(KoreaderAuthorizationDto { authorized: "OK" }),
     )
         .into_response()
 }
@@ -282,4 +281,11 @@ pub(crate) async fn koreader_put_progress(
     }
 
     StatusCode::OK.into_response()
+}
+
+fn now_epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }

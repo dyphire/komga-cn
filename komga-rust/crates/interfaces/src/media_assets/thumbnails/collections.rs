@@ -7,9 +7,9 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
-use serde_json::json;
 
 use crate::cache::asset_ok_response;
+use crate::contracts::media_assets::CollectionThumbnailDto;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::MediaAssetsState;
 
@@ -94,19 +94,8 @@ pub(crate) async fn collection_thumbnails(
         .await
     {
         Ok(rows) => Json(
-            rows.into_iter()
-                .map(|row| {
-                    json!({
-                        "id": row.id,
-                        "collectionId": row.collection_id,
-                        "type": row.thumbnail_type.persisted_name(),
-                        "selected": row.selected,
-                        "mediaType": row.media_type,
-                        "fileSize": row.file_size,
-                        "width": row.width,
-                        "height": row.height,
-                    })
-                })
+            rows.iter()
+                .map(CollectionThumbnailDto::from_record)
                 .collect::<Vec<_>>(),
         )
         .into_response(),
@@ -178,17 +167,7 @@ pub(crate) async fn collection_thumbnail_upload(
         )
         .await
     {
-        Ok(thumbnail) => Json(json!({
-            "id": thumbnail.id,
-            "collectionId": thumbnail.collection_id,
-            "type": thumbnail.thumbnail_type.persisted_name(),
-            "selected": thumbnail.selected,
-            "mediaType": thumbnail.media_type,
-            "fileSize": thumbnail.file_size,
-            "width": thumbnail.width,
-            "height": thumbnail.height,
-        }))
-        .into_response(),
+        Ok(thumbnail) => Json(CollectionThumbnailDto::from_record(&thumbnail)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }

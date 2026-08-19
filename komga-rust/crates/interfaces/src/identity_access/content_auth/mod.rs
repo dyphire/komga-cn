@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::access_log::{self, RequestConnectionInfo};
+use crate::contracts::identity_access::UserDto;
 
 use crate::identity_access::auth::{
     Admin, api_key_header_value, authentication_activity_request_metadata, basic_credentials,
@@ -18,7 +19,6 @@ use crate::identity_access::auth::{
     persisted_update_password_by_user_id, persisted_users, remember_me_requested,
     remember_me_token_from_headers, session_token_from_headers, unauthorized_json_response,
 };
-use crate::identity_access::user_payload_json;
 use crate::operational::register_session_expired_event;
 use crate::state::{IdentityAccessState, IdentityState};
 use komga_application::identity_access::{
@@ -99,7 +99,9 @@ fn auth_session_response(
     register_discovery_principal(auth_state, &success.user, &success.session_token);
 
     match success.response_mode {
-        AuthSessionResponseMode::BodyOnly => Json(user_payload_json(&success.user)).into_response(),
+        AuthSessionResponseMode::BodyOnly => {
+            Json(UserDto::from_user(&success.user)).into_response()
+        }
         AuthSessionResponseMode::SessionCookie => {
             bootstrap_api_key_user(success.user, success.session_token)
         }
@@ -160,7 +162,7 @@ pub(super) async fn users_list(app: &IdentityAccessState) -> Response {
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(users.iter().map(user_payload_json).collect::<Vec<_>>()).into_response()
+    Json(users.iter().map(UserDto::from_user).collect::<Vec<_>>()).into_response()
 }
 
 pub(super) async fn users_create(
@@ -247,7 +249,7 @@ pub(super) async fn users_create(
         })
         .await
     {
-        Ok(Some(user)) => (StatusCode::CREATED, Json(user_payload_json(&user))).into_response(),
+        Ok(Some(user)) => (StatusCode::CREATED, Json(UserDto::from_user(&user))).into_response(),
         Ok(None) => spring_error(
             StatusCode::BAD_REQUEST,
             "A user with this email already exists",

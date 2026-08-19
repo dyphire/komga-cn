@@ -7,8 +7,9 @@ use icu::collator::{
     options::{CollatorOptions, Strength},
 };
 use icu::locale::locale;
-use serde_json::{Value, json};
 
+use crate::contracts::common::PageDto;
+use crate::contracts::discovery::BookDto;
 use crate::helpers::{query_bool, query_value, query_values};
 use crate::identity_access::auth::Admin;
 use crate::state::DiscoveryState;
@@ -63,12 +64,12 @@ impl<'a> DuplicateBooksSortRequest<'a> {
 }
 
 struct DuplicateBookPayload {
-    payload: Value,
+    payload: BookDto,
     series_title_sort: String,
 }
 
 struct DuplicateBooksPageSlice {
-    content: Vec<Value>,
+    content: Vec<BookDto>,
     page: usize,
     size: usize,
     total_elements: usize,
@@ -151,60 +152,36 @@ fn duplicate_books_sort_modes(query: &str, unpaged: bool) -> Vec<DuplicateBooksS
     }
 }
 
-fn duplicate_books_sort_value(
-    book: &DuplicateBookPayload,
-    field: DuplicateBooksSortField,
-) -> Option<&Value> {
-    match field {
-        DuplicateBooksSortField::Name => book.payload.get("name"),
-        DuplicateBooksSortField::Series => None,
-        DuplicateBooksSortField::Created => book.payload.get("created"),
-        DuplicateBooksSortField::LastModified => book.payload.get("lastModified"),
-        DuplicateBooksSortField::FileSize => book.payload.get("sizeBytes"),
-        DuplicateBooksSortField::FileHash => book.payload.get("fileHash"),
-        DuplicateBooksSortField::Url => book.payload.get("url"),
-        DuplicateBooksSortField::MediaStatus => book.payload.pointer("/media/status"),
-        DuplicateBooksSortField::MediaComment => book.payload.pointer("/media/comment"),
-        DuplicateBooksSortField::MediaType => book.payload.pointer("/media/mediaType"),
-        DuplicateBooksSortField::MediaPagesCount => book.payload.pointer("/media/pagesCount"),
-        DuplicateBooksSortField::MetadataTitle => book.payload.pointer("/metadata/title"),
-        DuplicateBooksSortField::MetadataNumberSort => book.payload.pointer("/metadata/numberSort"),
-        DuplicateBooksSortField::MetadataReleaseDate => {
-            book.payload.pointer("/metadata/releaseDate")
-        }
-        DuplicateBooksSortField::ReadProgressLastModified => {
-            book.payload.pointer("/readProgress/lastModified")
-        }
-        DuplicateBooksSortField::ReadProgressReadDate => {
-            book.payload.pointer("/readProgress/readDate")
-        }
+fn compare_duplicate_book_strings(left: &str, right: &str, descending: bool) -> std::cmp::Ordering {
+    let ordering = left.to_lowercase().cmp(&right.to_lowercase());
+    if descending {
+        ordering.reverse()
+    } else {
+        ordering
     }
 }
 
-fn compare_duplicate_book_payload_values(
-    left: Option<&Value>,
-    right: Option<&Value>,
+fn compare_duplicate_book_numbers<T: PartialOrd>(
+    left: T,
+    right: T,
     descending: bool,
 ) -> std::cmp::Ordering {
-    let ordering = match (left, right) {
-        (Some(Value::String(left)), Some(Value::String(right))) => {
-            left.to_lowercase().cmp(&right.to_lowercase())
-        }
-        (Some(Value::Number(left)), Some(Value::Number(right))) => {
-            match (left.as_f64(), right.as_f64()) {
-                (Some(left), Some(right)) => left
-                    .partial_cmp(&right)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                _ => std::cmp::Ordering::Equal,
-            }
-        }
-        (Some(Value::Bool(left)), Some(Value::Bool(right))) => left.cmp(right),
-        (Some(Value::Null), Some(Value::Null)) => std::cmp::Ordering::Equal,
-        (Some(Value::Null), Some(_)) | (None, Some(_)) => std::cmp::Ordering::Less,
-        (Some(_), Some(Value::Null)) | (Some(_), None) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
-        _ => std::cmp::Ordering::Equal,
-    };
+    let ordering = left
+        .partial_cmp(&right)
+        .unwrap_or(std::cmp::Ordering::Equal);
+    if descending {
+        ordering.reverse()
+    } else {
+        ordering
+    }
+}
+
+fn compare_duplicate_book_options<T: Ord>(
+    left: Option<&T>,
+    right: Option<&T>,
+    descending: bool,
+) -> std::cmp::Ordering {
+    let ordering = left.cmp(&right);
     if descending {
         ordering.reverse()
     } else {
@@ -222,8 +199,8 @@ fn sort_duplicate_book_payloads(
             let ordering = match sort_mode.field {
                 DuplicateBooksSortField::Name => compare_duplicate_book_unicode_strings(
                     &unicode_collator,
-                    left.payload.get("name").and_then(Value::as_str),
-                    right.payload.get("name").and_then(Value::as_str),
+                    Some(left.payload.name.as_str()),
+                    Some(right.payload.name.as_str()),
                     sort_mode.descending,
                 ),
                 DuplicateBooksSortField::Series => compare_duplicate_book_unicode_strings(
@@ -232,20 +209,91 @@ fn sort_duplicate_book_payloads(
                     Some(right.series_title_sort.as_str()),
                     sort_mode.descending,
                 ),
-                DuplicateBooksSortField::MetadataTitle => compare_duplicate_book_unicode_strings(
-                    &unicode_collator,
-                    left.payload
-                        .pointer("/metadata/title")
-                        .and_then(Value::as_str),
-                    right
-                        .payload
-                        .pointer("/metadata/title")
-                        .and_then(Value::as_str),
+                DuplicateBooksSortField::Created => compare_duplicate_book_options(
+                    Some(&left.payload.created),
+                    Some(&right.payload.created),
                     sort_mode.descending,
                 ),
-                _ => compare_duplicate_book_payload_values(
-                    duplicate_books_sort_value(left, sort_mode.field),
-                    duplicate_books_sort_value(right, sort_mode.field),
+                DuplicateBooksSortField::LastModified => compare_duplicate_book_options(
+                    Some(&left.payload.last_modified),
+                    Some(&right.payload.last_modified),
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::FileSize => compare_duplicate_book_numbers(
+                    left.payload.size_bytes,
+                    right.payload.size_bytes,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::FileHash => compare_duplicate_book_strings(
+                    &left.payload.file_hash,
+                    &right.payload.file_hash,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::Url => compare_duplicate_book_strings(
+                    &left.payload.url,
+                    &right.payload.url,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MediaStatus => compare_duplicate_book_strings(
+                    &left.payload.media.status,
+                    &right.payload.media.status,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MediaComment => compare_duplicate_book_strings(
+                    &left.payload.media.comment,
+                    &right.payload.media.comment,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MediaType => compare_duplicate_book_strings(
+                    &left.payload.media.media_type,
+                    &right.payload.media.media_type,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MediaPagesCount => compare_duplicate_book_numbers(
+                    left.payload.media.pages_count,
+                    right.payload.media.pages_count,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MetadataTitle => compare_duplicate_book_unicode_strings(
+                    &unicode_collator,
+                    Some(left.payload.metadata.title.as_str()),
+                    Some(right.payload.metadata.title.as_str()),
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MetadataNumberSort => compare_duplicate_book_numbers(
+                    left.payload.metadata.number_sort,
+                    right.payload.metadata.number_sort,
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::MetadataReleaseDate => compare_duplicate_book_options(
+                    left.payload.metadata.release_date.as_ref(),
+                    right.payload.metadata.release_date.as_ref(),
+                    sort_mode.descending,
+                ),
+                DuplicateBooksSortField::ReadProgressLastModified => {
+                    compare_duplicate_book_options(
+                        left.payload
+                            .read_progress
+                            .as_ref()
+                            .map(|progress| &progress.last_modified),
+                        right
+                            .payload
+                            .read_progress
+                            .as_ref()
+                            .map(|progress| &progress.last_modified),
+                        sort_mode.descending,
+                    )
+                }
+                DuplicateBooksSortField::ReadProgressReadDate => compare_duplicate_book_options(
+                    left.payload
+                        .read_progress
+                        .as_ref()
+                        .map(|progress| &progress.read_date),
+                    right
+                        .payload
+                        .read_progress
+                        .as_ref()
+                        .map(|progress| &progress.read_date),
                     sort_mode.descending,
                 ),
             };
@@ -253,62 +301,33 @@ fn sort_duplicate_book_payloads(
                 return ordering;
             }
         }
-        left.payload
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .cmp(
-                right
-                    .payload
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-            )
+        left.payload.id.cmp(&right.payload.id)
     });
 }
 
 fn duplicate_books_page_payload(
-    content: Vec<Value>,
+    content: Vec<BookDto>,
     page: usize,
     size: usize,
     total_elements: usize,
     sorted: bool,
-) -> Value {
+) -> PageDto<BookDto> {
     let safe_size = size.max(1);
     let total_pages = if total_elements == 0 {
         0
     } else {
         ((total_elements - 1) / safe_size) + 1
     };
-    let number_of_elements = content.len();
-    let first = page == 0;
-    let last = total_pages == 0 || page + 1 >= total_pages;
-    let sort = json!({
-        "empty": !sorted,
-        "sorted": sorted,
-        "unsorted": !sorted,
-    });
 
-    json!({
-        "content": content,
-        "pageable": {
-            "pageNumber": page,
-            "pageSize": safe_size,
-            "sort": sort.clone(),
-            "offset": page.saturating_mul(safe_size),
-            "paged": true,
-            "unpaged": false,
-        },
-        "last": last,
-        "totalElements": total_elements,
-        "totalPages": total_pages,
-        "first": first,
-        "size": safe_size,
-        "number": page,
-        "sort": sort,
-        "numberOfElements": number_of_elements,
-        "empty": number_of_elements == 0,
-    })
+    PageDto::from_parts(
+        content,
+        page,
+        safe_size,
+        total_elements,
+        total_pages,
+        true,
+        sorted,
+    )
 }
 
 fn slice_duplicate_books_page(
@@ -381,8 +400,12 @@ pub(crate) async fn books_duplicates(
                     }
                     Err(error) => return internal_error_response(error),
                 };
+                let payload = match BookDto::from_read_model(&detail, true) {
+                    Ok(payload) => payload,
+                    Err(error) => return internal_error_response(error),
+                };
                 content.push(DuplicateBookPayload {
-                    payload: super::super::detail::book_detail_payload(&detail, true),
+                    payload,
                     series_title_sort: detail.series_title_sort,
                 });
             }

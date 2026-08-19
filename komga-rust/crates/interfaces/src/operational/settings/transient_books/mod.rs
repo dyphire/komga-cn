@@ -10,34 +10,42 @@ use komga_application::operational::{
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::contracts::common::SpringErrorDto;
+use crate::contracts::transient_books::TransientBookErrorDto;
 use crate::identity_access::auth::Admin;
 use crate::state::OperationalApiState;
 
 mod payload;
 
-use payload::transient_book_payload;
+use payload::transient_book_dto;
 
 const TRANSIENT_BOOKS_PATH: &str = "/api/v1/transient-books";
 
 fn transient_books_bad_request(message: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({
-            "error": "Bad Request",
-            "message": message,
-            "path": TRANSIENT_BOOKS_PATH,
-            "status": 400,
-            "timestamp": SystemTime::now()
+        Json(SpringErrorDto {
+            error: "Bad Request".to_string(),
+            message: message.to_string(),
+            path: TRANSIENT_BOOKS_PATH.to_string(),
+            status: 400,
+            timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis(),
-        })),
+                .as_millis() as u64,
+        }),
     )
         .into_response()
 }
 
-fn transient_books_json_error_response(status: StatusCode, error: &str) -> Response {
-    (status, Json(serde_json::json!({ "error": error }))).into_response()
+fn transient_books_error_response(status: StatusCode, error: &str) -> Response {
+    (
+        status,
+        Json(TransientBookErrorDto {
+            error: error.to_string(),
+        }),
+    )
+        .into_response()
 }
 
 pub(crate) async fn post_transient_books(
@@ -62,17 +70,19 @@ pub(crate) async fn post_transient_books(
         }
     };
 
-    let mut payload = records
+    let mut payload = match records
         .iter()
-        .map(transient_book_payload)
-        .collect::<Vec<_>>();
-    payload.sort_by(|left, right| {
-        left["url"]
-            .as_str()
-            .unwrap_or_default()
-            .cmp(right["url"].as_str().unwrap_or_default())
-    });
-    Json(Value::Array(payload)).into_response()
+        .map(transient_book_dto)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(payload) => payload,
+        Err(error) => {
+            tracing::error!(?error, "transient book response mapping failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    payload.sort_by(|left, right| left.url.cmp(&right.url));
+    Json(payload).into_response()
 }
 
 pub(crate) async fn post_transient_book_analyze(
@@ -81,7 +91,13 @@ pub(crate) async fn post_transient_book_analyze(
     AxumPath(transient_book_id): AxumPath<String>,
 ) -> Response {
     match app.transient_books.analyze(&transient_book_id).await {
-        Ok(record) => Json(transient_book_payload(&record)).into_response(),
+        Ok(record) => match transient_book_dto(&record) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => {
+                tracing::error!(?error, "transient book response mapping failed");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
         Err(TransientBookAnalyzeError::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Err(TransientBookAnalyzeError::Internal) => {
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -101,19 +117,16 @@ pub(crate) async fn get_transient_book_page(
         Ok(content) => content,
         Err(TransientBookPageError::NotFound) => return StatusCode::NOT_FOUND.into_response(),
         Err(TransientBookPageError::AnalysisFailed) => {
-            return transient_books_json_error_response(
-                StatusCode::NOT_FOUND,
-                "Book analysis failed",
-            );
+            return transient_books_error_response(StatusCode::NOT_FOUND, "Book analysis failed");
         }
         Err(TransientBookPageError::FileMissing) => {
-            return transient_books_json_error_response(
+            return transient_books_error_response(
                 StatusCode::NOT_FOUND,
                 "File not found, it may have moved",
             );
         }
         Err(TransientBookPageError::BadPageNumber) => {
-            return transient_books_json_error_response(
+            return transient_books_error_response(
                 StatusCode::BAD_REQUEST,
                 "Page number does not exist",
             );

@@ -9,7 +9,10 @@ pub(crate) use tags::book_tags;
 use super::persisted::common_helpers::{internal_error_response, requested_query_values};
 use super::persisted::library_mappings::remap_requested_library_ids_for_persisted;
 use crate::discovery_auth::context::{DetailContentContext, DetailResourceContext};
-use crate::helpers::{books_page_payload, detail_access_denial_response, to_domain_query_context};
+use crate::helpers::{
+    books_page_payload, detail_access_denial_response, spring_error_response,
+    to_domain_query_context,
+};
 use crate::identity_access::auth::Authenticated;
 use crate::state::DiscoveryState;
 use axum::Json;
@@ -20,10 +23,10 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::resolve_persisted_series_id;
 use komga_domain::discovery::{DiscoveryError, PageEnvelope};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bool) -> Response {
-    Json(books_page_payload(
+    match books_page_payload(
         PageEnvelope {
             content: vec![],
             page,
@@ -34,8 +37,10 @@ fn empty_books_page_response(page: usize, size: usize, unpaged: bool, sorted: bo
         false,
         !unpaged,
         sorted,
-    ))
-    .into_response()
+    ) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(error),
+    }
 }
 
 pub(crate) async fn books_list(
@@ -75,15 +80,17 @@ pub(crate) async fn books_list(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => Json(books_page_payload(
+        Ok(page) => match books_page_payload(
             page,
             context.is_admin,
             resolved.response.paged,
             resolved.response.sorted,
-        ))
-        .into_response(),
+        ) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal_error_response(error),
+        },
         Err(DiscoveryError::InvalidSemantics(e)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
+            spring_error_response(StatusCode::BAD_REQUEST, e)
         }
         Err(e) => internal_error_response(format!("{e:?}")),
     }
@@ -149,15 +156,17 @@ pub(crate) async fn books_deprecated_get(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => Json(books_page_payload(
+        Ok(page) => match books_page_payload(
             page,
             context.is_admin,
             resolved.response.paged,
             resolved.response.sorted,
-        ))
-        .into_response(),
+        ) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal_error_response(error),
+        },
         Err(DiscoveryError::InvalidSemantics(e)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
+            spring_error_response(StatusCode::BAD_REQUEST, e)
         }
         Err(e) => internal_error_response(format!("{e:?}")),
     }
@@ -218,15 +227,17 @@ pub(crate) async fn series_books_deprecated(
         .list_books(&context, resolved.request)
         .await
     {
-        Ok(page) => Json(books_page_payload(
+        Ok(page) => match books_page_payload(
             page,
             context.is_admin,
             resolved.response.paged,
             resolved.response.sorted,
-        ))
-        .into_response(),
+        ) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal_error_response(error),
+        },
         Err(DiscoveryError::InvalidSemantics(e)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response()
+            spring_error_response(StatusCode::BAD_REQUEST, e)
         }
         Err(e) => internal_error_response(format!("{e:?}")),
     }

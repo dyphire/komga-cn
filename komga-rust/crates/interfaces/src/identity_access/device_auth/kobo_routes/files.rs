@@ -1,13 +1,12 @@
-use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{AuthUserRole, user_has_role, user_is_admin};
 use serde::Deserialize;
-use serde_json::json;
 use std::path::Path as FsPath;
 
 use crate::access_log::RequestConnectionInfo;
+use crate::helpers::spring_error_response;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::media_assets::access_control::user_can_access_book_media;
 use crate::media_assets::http_helpers::{attachment_disposition, internal_error_response};
@@ -23,19 +22,11 @@ fn convert_epub_to_kepub_bytes(input_file: &FsPath) -> anyhow::Result<Vec<u8>> {
 }
 
 fn missing_kobo_file_response() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({ "error": "File not found, it may have moved" })),
-    )
-        .into_response()
+    spring_error_response(StatusCode::NOT_FOUND, "File not found, it may have moved")
 }
 
 fn kepub_conversion_failed_response() -> Response {
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({ "error": "Kepub conversion failed" })),
-    )
-        .into_response()
+    spring_error_response(StatusCode::SERVICE_UNAVAILABLE, "Kepub conversion failed")
 }
 
 fn kobo_epub_base(file_name: &str) -> &str {

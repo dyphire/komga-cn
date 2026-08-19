@@ -5,7 +5,6 @@ use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{
     KOBO_SYNC_ITEM_LIMIT, KoboLibrarySyncRequest, KoboProxyHeader, encode_komga_sync_token_payload,
 };
-use serde_json::Value;
 
 use super::{resolved_kobo_request_api_key_metadata, wire::build_kobo_sync_event_payload};
 use crate::access_log::RequestConnectionInfo;
@@ -112,7 +111,7 @@ pub(crate) async fn kobo_library_sync(
             HeaderValue::from_str(encoded_sync_token.as_str())
                 .unwrap_or_else(|_| HeaderValue::from_static("")),
         )],
-        Json(Value::Array(events)),
+        Json(events),
     )
         .into_response();
     if should_continue {

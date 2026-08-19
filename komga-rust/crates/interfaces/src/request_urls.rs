@@ -1,34 +1,35 @@
+use crate::contracts::opds::{
+    OpdsAuthenticationDto, OpdsAuthenticationLabelsDto, OpdsAuthenticationLinkDto,
+    OpdsAuthenticationMethodDto,
+};
 use axum::http::{HeaderMap, header};
-use serde_json::{Value, json};
 
-pub(crate) fn opds_auth_json(headers: &HeaderMap) -> Value {
+pub(crate) fn opds_auth_json(headers: &HeaderMap) -> OpdsAuthenticationDto {
     let auth_url = app_absolute_url(headers, "/opds/v2/auth");
     let logo_url = app_absolute_url(headers, "/android-chrome-512x512.png");
 
-    json!({
-        "authentication": [
-            {
-                "type": "http://opds-spec.org/auth/basic",
-                "labels": {
-                    "login": "Email",
-                    "password": "Password"
-                }
-            }
-        ],
-        "title": "Komga",
-        "id": auth_url,
-        "description": "Enter your email and password to authenticate.",
-        "links": [
-            {
-                "rel": "help",
-                "href": "https://komga.org"
+    OpdsAuthenticationDto {
+        authentication: vec![OpdsAuthenticationMethodDto {
+            authentication_type: "http://opds-spec.org/auth/basic".to_string(),
+            labels: OpdsAuthenticationLabelsDto {
+                login: "Email".to_string(),
+                password: "Password".to_string(),
             },
-            {
-                "rel": "logo",
-                "href": logo_url
-            }
-        ]
-    })
+        }],
+        title: "Komga".to_string(),
+        id: auth_url,
+        description: "Enter your email and password to authenticate.".to_string(),
+        links: vec![
+            OpdsAuthenticationLinkDto {
+                rel: "help".to_string(),
+                href: "https://komga.org".to_string(),
+            },
+            OpdsAuthenticationLinkDto {
+                rel: "logo".to_string(),
+                href: logo_url,
+            },
+        ],
+    }
 }
 
 pub(crate) fn app_absolute_url(headers: &HeaderMap, path: &str) -> String {

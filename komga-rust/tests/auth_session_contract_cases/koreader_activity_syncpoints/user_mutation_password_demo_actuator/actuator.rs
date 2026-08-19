@@ -798,7 +798,7 @@ async fn router_actuator_metrics_returns_metric_names_for_admin() {
 }
 
 #[tokio::test]
-async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
+async fn router_actuator_metric_detail_includes_base_unit_and_library_id_for_books_filesize() {
     let ctx = TestFixture::new("router-actuator-metric-detail-base-unit").await;
 
     let app = ctx.app().clone();
@@ -837,15 +837,18 @@ async fn router_actuator_metric_detail_includes_base_unit_for_books_filesize() {
         .get("availableTags")
         .and_then(Value::as_array)
         .expect("actuator metric detail should expose availableTags array");
-    assert!(
-        available_tags.iter().any(|tag| {
-            tag.get("tag").and_then(Value::as_str) == Some("library")
-                && tag
-                    .get("values")
-                    .and_then(Value::as_array)
-                    .is_some_and(|values| !values.is_empty())
-        }),
-        "actuator metric detail should expose library tag values: {payload:?}"
+    let library_tag = available_tags
+        .iter()
+        .find(|tag| tag.get("tag").and_then(Value::as_str) == Some("library"))
+        .expect("actuator metric detail should expose a library tag");
+    let library_values = library_tag
+        .get("values")
+        .and_then(Value::as_array)
+        .expect("actuator library tag should expose values");
+    assert_eq!(
+        library_values,
+        &[Value::String("library-1".to_string())],
+        "actuator library tags should use IDs rather than names"
     );
 }
 

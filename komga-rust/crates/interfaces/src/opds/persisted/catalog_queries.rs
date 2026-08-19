@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use axum::http::HeaderMap;
-use serde_json::{Value, json};
 
 use komga_application::opds::{
     BrowseSeriesNavigationEntry, OpdsBrowseCatalogPort, OpdsSeriesEntry,
 };
 
+use crate::contracts::opds::OpdsV2LinkDto;
 use crate::request_urls::app_absolute_url;
 
 use super::{OpdsJsonNavigationPage, PersistedSeries};
@@ -53,12 +53,13 @@ pub(super) fn browse_series_navigation_values(
     OpdsJsonNavigationPage {
         entries: entries
             .into_iter()
-            .map(|entry| {
-                json!({
-                    "title": entry.title,
-                    "href": app_absolute_url(headers, format!("/opds/v2/series/{}", entry.id).as_str()),
-                    "type": "application/opds+json",
-                })
+            .map(|entry| OpdsV2LinkDto {
+                title: Some(entry.title),
+                rel: None,
+                href: app_absolute_url(headers, format!("/opds/v2/series/{}", entry.id).as_str()),
+                media_type: Some("application/opds+json".to_string()),
+                templated: None,
+                properties: None,
             })
             .collect(),
         total_count: total,
@@ -70,7 +71,7 @@ pub(super) async fn load_browse_publisher_navigation(
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
-) -> anyhow::Result<Vec<Value>> {
+) -> anyhow::Result<Vec<OpdsV2LinkDto>> {
     let entries = backend
         .load_browse_publisher_entries(allowed_library_ids.as_ref(), library_id)
         .await?;
@@ -82,11 +83,14 @@ pub(super) async fn load_browse_publisher_navigation(
                 "/opds/v2/libraries{library_segment}/browse?publisher={}",
                 super::super::feeds::query_escape(entry.publisher.as_str()),
             );
-            json!({
-                "title": entry.publisher,
-                "href": app_absolute_url(headers, href.as_str()),
-                "type": "application/opds+json",
-            })
+            OpdsV2LinkDto {
+                title: Some(entry.publisher),
+                rel: None,
+                href: app_absolute_url(headers, href.as_str()),
+                media_type: Some("application/opds+json".to_string()),
+                templated: None,
+                properties: None,
+            }
         })
         .collect())
 }

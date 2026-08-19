@@ -1,13 +1,15 @@
 use anyhow::Context;
 use std::collections::HashMap;
 
-use komga_application::discovery::{BookMetadataLinkReadModel, SeriesReadModel, SeriesReadingDirection};
+use komga_application::discovery::{
+    SeriesAlternateTitleRecord, SeriesMetadataLinkRecord, SeriesReadModel, SeriesReadingDirection,
+};
 use komga_domain::discovery::SeriesStatus;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Error, QueryBuilder, Row, Sqlite, SqlitePool};
 
 use super::common;
-use super::models::{SeriesSummary, SeriesSummaryLink};
+use super::models::SeriesSummary;
 
 pub(super) async fn load_persisted_series_summaries(
     pool: &SqlitePool,
@@ -47,6 +49,7 @@ async fn fetch_persisted_series_summary_rows(
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"SELECT s.ID,
                   s.LIBRARY_ID,
+                  s.URL AS URL,
                   s.CREATED_DATE,
                   s.LAST_MODIFIED_DATE,
                   CAST(s.FILE_LAST_MODIFIED AS TEXT) AS FILE_LAST_MODIFIED,
@@ -56,12 +59,26 @@ async fn fetch_persisted_series_summary_rows(
                   COALESCE(sm.TITLE, s.NAME) AS TITLE,
                   COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
                   COALESCE(sm.STATUS, 'ONGOING') AS STATUS,
+                  COALESCE(sm.STATUS_LOCK, 0) AS STATUS_LOCK,
+                  COALESCE(sm.TITLE_LOCK, 0) AS TITLE_LOCK,
+                  COALESCE(sm.TITLE_SORT_LOCK, 0) AS TITLE_SORT_LOCK,
                   COALESCE(sm.SUMMARY, '') AS SUMMARY,
+                  COALESCE(sm.SUMMARY_LOCK, 0) AS SUMMARY_LOCK,
                   COALESCE(sm.READING_DIRECTION, '') AS READING_DIRECTION,
+                  COALESCE(sm.READING_DIRECTION_LOCK, 0) AS READING_DIRECTION_LOCK,
                   COALESCE(sm.PUBLISHER, '') AS PUBLISHER,
+                  COALESCE(sm.PUBLISHER_LOCK, 0) AS PUBLISHER_LOCK,
                   sm.AGE_RATING AS AGE_RATING,
+                  COALESCE(sm.AGE_RATING_LOCK, 0) AS AGE_RATING_LOCK,
                   sm.TOTAL_BOOK_COUNT AS TOTAL_BOOK_COUNT,
+                  COALESCE(sm.TOTAL_BOOK_COUNT_LOCK, 0) AS TOTAL_BOOK_COUNT_LOCK,
                   COALESCE(sm.LANGUAGE, '') AS LANGUAGE,
+                  COALESCE(sm.LANGUAGE_LOCK, 0) AS LANGUAGE_LOCK,
+                  COALESCE(sm.GENRES_LOCK, 0) AS GENRES_LOCK,
+                  COALESCE(sm.TAGS_LOCK, 0) AS TAGS_LOCK,
+                  COALESCE(sm.SHARING_LABELS_LOCK, 0) AS SHARING_LABELS_LOCK,
+                  COALESCE(sm.LINKS_LOCK, 0) AS LINKS_LOCK,
+                  COALESCE(sm.ALTERNATE_TITLES_LOCK, 0) AS ALTERNATE_TITLES_LOCK,
                   COALESCE(sm.CREATED_DATE, s.CREATED_DATE) AS METADATA_CREATED,
                   COALESCE(sm.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
                   COALESCE(bma.RELEASE_DATE, NULL) AS BOOKS_METADATA_RELEASE_DATE,
@@ -93,6 +110,13 @@ async fn fetch_persisted_series_summary_rows(
                     ''
                   ) AS ALTERNATE_TITLES,
                   COALESCE(
+                    (SELECT GROUP_CONCAT(LINK, char(30))
+                     FROM (SELECT DISTINCT sml.LABEL || char(31) || sml.URL AS LINK
+                           FROM SERIES_METADATA_LINK sml
+                           WHERE sml.SERIES_ID = s.ID)),
+                    ''
+                  ) AS LINKS,
+                  COALESCE(
                     (SELECT GROUP_CONCAT(AUTHOR, char(30))
                      FROM (SELECT DISTINCT CASE
                              WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
@@ -102,33 +126,13 @@ async fn fetch_persisted_series_summary_rows(
                            WHERE bmaa.SERIES_ID = s.ID)),
                     ''
                   ) AS BOOKS_METADATA_AUTHORS,
-                   COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
-                             FROM (SELECT DISTINCT bmat.TAG AS TAG
-                                   FROM BOOK_METADATA_AGGREGATION_TAG bmat
-                                   WHERE bmat.SERIES_ID = s.ID)), '') AS BOOKS_METADATA_TAGS,
-                   sm.STATUS_LOCK AS STATUS_LOCK,
-                   sm.TITLE_LOCK AS TITLE_LOCK,
-                   sm.TITLE_SORT_LOCK AS TITLE_SORT_LOCK,
-                   sm.SUMMARY_LOCK AS SUMMARY_LOCK,
-                   sm.READING_DIRECTION_LOCK AS READING_DIRECTION_LOCK,
-                   sm.PUBLISHER_LOCK AS PUBLISHER_LOCK,
-                   sm.AGE_RATING_LOCK AS AGE_RATING_LOCK,
-                   sm.LANGUAGE_LOCK AS LANGUAGE_LOCK,
-                   sm.GENRES_LOCK AS GENRES_LOCK,
-                   sm.TAGS_LOCK AS TAGS_LOCK,
-                   sm.TOTAL_BOOK_COUNT_LOCK AS TOTAL_BOOK_COUNT_LOCK,
-                   sm.SHARING_LABELS_LOCK AS SHARING_LABELS_LOCK,
-                   sm.LINKS_LOCK AS LINKS_LOCK,
-                   sm.ALTERNATE_TITLES_LOCK AS ALTERNATE_TITLES_LOCK,
-                   COALESCE(
-                     (SELECT GROUP_CONCAT(LABEL || char(30) || URL, char(31))
-                      FROM SERIES_METADATA_LINK sml
-                      WHERE sml.SERIES_ID = s.ID),
-                     ''
-                   ) AS LINKS
-            FROM SERIES s
-            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
-            LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
+                  COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
+                            FROM (SELECT DISTINCT bmat.TAG AS TAG
+                                  FROM BOOK_METADATA_AGGREGATION_TAG bmat
+                                  WHERE bmat.SERIES_ID = s.ID)), '') AS BOOKS_METADATA_TAGS
+           FROM SERIES s
+           LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+           LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
     );
 
     if let Some(ids) = ids.filter(|ids| !ids.is_empty()) {
@@ -164,6 +168,7 @@ fn series_read_model(summary: SeriesSummary) -> SeriesReadModel {
         id: summary.id,
         library_id: summary.library_id,
         name: summary.name,
+        url: summary.url,
         title: summary.title,
         title_sort: summary.title_sort,
         labels: summary.labels,
@@ -175,14 +180,30 @@ fn series_read_model(summary: SeriesSummary) -> SeriesReadModel {
         books_unread_count: summary.books_unread_count,
         books_in_progress_count: summary.books_in_progress_count,
         status: SeriesStatus::parse(&summary.status).unwrap_or(SeriesStatus::Ongoing),
+        status_lock: summary.status_lock,
         summary: summary.summary,
+        summary_lock: summary.summary_lock,
         reading_direction: SeriesReadingDirection::parse(&summary.reading_direction),
+        reading_direction_lock: summary.reading_direction_lock,
         publisher: summary.publisher,
+        publisher_lock: summary.publisher_lock,
         age_rating: summary.age_rating,
+        age_rating_lock: summary.age_rating_lock,
         language: summary.language,
+        language_lock: summary.language_lock,
         genres: summary.genres,
+        genres_lock: summary.genres_lock,
         tags: summary.tags,
+        tags_lock: summary.tags_lock,
+        total_book_count: summary.total_book_count,
+        total_book_count_lock: summary.total_book_count_lock,
+        sharing_labels_lock: summary.sharing_labels_lock,
+        links: summary.links,
+        links_lock: summary.links_lock,
         alternate_titles: summary.alternate_titles,
+        alternate_titles_lock: summary.alternate_titles_lock,
+        title_lock: summary.title_lock,
+        title_sort_lock: summary.title_sort_lock,
         metadata_created: summary.metadata_created,
         metadata_last_modified: summary.metadata_last_modified,
         books_metadata_authors: summary.books_metadata_authors,
@@ -194,49 +215,15 @@ fn series_read_model(summary: SeriesSummary) -> SeriesReadModel {
         books_metadata_last_modified: summary.books_metadata_last_modified,
         deleted: summary.deleted,
         oneshot: summary.oneshot,
-        status_lock: summary.status_lock,
-        title_lock: summary.title_lock,
-        title_sort_lock: summary.title_sort_lock,
-        summary_lock: summary.summary_lock,
-        reading_direction_lock: summary.reading_direction_lock,
-        publisher_lock: summary.publisher_lock,
-        age_rating_lock: summary.age_rating_lock,
-        language_lock: summary.language_lock,
-        genres_lock: summary.genres_lock,
-        tags_lock: summary.tags_lock,
-        total_book_count_lock: summary.total_book_count_lock,
-        sharing_labels_lock: summary.sharing_labels_lock,
-        links_lock: summary.links_lock,
-        alternate_titles_lock: summary.alternate_titles_lock,
-        links: summary
-            .links
-            .into_iter()
-            .map(|link| BookMetadataLinkReadModel {
-                label: link.label,
-                url: link.url,
-            })
-            .collect(),
     }
 }
 
 fn map_series_summary(row: SqliteRow) -> SeriesSummary {
-    let links = row
-        .get::<String, _>("LINKS")
-        .split(char::from(31))
-        .filter(|entry| !entry.is_empty())
-        .filter_map(|entry| {
-            let (label, url) = entry.split_once(char::from(30))?;
-            Some(SeriesSummaryLink {
-                label: label.to_string(),
-                url: url.to_string(),
-            })
-        })
-        .collect();
-
     SeriesSummary {
         id: row.get::<String, _>("ID"),
         library_id: row.get::<String, _>("LIBRARY_ID"),
         name: row.get::<String, _>("NAME"),
+        url: row.get::<String, _>("URL"),
         title: row.get::<String, _>("TITLE"),
         title_sort: row.get::<String, _>("TITLE_SORT"),
         labels: common::parse_group_concat_values(&row.get::<String, _>("LABELS")),
@@ -248,18 +235,34 @@ fn map_series_summary(row: SqliteRow) -> SeriesSummary {
         books_unread_count: row.get::<i64, _>("BOOK_COUNT").max(0) as u64,
         books_in_progress_count: 0,
         status: row.get::<String, _>("STATUS"),
+        status_lock: row.get::<bool, _>("STATUS_LOCK"),
         summary: row.get::<String, _>("SUMMARY"),
+        summary_lock: row.get::<bool, _>("SUMMARY_LOCK"),
         reading_direction: row.get::<String, _>("READING_DIRECTION"),
+        reading_direction_lock: row.get::<bool, _>("READING_DIRECTION_LOCK"),
         publisher: row.get::<String, _>("PUBLISHER"),
+        publisher_lock: row.get::<bool, _>("PUBLISHER_LOCK"),
         age_rating: row
             .get::<Option<i64>, _>("AGE_RATING")
             .map(common::clamp_kotlin_int_u32),
+        age_rating_lock: row.get::<bool, _>("AGE_RATING_LOCK"),
+        total_book_count: row
+            .get::<Option<i64>, _>("TOTAL_BOOK_COUNT")
+            .map(common::clamp_kotlin_int_u32),
+        total_book_count_lock: row.get::<bool, _>("TOTAL_BOOK_COUNT_LOCK"),
         language: row.get::<String, _>("LANGUAGE"),
+        language_lock: row.get::<bool, _>("LANGUAGE_LOCK"),
+        genres_lock: row.get::<bool, _>("GENRES_LOCK"),
+        tags_lock: row.get::<bool, _>("TAGS_LOCK"),
+        sharing_labels_lock: row.get::<bool, _>("SHARING_LABELS_LOCK"),
+        links: parse_series_links(&row.get::<String, _>("LINKS")),
+        links_lock: row.get::<bool, _>("LINKS_LOCK"),
         genres: common::parse_group_concat_values(&row.get::<String, _>("GENRES")),
         tags: common::parse_group_concat_values(&row.get::<String, _>("TAGS")),
-        alternate_titles: common::parse_group_concat_values(
-            &row.get::<String, _>("ALTERNATE_TITLES"),
-        ),
+        alternate_titles: parse_alternate_titles(&row.get::<String, _>("ALTERNATE_TITLES")),
+        alternate_titles_lock: row.get::<bool, _>("ALTERNATE_TITLES_LOCK"),
+        title_lock: row.get::<bool, _>("TITLE_LOCK"),
+        title_sort_lock: row.get::<bool, _>("TITLE_SORT_LOCK"),
         metadata_created: row.get::<String, _>("METADATA_CREATED"),
         metadata_last_modified: row.get::<String, _>("METADATA_LAST_MODIFIED"),
         books_metadata_authors: common::parse_group_concat_values(
@@ -275,22 +278,32 @@ fn map_series_summary(row: SqliteRow) -> SeriesSummary {
         books_metadata_last_modified: row.get::<String, _>("BOOKS_METADATA_LAST_MODIFIED"),
         deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
         oneshot: row.get::<i64, _>("ONESHOT") != 0,
-        status_lock: row.get::<i64, _>("STATUS_LOCK") != 0,
-        title_lock: row.get::<i64, _>("TITLE_LOCK") != 0,
-        title_sort_lock: row.get::<i64, _>("TITLE_SORT_LOCK") != 0,
-        summary_lock: row.get::<i64, _>("SUMMARY_LOCK") != 0,
-        reading_direction_lock: row.get::<i64, _>("READING_DIRECTION_LOCK") != 0,
-        publisher_lock: row.get::<i64, _>("PUBLISHER_LOCK") != 0,
-        age_rating_lock: row.get::<i64, _>("AGE_RATING_LOCK") != 0,
-        language_lock: row.get::<i64, _>("LANGUAGE_LOCK") != 0,
-        genres_lock: row.get::<i64, _>("GENRES_LOCK") != 0,
-        tags_lock: row.get::<i64, _>("TAGS_LOCK") != 0,
-        total_book_count_lock: row.get::<i64, _>("TOTAL_BOOK_COUNT_LOCK") != 0,
-        sharing_labels_lock: row.get::<i64, _>("SHARING_LABELS_LOCK") != 0,
-        links_lock: row.get::<i64, _>("LINKS_LOCK") != 0,
-        alternate_titles_lock: row.get::<i64, _>("ALTERNATE_TITLES_LOCK") != 0,
-        links,
     }
+}
+
+fn parse_series_links(raw: &str) -> Vec<SeriesMetadataLinkRecord> {
+    common::parse_group_concat_values(raw)
+        .into_iter()
+        .filter_map(|value| {
+            value
+                .split_once('\u{1f}')
+                .map(|(label, url)| SeriesMetadataLinkRecord {
+                    label: label.to_string(),
+                    url: url.to_string(),
+                })
+        })
+        .collect()
+}
+
+fn parse_alternate_titles(raw: &str) -> Vec<SeriesAlternateTitleRecord> {
+    common::parse_group_concat_values(raw)
+        .into_iter()
+        .map(|value| match value.split_once("::") {
+            Some((label, title)) => (label.to_string(), title.to_string()),
+            None => (String::new(), value),
+        })
+        .map(|(label, title)| SeriesAlternateTitleRecord { label, title })
+        .collect()
 }
 
 #[cfg(test)]
@@ -299,7 +312,7 @@ mod tests {
     use crate::test_support::BootstrappedBookFixture;
 
     #[tokio::test]
-    async fn load_persisted_series_summaries_preserves_commas_in_metadata_values() {
+    async fn load_persisted_series_summaries_preserves_metadata_values() {
         let fixture = BootstrappedBookFixture::open("series-summary-comma-values").await;
         fixture.insert_library_series().await;
         fixture.insert_series_metadata().await;
@@ -322,6 +335,36 @@ mod tests {
             .execute(&fixture.pool)
             .await
             .expect("tag should be inserted");
+        sqlx::query(
+            r#"UPDATE SERIES_METADATA
+               SET STATUS_LOCK = 1,
+                   TITLE_LOCK = 1,
+                   TOTAL_BOOK_COUNT = 5,
+                   TOTAL_BOOK_COUNT_LOCK = 1,
+                   LINKS_LOCK = 1,
+                   ALTERNATE_TITLES_LOCK = 1
+               WHERE SERIES_ID = ?"#,
+        )
+        .bind("series-1")
+        .execute(&fixture.pool)
+        .await
+        .expect("series metadata locks should be updated");
+        sqlx::query("INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL) VALUES (?, ?, ?)")
+            .bind("series-1")
+            .bind("Wiki")
+            .bind("https://example.com")
+            .execute(&fixture.pool)
+            .await
+            .expect("series link should be inserted");
+        sqlx::query(
+            "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+        )
+        .bind("series-1")
+        .bind("en")
+        .bind("Alt Title")
+        .execute(&fixture.pool)
+        .await
+        .expect("alternate title should be inserted");
 
         let summaries = load_persisted_series_summaries(&fixture.pool)
             .await
@@ -330,9 +373,29 @@ mod tests {
             .first()
             .expect("series summary should include seeded series");
 
+        assert_eq!(summary.url, "series");
         assert_eq!(summary.labels, vec!["Kids, Family"]);
         assert_eq!(summary.genres, vec!["Sci, Fi"]);
         assert_eq!(summary.tags, vec!["Slice, Life"]);
+        assert!(summary.status_lock);
+        assert_eq!(summary.total_book_count, Some(5));
+        assert!(summary.total_book_count_lock);
+        assert_eq!(
+            summary.links,
+            vec![SeriesMetadataLinkRecord {
+                label: "Wiki".to_string(),
+                url: "https://example.com".to_string(),
+            }]
+        );
+        assert!(summary.links_lock);
+        assert_eq!(
+            summary.alternate_titles,
+            vec![SeriesAlternateTitleRecord {
+                label: "en".to_string(),
+                title: "Alt Title".to_string(),
+            }]
+        );
+        assert!(summary.alternate_titles_lock);
         fixture.close().await;
     }
 }

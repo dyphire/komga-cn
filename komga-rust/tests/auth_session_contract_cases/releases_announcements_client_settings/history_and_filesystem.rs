@@ -115,7 +115,7 @@ async fn router_get_history_maps_events_to_api_page_contract() {
                 "type": "BOOK_ADDED",
                 "bookId": "book-1",
                 "seriesId": null,
-                "timestamp": "2024-01-01T00:00:00Z",
+                "timestamp": "2024-01-01T00:00:00",
                 "properties": {},
             }],
             "pageable": {

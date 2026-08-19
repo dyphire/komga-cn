@@ -1,20 +1,29 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::operational::{
     PersistedServerSettings, ServerSettingPatch, ServerSettingsLoadError,
     ServerSettingsUpdateCommand, ServerSettingsUpdateError, ThumbnailSize,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
+use crate::contracts::common::MessageDto;
+use crate::contracts::operational::{SettingMultiSourceDto, SettingsDto, ThumbnailSizeDto};
 use crate::identity_access::auth::Admin;
-use crate::operational::helpers::{
-    effective_server_context_path, effective_server_port, invalid_settings_payload,
-    multi_source_number, multi_source_string,
-};
 use crate::state::{RuntimeState, ServerSettingsState};
+
+fn invalid_settings_payload(message: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(MessageDto {
+            message: message.to_string(),
+        }),
+    )
+        .into_response()
+}
 
 pub(crate) async fn get_server_settings(
     State(app): State<ServerSettingsState>,
@@ -25,7 +34,7 @@ pub(crate) async fn get_server_settings(
         Err(ServerSettingsLoadError::Load(error)) => return settings_load_error_response(error),
     };
 
-    Json(settings_json(&app.runtime, &settings)).into_response()
+    Json(settings_dto(&app.runtime, &settings)).into_response()
 }
 
 pub(crate) async fn update_server_settings(
@@ -54,12 +63,16 @@ pub(crate) async fn update_server_settings(
         Err(ServerSettingsUpdateError::Load(error)) => settings_load_error_response(error),
         Err(ServerSettingsUpdateError::Persist(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("failed to persist settings: {error:#}") })),
+            Json(MessageDto {
+                message: format!("failed to persist settings: {error:#}"),
+            }),
         )
             .into_response(),
         Err(ServerSettingsUpdateError::ApplyTaskPool(error)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("failed to process queued tasks: {error:#}") })),
+            Json(MessageDto {
+                message: format!("failed to process queued tasks: {error:#}"),
+            }),
         )
             .into_response(),
     }
@@ -69,7 +82,9 @@ fn settings_load_error_response(error: impl std::fmt::Display + std::fmt::Debug)
     tracing::error!(?error, "server settings load error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "message": format!("failed to load settings: {error:#}") })),
+        Json(MessageDto {
+            message: format!("failed to load settings: {error:#}"),
+        }),
     )
         .into_response()
 }
@@ -165,6 +180,12 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
         "koboPort must be an integer between 1 and 65535",
     )?;
 
+    command.kepubify_path = optional_string_patch(
+        payload,
+        "kepubifyPath",
+        "kepubifyPath must be a string or null",
+    )?;
+
     Ok(command)
 }
 
@@ -198,27 +219,36 @@ fn optional_string_patch(
     }
 }
 
-fn settings_json(runtime: &RuntimeState, settings: &PersistedServerSettings) -> Value {
-    json!({
-        "deleteEmptyCollections": settings.delete_empty_collections,
-        "deleteEmptyReadLists": settings.delete_empty_read_lists,
-        "rememberMeDurationDays": settings.remember_me_duration_days,
-        "thumbnailSize": settings.thumbnail_size.as_str(),
-        "taskPoolSize": settings.task_pool_size,
-        "serverPort": multi_source_number(
-            Some(u64::from(runtime.configuration_bind_address.port())),
-            settings.server_port.map(u64::from),
-            effective_server_port(runtime).map(u64::from),
+fn settings_dto(runtime: &RuntimeState, settings: &PersistedServerSettings) -> SettingsDto {
+    SettingsDto {
+        delete_empty_collections: settings.delete_empty_collections,
+        delete_empty_read_lists: settings.delete_empty_read_lists,
+        remember_me_duration_days: settings.remember_me_duration_days,
+        thumbnail_size: thumbnail_size_dto(settings.thumbnail_size),
+        task_pool_size: settings.task_pool_size,
+        server_port: SettingMultiSourceDto::new(
+            Some(runtime.configuration_bind_address.port()),
+            settings.server_port,
+            Some(runtime.bind_address.port()),
         ),
-        "serverContextPath": multi_source_string(
-            runtime.configuration_server_context_path.as_deref(),
-            settings.server_context_path.as_deref(),
-            Some(effective_server_context_path(runtime)),
+        server_context_path: SettingMultiSourceDto::new(
+            runtime.configuration_server_context_path.clone(),
+            settings.server_context_path.clone(),
+            Some(runtime.server_context_path.clone().unwrap_or_default()),
         ),
-        "kepubifyPath": multi_source_string(None, None, None),
-        "koboProxy": settings.kobo_proxy,
-        "koboPort": settings.kobo_port,
-    })
+        kobo_proxy: settings.kobo_proxy,
+        kobo_port: settings.kobo_port,
+        kepubify_path: SettingMultiSourceDto::new(None, settings.kepubify_path.clone(), None),
+    }
+}
+
+fn thumbnail_size_dto(size: ThumbnailSize) -> ThumbnailSizeDto {
+    match size {
+        ThumbnailSize::Default => ThumbnailSizeDto::Default,
+        ThumbnailSize::Medium => ThumbnailSizeDto::Medium,
+        ThumbnailSize::Large => ThumbnailSizeDto::Large,
+        ThumbnailSize::XLarge => ThumbnailSizeDto::XLarge,
+    }
 }
 
 #[cfg(test)]

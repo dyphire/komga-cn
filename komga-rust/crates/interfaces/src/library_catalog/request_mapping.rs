@@ -1,11 +1,12 @@
 #![allow(clippy::result_large_err)]
 
+use crate::contracts::common::ViolationDto;
 use crate::helpers::validation_error_response;
 use axum::response::Response;
 use komga_application::library_catalog::{
     LibraryChangeSet, LibraryScanInterval, LibrarySeriesCover,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::handlers::bad_request_response;
 
@@ -263,7 +264,7 @@ fn apply_string_array_field(
 fn normalize_nullable_patch_string_field(
     body: &mut serde_json::Map<String, Value>,
     key: &str,
-    violations: &mut Vec<Value>,
+    violations: &mut Vec<ViolationDto>,
 ) -> Result<(), Response> {
     let Some(value) = body.get(key) else {
         return Ok(());
@@ -276,10 +277,10 @@ fn normalize_nullable_patch_string_field(
         return Err(bad_request_response(&format!("{key} must be a string")));
     };
     if value.trim().is_empty() {
-        violations.push(json!({
-            "fieldName": key,
-            "message": "must not be blank",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some(key.to_string()),
+            message: Some("must not be blank".to_string()),
+        });
     }
     Ok(())
 }

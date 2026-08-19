@@ -88,6 +88,7 @@ fn normalize_server_settings(
             server_context_path: parse_server_context_path(persisted, "SERVER_CONTEXT_PATH")?,
             kobo_proxy: parse_bool(persisted, "KOBO_PROXY", false)?,
             kobo_port: parse_port(persisted, "KOBO_PORT")?,
+            kepubify_path: parse_non_blank_string(persisted.get("KEPUBIFY_PATH")),
         },
         generated_remember_me_key,
     })
@@ -280,6 +281,7 @@ mod tests {
                 ServerSettingChange::set("SERVER_CONTEXT_PATH", "/komga"),
                 ServerSettingChange::set("KOBO_PROXY", "true"),
                 ServerSettingChange::set("KOBO_PORT", "8085"),
+                ServerSettingChange::set("KEPUBIFY_PATH", "/usr/bin/kepubify"),
             ])
             .await
             .expect("valid persisted settings should be seeded");
@@ -298,6 +300,7 @@ mod tests {
         assert_eq!(settings.server_context_path.as_deref(), Some("/komga"));
         assert!(settings.kobo_proxy);
         assert_eq!(settings.kobo_port, Some(8085));
+        assert_eq!(settings.kepubify_path.as_deref(), Some("/usr/bin/kepubify"));
 
         cleanup_fixture(root, database_file).await;
     }

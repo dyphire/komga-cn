@@ -1,8 +1,16 @@
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde::ser::{SerializeMap, Serializer};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 use komga_application::identity_access::{
     KoboMetadataRecord, KoboSyncBookSnapshot, KoboSyncEvent, KoboSyncReadListSnapshot,
     KoboSyncReadProgressSnapshot, now_sync_marker,
+};
+
+use super::reading_state::{
+    KoboReadingStateBookmarkPayload, KoboReadingStateLocationPayload, KoboReadingStatePayload,
+    KoboReadingStateStatisticsPayload, KoboReadingStateStatusPayload,
 };
 
 struct KoboBookDownloadFormat {
@@ -26,15 +34,209 @@ impl KoboBookDownloadFormat {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct KoboBookMetadataWire {
+    categories: Vec<String>,
+    contributor_roles: Vec<KoboContributorRoleWire>,
+    contributors: Vec<String>,
+    cover_image_id: Option<String>,
+    cross_revision_id: String,
+    current_display_price: KoboPriceWire,
+    current_love_display_price: KoboPriceWire,
+    description: String,
+    download_urls: Vec<KoboDownloadUrlWire>,
+    entitlement_id: String,
+    external_ids: Vec<String>,
+    genre: String,
+    is_eligible_for_kobo_love: bool,
+    is_internet_archive: bool,
+    is_pre_order: bool,
+    is_social_enabled: bool,
+    #[serde(rename = "ISBN")]
+    isbn: Option<String>,
+    language: String,
+    phonetic_pronunciations: BTreeMap<String, String>,
+    publication_date: Option<String>,
+    publisher: Option<KoboPublisherWire>,
+    revision_id: String,
+    series: Option<KoboSeriesWire>,
+    // Standalone metadata includes these fields as explicit nulls; sync metadata omits them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slug: Option<Option<String>>,
+    #[serde(rename = "SubTitle", skip_serializing_if = "Option::is_none")]
+    subtitle: Option<Option<String>>,
+    title: String,
+    work_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboContributorRoleWire {
+    name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboPriceWire {
+    currency_code: &'static str,
+    total_amount: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboDownloadUrlWire {
+    drm_type: &'static str,
+    format: String,
+    platform: &'static str,
+    size: u64,
+    url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboPublisherWire {
+    imprint: &'static str,
+    name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboSeriesWire {
+    id: String,
+    name: String,
+    number: String,
+    #[serde(rename = "NumberFloat")]
+    number_float: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct KoboNewEntitlementWire {
+    book_entitlement: KoboEntitlementWire,
+    book_metadata: KoboBookMetadataWire,
+    reading_state: KoboReadingStatePayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct KoboChangedEntitlementWire {
+    book_entitlement: KoboEntitlementWire,
+    book_metadata: KoboBookMetadataWire,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct KoboChangedReadingStateWire {
+    reading_state: KoboReadingStatePayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboEntitlementWire {
+    accessibility: &'static str,
+    active_period: KoboActivePeriodWire,
+    created: String,
+    cross_revision_id: String,
+    id: String,
+    is_hidden_from_archive: bool,
+    is_locked: bool,
+    is_removed: bool,
+    last_modified: String,
+    origin_category: &'static str,
+    revision_id: String,
+    status: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboActivePeriodWire {
+    from: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub(super) struct KoboTagEventWire {
+    tag: KoboTagWire,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboTagWire {
+    id: String,
+    created: String,
+    last_modified: String,
+    name: String,
+    #[serde(rename = "Type")]
+    tag_type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    items: Option<Vec<KoboTagItemWire>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct KoboTagItemWire {
+    revision_id: String,
+    #[serde(rename = "Type")]
+    item_type: &'static str,
+}
+
+pub(super) enum KoboSyncEventPayload {
+    Raw(Value),
+    NewEntitlement(Box<KoboNewEntitlementWire>),
+    ChangedProductMetadata(Box<KoboBookMetadataWire>),
+    ChangedEntitlement(Box<KoboChangedEntitlementWire>),
+    ChangedReadingState(Box<KoboChangedReadingStateWire>),
+    NewTag(Box<KoboTagEventWire>),
+    ChangedTag(Box<KoboTagEventWire>),
+    DeletedTag(Box<KoboTagEventWire>),
+}
+
+impl Serialize for KoboSyncEventPayload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Raw(value) => value.serialize(serializer),
+            Self::NewEntitlement(value) => {
+                serialize_kobo_event(serializer, "NewEntitlement", value)
+            }
+            Self::ChangedProductMetadata(value) => {
+                serialize_kobo_event(serializer, "ChangedProductMetadata", value)
+            }
+            Self::ChangedEntitlement(value) => {
+                serialize_kobo_event(serializer, "ChangedEntitlement", value)
+            }
+            Self::ChangedReadingState(value) => {
+                serialize_kobo_event(serializer, "ChangedReadingState", value)
+            }
+            Self::NewTag(value) => serialize_kobo_event(serializer, "NewTag", value),
+            Self::ChangedTag(value) => serialize_kobo_event(serializer, "ChangedTag", value),
+            Self::DeletedTag(value) => serialize_kobo_event(serializer, "DeletedTag", value),
+        }
+    }
+}
+
+fn serialize_kobo_event<S, T>(serializer: S, name: &str, value: &T) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    let mut map = serializer.serialize_map(Some(1))?;
+    map.serialize_entry(name, value)?;
+    map.end()
+}
+
 pub(super) fn build_kobo_book_metadata_payload(
     book_id: &str,
     metadata: &KoboMetadataRecord,
     base_url: &str,
     auth_token: &str,
-) -> Value {
+) -> Vec<KoboBookMetadataWire> {
     let download_format = KoboBookDownloadFormat::from_metadata(metadata);
 
-    Value::Array(vec![kobo_book_metadata_wire(KoboBookMetadataWireInput {
+    vec![kobo_book_metadata_wire(KoboBookMetadataWireInput {
         id: book_id,
         title: &metadata.title,
         summary: &metadata.summary,
@@ -57,7 +259,7 @@ pub(super) fn build_kobo_book_metadata_payload(
             download_format.convert_kepub,
         ),
         include_standalone_fields: true,
-    })])
+    })]
 }
 
 fn build_kobo_new_entitlement(
@@ -65,7 +267,7 @@ fn build_kobo_new_entitlement(
     progress: Option<&KoboSyncReadProgressSnapshot>,
     base_url: &str,
     auth_token: &str,
-) -> Result<Value, &'static str> {
+) -> Result<KoboSyncEventPayload, &'static str> {
     let reading_state = kobo_reading_state_from_snapshot(book, progress)?;
     Ok(kobo_new_entitlement_event(
         book,
@@ -79,57 +281,57 @@ fn build_kobo_changed_product_metadata(
     book: &KoboSyncBookSnapshot,
     base_url: &str,
     auth_token: &str,
-) -> Value {
-    kobo_changed_product_metadata_event(book, base_url, auth_token)
+) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::ChangedProductMetadata(Box::new(kobo_book_metadata_from_snapshot(
+        book, base_url, auth_token,
+    )))
 }
 
 fn build_kobo_changed_entitlement_removed(
     book: &KoboSyncBookSnapshot,
     base_url: &str,
     auth_token: &str,
-) -> Value {
-    kobo_changed_entitlement_removed_event(book, base_url, auth_token)
+) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::ChangedEntitlement(Box::new(kobo_changed_entitlement_removed_event(
+        book, base_url, auth_token,
+    )))
 }
 
 fn build_kobo_changed_reading_state(
     book: &KoboSyncBookSnapshot,
     progress: &KoboSyncReadProgressSnapshot,
-) -> Result<Value, &'static str> {
+) -> Result<KoboSyncEventPayload, &'static str> {
     let reading_state = kobo_reading_state_from_snapshot(book, Some(progress))?;
-    Ok(kobo_changed_reading_state_event(reading_state))
+    Ok(KoboSyncEventPayload::ChangedReadingState(Box::new(
+        kobo_changed_reading_state_event(reading_state),
+    )))
 }
 
-fn build_kobo_new_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
-    json!({
-        "NewTag": {
-            "Tag": kobo_tag_from_snapshot(readlist, true),
-        }
-    })
+fn build_kobo_new_tag(readlist: &KoboSyncReadListSnapshot) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::NewTag(Box::new(KoboTagEventWire {
+        tag: kobo_tag_from_snapshot(readlist, true),
+    }))
 }
 
-fn build_kobo_changed_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
-    json!({
-        "ChangedTag": {
-            "Tag": kobo_tag_from_snapshot(readlist, true),
-        }
-    })
+fn build_kobo_changed_tag(readlist: &KoboSyncReadListSnapshot) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::ChangedTag(Box::new(KoboTagEventWire {
+        tag: kobo_tag_from_snapshot(readlist, true),
+    }))
 }
 
-fn build_kobo_deleted_tag(readlist: &KoboSyncReadListSnapshot) -> Value {
-    json!({
-        "DeletedTag": {
-            "Tag": kobo_tag_from_snapshot(readlist, false),
-        }
-    })
+fn build_kobo_deleted_tag(readlist: &KoboSyncReadListSnapshot) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::DeletedTag(Box::new(KoboTagEventWire {
+        tag: kobo_tag_from_snapshot(readlist, false),
+    }))
 }
 
 pub(super) fn build_kobo_sync_event_payload(
     event: KoboSyncEvent,
     base_url: &str,
     auth_token: &str,
-) -> Result<Value, &'static str> {
+) -> Result<KoboSyncEventPayload, &'static str> {
     match event {
-        KoboSyncEvent::Raw(value) => Ok(value),
+        KoboSyncEvent::Raw(value) => Ok(KoboSyncEventPayload::Raw(value)),
         KoboSyncEvent::NewEntitlement { book, progress } => {
             build_kobo_new_entitlement(&book, progress.as_ref(), base_url, auth_token)
         }
@@ -148,11 +350,11 @@ pub(super) fn build_kobo_sync_event_payload(
     }
 }
 
-fn kobo_description(summary: &str) -> Value {
+fn kobo_description(summary: &str) -> String {
     if summary.trim().is_empty() {
-        Value::String(" ".to_string())
+        " ".to_string()
     } else {
-        Value::String(summary.to_string())
+        summary.to_string()
     }
 }
 
@@ -169,21 +371,21 @@ fn kobo_language(language: &str) -> String {
     }
 }
 
-fn kobo_publication_date_value(value: &str) -> Option<Value> {
+fn kobo_publication_date_value(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() {
         None
     } else if value.len() == 10 && value.as_bytes().get(4) == Some(&b'-') {
-        Some(Value::String(format!("{value}T00:00:00Z")))
+        Some(format!("{value}T00:00:00Z"))
     } else {
-        Some(Value::String(value.to_string()))
+        Some(value.to_string())
     }
 }
 
 fn kobo_reading_state_from_snapshot(
     book: &KoboSyncBookSnapshot,
     progress: Option<&KoboSyncReadProgressSnapshot>,
-) -> Result<Value, &'static str> {
+) -> Result<KoboReadingStatePayload, &'static str> {
     if let Some(progress) = progress {
         let locator = parse_locator_payload(progress.locator.as_deref())?;
         let source_progress = locator
@@ -206,72 +408,60 @@ fn kobo_reading_state_from_snapshot(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
-        let mut bookmark = serde_json::Map::new();
-        bookmark.insert(
-            "LastModified".to_string(),
-            Value::String(progress.last_modified.clone()),
-        );
-        if let Some(total_progress) = total_progress {
-            bookmark.insert("ProgressPercent".to_string(), json!(total_progress * 100.0));
-        }
-        if let Some(source_progress) = source_progress {
-            bookmark.insert(
-                "ContentSourceProgressPercent".to_string(),
-                json!(source_progress * 100.0),
-            );
-        }
-        if let Some(source) = source {
-            bookmark.insert(
-                "Location".to_string(),
-                json!({
-                    "Source": source,
-                    "Type": "KoboSpan",
-                    "Value": value,
-                }),
-            );
-        }
         let status = if progress.completed {
             "Finished"
         } else {
             "Reading"
         };
-        Ok(json!({
-            "Created": progress.created,
-            "CurrentBookmark": Value::Object(bookmark),
-            "EntitlementId": book.id,
-            "LastModified": progress.last_modified,
-            "PriorityTimestamp": progress.last_modified,
-            "Statistics": {
-                "LastModified": progress.last_modified,
+        Ok(KoboReadingStatePayload {
+            created: progress.created.clone(),
+            current_bookmark: KoboReadingStateBookmarkPayload {
+                last_modified: progress.last_modified.clone(),
+                progress_percent: total_progress.map(|value| value * 100.0),
+                content_source_progress_percent: source_progress.map(|value| value * 100.0),
+                location: source.map(|source| KoboReadingStateLocationPayload {
+                    source,
+                    location_type: "KoboSpan",
+                    value: Some(value),
+                }),
             },
-            "StatusInfo": {
-                "LastModified": progress.last_modified,
-                "Status": status,
-                "TimesStartedReading": 1,
-                "LastTimeFinished": Value::Null,
-                "LastTimeStartedReading": Value::Null,
+            entitlement_id: book.id.clone(),
+            last_modified: progress.last_modified.clone(),
+            priority_timestamp: progress.last_modified.clone(),
+            statistics: KoboReadingStateStatisticsPayload {
+                last_modified: progress.last_modified.clone(),
             },
-        }))
+            status_info: KoboReadingStateStatusPayload {
+                last_modified: progress.last_modified.clone(),
+                status,
+                times_started_reading: 1,
+                last_time_finished: None,
+                last_time_started_reading: None,
+            },
+        })
     } else {
-        Ok(json!({
-            "Created": book.created,
-            "CurrentBookmark": {
-                "LastModified": book.created,
+        Ok(KoboReadingStatePayload {
+            created: book.created.clone(),
+            current_bookmark: KoboReadingStateBookmarkPayload {
+                last_modified: book.created.clone(),
+                progress_percent: None,
+                content_source_progress_percent: None,
+                location: None,
             },
-            "EntitlementId": book.id,
-            "LastModified": book.created,
-            "PriorityTimestamp": book.created,
-            "Statistics": {
-                "LastModified": book.created,
+            entitlement_id: book.id.clone(),
+            last_modified: book.created.clone(),
+            priority_timestamp: book.created.clone(),
+            statistics: KoboReadingStateStatisticsPayload {
+                last_modified: book.created.clone(),
             },
-            "StatusInfo": {
-                "LastModified": book.created,
-                "Status": "ReadyToRead",
-                "TimesStartedReading": 0,
-                "LastTimeFinished": Value::Null,
-                "LastTimeStartedReading": Value::Null,
+            status_info: KoboReadingStateStatusPayload {
+                last_modified: book.created.clone(),
+                status: "ReadyToRead",
+                times_started_reading: 0,
+                last_time_finished: None,
+                last_time_started_reading: None,
             },
-        }))
+        })
     }
 }
 
@@ -297,117 +487,54 @@ struct KoboBookMetadataWireInput<'a> {
     include_standalone_fields: bool,
 }
 
-fn kobo_book_metadata_wire(input: KoboBookMetadataWireInput<'_>) -> Value {
-    let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "Categories".to_string(),
-        Value::Array(vec![Value::String(
-            "00000000-0000-0000-0000-000000000001".to_string(),
-        )]),
-    );
-    metadata.insert(
-        "ContributorRoles".to_string(),
-        Value::Array(
-            input
-                .contributor_names
-                .iter()
-                .map(|name| json!({ "Name": name }))
-                .collect(),
-        ),
-    );
-    metadata.insert(
-        "Contributors".to_string(),
-        Value::Array(
-            input
-                .contributor_names
-                .iter()
-                .map(|name| Value::String(name.clone()))
-                .collect(),
-        ),
-    );
-    metadata.insert(
-        "CoverImageId".to_string(),
-        input
-            .cover_image_id
-            .map(|value| Value::String(value.to_string()))
-            .unwrap_or(Value::Null),
-    );
-    metadata.insert(
-        "CrossRevisionId".to_string(),
-        Value::String(input.id.to_string()),
-    );
-    metadata.insert(
-        "CurrentDisplayPrice".to_string(),
-        json!({"CurrencyCode": "USD", "TotalAmount": 0}),
-    );
-    metadata.insert(
-        "CurrentLoveDisplayPrice".to_string(),
-        json!({"CurrencyCode": "USD", "TotalAmount": 0}),
-    );
-    metadata.insert("Description".to_string(), kobo_description(input.summary));
-    metadata.insert(
-        "DownloadUrls".to_string(),
-        json!([
-            {
-                "DrmType": "None",
-                "Format": input.download_format,
-                "Platform": "Generic",
-                "Size": input.file_size,
-                "Url": input.download_url,
-            }
-        ]),
-    );
-    metadata.insert(
-        "EntitlementId".to_string(),
-        Value::String(input.id.to_string()),
-    );
-    metadata.insert("ExternalIds".to_string(), Value::Array(vec![]));
-    metadata.insert(
-        "Genre".to_string(),
-        Value::String("00000000-0000-0000-0000-000000000001".to_string()),
-    );
-    metadata.insert("IsEligibleForKoboLove".to_string(), Value::Bool(false));
-    metadata.insert("IsInternetArchive".to_string(), Value::Bool(false));
-    metadata.insert("IsPreOrder".to_string(), Value::Bool(false));
-    metadata.insert("IsSocialEnabled".to_string(), Value::Bool(true));
-    metadata.insert(
-        "ISBN".to_string(),
-        input
-            .isbn
-            .map(|value| Value::String(value.to_string()))
-            .unwrap_or(Value::Null),
-    );
-    metadata.insert(
-        "Language".to_string(),
-        Value::String(kobo_language(input.language)),
-    );
-    metadata.insert(
-        "PhoneticPronunciations".to_string(),
-        Value::Object(serde_json::Map::new()),
-    );
-    metadata.insert(
-        "PublicationDate".to_string(),
-        input
+fn kobo_book_metadata_wire(input: KoboBookMetadataWireInput<'_>) -> KoboBookMetadataWire {
+    KoboBookMetadataWire {
+        categories: vec!["00000000-0000-0000-0000-000000000001".to_string()],
+        contributor_roles: input
+            .contributor_names
+            .iter()
+            .map(|name| KoboContributorRoleWire { name: name.clone() })
+            .collect(),
+        contributors: input.contributor_names.to_vec(),
+        cover_image_id: input.cover_image_id.map(str::to_owned),
+        cross_revision_id: input.id.to_string(),
+        current_display_price: KoboPriceWire {
+            currency_code: "USD",
+            total_amount: 0,
+        },
+        current_love_display_price: KoboPriceWire {
+            currency_code: "USD",
+            total_amount: 0,
+        },
+        description: kobo_description(input.summary),
+        download_urls: vec![KoboDownloadUrlWire {
+            drm_type: "None",
+            format: input.download_format.to_string(),
+            platform: "Generic",
+            size: input.file_size,
+            url: input.download_url,
+        }],
+        entitlement_id: input.id.to_string(),
+        external_ids: Vec::new(),
+        genre: "00000000-0000-0000-0000-000000000001".to_string(),
+        is_eligible_for_kobo_love: false,
+        is_internet_archive: false,
+        is_pre_order: false,
+        is_social_enabled: true,
+        isbn: input.isbn.map(str::to_owned),
+        language: kobo_language(input.language),
+        phonetic_pronunciations: BTreeMap::new(),
+        publication_date: input
             .publication_date
             .or(input.publication_fallback_date)
-            .and_then(kobo_publication_date_value)
-            .unwrap_or(Value::Null),
-    );
-    metadata.insert(
-        "Publisher".to_string(),
-        input
-            .publisher_name
-            .map(|name| json!({ "Imprint": "", "Name": name }))
-            .unwrap_or(Value::Null),
-    );
-    metadata.insert(
-        "RevisionId".to_string(),
-        Value::String(input.id.to_string()),
-    );
-    metadata.insert(
-        "Series".to_string(),
-        if input.oneshot {
-            Value::Null
+            .and_then(kobo_publication_date_value),
+        publisher: input.publisher_name.map(|name| KoboPublisherWire {
+            imprint: "",
+            name: name.to_string(),
+        }),
+        revision_id: input.id.to_string(),
+        series: if input.oneshot {
+            None
         } else if let (
             Some(series_id),
             Some(series_name),
@@ -419,30 +546,27 @@ fn kobo_book_metadata_wire(input: KoboBookMetadataWireInput<'_>) -> Value {
             input.series_number,
             input.series_number_float,
         ) {
-            json!({
-                "Id": series_id,
-                "Name": series_name,
-                "Number": series_number,
-                "NumberFloat": series_number_float,
+            Some(KoboSeriesWire {
+                id: series_id.to_string(),
+                name: series_name.to_string(),
+                number: series_number.to_string(),
+                number_float: series_number_float,
             })
         } else {
-            Value::Null
+            None
         },
-    );
-    if input.include_standalone_fields {
-        metadata.insert("Slug".to_string(), Value::Null);
-        metadata.insert("SubTitle".to_string(), Value::Null);
+        slug: input.include_standalone_fields.then_some(None::<String>),
+        subtitle: input.include_standalone_fields.then_some(None::<String>),
+        title: input.title.to_string(),
+        work_id: input.id.to_string(),
     }
-    metadata.insert("Title".to_string(), Value::String(input.title.to_string()));
-    metadata.insert("WorkId".to_string(), Value::String(input.id.to_string()));
-    Value::Object(metadata)
 }
 
 fn kobo_book_metadata_from_snapshot(
     book: &KoboSyncBookSnapshot,
     base_url: &str,
     auth_token: &str,
-) -> Value {
+) -> KoboBookMetadataWire {
     kobo_book_metadata_wire(KoboBookMetadataWireInput {
         id: &book.id,
         title: &book.title,
@@ -469,103 +593,81 @@ fn kobo_book_metadata_from_snapshot(
     })
 }
 
-fn kobo_entitlement_from_snapshot(book: &KoboSyncBookSnapshot, is_removed: bool) -> Value {
-    json!({
-        "Accessibility": "Full",
-        "ActivePeriod": {
-            "From": now_sync_marker(),
+fn kobo_entitlement_from_snapshot(
+    book: &KoboSyncBookSnapshot,
+    is_removed: bool,
+) -> KoboEntitlementWire {
+    KoboEntitlementWire {
+        accessibility: "Full",
+        active_period: KoboActivePeriodWire {
+            from: now_sync_marker(),
         },
-        "Created": book.created,
-        "CrossRevisionId": book.id,
-        "Id": book.id,
-        "IsHiddenFromArchive": false,
-        "IsLocked": false,
-        "IsRemoved": is_removed,
-        "LastModified": book.last_modified,
-        "OriginCategory": "Imported",
-        "RevisionId": book.id,
-        "Status": "Active",
-    })
+        created: book.created.clone(),
+        cross_revision_id: book.id.clone(),
+        id: book.id.clone(),
+        is_hidden_from_archive: false,
+        is_locked: false,
+        is_removed,
+        last_modified: book.last_modified.clone(),
+        origin_category: "Imported",
+        revision_id: book.id.clone(),
+        status: "Active",
+    }
 }
 
-fn kobo_tag_from_snapshot(readlist: &KoboSyncReadListSnapshot, include_items: bool) -> Value {
-    let mut tag = serde_json::Map::new();
-    tag.insert("Id".to_string(), Value::String(readlist.id.clone()));
-    tag.insert(
-        "Created".to_string(),
-        Value::String(readlist.created.clone()),
-    );
-    tag.insert(
-        "LastModified".to_string(),
-        Value::String(readlist.last_modified.clone()),
-    );
-    tag.insert("Name".to_string(), Value::String(readlist.name.clone()));
-    tag.insert("Type".to_string(), Value::String("UserTag".to_string()));
-    if include_items {
-        let items = readlist
-            .items
-            .iter()
-            .map(|book_id| {
-                json!({
-                    "RevisionId": book_id,
-                    "Type": "ProductRevisionTagItem",
+fn kobo_tag_from_snapshot(readlist: &KoboSyncReadListSnapshot, include_items: bool) -> KoboTagWire {
+    KoboTagWire {
+        id: readlist.id.clone(),
+        created: readlist.created.clone(),
+        last_modified: readlist.last_modified.clone(),
+        name: readlist.name.clone(),
+        tag_type: "UserTag",
+        items: include_items.then(|| {
+            readlist
+                .items
+                .iter()
+                .map(|book_id| KoboTagItemWire {
+                    revision_id: book_id.clone(),
+                    item_type: "ProductRevisionTagItem",
                 })
-            })
-            .collect::<Vec<_>>();
-        tag.insert("Items".to_string(), Value::Array(items));
+                .collect()
+        }),
     }
-    Value::Object(tag)
 }
 
 fn kobo_new_entitlement_event(
     book: &KoboSyncBookSnapshot,
-    reading_state: Value,
+    reading_state: KoboReadingStatePayload,
     base_url: &str,
     auth_token: &str,
-) -> Value {
-    json!({
-        "NewEntitlement": {
-            "BookEntitlement": kobo_entitlement_from_snapshot(book, false),
-            "BookMetadata": kobo_book_metadata_from_snapshot(book, base_url, auth_token),
-            "ReadingState": reading_state,
-        }
-    })
+) -> KoboSyncEventPayload {
+    KoboSyncEventPayload::NewEntitlement(Box::new(KoboNewEntitlementWire {
+        book_entitlement: kobo_entitlement_from_snapshot(book, false),
+        book_metadata: kobo_book_metadata_from_snapshot(book, base_url, auth_token),
+        reading_state,
+    }))
 }
 
 fn kobo_changed_entitlement_removed_event(
     book: &KoboSyncBookSnapshot,
     base_url: &str,
     auth_token: &str,
-) -> Value {
-    json!({
-        "ChangedEntitlement": {
-            "BookEntitlement": kobo_entitlement_from_snapshot(book, true),
-            "BookMetadata": kobo_book_metadata_from_snapshot(book, base_url, auth_token),
-        }
-    })
+) -> KoboChangedEntitlementWire {
+    KoboChangedEntitlementWire {
+        book_entitlement: kobo_entitlement_from_snapshot(book, true),
+        book_metadata: kobo_book_metadata_from_snapshot(book, base_url, auth_token),
+    }
 }
 
-fn kobo_changed_product_metadata_event(
-    book: &KoboSyncBookSnapshot,
-    base_url: &str,
-    auth_token: &str,
-) -> Value {
-    json!({
-        "ChangedProductMetadata": kobo_book_metadata_from_snapshot(book, base_url, auth_token),
-    })
-}
-
-fn kobo_changed_reading_state_event(reading_state: Value) -> Value {
-    json!({
-        "ChangedReadingState": {
-            "ReadingState": reading_state,
-        }
-    })
+fn kobo_changed_reading_state_event(
+    reading_state: KoboReadingStatePayload,
+) -> KoboChangedReadingStateWire {
+    KoboChangedReadingStateWire { reading_state }
 }
 
 fn parse_locator_payload(locator: Option<&[u8]>) -> Result<Value, &'static str> {
     let Some(locator) = locator else {
-        return Ok(json!({}));
+        return Ok(Value::Object(Default::default()));
     };
 
     let payload = serde_json::from_slice::<Value>(locator)
@@ -613,10 +715,8 @@ mod tests {
             "http://localhost:8080",
             "token-1",
         );
-        let book = payload
-            .as_array()
-            .and_then(|items| items.first())
-            .expect("metadata item expected");
+        let book = serde_json::to_value(payload.first().expect("metadata item expected"))
+            .expect("metadata should serialize");
 
         assert_eq!(
             book.get("Description"),
@@ -655,7 +755,7 @@ mod tests {
 
     #[test]
     fn kobo_sync_event_rejects_invalid_persisted_locator() {
-        let error = build_kobo_sync_event_payload(
+        let result = build_kobo_sync_event_payload(
             KoboSyncEvent::ChangedReadingState {
                 book: sync_book_snapshot(),
                 progress: KoboSyncReadProgressSnapshot {
@@ -668,10 +768,12 @@ mod tests {
             },
             "http://localhost:8080",
             "token-1",
-        )
-        .expect_err("invalid persisted locator should reject sync event payload rendering");
+        );
 
-        assert_eq!(error, "invalid persisted read-progress locator");
+        assert!(matches!(
+            result,
+            Err("invalid persisted read-progress locator")
+        ));
     }
 
     fn sync_book_snapshot() -> KoboSyncBookSnapshot {

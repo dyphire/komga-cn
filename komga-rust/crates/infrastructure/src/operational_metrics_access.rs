@@ -118,10 +118,10 @@ async fn load_series_grouped_by_library(
     pool: &SqlitePool,
 ) -> anyhow::Result<Vec<LibraryMetricValue>> {
     let rows = sqlx::query(
-        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(s.ID) AS COUNT
+        r#"SELECT l.ID AS LIBRARY_ID, COUNT(s.ID) AS COUNT
 FROM SERIES s
 JOIN LIBRARY l ON l.ID = s.LIBRARY_ID
-GROUP BY l.NAME"#,
+GROUP BY l.ID"#,
     )
     .fetch_all(pool)
     .await
@@ -130,7 +130,7 @@ GROUP BY l.NAME"#,
     Ok(rows
         .into_iter()
         .map(|row| LibraryMetricValue {
-            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
             value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())
@@ -140,10 +140,10 @@ async fn load_books_grouped_by_library(
     pool: &SqlitePool,
 ) -> anyhow::Result<Vec<LibraryMetricValue>> {
     let rows = sqlx::query(
-        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(b.ID) AS COUNT
+        r#"SELECT l.ID AS LIBRARY_ID, COUNT(b.ID) AS COUNT
 FROM BOOK b
 JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-GROUP BY l.NAME"#,
+GROUP BY l.ID"#,
     )
     .fetch_all(pool)
     .await
@@ -152,7 +152,7 @@ GROUP BY l.NAME"#,
     Ok(rows
         .into_iter()
         .map(|row| LibraryMetricValue {
-            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
             value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())
@@ -162,10 +162,10 @@ async fn load_books_filesize_grouped_by_library(
     pool: &SqlitePool,
 ) -> anyhow::Result<Vec<LibraryMetricValue>> {
     let rows = sqlx::query(
-        r#"SELECT l.NAME AS LIBRARY_NAME, COALESCE(SUM(b.FILE_SIZE), 0) AS TOTAL_SIZE
+        r#"SELECT l.ID AS LIBRARY_ID, COALESCE(SUM(b.FILE_SIZE), 0) AS TOTAL_SIZE
 FROM BOOK b
 JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
-GROUP BY l.NAME"#,
+GROUP BY l.ID"#,
     )
     .fetch_all(pool)
     .await
@@ -174,7 +174,7 @@ GROUP BY l.NAME"#,
     Ok(rows
         .into_iter()
         .map(|row| LibraryMetricValue {
-            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
             value: row.get::<i64, _>("TOTAL_SIZE") as f64,
         })
         .collect())
@@ -184,10 +184,10 @@ async fn load_sidecars_grouped_by_library(
     pool: &SqlitePool,
 ) -> anyhow::Result<Vec<LibraryMetricValue>> {
     let rows = sqlx::query(
-        r#"SELECT l.NAME AS LIBRARY_NAME, COUNT(sc.URL) AS COUNT
+        r#"SELECT l.ID AS LIBRARY_ID, COUNT(sc.URL) AS COUNT
 FROM SIDECAR sc
 JOIN LIBRARY l ON l.ID = sc.LIBRARY_ID
-GROUP BY l.NAME"#,
+GROUP BY l.ID"#,
     )
     .fetch_all(pool)
     .await
@@ -196,7 +196,7 @@ GROUP BY l.NAME"#,
     Ok(rows
         .into_iter()
         .map(|row| LibraryMetricValue {
-            library_name: row.get::<String, _>("LIBRARY_NAME"),
+            library_id: row.get::<String, _>("LIBRARY_ID"),
             value: row.get::<i64, _>("COUNT") as f64,
         })
         .collect())

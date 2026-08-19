@@ -1,24 +1,28 @@
 use komga_application::operational::{TransientBookPage, TransientBookRecord};
-use serde_json::{Value, json};
-use time::OffsetDateTime;
 
+use crate::contracts::common::{KotlinLocalDateTime, WireDateTimeError};
+use crate::contracts::transient_books::{TransientBookDto, TransientBookPageDto};
 use crate::helpers::api_file_path;
 
-pub(super) fn transient_book_payload(record: &TransientBookRecord) -> Value {
-    json!({
-        "id": record.id,
-        "name": record.name,
-        "url": api_file_path(&record.path),
-        "fileLastModified": format_local_datetime(record.file_last_modified_unix_nanos),
-        "sizeBytes": record.size_bytes,
-        "size": format_size_bytes(record.size_bytes),
-        "status": record.status.persisted_name(),
-        "mediaType": record.media_type,
-        "pages": record.pages.iter().map(transient_page_payload).collect::<Vec<_>>(),
-        "files": record.files,
-        "comment": record.comment,
-        "number": record.number,
-        "seriesId": record.series_id,
+pub(super) fn transient_book_dto(
+    record: &TransientBookRecord,
+) -> Result<TransientBookDto, WireDateTimeError> {
+    Ok(TransientBookDto {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        url: api_file_path(&record.path),
+        file_last_modified: KotlinLocalDateTime::from_unix_timestamp_nanos(
+            record.file_last_modified_unix_nanos,
+        )?,
+        size_bytes: record.size_bytes,
+        size: format_size_bytes(record.size_bytes),
+        status: record.status.persisted_name().to_string(),
+        media_type: record.media_type.clone(),
+        pages: record.pages.iter().map(transient_page_dto).collect(),
+        files: record.files.clone(),
+        comment: record.comment.clone(),
+        number: record.number,
+        series_id: record.series_id.clone(),
     })
 }
 
@@ -43,53 +47,14 @@ pub(super) fn format_size_bytes(size_bytes: u64) -> String {
     }
 }
 
-fn format_local_datetime(unix_nanos: i128) -> String {
-    let local_offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-    let datetime = OffsetDateTime::from_unix_timestamp_nanos(unix_nanos)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(local_offset);
-    let mut formatted = format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        datetime.year(),
-        datetime.month() as u8,
-        datetime.day(),
-        datetime.hour(),
-        datetime.minute(),
-        datetime.second(),
-    );
-    if datetime.nanosecond() > 0 {
-        let fraction = format!("{:09}", datetime.nanosecond());
-        formatted.push('.');
-        formatted.push_str(fraction.trim_end_matches('0'));
-    }
-    formatted
-}
-
-fn transient_page_payload(page: &TransientBookPage) -> Value {
-    json!({
-        "number": page.number,
-        "fileName": page.file_name,
-        "mediaType": page.media_type,
-        "width": page.width,
-        "height": page.height,
-        "sizeBytes": page.size_bytes,
-        "size": page
-            .size_bytes
-            .map(format_size_bytes)
-            .unwrap_or_default(),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::format_local_datetime;
-
-    #[test]
-    fn format_local_datetime_preserves_subsecond_precision() {
-        let formatted = format_local_datetime(123_456_789_i128);
-        assert!(
-            formatted.contains(".123456789"),
-            "expected Kotlin-style local datetime formatting to keep subsecond precision: {formatted}"
-        );
+fn transient_page_dto(page: &TransientBookPage) -> TransientBookPageDto {
+    TransientBookPageDto {
+        number: page.number,
+        file_name: page.file_name.clone(),
+        media_type: page.media_type.clone(),
+        width: page.width,
+        height: page.height,
+        size_bytes: page.size_bytes,
+        size: page.size_bytes.map(format_size_bytes).unwrap_or_default(),
     }
 }

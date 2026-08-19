@@ -1,3 +1,6 @@
+use crate::contracts::library_catalog::LibraryDto;
+use crate::helpers::spring_error_response;
+use crate::state::LibraryCatalogState;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -5,11 +8,6 @@ use komga_application::library_catalog::{LibraryCatalogMutationError, LibraryCha
 use komga_application::task_processing::{
     SubmitUrgency, TaskQueueRecord as ApplicationTaskQueueRecord,
 };
-use serde_json::json;
-
-use crate::state::LibraryCatalogState;
-
-use super::response_mapping::library_payload;
 
 pub(super) struct LibraryCatalogCommands<'a> {
     app: &'a LibraryCatalogState,
@@ -27,7 +25,7 @@ impl<'a> LibraryCatalogCommands<'a> {
                 if enqueue_response.status().is_server_error() {
                     return enqueue_response;
                 }
-                Json(library_payload(&result.library, true)).into_response()
+                Json(LibraryDto::from_record(&result.library, true)).into_response()
             }
             Err(error) => mutation_error_response(error),
         }
@@ -118,11 +116,7 @@ async fn enqueue_task_records_with_status(
         .await
     {
         tracing::error!(?error, "library catalog task enqueue failed");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("{error:#}") })),
-        )
-            .into_response();
+        return spring_error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}"));
     }
 
     status.into_response()
@@ -137,14 +131,10 @@ fn mutation_error_response(error: LibraryCatalogMutationError) -> Response {
 }
 
 fn bad_request_response(message: &str) -> Response {
-    (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+    spring_error_response(StatusCode::BAD_REQUEST, message)
 }
 
 fn internal_error_response(error: impl std::fmt::Display + std::fmt::Debug) -> Response {
     tracing::error!(?error, "library catalog mutation failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": format!("{error:#}") })),
-    )
-        .into_response()
+    spring_error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}"))
 }

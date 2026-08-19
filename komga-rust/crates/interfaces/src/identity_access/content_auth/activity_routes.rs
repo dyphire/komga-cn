@@ -3,21 +3,20 @@ use axum::extract::Path;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{user_id, user_is_admin};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::helpers::{
-    api_key_comment_from_request, authentication_activity_page_payload,
-    authentication_activity_payload, query_value, required_authenticated_user,
-    sqlite_datetime_to_utc,
+    api_key_comment_from_request, authentication_activity_page_payload, query_value,
+    required_authenticated_user,
 };
 use crate::access_log::RequestConnectionInfo;
+use crate::contracts::common::MessageDto;
+use crate::contracts::identity_access::{ApiKeyDto, AuthenticationActivityDto};
 use crate::identity_access::auth::{
     persisted_api_key_comment_exists, persisted_create_api_key, persisted_delete_api_key_by_id,
     persisted_list_api_keys, persisted_list_authentication_activity, persisted_users,
 };
 use crate::state::IdentityAccessState;
-
-const REDACTED_API_KEY_VALUE: &str = "******";
 
 pub(crate) async fn users_me_api_keys_create(
     headers: HeaderMap,
@@ -42,7 +41,9 @@ pub(crate) async fn users_me_api_keys_create(
         Ok(true) => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "message": "api key comment already exists for this user" })),
+                Json(MessageDto {
+                    message: "api key comment already exists for this user".to_string(),
+                }),
             )
                 .into_response();
         }
@@ -51,18 +52,10 @@ pub(crate) async fn users_me_api_keys_create(
     }
 
     match persisted_create_api_key(identity, user_id(&current_user), comment.as_str()).await {
-        Ok(api_key) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "id": api_key.id(),
-                "userId": api_key.user_id(),
-                "key": api_key.key(),
-                "comment": api_key.comment(),
-                "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
-                "lastModifiedDate": api_key.last_modified_date().map(sqlite_datetime_to_utc),
-            })),
-        )
-            .into_response(),
+        Ok(api_key) => match ApiKeyDto::from_persisted(&api_key, false) {
+            Ok(payload) => (StatusCode::OK, Json(payload)).into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        },
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -87,22 +80,16 @@ pub(crate) async fn users_me_api_keys_list(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(
-        api_keys
-            .iter()
-            .map(|api_key| {
-                serde_json::json!({
-                    "id": api_key.id(),
-                    "userId": api_key.user_id(),
-                    "key": REDACTED_API_KEY_VALUE,
-                    "comment": api_key.comment(),
-                    "createdDate": api_key.created_date().map(sqlite_datetime_to_utc),
-                    "lastModifiedDate": api_key.last_modified_date().map(sqlite_datetime_to_utc),
-                })
-            })
-            .collect::<Vec<_>>(),
-    )
-    .into_response()
+    let payload = match api_keys
+        .iter()
+        .map(|api_key| ApiKeyDto::from_persisted(api_key, true))
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(payload) => payload,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(payload).into_response()
 }
 
 pub(crate) async fn users_me_api_keys_delete(
@@ -150,7 +137,10 @@ pub(crate) async fn users_me_authentication_activity(
             || activity.email.as_deref() == Some(current_user.email.as_str())
     });
 
-    Json(authentication_activity_page_payload(rows, query)).into_response()
+    match authentication_activity_page_payload(rows, query) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 pub(crate) async fn users_authentication_activity(
@@ -174,7 +164,10 @@ pub(crate) async fn users_authentication_activity(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(authentication_activity_page_payload(rows, query)).into_response()
+    match authentication_activity_page_payload(rows, query) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 pub(crate) async fn users_by_id_authentication_activity_latest(
@@ -224,5 +217,8 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    Json(authentication_activity_payload(&activity)).into_response()
+    match AuthenticationActivityDto::from_persisted(&activity) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }

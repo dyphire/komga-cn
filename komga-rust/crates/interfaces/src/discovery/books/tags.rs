@@ -3,7 +3,6 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::BookTagScope;
-use serde_json::json;
 
 use crate::helpers::{query_value, query_values, to_domain_query_context};
 use crate::identity_access::auth::Authenticated;
@@ -82,7 +81,7 @@ pub(crate) async fn book_tags(
         .list_book_tags(&context, scope, service_library_ids)
         .await
     {
-        Ok(tags) => Json(json!(tags)).into_response(),
+        Ok(tags) => Json(tags).into_response(),
         Err(error) => internal_error_response(format!("{error:?}")),
     }
 }

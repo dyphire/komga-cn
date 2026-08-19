@@ -9,10 +9,20 @@ use komga_application::operational::{
     ActuatorInfoSnapshot, ActuatorMetricDetail, ActuatorOsInfo, ActuatorPingHealthReport,
     ActuatorProcessInfo, ActuatorService,
 };
-use serde_json::{Value, json};
-use std::collections::HashMap;
+use serde::Serialize;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
+use crate::contracts::actuator::{
+    ActuatorBuildDto, ActuatorDatabaseComponentsDto, ActuatorDatabaseHealthDto,
+    ActuatorDatasourceDetailsDto, ActuatorDatasourceHealthDto, ActuatorDiskSpaceDetailsDto,
+    ActuatorDiskSpaceDto, ActuatorErrorDto, ActuatorGitCommitDto, ActuatorGitDto,
+    ActuatorHealthComponentsDto, ActuatorHealthDto, ActuatorHealthStatusDto, ActuatorInfoDto,
+    ActuatorLinkDto, ActuatorLogfileErrorDto, ActuatorMemoryPoolDto, ActuatorMessageDto,
+    ActuatorMetricAvailableTagDto, ActuatorMetricDetailDto, ActuatorMetricMeasurementDto,
+    ActuatorMetricsIndexDto, ActuatorOsDto, ActuatorPingHealthDto, ActuatorProcessDto,
+    ActuatorProcessMemoryDto, ActuatorRootDto,
+};
 use crate::identity_access::auth::{Admin, resolved_request_auth_user};
 use crate::state::OperationalApiState;
 use komga_application::identity_access::user_is_admin;
@@ -23,7 +33,7 @@ const PRODUCT_ARTIFACT: &str = "komga";
 const PRODUCT_NAME: &str = "komga-rust";
 const DEFAULT_PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn actuator_json(payload: Value) -> Response {
+fn actuator_json<T: Serialize>(payload: T) -> Response {
     ([(header::CONTENT_TYPE, ACTUATOR_V3_JSON)], Json(payload)).into_response()
 }
 
@@ -31,7 +41,7 @@ pub(crate) async fn actuator_root(
     State(_app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    actuator_json(actuator_root_payload())
+    actuator_json(actuator_root_dto())
 }
 
 pub(crate) async fn actuator_health(
@@ -50,14 +60,14 @@ pub(crate) async fn actuator_health(
     )
     .health_report();
 
-    Json(actuator_health_payload(health, include_details)).into_response()
+    Json(actuator_health_dto(health, include_details)).into_response()
 }
 
 pub(crate) async fn actuator_info(
     State(app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    actuator_json(actuator_info_payload(
+    actuator_json(actuator_info_dto(
         ActuatorService::new(
             app.actuator_snapshots.as_ref(),
             app.operational_runtime.as_ref(),
@@ -75,10 +85,15 @@ pub(crate) async fn actuator_logfile(
         Err(_) => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": "log file not found",
-                    "path": app.operational.runtime.log_file.to_string_lossy().to_string(),
-                })),
+                Json(ActuatorLogfileErrorDto {
+                    error: "log file not found",
+                    path: app
+                        .operational
+                        .runtime
+                        .log_file
+                        .to_string_lossy()
+                        .to_string(),
+                }),
             )
                 .into_response();
         }
@@ -102,14 +117,17 @@ pub(crate) async fn actuator_shutdown(
         trigger.request_shutdown();
     }
 
-    Json(json!({ "message": "Shutting down, bye..." })).into_response()
+    Json(ActuatorMessageDto {
+        message: "Shutting down, bye...",
+    })
+    .into_response()
 }
 
 pub(crate) async fn actuator_metrics_index(
     State(_app): State<OperationalApiState>,
     _admin: Admin,
 ) -> Response {
-    actuator_json(actuator_metrics_index_payload())
+    actuator_json(actuator_metrics_index_dto())
 }
 
 pub(crate) async fn actuator_metric_detail(
@@ -125,26 +143,28 @@ pub(crate) async fn actuator_metric_detail(
     );
 
     match service.metric_detail(&metric_name, &tag_filters).await {
-        Ok(Some(metric)) => actuator_json(actuator_metric_detail_payload(metric)),
+        Ok(Some(metric)) => actuator_json(actuator_metric_detail_dto(metric)),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
             tracing::error!(?error, "actuator metric detail failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("{error:#}") })),
+                Json(ActuatorErrorDto {
+                    error: format!("{error:#}"),
+                }),
             )
                 .into_response()
         }
     }
 }
 
-fn actuator_root_payload() -> Value {
-    json!({
-        "_links": actuator_root_links(),
-    })
+fn actuator_root_dto() -> ActuatorRootDto {
+    ActuatorRootDto {
+        links: actuator_root_links(),
+    }
 }
 
-fn actuator_root_links() -> Value {
+fn actuator_root_links() -> BTreeMap<String, ActuatorLinkDto> {
     let links = [
         ("self", "/actuator", false),
         ("beans", "/actuator/beans", false),
@@ -174,134 +194,131 @@ fn actuator_root_links() -> Value {
         ("threaddump", "/actuator/threaddump", false),
     ];
 
-    Value::Object(serde_json::Map::from_iter(links.into_iter().map(
-        |(name, href, templated)| {
+    links
+        .into_iter()
+        .map(|(name, href, templated)| {
             (
                 name.to_string(),
-                json!({
-                    "href": href,
-                    "templated": templated,
-                }),
+                ActuatorLinkDto {
+                    href: href.to_string(),
+                    templated,
+                },
             )
+        })
+        .collect()
+}
+
+fn actuator_health_dto(report: ActuatorHealthReport, include_details: bool) -> ActuatorHealthDto {
+    ActuatorHealthDto {
+        status: actuator_health_status(report.status),
+        components: include_details.then(|| ActuatorHealthComponentsDto {
+            db: actuator_database_health_dto(report.db),
+            disk_space: actuator_disk_space_dto(report.disk_space),
+            ping: actuator_ping_dto(report.ping),
+        }),
+    }
+}
+
+fn actuator_database_health_dto(report: ActuatorDatabaseHealthReport) -> ActuatorDatabaseHealthDto {
+    ActuatorDatabaseHealthDto {
+        status: actuator_health_status(report.status),
+        components: ActuatorDatabaseComponentsDto {
+            sqlite_rw: actuator_datasource_health_dto(report.sqlite_rw),
+            sqlite_ro: actuator_datasource_health_dto(report.sqlite_ro),
+            tasks_rw: actuator_datasource_health_dto(report.tasks_rw),
+            tasks_ro: actuator_datasource_health_dto(report.tasks_ro),
         },
-    )))
-}
-
-fn actuator_health_payload(report: ActuatorHealthReport, include_details: bool) -> Value {
-    if !include_details {
-        return json!({ "status": actuator_health_status(report.status) });
-    }
-
-    json!({
-        "status": actuator_health_status(report.status),
-        "components": {
-            "db": actuator_database_health_payload(report.db),
-            "diskSpace": actuator_disk_space_payload(report.disk_space),
-            "ping": actuator_ping_payload(report.ping),
-        }
-    })
-}
-
-fn actuator_database_health_payload(report: ActuatorDatabaseHealthReport) -> Value {
-    json!({
-        "status": actuator_health_status(report.status),
-        "components": {
-            "sqliteDataSourceRW": actuator_datasource_health_payload(report.sqlite_rw),
-            "sqliteDataSourceRO": actuator_datasource_health_payload(report.sqlite_ro),
-            "tasksDataSourceRW": actuator_datasource_health_payload(report.tasks_rw),
-            "tasksDataSourceRO": actuator_datasource_health_payload(report.tasks_ro),
-        }
-    })
-}
-
-fn actuator_datasource_health_payload(report: ActuatorDatasourceHealthReport) -> Value {
-    json!({
-        "status": actuator_health_status(report.status),
-        "details": {
-            "database": "SQLite",
-            "validationQuery": "isValid()",
-        }
-    })
-}
-
-fn actuator_disk_space_payload(report: ActuatorDiskSpaceHealthReport) -> Value {
-    match (report.total, report.free) {
-        (Some(total), Some(free)) => json!({
-            "status": actuator_health_status(report.status),
-            "details": {
-                "total": total,
-                "free": free,
-                "threshold": report.threshold,
-                "path": report.path,
-            }
-        }),
-        _ => json!({
-            "status": actuator_health_status(report.status),
-            "details": {
-                "threshold": report.threshold,
-                "path": report.path,
-            }
-        }),
     }
 }
 
-fn actuator_ping_payload(report: ActuatorPingHealthReport) -> Value {
-    json!({ "status": actuator_health_status(report.status) })
+fn actuator_datasource_health_dto(
+    report: ActuatorDatasourceHealthReport,
+) -> ActuatorDatasourceHealthDto {
+    ActuatorDatasourceHealthDto {
+        status: actuator_health_status(report.status),
+        details: ActuatorDatasourceDetailsDto {
+            database: "SQLite",
+            validation_query: "isValid()",
+        },
+    }
 }
 
-fn actuator_health_status(status: ActuatorHealthStatus) -> &'static str {
+fn actuator_disk_space_dto(report: ActuatorDiskSpaceHealthReport) -> ActuatorDiskSpaceDto {
+    let (total, free) = report
+        .total
+        .zip(report.free)
+        .map_or((None, None), |(total, free)| (Some(total), Some(free)));
+
+    ActuatorDiskSpaceDto {
+        status: actuator_health_status(report.status),
+        details: ActuatorDiskSpaceDetailsDto {
+            total,
+            free,
+            threshold: report.threshold,
+            path: report.path,
+        },
+    }
+}
+
+fn actuator_ping_dto(report: ActuatorPingHealthReport) -> ActuatorPingHealthDto {
+    ActuatorPingHealthDto {
+        status: actuator_health_status(report.status),
+    }
+}
+
+fn actuator_health_status(status: ActuatorHealthStatus) -> ActuatorHealthStatusDto {
     match status {
-        ActuatorHealthStatus::Up => "UP",
-        ActuatorHealthStatus::Down => "DOWN",
+        ActuatorHealthStatus::Up => ActuatorHealthStatusDto::Up,
+        ActuatorHealthStatus::Down => ActuatorHealthStatusDto::Down,
     }
 }
 
-fn actuator_info_payload(snapshot: ActuatorInfoSnapshot) -> Value {
-    let mut payload = serde_json::Map::new();
-    payload.insert("build".to_string(), build_info_json(&snapshot.build));
-    payload.insert("os".to_string(), os_info_json(snapshot.os));
-    payload.insert("process".to_string(), process_info_json(snapshot.process));
-
-    if snapshot.build.git_branch.is_some()
+fn actuator_info_dto(snapshot: ActuatorInfoSnapshot) -> ActuatorInfoDto {
+    let git = if snapshot.build.git_branch.is_some()
         || snapshot.build.git_commit_id.is_some()
         || snapshot.build.git_commit_time.is_some()
     {
-        payload.insert(
-            "git".to_string(),
-            json!({
-                "branch": snapshot.build.git_branch,
-                "commit": {
-                    "id": snapshot.build.git_commit_id,
-                    "time": snapshot.build.git_commit_time,
-                }
-            }),
-        );
-    }
-    Value::Object(payload)
-}
-
-fn process_info_json(process: ActuatorProcessInfo) -> Value {
-    json!({
-        "pid": process.pid,
-        "parentPid": process.parent_pid,
-        "cpus": process.cpus,
-        "virtualThreads": process.virtual_threads,
-        "memory": {
-            "heap": {
-                "used": process.memory.heap_used,
-                "committed": process.memory.heap_committed,
-                "max": process.memory.heap_max,
+        Some(ActuatorGitDto {
+            branch: snapshot.build.git_branch.clone(),
+            commit: ActuatorGitCommitDto {
+                id: snapshot.build.git_commit_id.clone(),
+                time: snapshot.build.git_commit_time.clone(),
             },
-            "nonHeap": {
-                "used": process.memory.non_heap_used,
-                "committed": process.memory.non_heap_committed,
-                "max": process.memory.non_heap_max,
-            }
-        }
-    })
+        })
+    } else {
+        None
+    };
+
+    ActuatorInfoDto {
+        build: build_info_dto(&snapshot.build),
+        os: os_info_dto(snapshot.os),
+        process: process_info_dto(snapshot.process),
+        git,
+    }
 }
 
-fn build_info_json(build: &ActuatorBuildInfo) -> Value {
+fn process_info_dto(process: ActuatorProcessInfo) -> ActuatorProcessDto {
+    ActuatorProcessDto {
+        pid: process.pid,
+        parent_pid: process.parent_pid,
+        cpus: process.cpus,
+        virtual_threads: process.virtual_threads,
+        memory: ActuatorProcessMemoryDto {
+            heap: ActuatorMemoryPoolDto {
+                used: process.memory.heap_used,
+                committed: process.memory.heap_committed,
+                max: process.memory.heap_max,
+            },
+            non_heap: ActuatorMemoryPoolDto {
+                used: process.memory.non_heap_used,
+                committed: process.memory.non_heap_committed,
+                max: process.memory.non_heap_max,
+            },
+        },
+    }
+}
+
+fn build_info_dto(build: &ActuatorBuildInfo) -> ActuatorBuildDto {
     let version = build
         .version
         .as_deref()
@@ -309,37 +326,29 @@ fn build_info_json(build: &ActuatorBuildInfo) -> Value {
         .map(str::to_string)
         .unwrap_or_else(|| DEFAULT_PRODUCT_VERSION.to_string());
 
-    Value::Object(serde_json::Map::from_iter([
-        (
-            "artifact".to_string(),
-            Value::String(PRODUCT_ARTIFACT.to_string()),
-        ),
-        ("name".to_string(), Value::String(PRODUCT_NAME.to_string())),
-        ("version".to_string(), Value::String(version)),
-        (
-            "group".to_string(),
-            Value::String(PRODUCT_GROUP.to_string()),
-        ),
-    ]))
-}
-
-fn os_info_json(os: ActuatorOsInfo) -> Value {
-    let mut payload = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(os.name)),
-        ("arch".to_string(), Value::String(os.arch)),
-    ]);
-
-    if let Some(version) = os.version {
-        payload.insert("version".to_string(), Value::String(version));
+    ActuatorBuildDto {
+        artifact: PRODUCT_ARTIFACT.to_string(),
+        name: PRODUCT_NAME.to_string(),
+        version,
+        group: PRODUCT_GROUP.to_string(),
     }
-
-    Value::Object(payload)
 }
 
-fn actuator_metrics_index_payload() -> Value {
-    json!({
-        "names": ActuatorService::metric_names(),
-    })
+fn os_info_dto(os: ActuatorOsInfo) -> ActuatorOsDto {
+    ActuatorOsDto {
+        name: os.name,
+        arch: os.arch,
+        version: os.version,
+    }
+}
+
+fn actuator_metrics_index_dto() -> ActuatorMetricsIndexDto {
+    ActuatorMetricsIndexDto {
+        names: ActuatorService::metric_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    }
 }
 
 fn actuator_metric_query_tags(query: Option<&str>) -> HashMap<String, String> {
@@ -352,44 +361,26 @@ fn actuator_metric_query_tags(query: Option<&str>) -> HashMap<String, String> {
         .collect()
 }
 
-fn actuator_metric_detail_payload(metric: ActuatorMetricDetail) -> Value {
-    let mut payload = serde_json::Map::from_iter([
-        ("name".to_string(), Value::String(metric.name)),
-        ("description".to_string(), Value::String(metric.description)),
-        (
-            "measurements".to_string(),
-            Value::Array(
-                metric
-                    .measurements
-                    .into_iter()
-                    .map(|measurement| {
-                        json!({
-                            "statistic": measurement.statistic,
-                            "value": measurement.value,
-                        })
-                    })
-                    .collect(),
-            ),
-        ),
-        (
-            "availableTags".to_string(),
-            Value::Array(
-                metric
-                    .available_tags
-                    .into_iter()
-                    .map(|tag| {
-                        json!({
-                            "tag": tag.tag,
-                            "values": tag.values,
-                        })
-                    })
-                    .collect(),
-            ),
-        ),
-    ]);
-    if let Some(base_unit) = metric.base_unit {
-        payload.insert("baseUnit".to_string(), Value::String(base_unit));
+fn actuator_metric_detail_dto(metric: ActuatorMetricDetail) -> ActuatorMetricDetailDto {
+    ActuatorMetricDetailDto {
+        name: metric.name,
+        description: metric.description,
+        base_unit: metric.base_unit,
+        measurements: metric
+            .measurements
+            .into_iter()
+            .map(|measurement| ActuatorMetricMeasurementDto {
+                statistic: measurement.statistic,
+                value: measurement.value,
+            })
+            .collect(),
+        available_tags: metric
+            .available_tags
+            .into_iter()
+            .map(|tag| ActuatorMetricAvailableTagDto {
+                tag: tag.tag,
+                values: tag.values,
+            })
+            .collect(),
     }
-
-    Value::Object(payload)
 }

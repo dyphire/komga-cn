@@ -2,11 +2,11 @@ use axum::Json;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::Duration;
 
-use crate::identity_access::user_payload_json;
+use crate::contracts::common::SpringErrorDto;
+use crate::contracts::identity_access::UserDto;
 use komga_application::identity_access::AuthUser;
 
 pub(crate) fn bootstrap_user(user: AuthUser, token: String) -> Response {
@@ -31,7 +31,7 @@ pub(crate) fn bootstrap_user(user: AuthUser, token: String) -> Response {
                 }),
             ),
         ],
-        Json(user_payload_json(&user)),
+        Json(UserDto::from_user(&user)),
     )
         .into_response()
 }
@@ -56,7 +56,7 @@ pub(crate) fn bootstrap_user_with_remember_me_cookies(
         .build()
         .to_string();
 
-    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(UserDto::from_user(&user))).into_response();
     let headers = response.headers_mut();
     headers.append(
         header::SET_COOKIE,
@@ -86,7 +86,7 @@ pub(crate) fn bootstrap_user_with_remember_me_token(
         .build()
         .to_string();
 
-    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(UserDto::from_user(&user))).into_response();
     let headers = response.headers_mut();
     headers.insert(
         HeaderName::from_static("x-auth-token"),
@@ -108,7 +108,7 @@ pub(crate) fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response 
         .build()
         .to_string();
 
-    let mut response = (StatusCode::OK, Json(user_payload_json(&user))).into_response();
+    let mut response = (StatusCode::OK, Json(UserDto::from_user(&user))).into_response();
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_str(&session_cookie).unwrap_or_else(|_| {
@@ -121,13 +121,13 @@ pub(crate) fn bootstrap_api_key_user(user: AuthUser, token: String) -> Response 
 pub(crate) fn unauthorized_json_response(path: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        Json(json!({
-            "error": "Unauthorized",
-            "message": "Unauthorized",
-            "path": path,
-            "status": 401,
-            "timestamp": now_epoch_millis(),
-        })),
+        Json(SpringErrorDto {
+            error: "Unauthorized".to_string(),
+            message: "Unauthorized".to_string(),
+            path: path.to_string(),
+            status: 401,
+            timestamp: now_epoch_millis() as u64,
+        }),
     )
         .into_response()
 }

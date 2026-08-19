@@ -7,9 +7,9 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
-use serde_json::json;
 
 use crate::cache::asset_ok_response;
+use crate::contracts::media_assets::SeriesThumbnailDto;
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::MediaAssetsState;
 use komga_application::discovery::resolve_persisted_series_id;
@@ -84,19 +84,8 @@ pub(crate) async fn series_thumbnails(
         .await
     {
         Ok(rows) => Json(
-            rows.into_iter()
-                .map(|row| {
-                    json!({
-                        "id": row.id,
-                        "seriesId": row.series_id,
-                        "type": row.thumbnail_type.persisted_name(),
-                        "selected": row.selected,
-                        "mediaType": row.media_type,
-                        "fileSize": row.file_size,
-                        "width": row.width,
-                        "height": row.height,
-                    })
-                })
+            rows.iter()
+                .map(SeriesThumbnailDto::from_record)
                 .collect::<Vec<_>>(),
         )
         .into_response(),
@@ -190,17 +179,7 @@ pub(crate) async fn series_thumbnail_upload(
         )
         .await
     {
-        Ok(thumbnail) => Json(json!({
-            "id": thumbnail.id,
-            "seriesId": thumbnail.series_id,
-            "type": thumbnail.thumbnail_type.persisted_name(),
-            "selected": thumbnail.selected,
-            "mediaType": thumbnail.media_type,
-            "fileSize": thumbnail.file_size,
-            "width": thumbnail.width,
-            "height": thumbnail.height,
-        }))
-        .into_response(),
+        Ok(thumbnail) => Json(SeriesThumbnailDto::from_record(&thumbnail)).into_response(),
         Err(error) => internal_error_response(error),
     }
 }

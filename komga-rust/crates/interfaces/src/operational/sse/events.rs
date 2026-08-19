@@ -6,20 +6,26 @@ use futures_util::stream;
 use komga_application::runtime_sse::{
     RuntimeSseEvent, RuntimeSseEventSink, RuntimeSseEventSubscription,
 };
-use serde_json::json;
+use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
+use crate::contracts::sse::{
+    BookImportSseDto, BookSseDto, CollectionSseDto, LibrarySseDto, ReadListSseDto,
+    ReadProgressSeriesSseDto, ReadProgressSseDto, SeriesSseDto, SessionExpiredSseDto,
+    TaskQueueSseDto, ThumbnailBookSseDto, ThumbnailCollectionSseDto, ThumbnailReadListSseDto,
+    ThumbnailSeriesSseDto,
+};
 use crate::identity_access::auth::resolved_auth_user;
 use crate::state::OperationalApiState;
 use komga_application::identity_access::{user_id, user_is_admin};
 
-fn sse_event(name: &str, payload: serde_json::Value) -> Event {
+fn sse_event<T: Serialize>(name: &str, payload: &T) -> Event {
     Event::default()
         .event(name)
-        .data(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()))
+        .data(serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string()))
 }
 
 pub(crate) async fn sse_events(
@@ -136,28 +142,43 @@ async fn poll_runtime_events(stream_state: &mut SseStreamState) {
 
 fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
     match event {
-        RuntimeSseEvent::LibraryAdded { library_id } => {
-            sse_event("LibraryAdded", json!({ "libraryId": library_id }))
-        }
-        RuntimeSseEvent::LibraryChanged { library_id } => {
-            sse_event("LibraryChanged", json!({ "libraryId": library_id }))
-        }
-        RuntimeSseEvent::LibraryDeleted { library_id } => {
-            sse_event("LibraryDeleted", json!({ "libraryId": library_id }))
-        }
+        RuntimeSseEvent::LibraryAdded { library_id } => sse_event(
+            "LibraryAdded",
+            &LibrarySseDto {
+                library_id: library_id.clone(),
+            },
+        ),
+        RuntimeSseEvent::LibraryChanged { library_id } => sse_event(
+            "LibraryChanged",
+            &LibrarySseDto {
+                library_id: library_id.clone(),
+            },
+        ),
+        RuntimeSseEvent::LibraryDeleted { library_id } => sse_event(
+            "LibraryDeleted",
+            &LibrarySseDto {
+                library_id: library_id.clone(),
+            },
+        ),
         RuntimeSseEvent::SeriesAdded {
             series_id,
             library_id,
         } => sse_event(
             "SeriesAdded",
-            json!({ "seriesId": series_id, "libraryId": library_id }),
+            &SeriesSseDto {
+                series_id: series_id.clone(),
+                library_id: library_id.clone(),
+            },
         ),
         RuntimeSseEvent::SeriesChanged {
             series_id,
             library_id,
         } => sse_event(
             "SeriesChanged",
-            json!({ "seriesId": series_id, "libraryId": library_id }),
+            &SeriesSseDto {
+                series_id: series_id.clone(),
+                library_id: library_id.clone(),
+            },
         ),
         RuntimeSseEvent::BookAdded {
             book_id,
@@ -165,7 +186,11 @@ fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
             library_id,
         } => sse_event(
             "BookAdded",
-            json!({ "bookId": book_id, "seriesId": series_id, "libraryId": library_id }),
+            &BookSseDto {
+                book_id: book_id.clone(),
+                series_id: series_id.clone(),
+                library_id: library_id.clone(),
+            },
         ),
         RuntimeSseEvent::BookChanged {
             book_id,
@@ -173,7 +198,11 @@ fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
             library_id,
         } => sse_event(
             "BookChanged",
-            json!({ "bookId": book_id, "seriesId": series_id, "libraryId": library_id }),
+            &BookSseDto {
+                book_id: book_id.clone(),
+                series_id: series_id.clone(),
+                library_id: library_id.clone(),
+            },
         ),
         RuntimeSseEvent::BookImported {
             book_id,
@@ -182,70 +211,100 @@ fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
             message,
         } => sse_event(
             "BookImported",
-            json!({
-                "bookId": book_id,
-                "sourceFile": source_file,
-                "success": success,
-                "message": message,
-            }),
+            &BookImportSseDto {
+                book_id: book_id.clone(),
+                source_file: source_file.clone(),
+                success: *success,
+                message: message.clone(),
+            },
         ),
         RuntimeSseEvent::CollectionAdded {
             collection_id,
             series_ids,
         } => sse_event(
             "CollectionAdded",
-            json!({ "collectionId": collection_id, "seriesIds": series_ids }),
+            &CollectionSseDto {
+                collection_id: collection_id.clone(),
+                series_ids: series_ids.clone(),
+            },
         ),
         RuntimeSseEvent::CollectionChanged {
             collection_id,
             series_ids,
         } => sse_event(
             "CollectionChanged",
-            json!({ "collectionId": collection_id, "seriesIds": series_ids }),
+            &CollectionSseDto {
+                collection_id: collection_id.clone(),
+                series_ids: series_ids.clone(),
+            },
         ),
         RuntimeSseEvent::CollectionDeleted {
             collection_id,
             series_ids,
         } => sse_event(
             "CollectionDeleted",
-            json!({ "collectionId": collection_id, "seriesIds": series_ids }),
+            &CollectionSseDto {
+                collection_id: collection_id.clone(),
+                series_ids: series_ids.clone(),
+            },
         ),
         RuntimeSseEvent::ReadListAdded {
             readlist_id,
             book_ids,
         } => sse_event(
             "ReadListAdded",
-            json!({ "readListId": readlist_id, "bookIds": book_ids }),
+            &ReadListSseDto {
+                read_list_id: readlist_id.clone(),
+                book_ids: book_ids.clone(),
+            },
         ),
         RuntimeSseEvent::ReadListChanged {
             readlist_id,
             book_ids,
         } => sse_event(
             "ReadListChanged",
-            json!({ "readListId": readlist_id, "bookIds": book_ids }),
+            &ReadListSseDto {
+                read_list_id: readlist_id.clone(),
+                book_ids: book_ids.clone(),
+            },
         ),
         RuntimeSseEvent::ReadListDeleted {
             readlist_id,
             book_ids,
         } => sse_event(
             "ReadListDeleted",
-            json!({ "readListId": readlist_id, "bookIds": book_ids }),
+            &ReadListSseDto {
+                read_list_id: readlist_id.clone(),
+                book_ids: book_ids.clone(),
+            },
         ),
         RuntimeSseEvent::ReadProgressChanged { book_id, user_id } => sse_event(
             "ReadProgressChanged",
-            json!({ "bookId": book_id, "userId": user_id }),
+            &ReadProgressSseDto {
+                book_id: book_id.clone(),
+                user_id: user_id.clone(),
+            },
         ),
         RuntimeSseEvent::ReadProgressDeleted { book_id, user_id } => sse_event(
             "ReadProgressDeleted",
-            json!({ "bookId": book_id, "userId": user_id }),
+            &ReadProgressSseDto {
+                book_id: book_id.clone(),
+                user_id: user_id.clone(),
+            },
         ),
         RuntimeSseEvent::ReadProgressSeriesChanged { series_id, user_id } => sse_event(
             "ReadProgressSeriesChanged",
-            json!({ "seriesId": series_id, "userId": user_id }),
+            &ReadProgressSeriesSseDto {
+                series_id: series_id.clone(),
+                user_id: user_id.clone(),
+            },
         ),
         RuntimeSseEvent::ReadProgressSeriesDeleted { series_id, user_id } => sse_event(
             "ReadProgressSeriesDeleted",
-            json!({ "seriesId": series_id, "userId": user_id }),
+            &ReadProgressSeriesSseDto {
+                series_id: series_id.clone(),
+                user_id: user_id.clone(),
+            },
         ),
         RuntimeSseEvent::ThumbnailBookAdded {
             book_id,
@@ -253,7 +312,11 @@ fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
             selected,
         } => sse_event(
             "ThumbnailBookAdded",
-            json!({ "bookId": book_id, "seriesId": series_id, "selected": selected }),
+            &ThumbnailBookSseDto {
+                book_id: book_id.clone(),
+                series_id: series_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailBookDeleted {
             book_id,
@@ -261,53 +324,78 @@ fn runtime_sse_event(event: &RuntimeSseEvent) -> Event {
             selected,
         } => sse_event(
             "ThumbnailBookDeleted",
-            json!({ "bookId": book_id, "seriesId": series_id, "selected": selected }),
+            &ThumbnailBookSseDto {
+                book_id: book_id.clone(),
+                series_id: series_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailSeriesAdded {
             series_id,
             selected,
         } => sse_event(
             "ThumbnailSeriesAdded",
-            json!({ "seriesId": series_id, "selected": selected }),
+            &ThumbnailSeriesSseDto {
+                series_id: series_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailSeriesDeleted {
             series_id,
             selected,
         } => sse_event(
             "ThumbnailSeriesDeleted",
-            json!({ "seriesId": series_id, "selected": selected }),
+            &ThumbnailSeriesSseDto {
+                series_id: series_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailReadListAdded {
             readlist_id,
             selected,
         } => sse_event(
             "ThumbnailReadListAdded",
-            json!({ "readListId": readlist_id, "selected": selected }),
+            &ThumbnailReadListSseDto {
+                read_list_id: readlist_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailReadListDeleted {
             readlist_id,
             selected,
         } => sse_event(
             "ThumbnailReadListDeleted",
-            json!({ "readListId": readlist_id, "selected": selected }),
+            &ThumbnailReadListSseDto {
+                read_list_id: readlist_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailCollectionAdded {
             collection_id,
             selected,
         } => sse_event(
             "ThumbnailSeriesCollectionAdded",
-            json!({ "collectionId": collection_id, "selected": selected }),
+            &ThumbnailCollectionSseDto {
+                collection_id: collection_id.clone(),
+                selected: *selected,
+            },
         ),
         RuntimeSseEvent::ThumbnailCollectionDeleted {
             collection_id,
             selected,
         } => sse_event(
             "ThumbnailSeriesCollectionDeleted",
-            json!({ "collectionId": collection_id, "selected": selected }),
+            &ThumbnailCollectionSseDto {
+                collection_id: collection_id.clone(),
+                selected: *selected,
+            },
         ),
-        RuntimeSseEvent::SessionExpired { user_id } => {
-            sse_event("SessionExpired", json!({ "userId": user_id }))
-        }
+        RuntimeSseEvent::SessionExpired { user_id } => sse_event(
+            "SessionExpired",
+            &SessionExpiredSseDto {
+                user_id: user_id.clone(),
+            },
+        ),
     }
 }
 
@@ -318,11 +406,11 @@ async fn task_queue_status_event(app: &OperationalApiState) -> Event {
             tracing::error!(?error, "task queue status failed");
             return sse_event(
                 "TaskQueueStatus",
-                json!({
-                    "count": 0,
-                    "countByType": {},
-                    "error": format!("{error:#}"),
-                }),
+                &TaskQueueSseDto {
+                    count: 0,
+                    count_by_type: BTreeMap::new(),
+                    error: Some(format!("{error:#}")),
+                },
             );
         }
     };
@@ -330,10 +418,11 @@ async fn task_queue_status_event(app: &OperationalApiState) -> Event {
     let total_count: usize = count_by_type.values().sum();
     sse_event(
         "TaskQueueStatus",
-        json!({
-            "count": total_count,
-            "countByType": count_by_type,
-        }),
+        &TaskQueueSseDto {
+            count: total_count,
+            count_by_type,
+            error: None,
+        },
     )
 }
 

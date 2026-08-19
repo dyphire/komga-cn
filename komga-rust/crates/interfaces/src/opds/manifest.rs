@@ -5,8 +5,12 @@ use komga_application::identity_access::AuthUser;
 use komga_application::media_assets::{
     ManifestBuildOutcome, ManifestVariant, build_persisted_book_manifest,
 };
-use serde_json::{Value, json};
 
+use crate::contracts::media_assets::{
+    WebPubManifestAuthenticationLinkDto, WebPubManifestDto, WebPubManifestLinkDto,
+    WebPubManifestLinkPropertiesDto,
+};
+use crate::helpers::spring_error_response;
 use crate::media_assets::manifest_renderer::{ManifestHrefSurface, render_manifest_payload};
 use crate::request_urls::app_absolute_url;
 use crate::state::OpdsState;
@@ -58,7 +62,15 @@ async fn opds_manifest_variant(
     {
         Ok(ManifestBuildOutcome::Found(manifest)) => {
             let mut payload =
-                render_manifest_payload(&headers, &manifest, ManifestHrefSurface::OpdsV2);
+                match render_manifest_payload(&headers, &manifest, ManifestHrefSurface::OpdsV2) {
+                    Ok(payload) => payload,
+                    Err(error) => {
+                        return spring_error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("render persisted OPDS manifest: {error:#}"),
+                        );
+                    }
+                };
             adapt_manifest_payload_to_opds(
                 &mut payload,
                 &headers,
@@ -73,15 +85,14 @@ async fn opds_manifest_variant(
                 .into_response()
         }
         Ok(ManifestBuildOutcome::BadRequest(message)) => {
-            (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response()
+            spring_error_response(StatusCode::BAD_REQUEST, message)
         }
         Ok(ManifestBuildOutcome::NotFound) => StatusCode::NOT_FOUND.into_response(),
         Ok(ManifestBuildOutcome::Forbidden) => StatusCode::FORBIDDEN.into_response(),
-        Err(error) => (
+        Err(error) => spring_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("load persisted OPDS manifest: {error:#}") })),
-        )
-            .into_response(),
+            format!("load persisted OPDS manifest: {error:#}"),
+        ),
     }
 }
 
@@ -96,7 +107,7 @@ fn manifest_variant(profile: Option<&str>) -> Option<ManifestVariant> {
 }
 
 fn adapt_manifest_payload_to_opds(
-    payload: &mut Value,
+    payload: &mut WebPubManifestDto,
     headers: &HeaderMap,
     book_id: &str,
     series_id: Option<&str>,
@@ -108,96 +119,75 @@ fn adapt_manifest_payload_to_opds(
 }
 
 fn add_series_links_to_belongs_to(
-    payload: &mut Value,
+    payload: &mut WebPubManifestDto,
     headers: &HeaderMap,
     series_id: Option<&str>,
 ) {
     let Some(series_id) = series_id.filter(|value| !value.is_empty()) else {
         return;
     };
-    let Some(series_entries) = payload
-        .get_mut("metadata")
-        .and_then(Value::as_object_mut)
-        .and_then(|metadata| metadata.get_mut("belongsTo"))
-        .and_then(Value::as_object_mut)
-        .and_then(|belongs_to| belongs_to.get_mut("series"))
-        .and_then(Value::as_array_mut)
-    else {
+    let Some(belongs_to) = payload.metadata.belongs_to.as_mut() else {
         return;
     };
 
-    for entry in series_entries {
-        let Some(entry_object) = entry.as_object_mut() else {
-            continue;
-        };
-        entry_object.insert(
-            "links".to_string(),
-            Value::Array(vec![json!({
-                "href": app_absolute_url(headers, format!("/opds/v2/series/{series_id}").as_str()),
-                "type": "application/opds+json",
-            })]),
-        );
+    for entry in &mut belongs_to.series {
+        entry.links = Some(vec![WebPubManifestLinkDto {
+            rel: None,
+            href: app_absolute_url(headers, format!("/opds/v2/series/{series_id}").as_str()),
+            media_type: "application/opds+json".to_string(),
+            properties: None,
+            dimensions: None,
+            alternate: vec![],
+        }]);
     }
 }
 
-fn add_auth_properties_to_manifest_links(payload: &mut Value, headers: &HeaderMap) {
-    let Some(links) = payload.get_mut("links").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for link in links {
+fn add_auth_properties_to_manifest_links(payload: &mut WebPubManifestDto, headers: &HeaderMap) {
+    for link in &mut payload.links {
         insert_auth_properties(link, headers);
     }
 }
 
-fn add_auth_properties_to_thumbnail_resources(payload: &mut Value, headers: &HeaderMap) {
-    let Some(resources) = payload.get_mut("resources").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for resource in resources {
-        let is_thumbnail = resource
-            .get("href")
-            .and_then(Value::as_str)
-            .is_some_and(|href| href.ends_with("/thumbnail"));
+fn add_auth_properties_to_thumbnail_resources(
+    payload: &mut WebPubManifestDto,
+    headers: &HeaderMap,
+) {
+    for resource in &mut payload.resources {
+        let is_thumbnail = resource.href.ends_with("/thumbnail");
         if is_thumbnail {
             insert_auth_properties(resource, headers);
         }
     }
 }
 
-fn insert_auth_properties(value: &mut Value, headers: &HeaderMap) {
-    let Some(entry) = value.as_object_mut() else {
-        return;
-    };
-    entry.insert(
-        "properties".to_string(),
-        json!({
-            "authenticate": {
-                "href": app_absolute_url(headers, "/opds/v2/auth"),
-                "type": OPDS_AUTH_CONTENT_TYPE,
-            }
-        }),
-    );
+fn insert_auth_properties(value: &mut WebPubManifestLinkDto, headers: &HeaderMap) {
+    value.properties = Some(WebPubManifestLinkPropertiesDto {
+        authenticate: WebPubManifestAuthenticationLinkDto {
+            href: app_absolute_url(headers, "/opds/v2/auth"),
+            media_type: OPDS_AUTH_CONTENT_TYPE.to_string(),
+        },
+    });
 }
 
-fn add_progression_link(payload: &mut Value, headers: &HeaderMap, book_id: &str) {
-    let Some(links) = payload.get_mut("links").and_then(Value::as_array_mut) else {
-        return;
-    };
-    if links
+fn add_progression_link(payload: &mut WebPubManifestDto, headers: &HeaderMap, book_id: &str) {
+    if payload
+        .links
         .iter()
-        .any(|link| link.get("rel").and_then(Value::as_str) == Some(PROGRESSION_REL))
+        .any(|link| link.rel.as_deref() == Some(PROGRESSION_REL))
     {
         return;
     }
-    links.push(json!({
-        "rel": PROGRESSION_REL,
-        "href": app_absolute_url(headers, format!("/opds/v2/books/{book_id}/progression").as_str()),
-        "type": PROGRESSION_CONTENT_TYPE,
-        "properties": {
-            "authenticate": {
-                "href": app_absolute_url(headers, "/opds/v2/auth"),
-                "type": OPDS_AUTH_CONTENT_TYPE,
-            }
-        }
-    }));
+    let mut link = WebPubManifestLinkDto {
+        rel: Some(PROGRESSION_REL.to_string()),
+        href: app_absolute_url(
+            headers,
+            format!("/opds/v2/books/{book_id}/progression").as_str(),
+        ),
+        media_type: PROGRESSION_CONTENT_TYPE.to_string(),
+        properties: None,
+        dimensions: None,
+        alternate: vec![],
+    };
+    insert_auth_properties(&mut link, headers);
+    payload.links.push(link);
 }

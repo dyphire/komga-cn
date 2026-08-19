@@ -5,15 +5,18 @@ use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::operational::{
-    PageHashAction, PageHashDeleteError, PageHashDeleteMatch, PageHashKnownEntry,
-    PageHashKnownQuery, PageHashMatchEntry, PageHashMatchesQuery, PageHashPage, PageHashSort,
-    PageHashSortDirection, PageHashUnknownEntry, PageHashUnknownQuery, PageHashUpsertCommand,
+    PageHashAction, PageHashDeleteError, PageHashDeleteMatch, PageHashKnownQuery,
+    PageHashMatchesQuery, PageHashSort, PageHashSortDirection, PageHashUnknownQuery,
+    PageHashUpsertCommand,
 };
 use komga_application::operational::{
     PageHashKnownSortProperty, PageHashMatchSortProperty, PageHashUnknownSortProperty,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
+use crate::contracts::page_hashes::{
+    known_page_hash_page, page_hash_matches_page, unknown_page_hash_page,
+};
 use crate::identity_access::auth::Admin;
 
 use super::{query_value, query_values};
@@ -63,7 +66,12 @@ pub(crate) async fn get_page_hashes(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(known_page_hash_page_payload(&page_data)).into_response()
+    let payload = match known_page_hash_page(&page_data) {
+        Ok(payload) => payload,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(payload).into_response()
 }
 
 fn parse_page_hash_actions(raw_values: Vec<String>) -> Result<Vec<PageHashAction>, StatusCode> {
@@ -114,7 +122,12 @@ pub(crate) async fn get_page_hashes_unknown(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(unknown_page_hash_page_payload(&page_data)).into_response()
+    let payload = match unknown_page_hash_page(&page_data) {
+        Ok(payload) => payload,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(payload).into_response()
 }
 
 pub(crate) async fn get_page_hash_matches(
@@ -139,7 +152,12 @@ pub(crate) async fn get_page_hash_matches(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    Json(page_hash_matches_page_payload(&page_data)).into_response()
+    let payload = match page_hash_matches_page(&page_data) {
+        Ok(payload) => payload,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(payload).into_response()
 }
 
 pub(crate) async fn get_page_hash_thumbnail(
@@ -271,184 +289,12 @@ fn page_hash_delete_error_response(error: PageHashDeleteError) -> Response {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageHashPagePayload<C> {
-    content: Vec<C>,
-    pageable: PageHashPageablePayload,
-    last: bool,
-    total_elements: u64,
-    total_pages: u64,
-    first: bool,
-    size: u64,
-    number: u64,
-    sort: PageHashSortStatePayload,
-    number_of_elements: u64,
-    empty: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageHashPageablePayload {
-    page_number: u64,
-    page_size: u64,
-    sort: PageHashSortStatePayload,
-    offset: u64,
-    paged: bool,
-    unpaged: bool,
-}
-
-#[derive(Serialize)]
-struct PageHashSortStatePayload {
-    empty: bool,
-    sorted: bool,
-    unsorted: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct KnownPageHashPayload<'a> {
-    hash: &'a str,
-    size: Option<i64>,
-    action: &'static str,
-    delete_count: i64,
-    match_count: i64,
-    created: &'a str,
-    last_modified: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UnknownPageHashPayload<'a> {
-    hash: &'a str,
-    size: Option<i64>,
-    match_count: i64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageHashMatchPayload<'a> {
-    book_id: &'a str,
-    url: &'a str,
-    page_number: i64,
-    file_name: &'a str,
-    file_size: i64,
-    media_type: &'a str,
-}
-
-fn known_page_hash_page_payload(
-    page: &PageHashPage<PageHashKnownEntry>,
-) -> PageHashPagePayload<KnownPageHashPayload<'_>> {
-    page_hash_page_payload(
-        page,
-        page.content.iter().map(known_page_hash_payload).collect(),
-    )
-}
-
-fn unknown_page_hash_page_payload(
-    page: &PageHashPage<PageHashUnknownEntry>,
-) -> PageHashPagePayload<UnknownPageHashPayload<'_>> {
-    page_hash_page_payload(
-        page,
-        page.content.iter().map(unknown_page_hash_payload).collect(),
-    )
-}
-
-fn page_hash_matches_page_payload(
-    page: &PageHashPage<PageHashMatchEntry>,
-) -> PageHashPagePayload<PageHashMatchPayload<'_>> {
-    page_hash_page_payload(
-        page,
-        page.content.iter().map(page_hash_match_payload).collect(),
-    )
-}
-
-fn page_hash_page_payload<C>(
-    page: &PageHashPage<impl Sized>,
-    content: Vec<C>,
-) -> PageHashPagePayload<C> {
-    let sort = page_hash_sort_state_payload(page.sorted);
-    let number_of_elements = page.number_of_elements();
-
-    PageHashPagePayload {
-        content,
-        pageable: page_hash_pageable_payload(page),
-        last: page.total_pages == 0 || page.page + 1 >= page.total_pages,
-        total_elements: page.total_elements,
-        total_pages: page.total_pages,
-        first: page.page == 0,
-        size: page.size,
-        number: page.page,
-        sort,
-        number_of_elements,
-        empty: number_of_elements == 0,
-    }
-}
-
-fn page_hash_pageable_payload(page: &PageHashPage<impl Sized>) -> PageHashPageablePayload {
-    PageHashPageablePayload {
-        page_number: page.page,
-        page_size: page.size,
-        sort: page_hash_sort_state_payload(page.sorted),
-        offset: page.offset(),
-        paged: true,
-        unpaged: false,
-    }
-}
-
-fn page_hash_sort_state_payload(sorted: bool) -> PageHashSortStatePayload {
-    PageHashSortStatePayload {
-        empty: !sorted,
-        sorted,
-        unsorted: !sorted,
-    }
-}
-
-fn known_page_hash_payload(entry: &PageHashKnownEntry) -> KnownPageHashPayload<'_> {
-    KnownPageHashPayload {
-        hash: &entry.hash,
-        size: entry.size,
-        action: page_hash_action_name(entry.action),
-        delete_count: entry.delete_count,
-        match_count: entry.match_count,
-        created: &entry.created,
-        last_modified: &entry.last_modified,
-    }
-}
-
-fn unknown_page_hash_payload(entry: &PageHashUnknownEntry) -> UnknownPageHashPayload<'_> {
-    UnknownPageHashPayload {
-        hash: &entry.hash,
-        size: entry.size,
-        match_count: entry.match_count,
-    }
-}
-
-fn page_hash_match_payload(entry: &PageHashMatchEntry) -> PageHashMatchPayload<'_> {
-    PageHashMatchPayload {
-        book_id: &entry.book_id,
-        url: &entry.url,
-        page_number: entry.page_number,
-        file_name: &entry.file_name,
-        file_size: entry.file_size,
-        media_type: &entry.media_type,
-    }
-}
-
 fn page_hash_action(value: &str) -> Option<PageHashAction> {
     match value {
         "DELETE_MANUAL" => Some(PageHashAction::DeleteManual),
         "DELETE_AUTO" => Some(PageHashAction::DeleteAuto),
         "IGNORE" => Some(PageHashAction::Ignore),
         _ => None,
-    }
-}
-
-fn page_hash_action_name(action: PageHashAction) -> &'static str {
-    match action {
-        PageHashAction::DeleteManual => "DELETE_MANUAL",
-        PageHashAction::DeleteAuto => "DELETE_AUTO",
-        PageHashAction::Ignore => "IGNORE",
     }
 }
 

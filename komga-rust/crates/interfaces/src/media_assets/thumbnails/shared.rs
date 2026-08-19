@@ -1,11 +1,10 @@
-use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
 use image::ImageFormat;
 use komga_application::media_assets::{EntityThumbnailBinary, ThumbnailType};
-use serde_json::json;
 
+use crate::helpers::spring_error_response;
 use crate::media_response_policy::MediaAssetResponse;
 use crate::state::MediaAssetsState;
 
@@ -293,13 +292,10 @@ pub(super) async fn parse_thumbnail_upload(
                     "" | "true" => true,
                     "false" => false,
                     _ => {
-                        return Err((
+                        return Err(spring_error_response(
                             StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": format!("{entity_name} thumbnail selected field must be true or false"),
-                            })),
-                        )
-                            .into_response());
+                            format!("{entity_name} thumbnail selected field must be true or false"),
+                        ));
                     }
                 };
             }
@@ -339,21 +335,15 @@ fn resolve_thumbnail_media_type(content_type: Option<&str>, bytes: &[u8]) -> Opt
 }
 
 fn empty_thumbnail_upload_response(entity_name: &str) -> Response {
-    (
+    spring_error_response(
         StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": format!("{entity_name} thumbnail upload body must not be empty"),
-        })),
+        format!("{entity_name} thumbnail upload body must not be empty"),
     )
-        .into_response()
 }
 
 fn invalid_thumbnail_upload_response(entity_name: &str, error: impl std::fmt::Display) -> Response {
-    (
+    spring_error_response(
         StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": format!("invalid {entity_name} thumbnail upload: {error:#}"),
-        })),
+        format!("invalid {entity_name} thumbnail upload: {error:#}"),
     )
-        .into_response()
 }

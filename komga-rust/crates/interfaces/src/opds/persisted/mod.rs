@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use axum::Json;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
 
 use komga_application::identity_access::{
     AuthUser, user_shared_all_libraries, user_shared_library_ids,
@@ -14,13 +12,16 @@ use komga_application::opds::{
     OpdsSeriesPersistedPort, PersistedLibraryRecord,
 };
 
+use crate::contracts::opds::OpdsV2LinkDto;
+
 use super::types::{PersistedLibrary, PersistedSeries, PersistedSeriesSearchResult};
+use crate::helpers::internal_error_response;
 
 mod catalog_queries;
 
 #[derive(Default)]
 pub(super) struct OpdsJsonNavigationPage {
-    pub(super) entries: Vec<Value>,
+    pub(super) entries: Vec<OpdsV2LinkDto>,
     pub(super) total_count: usize,
 }
 
@@ -160,7 +161,7 @@ pub(super) async fn load_browse_publisher_navigation(
     headers: &HeaderMap,
     allowed_library_ids: &Option<HashSet<String>>,
     library_id: Option<&str>,
-) -> anyhow::Result<Vec<Value>> {
+) -> anyhow::Result<Vec<OpdsV2LinkDto>> {
     catalog_queries::load_browse_publisher_navigation(
         backend,
         headers,
@@ -210,13 +211,9 @@ where
     let library = match load_library(backend, library_id).await {
         Ok(library) => library,
         Err(error) => {
-            return Some(
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("load OPDS library scope: {error:#}") })),
-                )
-                    .into_response(),
-            );
+            return Some(internal_error_response(format!(
+                "load OPDS library scope: {error:#}"
+            )));
         }
     };
 

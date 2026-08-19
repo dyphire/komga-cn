@@ -5,22 +5,30 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::{Multipart, multipart::MultipartRejection};
 use komga_application::discovery::{
-    ReadlistMutationError, ReadlistMutationInput, parse_comicrack_readlist,
+    ReadListReadModel, ReadlistMutationError, ReadlistMutationInput, parse_comicrack_readlist,
 };
 use komga_domain::discovery::PageEnvelope;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::BookDetailReadModel;
 use super::detail_utils::internal_error_response;
-use super::readlists_support::{
-    comicrack_match_payload, merge_readlist_write_input, readlist_payload, readlists_page_payload,
-};
-use super::{BookDetailReadModel, book_detail_payload};
+use super::readlists_support::{merge_readlist_write_input, readlists_page_payload};
+use crate::contracts::common::{PageDto, SpringErrorDto, ViolationDto};
+use crate::contracts::discovery::{BookDto, ReadListDto, ReadListRequestMatchDto};
 use crate::discovery::query::{resolve_readlist_books_query, resolve_readlists_query};
 use crate::helpers::{to_domain_query_context, validation_error_response};
 use crate::identity_access::auth::{Admin, Authenticated};
 use crate::state::DiscoveryState;
+
+fn readlist_response(readlist: &ReadListReadModel) -> Response {
+    match ReadListDto::from_read_model(readlist) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
+}
+
 pub(crate) async fn readlists(
     State(app): State<DiscoveryState>,
     _: Authenticated,
@@ -28,6 +36,7 @@ pub(crate) async fn readlists(
     uri: Uri,
 ) -> Response {
     let query = resolve_readlists_query(&uri);
+    let paged = !query.unpaged;
 
     let requested_context = match app
         .discovery_auth
@@ -65,7 +74,10 @@ pub(crate) async fn readlists(
         Err(error) => return internal_error_response(error),
     };
 
-    Json(readlists_page_payload(page)).into_response()
+    match readlists_page_payload(page, paged) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(format!("{error:#}")),
+    }
 }
 
 pub(crate) async fn readlist_create(
@@ -94,7 +106,7 @@ pub(crate) async fn readlist_create(
         .readlist_for_mutation(&created.readlist_id)
         .await
     {
-        Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
+        Ok(Some(readlist)) => readlist_response(&readlist),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -147,16 +159,16 @@ fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput,
 
     let mut violations = Vec::new();
     if name.trim().is_empty() {
-        violations.push(json!({
-            "fieldName": "name",
-            "message": "must not be blank",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("name".to_string()),
+            message: Some("must not be blank".to_string()),
+        });
     }
     if book_values.is_empty() {
-        violations.push(json!({
-            "fieldName": "bookIds",
-            "message": "must not be empty",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("bookIds".to_string()),
+            message: Some("must not be empty".to_string()),
+        });
     }
 
     let mut seen_book_ids = BTreeSet::new();
@@ -177,10 +189,10 @@ fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput,
     }
 
     if saw_duplicate_book_id {
-        violations.push(json!({
-            "fieldName": "bookIds",
-            "message": "must only contain unique elements",
-        }));
+        violations.push(ViolationDto {
+            field_name: Some("bookIds".to_string()),
+            message: Some("must only contain unique elements".to_string()),
+        });
     }
 
     if !violations.is_empty() {
@@ -202,16 +214,16 @@ fn readlist_create_bad_request(message: &str) -> Response {
 fn readlist_bad_request(message: &str, path: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": "Bad Request",
-            "message": message,
-            "path": path,
-            "status": 400,
-            "timestamp": SystemTime::now()
+        Json(SpringErrorDto {
+            error: "Bad Request".to_string(),
+            message: message.to_string(),
+            path: path.to_string(),
+            status: 400,
+            timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis(),
-        })),
+                .as_millis() as u64,
+        }),
     )
         .into_response()
 }
@@ -241,7 +253,10 @@ pub(crate) async fn readlist_match_comicrack(
     };
 
     match app.persisted_sets.match_comicrack_readlist(&request).await {
-        Ok(result) => Json(comicrack_match_payload(&result)).into_response(),
+        Ok(result) => match ReadListRequestMatchDto::from_result(&result) {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal_error_response(format!("{error:#}")),
+        },
         Err(error) => internal_error_response(error),
     }
 }
@@ -249,16 +264,16 @@ pub(crate) async fn readlist_match_comicrack(
 fn comicrack_bad_request_response(error_code: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
-        Json(json!({
-            "error": "Bad Request",
-            "message": error_code,
-            "path": "/api/v1/readlists/match/comicrack",
-            "status": 400,
-            "timestamp": SystemTime::now()
+        Json(SpringErrorDto {
+            error: "Bad Request".to_string(),
+            message: error_code.to_string(),
+            path: "/api/v1/readlists/match/comicrack".to_string(),
+            status: 400,
+            timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis(),
-        })),
+                .as_millis() as u64,
+        }),
     )
         .into_response()
 }
@@ -352,12 +367,10 @@ pub(crate) async fn readlist_books(
         Err(error) => return internal_error_response(error),
     };
 
-    Json(book_details_page_payload(
-        page,
-        response_context.is_admin,
-        paged,
-    ))
-    .into_response()
+    match book_details_page_payload(page, response_context.is_admin, paged) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(error),
+    }
 }
 
 pub(crate) async fn readlist_detail(
@@ -381,7 +394,7 @@ pub(crate) async fn readlist_detail(
         .readlist_detail(&to_domain_query_context(context), &readlist_id)
         .await
     {
-        Ok(Some(readlist)) => Json(readlist_payload(&readlist)).into_response(),
+        Ok(Some(readlist)) => readlist_response(&readlist),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => internal_error_response(error),
     }
@@ -437,56 +450,32 @@ async fn sibling_response(
         Err(error) => return internal_error_response(error),
     };
 
-    Json(book_detail_payload(&sibling, is_admin)).into_response()
+    match BookDto::from_read_model(&sibling, is_admin) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal_error_response(error),
+    }
 }
 
 fn book_details_page_payload(
     page: PageEnvelope<BookDetailReadModel>,
     is_admin: bool,
     paged: bool,
-) -> Value {
+) -> anyhow::Result<PageDto<BookDto>> {
     let content = page
         .content
         .iter()
-        .map(|book| book_detail_payload(book, is_admin))
-        .collect::<Vec<_>>();
-    let number_of_elements = content.len();
-    let first = page.page == 0;
-    let last = page.total_pages == 0 || page.page + 1 >= page.total_pages;
-    let offset = if paged {
-        page.page.saturating_mul(page.size)
-    } else {
-        0
-    };
+        .map(|book| BookDto::from_read_model(book, is_admin))
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
-    json!({
-        "content": content,
-        "pageable": {
-            "pageNumber": page.page,
-            "pageSize": page.size,
-            "sort": {
-                "empty": false,
-                "sorted": true,
-                "unsorted": false
-            },
-            "offset": offset,
-            "paged": paged,
-            "unpaged": !paged
-        },
-        "last": last,
-        "totalElements": page.total_elements,
-        "totalPages": page.total_pages,
-        "first": first,
-        "size": page.size,
-        "number": page.page,
-        "sort": {
-            "empty": false,
-            "sorted": true,
-            "unsorted": false
-        },
-        "numberOfElements": number_of_elements,
-        "empty": number_of_elements == 0
-    })
+    Ok(PageDto::from_parts(
+        content,
+        page.page,
+        page.size,
+        page.total_elements,
+        page.total_pages,
+        paged,
+        true,
+    ))
 }
 
 async fn extract_comicrack_upload_xml(
