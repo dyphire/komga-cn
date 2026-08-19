@@ -271,7 +271,6 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     .series_ids_requiring_book_sync
                     .contains(&series.series_id);
             for book in &series.books {
-                let mut book_changed = false;
                 if sync_books || !active_book_ids.contains(&book.book_id) {
                     let book_updated = sqlx::query(
                         r#"UPDATE BOOK
@@ -304,10 +303,6 @@ WHERE ID = ?
                     .context("failed to update BOOK rows")?
                     .rows_affected();
 
-                    if book_updated != 0 {
-                        book_changed = true;
-                    }
-
                     if book_updated == 0 {
                         let inserted = sqlx::query(
                                 r#"INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
@@ -327,7 +322,6 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             .context("failed to insert BOOK rows")?
                             .rows_affected();
                         if inserted != 0 {
-                            book_changed = true;
                             record_book_runtime_sse_event(
                                 &mut runtime_events,
                                 &book.book_id,
@@ -360,35 +354,6 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             book.book_id
                         ))
                     })?;
-
-                if book_changed {
-                    let media_updated = sqlx::query(
-                        r#"UPDATE MEDIA_FILE
-SET FILE_SIZE = ?
-WHERE FILE_NAME = ?
-  AND BOOK_ID = ?"#,
-                    )
-                    .bind(book.file_size)
-                    .bind(&book.file_name)
-                    .bind(&book.book_id)
-                    .execute(pool)
-                    .await
-                    .context("failed to update MEDIA_FILE rows")?
-                    .rows_affected();
-
-                    if media_updated == 0 {
-                        sqlx::query(
-                            r#"INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE)
-VALUES (?, ?, ?)"#,
-                        )
-                        .bind(&book.file_name)
-                        .bind(&book.book_id)
-                        .bind(book.file_size)
-                        .execute(pool)
-                        .await
-                        .context("failed to insert MEDIA_FILE rows")?;
-                    }
-                }
             }
 
             if !inserted_in_series.is_empty()

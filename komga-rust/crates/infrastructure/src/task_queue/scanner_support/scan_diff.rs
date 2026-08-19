@@ -143,7 +143,6 @@ pub(super) fn build_scanned_library(
                 let file_last_modified_unix_seconds =
                     metadata_updated_unix_seconds(&metadata, path.as_path())?;
                 let book_name = path_file_stem_utf8(path.as_path())?.to_string();
-                let file_name = path_file_name_utf8(path.as_path())?.to_string();
 
                 if let Some(existing) = existing_books_by_url.get(&book_url_key)
                     && existing.file_last_modified_unix_seconds != file_last_modified_unix_seconds
@@ -164,7 +163,6 @@ pub(super) fn build_scanned_library(
                     book_id: book_id.clone(),
                     book_name,
                     book_url,
-                    file_name,
                     file_size: metadata.len() as i64,
                     file_last_modified_unix_seconds,
                     oneshot: false,

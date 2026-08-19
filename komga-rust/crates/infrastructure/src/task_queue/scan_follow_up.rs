@@ -257,7 +257,6 @@ mod tests {
                     book_id: "book-1".to_string(),
                     book_name: "Book One".to_string(),
                     book_url: "Series One/book.cbz".to_string(),
-                    file_name: "book.cbz".to_string(),
                     file_size: 10,
                     file_last_modified_unix_seconds: 1,
                     oneshot: false,

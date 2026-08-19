@@ -19,7 +19,6 @@ pub(super) struct PersistenceSnapshot {
     pub(super) book_metadata_aggregation_rows: i64,
     pub(super) book_rows: i64,
     pub(super) book_metadata_rows: i64,
-    pub(super) media_file_rows: i64,
     pub(super) sidecar_rows: i64,
 }
 
@@ -506,19 +505,6 @@ pub(super) async fn load_persistence_snapshot(
     .expect("book metadata row count should be queryable")
     .get::<i64, _>("COUNT");
 
-    let media_file_rows = sqlx::query(
-        "SELECT COUNT(*) AS COUNT \
-         FROM MEDIA_FILE \
-         WHERE BOOK_ID IN (SELECT ID \
-         FROM BOOK \
-         WHERE LIBRARY_ID = ?)",
-    )
-    .bind(library_id)
-    .fetch_one(&pool)
-    .await
-    .expect("media_file row count should be queryable")
-    .get::<i64, _>("COUNT");
-
     let sidecar_rows = sqlx::query(
         "SELECT COUNT(*) AS COUNT \
                                     FROM SIDECAR \
@@ -539,7 +525,6 @@ pub(super) async fn load_persistence_snapshot(
         book_metadata_aggregation_rows,
         book_rows,
         book_metadata_rows,
-        media_file_rows,
         sidecar_rows,
     }
 }

@@ -918,7 +918,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn analyze_book_persists_archive_metadata_and_preserves_scanner_file() {
+    async fn analyze_book_replaces_scanner_file_with_archive_metadata() {
         let fixture = RuntimeTestFixture::new("analyze-book-archive-media-files");
         std::fs::create_dir_all(fixture.library_root.join("books"))
             .expect("archive media files library root should be created");
@@ -953,7 +953,12 @@ mod tests {
             .expect("archive analysis should succeed");
 
         let files = load_persisted_media_files(fixture.database_file.as_path(), "book-1").await;
-        assert_eq!(files[0], ("book-1.cbz".to_string(), None, None, Some(123)));
+        assert!(
+            !files
+                .iter()
+                .any(|(file_name, _, _, _)| file_name == "book-1.cbz"),
+            "scanner-owned physical book file must not remain in MEDIA_FILE",
+        );
         assert!(
             files
                 .iter()

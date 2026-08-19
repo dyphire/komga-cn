@@ -78,18 +78,9 @@ pub(in crate::task_queue) async fn analyze_book(
     };
     let current_page_count = persisted.page_count.min(i64::MAX as u64) as i64;
 
-    let source_file_name = std::path::Path::new(&input.url)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(input.url.as_str());
-    persist_book_analysis(
-        runtime.database().write_pool(),
-        &book_id,
-        source_file_name,
-        &persisted,
-    )
-    .await
-    .map_err(TaskProcessingError::runtime)?;
+    persist_book_analysis(runtime.database().write_pool(), &book_id, &persisted)
+        .await
+        .map_err(TaskProcessingError::runtime)?;
 
     runtime
         .search_engine()

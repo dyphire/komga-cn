@@ -78,7 +78,6 @@ pub(in crate::task_queue) struct ScannedBookRow {
     pub(in crate::task_queue) book_id: String,
     pub(in crate::task_queue) book_name: String,
     pub(in crate::task_queue) book_url: String,
-    pub(in crate::task_queue) file_name: String,
     pub(in crate::task_queue) file_size: i64,
     pub(in crate::task_queue) file_last_modified_unix_seconds: i64,
     pub(in crate::task_queue) oneshot: bool,

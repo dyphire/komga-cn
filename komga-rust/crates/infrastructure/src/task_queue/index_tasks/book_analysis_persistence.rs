@@ -81,7 +81,6 @@ pub(super) async fn analyze_book_input(
 pub(super) async fn persist_book_analysis(
     pool: &SqlitePool,
     book_id: &str,
-    source_file_name: &str,
     analysis: &AnalyzedBookMedia,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
@@ -127,17 +126,13 @@ pub(super) async fn persist_book_analysis(
         })?;
     }
 
-    sqlx::query(
-        "DELETE FROM MEDIA_FILE WHERE BOOK_ID = ? AND (MEDIA_TYPE IS NOT NULL OR SUB_TYPE IS NOT NULL OR FILE_NAME <> ?)",
-    )
+    sqlx::query("DELETE FROM MEDIA_FILE WHERE BOOK_ID = ?")
         .bind(book_id)
-        .bind(source_file_name)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to clear derived MEDIA_FILE rows for '{book_id}'"
-            ))
+            anyhow::anyhow!(error)
+                .context(format!("failed to clear MEDIA_FILE rows for '{book_id}'"))
         })?;
 
     for file in &analysis.media_files {

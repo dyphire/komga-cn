@@ -42,10 +42,6 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
         "scanner contract requires scan output to persist BOOK_METADATA rows compatible with Kotlin readers",
     );
     assert!(
-        snapshot.media_file_rows >= 1,
-        "scanner contract requires scanned archive file names to persist in MEDIA_FILE",
-    );
-    assert!(
         snapshot.sidecar_rows >= 1,
         "scanner contract requires recognized series sidecars to persist in SIDECAR with Kotlin-compatible shape",
     );
