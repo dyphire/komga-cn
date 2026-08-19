@@ -226,10 +226,10 @@ fn map_series_summary(row: SqliteRow) -> SeriesSummary {
         .filter(|entry| !entry.is_empty())
         .filter_map(|entry| {
             let (label, url) = entry.split_once(char::from(30))?;
-            SeriesSummaryLink {
+            Some(SeriesSummaryLink {
                 label: label.to_string(),
                 url: url.to_string(),
-            }
+            })
         })
         .collect();
 
