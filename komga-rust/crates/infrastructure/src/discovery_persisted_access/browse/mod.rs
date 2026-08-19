@@ -262,10 +262,10 @@ fn persisted_series_to_read_model(series: &PersistedSeriesSummary) -> SeriesRead
         alternate_titles_lock: series.alternate_titles_lock,
         links: series
             .links
-            .into_iter()
+            .iter()
             .map(|link| BookMetadataLinkReadModel {
-                label: link.label,
-                url: link.url,
+                label: link.label.clone(),
+                url: link.url.clone(),
             })
             .collect(),
     }
