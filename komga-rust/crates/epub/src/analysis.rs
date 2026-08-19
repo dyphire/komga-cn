@@ -19,7 +19,7 @@ use crate::{
 
 const DIVINA_LETTER_COUNT_THRESHOLD: usize = 15;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EpubAnalysisError {
     message: String,
 }
@@ -52,7 +52,7 @@ pub struct EpubAnalysisFile {
     pub file_name: String,
     pub media_type: String,
     pub sub_type: String,
-    pub file_size: i64,
+    pub file_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -64,6 +64,7 @@ pub struct EpubAnalysis {
     pub files: Vec<String>,
     pub media_files: Vec<EpubAnalysisFile>,
     pub extension_blob: Vec<u8>,
+    pub comment: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -108,7 +109,37 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
         add_media_file(&mut media_files, item, "EPUB_ASSET", &entries);
     }
 
-    let pages = divina_pages(&mut archive, &manifest, &spine, &entries)?;
+    let mut errors = Vec::new();
+    let is_kepub = is_kepub(&mut archive, &spine);
+    let navigation = navigation(&mut archive, &package, &rootfile_path, &manifest);
+    let toc = match navigation.toc {
+        Ok(toc) => toc,
+        Err(_) => {
+            errors.push("ERR_1035");
+            Vec::new()
+        }
+    };
+    let landmarks = match navigation.landmarks {
+        Ok(landmarks) => landmarks,
+        Err(_) => {
+            errors.push("ERR_1036");
+            Vec::new()
+        }
+    };
+    let page_list = match navigation.page_list {
+        Ok(page_list) => page_list,
+        Err(_) => {
+            errors.push("ERR_1037");
+            Vec::new()
+        }
+    };
+    let pages = match divina_pages(&mut archive, &manifest, &spine, &entries) {
+        Ok(pages) => pages,
+        Err(_) => {
+            errors.push("ERR_1038");
+            Vec::new()
+        }
+    };
     let divina_compatible = !pages.is_empty();
     let is_fixed_layout = parse_epub_fixed_layout(&package)
         .map_err(parse_error("parse EPUB fixed-layout metadata"))?
@@ -122,16 +153,33 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
             .map(|entry| entry.compressed_size.div_ceil(1024))
             .sum()
     };
-    let is_kepub = is_kepub(&mut archive, &spine)?;
-    let positions = positions(
+    let positions = match positions(
         &mut archive,
         &spine,
         &media_files,
         &entries,
         is_fixed_layout,
         is_kepub,
-    )?;
-    let (toc, landmarks, page_list) = navigation(&mut archive, &package, &rootfile_path, &manifest);
+    ) {
+        Ok(positions) => positions,
+        Err(_) => {
+            errors.push("ERR_1039");
+            Vec::new()
+        }
+    };
+    let missing_resources = media_files
+        .iter()
+        .filter(|file| file.file_size.is_none())
+        .map(|file| file.file_name.clone())
+        .collect::<Vec<_>>();
+    let mut comment_parts = errors
+        .iter()
+        .map(|error| (*error).to_string())
+        .collect::<Vec<_>>();
+    if !missing_resources.is_empty() {
+        comment_parts.push(format!("ERR_1033 [{}]", missing_resources.join(", ")));
+    }
+    let comment = (!comment_parts.is_empty()).then(|| comment_parts.join(" "));
     let extension_blob =
         encode_extension(positions, is_fixed_layout, &toc, &landmarks, &page_list)?;
     let mut files = media_files
@@ -148,6 +196,7 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
         files,
         media_files,
         extension_blob,
+        comment,
     })
 }
 
@@ -202,14 +251,14 @@ fn add_media_file(
     entries: &HashMap<String, ZipEntryMetadata>,
 ) {
     let file_name = resource_name(&item.href);
-    let Some(entry) = entries.get(&file_name) else {
-        return;
-    };
+    let file_size = entries
+        .get(&file_name)
+        .map(|entry| entry.size.try_into().unwrap_or(i64::MAX));
     media_files.push(EpubAnalysisFile {
         file_name,
         media_type: item.media_type.clone(),
         sub_type: sub_type.to_string(),
-        file_size: entry.size.try_into().unwrap_or(i64::MAX),
+        file_size,
     });
 }
 
@@ -391,23 +440,22 @@ fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
     actual == expected || actual.ends_with(expected)
 }
 
-fn is_kepub<R: Read + Seek>(
-    archive: &mut ZipArchive<R>,
-    spine: &[EpubManifestItem],
-) -> Result<bool, EpubAnalysisError> {
+fn is_kepub<R: Read + Seek>(archive: &mut ZipArchive<R>, spine: &[EpubManifestItem]) -> bool {
     for item in spine {
         if !is_html(&item.media_type) {
             continue;
         }
         let path = resource_name(&item.href);
-        let Some(bytes) = read_entry(archive, &path)? else {
-            continue;
+        let bytes = match read_entry(archive, &path) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => continue,
+            Err(_) => return false,
         };
         if String::from_utf8_lossy(&bytes).contains("koboSpan") {
-            return Ok(true);
+            return true;
         }
     }
-    Ok(false)
+    false
 }
 
 #[derive(Clone, Debug, Default)]
@@ -560,16 +608,18 @@ fn find_nav<'a>(node: &'a XmlNode, nav_type: &str) -> Option<&'a XmlNode> {
         .find_map(|child| find_nav(child, nav_type))
 }
 
+struct NavigationParts {
+    toc: Result<Vec<EpubNavigationLink>, EpubAnalysisError>,
+    landmarks: Result<Vec<EpubNavigationLink>, EpubAnalysisError>,
+    page_list: Result<Vec<EpubNavigationLink>, EpubAnalysisError>,
+}
+
 fn navigation<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     package: &[u8],
     rootfile_path: &str,
     manifest: &HashMap<String, EpubManifestItem>,
-) -> (
-    Vec<EpubNavigationLink>,
-    Vec<EpubNavigationLink>,
-    Vec<EpubNavigationLink>,
-) {
+) -> NavigationParts {
     let nav_path = manifest
         .values()
         .find(|item| {
@@ -578,15 +628,18 @@ fn navigation<R: Read + Seek>(
                 .any(|property| property.eq_ignore_ascii_case("nav"))
         })
         .map(|item| resource_name(&item.href));
-    let nav_links = nav_path.as_deref().and_then(|path| {
-        let bytes = read_entry(archive, path).ok().flatten()?;
-        let document = parse_xml_document(&bytes).ok()?;
-        Some((
-            nav_links_for(&document, path, "toc"),
-            nav_links_for(&document, path, "landmarks"),
-            nav_links_for(&document, path, "page-list"),
-        ))
-    });
+    let nav_links = nav_path
+        .as_deref()
+        .map(|path| -> Result<_, EpubAnalysisError> {
+            let bytes = read_entry(archive, path)?.unwrap_or_default();
+            let document = parse_xml_document(&bytes)?;
+            Ok((
+                nav_links_for(&document, path, "toc"),
+                nav_links_for(&document, path, "landmarks"),
+                nav_links_for(&document, path, "page-list"),
+            ))
+        })
+        .transpose();
 
     let ncx_path = manifest
         .values()
@@ -603,34 +656,47 @@ fn navigation<R: Read + Seek>(
             })
         })
         .map(|item| resource_name(&item.href));
-    let ncx_links = ncx_path.as_deref().and_then(|path| {
-        let bytes = read_entry(archive, path).ok().flatten()?;
-        let document = parse_xml_document(&bytes).ok()?;
-        Some((
-            ncx_links_for(&document, path, "navMap", "navPoint"),
-            ncx_links_for(&document, path, "pageList", "pageTarget"),
-        ))
-    });
+    let ncx_links = ncx_path
+        .as_deref()
+        .map(|path| -> Result<_, EpubAnalysisError> {
+            let bytes = read_entry(archive, path)?.unwrap_or_default();
+            let document = parse_xml_document(&bytes)?;
+            Ok((
+                ncx_links_for(&document, path, "navMap", "navPoint"),
+                ncx_links_for(&document, path, "pageList", "pageTarget"),
+            ))
+        })
+        .transpose();
 
-    let toc = nav_links
-        .as_ref()
-        .map(|links| links.0.clone())
-        .filter(|links| !links.is_empty())
-        .or_else(|| ncx_links.as_ref().map(|links| links.0.clone()))
-        .unwrap_or_default();
-    let page_list = nav_links
-        .as_ref()
-        .map(|links| links.2.clone())
-        .filter(|links| !links.is_empty())
-        .or_else(|| ncx_links.as_ref().map(|links| links.1.clone()))
-        .unwrap_or_default();
-    let landmarks = nav_links
-        .as_ref()
-        .map(|links| links.1.clone())
-        .filter(|links| !links.is_empty())
-        .unwrap_or_else(|| guide_links(package, rootfile_path));
+    let toc = match nav_links.as_ref() {
+        Err(error) => Err(error.clone()),
+        Ok(Some(links)) if !links.0.is_empty() => Ok(links.0.clone()),
+        Ok(_) => match ncx_links.as_ref() {
+            Err(error) => Err(error.clone()),
+            Ok(Some(links)) => Ok(links.0.clone()),
+            Ok(None) => Ok(Vec::new()),
+        },
+    };
+    let landmarks = match nav_links.as_ref() {
+        Err(error) => Err(error.clone()),
+        Ok(Some(links)) if !links.1.is_empty() => Ok(links.1.clone()),
+        Ok(_) => Ok(guide_links(package, rootfile_path)),
+    };
+    let page_list = match nav_links.as_ref() {
+        Err(error) => Err(error.clone()),
+        Ok(Some(links)) if !links.2.is_empty() => Ok(links.2.clone()),
+        Ok(_) => match ncx_links.as_ref() {
+            Err(error) => Err(error.clone()),
+            Ok(Some(links)) => Ok(links.1.clone()),
+            Ok(None) => Ok(Vec::new()),
+        },
+    };
 
-    (toc, landmarks, page_list)
+    NavigationParts {
+        toc,
+        landmarks,
+        page_list,
+    }
 }
 
 fn nav_links_for(document: &XmlNode, path: &str, nav_type: &str) -> Vec<EpubNavigationLink> {
@@ -745,13 +811,13 @@ fn positions<R: Read + Seek>(
         else {
             continue;
         };
+        let Some(entry) = entries.get(&file_name) else {
+            continue;
+        };
         let position_count = if fixed_layout {
             1
         } else {
-            entries
-                .get(&file_name)
-                .map(|entry| entry.size.div_ceil(1024).max(1))
-                .unwrap_or(1)
+            entry.size.div_ceil(1024).max(1)
         };
         for index in 0..position_count {
             let progression = if fixed_layout {
@@ -1067,5 +1133,60 @@ mod tests {
 
         assert!(analysis.pages.is_empty());
         assert!(!navigation.is_fixed_layout);
+    }
+
+    #[test]
+    fn preserves_missing_resources_and_partial_epub_errors() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should follow the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "komga-epub-partial-analysis-{}-{unique}.epub",
+            std::process::id()
+        ));
+        let file = File::create(&path).expect("temporary EPUB should be created");
+        let mut zip = ZipWriter::new(file);
+        let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (name, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+            ),
+            (
+                "content.opf",
+                br#"<package><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="missing" href="missing.css" media-type="text/css"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            (
+                "chapter.xhtml",
+                br#"<html><body><span class="koboSpan" id="kobo.1.1""#,
+            ),
+            (
+                "nav.xhtml",
+                br#"<html><body><nav epub:type="toc"><ol>"#,
+            ),
+        ] {
+            zip.start_file(name, stored)
+                .expect("temporary EPUB entry should be created");
+            zip.write_all(bytes)
+                .expect("temporary EPUB entry should be written");
+        }
+        zip.finish().expect("temporary EPUB should finish");
+
+        let analysis = analyze_epub_file(&path).expect("partial EPUB should remain analyzable");
+        std::fs::remove_file(&path).expect("temporary EPUB should be removed");
+
+        assert!(analysis.page_count > 0);
+        assert_eq!(analysis.media_files.len(), 3);
+        assert_eq!(analysis.media_files[0].file_name, "chapter.xhtml");
+        assert_eq!(analysis.media_files[0].file_size, Some(48));
+        assert_eq!(analysis.media_files[1].file_name, "missing.css");
+        assert_eq!(analysis.media_files[1].file_size, None);
+        assert_eq!(analysis.media_files[2].file_name, "nav.xhtml");
+        assert_eq!(
+            analysis.comment.as_deref(),
+            Some("ERR_1035 ERR_1036 ERR_1037 ERR_1038 ERR_1039 ERR_1033 [missing.css]")
+        );
     }
 }

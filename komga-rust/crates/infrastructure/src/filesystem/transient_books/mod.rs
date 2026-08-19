@@ -285,7 +285,32 @@ pub(crate) fn analyze_transient_book(path: &str) -> anyhow::Result<TransientBook
             | "application/x-rar-compressed; version=4"
             | "application/x-rar-compressed; version=5"
     ) {
-        analyze_transient_media_file(path).map_err(|_| "ERR_1008")
+        match analyze_transient_media_file(path) {
+            Ok(analysis) => Ok(analysis),
+            Err(error) => {
+                let (status, code) = error
+                    .chain()
+                    .find_map(|cause| {
+                        cause
+                            .downcast_ref::<unrar::error::UnrarError>()
+                            .map(|error| match error.code {
+                                unrar::error::Code::MissingPassword
+                                | unrar::error::Code::BadPassword => {
+                                    (MediaStatus::Unsupported, "ERR_1002")
+                                }
+                                unrar::error::Code::EOpen
+                                    if error.when == unrar::error::When::Process =>
+                                {
+                                    (MediaStatus::Unsupported, "ERR_1004")
+                                }
+                                unrar::error::Code::EOpen => (MediaStatus::Error, "ERR_1008"),
+                                _ => (MediaStatus::Error, "ERR_1008"),
+                            })
+                    })
+                    .unwrap_or((MediaStatus::Error, "ERR_1008"));
+                return Ok(transient_analysis_error(status, media_type, code));
+            }
+        }
     } else if media_type == "application/pdf" {
         analyze_transient_media_file(path).map_err(|_| "ERR_1005")
     } else {
@@ -850,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn analyze_transient_book_returns_err_1008_for_invalid_cbz_page_image_bytes() {
+    fn analyze_transient_book_returns_err_1006_for_invalid_cbz_page_image_bytes() {
         let path = unique_temp_path("invalid-cbz-page-image", "cbz");
         let file = File::create(&path).expect("cbz fixture should be created");
         let mut zip = ZipWriter::new(file);
@@ -869,7 +894,7 @@ mod tests {
 
         assert_eq!(analysis.status, MediaStatus::Error);
         assert_eq!(analysis.media_type, "application/zip");
-        assert_eq!(analysis.comment, "ERR_1008");
+        assert_eq!(analysis.comment, "ERR_1006");
         assert!(analysis.pages.is_empty());
 
         let _ = fs::remove_file(path);
@@ -935,6 +960,18 @@ mod tests {
             analysis.pages[0].size_bytes.is_some_and(|size| size > 0),
             "rar page size_bytes should be populated"
         );
+    }
+
+    #[test]
+    fn analyze_transient_book_marks_encrypted_rar_as_unsupported() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/archives/rar4-encrypted.rar");
+
+        let analysis = analyze_transient_book(path.to_string_lossy().as_ref())
+            .expect("encrypted transient RAR analysis should complete");
+
+        assert_eq!(analysis.status, MediaStatus::Unsupported);
+        assert_eq!(analysis.comment, "ERR_1002");
     }
 
     #[test]

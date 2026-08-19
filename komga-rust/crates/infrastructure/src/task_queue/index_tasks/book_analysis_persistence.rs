@@ -25,6 +25,7 @@ pub(super) struct AnalyzedBookPage {
 pub(super) struct AnalyzedBookMedia {
     pub(super) status: MediaStatus,
     pub(super) media_type: String,
+    pub(super) comment: Option<String>,
     pub(super) page_count: u64,
     pub(super) epub_divina_compatible: bool,
     pub(super) epub_is_kepub: bool,
@@ -36,9 +37,9 @@ pub(super) struct AnalyzedBookMedia {
 #[derive(Clone, Debug)]
 pub(super) struct AnalyzedBookMediaFile {
     pub(super) file_name: String,
-    pub(super) media_type: String,
-    pub(super) sub_type: String,
-    pub(super) file_size: i64,
+    pub(super) media_type: Option<String>,
+    pub(super) sub_type: Option<String>,
+    pub(super) file_size: Option<i64>,
 }
 
 pub(super) async fn analyze_book_input(
@@ -80,6 +81,7 @@ pub(super) async fn analyze_book_input(
 pub(super) async fn persist_book_analysis(
     pool: &SqlitePool,
     book_id: &str,
+    source_file_name: &str,
     analysis: &AnalyzedBookMedia,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await.map_err(|error| {
@@ -125,8 +127,11 @@ pub(super) async fn persist_book_analysis(
         })?;
     }
 
-    sqlx::query("DELETE FROM MEDIA_FILE WHERE BOOK_ID = ? AND SUB_TYPE IS NOT NULL")
+    sqlx::query(
+        "DELETE FROM MEDIA_FILE WHERE BOOK_ID = ? AND (MEDIA_TYPE IS NOT NULL OR SUB_TYPE IS NOT NULL OR FILE_NAME <> ?)",
+    )
         .bind(book_id)
+        .bind(source_file_name)
         .execute(&mut *tx)
         .await
         .map_err(|error| {
@@ -165,13 +170,15 @@ pub(super) async fn persist_book_analysis(
             BOOK_ID,
             STATUS,
             MEDIA_TYPE,
+            COMMENT,
             PAGE_COUNT,
             EPUB_DIVINA_COMPATIBLE,
             EPUB_IS_KEPUB
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(BOOK_ID) DO UPDATE
         SET STATUS = excluded.STATUS,
             MEDIA_TYPE = excluded.MEDIA_TYPE,
+            COMMENT = excluded.COMMENT,
             PAGE_COUNT = excluded.PAGE_COUNT,
             EPUB_DIVINA_COMPATIBLE = excluded.EPUB_DIVINA_COMPATIBLE,
             EPUB_IS_KEPUB = excluded.EPUB_IS_KEPUB,
@@ -180,6 +187,7 @@ pub(super) async fn persist_book_analysis(
     .bind(book_id)
     .bind(analysis.status.persisted_name())
     .bind(&analysis.media_type)
+    .bind(&analysis.comment)
     .bind(analysis.page_count.min(i32::MAX as u64) as i32)
     .bind(analysis.epub_divina_compatible)
     .bind(analysis.epub_is_kepub)

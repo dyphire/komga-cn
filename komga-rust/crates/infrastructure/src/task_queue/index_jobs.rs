@@ -227,6 +227,57 @@ mod tests {
         zip.finish().expect("KEPUB fixture should finish");
     }
 
+    fn write_missing_resource_epub_fixture(path: &std::path::Path) {
+        let file = File::create(path).expect("partial EPUB fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        for (name, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+            ),
+            (
+                "content.opf",
+                br#"<package><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="missing" href="missing.css" media-type="text/css"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            (
+                "chapter.xhtml",
+                br#"<html xmlns="http://www.w3.org/1999/xhtml"><body>Text</body></html>"#,
+            ),
+        ] {
+            zip.start_file(name, options)
+                .expect("partial EPUB entry should be created");
+            zip.write_all(bytes)
+                .expect("partial EPUB entry should be written");
+        }
+        zip.finish().expect("partial EPUB fixture should finish");
+    }
+
+    fn write_cbz_with_non_page_fixture(path: &std::path::Path) {
+        let file = File::create(path).expect("CBZ metadata fixture should be created");
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        for (name, bytes) in [
+            ("00000001.png", png_bytes(48, 96)),
+            (
+                "ComicInfo.xml",
+                br#"<ComicInfo><Title>Fixture</Title></ComicInfo>"#.to_vec(),
+            ),
+            ("notes.txt", b"fixture notes".to_vec()),
+        ] {
+            zip.start_file(name, options)
+                .expect("CBZ metadata entry should be created");
+            zip.write_all(&bytes)
+                .expect("CBZ metadata entry should be written");
+        }
+        zip.finish().expect("CBZ metadata fixture should finish");
+    }
+
     async fn open_bootstrapped_main_pool(database_file: &std::path::Path) -> SqlitePool {
         let context = connect_main_write_context(database_file)
             .await
@@ -411,6 +462,50 @@ mod tests {
         .await
         .expect("EPUB capabilities should be queryable");
         (row.get("EPUB_DIVINA_COMPATIBLE"), row.get("EPUB_IS_KEPUB"))
+    }
+
+    async fn load_persisted_media_comment(
+        database_file: &std::path::Path,
+        book_id: &str,
+    ) -> Option<String> {
+        let pool = connect_test_pool(database_file, 1)
+            .await
+            .expect("media comment verify db should open");
+        let row = sqlx::query("SELECT COMMENT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
+            .bind(book_id)
+            .fetch_one(&pool)
+            .await
+            .expect("media comment should be queryable");
+        let comment = row.get("COMMENT");
+        pool.close().await;
+        comment
+    }
+
+    async fn load_persisted_media_files(
+        database_file: &std::path::Path,
+        book_id: &str,
+    ) -> Vec<(String, Option<String>, Option<String>, Option<i64>)> {
+        let pool = connect_test_pool(database_file, 1)
+            .await
+            .expect("media files verify db should open");
+        let rows = sqlx::query(
+            "SELECT FILE_NAME, MEDIA_TYPE, SUB_TYPE, FILE_SIZE FROM MEDIA_FILE WHERE BOOK_ID = ? ORDER BY rowid ASC",
+        )
+        .bind(book_id)
+        .fetch_all(&pool)
+        .await
+        .expect("media files should be queryable");
+        pool.close().await;
+        rows.into_iter()
+            .map(|row| {
+                (
+                    row.get("FILE_NAME"),
+                    row.get("MEDIA_TYPE"),
+                    row.get("SUB_TYPE"),
+                    row.get("FILE_SIZE"),
+                )
+            })
+            .collect()
     }
 
     fn analyzed_fixture_page_count(file_name: &str, _book_url: &str) -> i64 {
@@ -771,6 +866,114 @@ mod tests {
             (false, false),
         );
         verify_pool.close().await;
+
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn analyze_book_persists_and_clears_media_comment() {
+        let fixture = RuntimeTestFixture::new("analyze-book-media-comment");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("media comment library root should be created");
+        let book_path = fixture.library_root.join("books/book-1.epub");
+        write_missing_resource_epub_fixture(&book_path);
+
+        let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
+        insert_library(&pool, &fixture.library_root, false).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.epub",
+            "library-1",
+            "series-1",
+            None,
+        )
+        .await;
+        pool.close().await;
+
+        let runtime = fixture.runtime_context(false, false).await;
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("partial EPUB analysis should succeed");
+        assert_eq!(
+            load_persisted_media_comment(fixture.database_file.as_path(), "book-1").await,
+            Some("ERR_1033 [missing.css]".to_string()),
+        );
+
+        let reflowable_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../komga/src/test/resources/epub/The Incomplete Theft - Ralph Burke.epub");
+        std::fs::copy(reflowable_path, &book_path)
+            .expect("clean reflowable EPUB fixture should replace the partial fixture");
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("reanalysis should succeed");
+        assert_eq!(
+            load_persisted_media_comment(fixture.database_file.as_path(), "book-1").await,
+            None,
+        );
+
+        fixture.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn analyze_book_persists_archive_metadata_and_preserves_scanner_file() {
+        let fixture = RuntimeTestFixture::new("analyze-book-archive-media-files");
+        std::fs::create_dir_all(fixture.library_root.join("books"))
+            .expect("archive media files library root should be created");
+        let book_path = fixture.library_root.join("books/book-1.cbz");
+        write_cbz_with_non_page_fixture(&book_path);
+
+        let pool = open_bootstrapped_main_pool(fixture.database_file.as_path()).await;
+        insert_library(&pool, &fixture.library_root, false).await;
+        insert_series(&pool, "library-1", "series-1").await;
+        insert_book(
+            &pool,
+            "book-1",
+            "book-1",
+            "books/book-1.cbz",
+            "library-1",
+            "series-1",
+            None,
+        )
+        .await;
+        sqlx::query("INSERT INTO MEDIA_FILE (FILE_NAME, BOOK_ID, FILE_SIZE) VALUES (?, ?, ?)")
+            .bind("book-1.cbz")
+            .bind("book-1")
+            .bind(123_i64)
+            .execute(&pool)
+            .await
+            .expect("scanner media file row should be inserted");
+        pool.close().await;
+
+        let runtime = fixture.runtime_context(false, false).await;
+        super::execute_analyze_book(&runtime.job(), "book-1", 90)
+            .await
+            .expect("archive analysis should succeed");
+
+        let files = load_persisted_media_files(fixture.database_file.as_path(), "book-1").await;
+        assert_eq!(files[0], ("book-1.cbz".to_string(), None, None, Some(123)));
+        assert!(
+            files
+                .iter()
+                .any(|(file_name, media_type, sub_type, file_size)| {
+                    file_name == "ComicInfo.xml"
+                        && media_type.is_some()
+                        && sub_type.is_none()
+                        && file_size.is_some()
+                })
+        );
+        assert!(
+            files
+                .iter()
+                .any(|(file_name, media_type, sub_type, file_size)| {
+                    file_name == "notes.txt"
+                        && media_type.is_some()
+                        && sub_type.is_none()
+                        && file_size.is_some()
+                })
+        );
 
         fixture.cleanup().await;
     }
