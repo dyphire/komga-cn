@@ -6,7 +6,7 @@ use komga_epub::{normalize_epub_resource_href, parse_epub_fixed_layout};
 
 use komga_application::media_assets::{
     BookMediaRecord, BookPageRecord, ContentResolverPort, EpubCoverImage, EpubNavigationExtension,
-    MediaImageDimensions,
+    ImageOutputFormat, MediaImageDimensions, RenderedImage,
 };
 
 /// Stateless filesystem I/O for resolving page/resource content from archives and PDFs.
@@ -32,8 +32,19 @@ impl ContentResolverPort for ContentResolver {
         page: &BookPageRecord,
         page_number: u64,
         max_edge: u32,
-    ) -> anyhow::Result<Option<Vec<u8>>> {
-        page_content::render_book_page_thumbnail(media, page, page_number, max_edge).await
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>> {
+        page_content::render_book_page_thumbnail(media, page, page_number, max_edge, output_format)
+            .await
+    }
+
+    async fn render_pdf_page(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>> {
+        page_content::render_pdf_page(media, page_number, output_format)
     }
 
     async fn archive_page_row(

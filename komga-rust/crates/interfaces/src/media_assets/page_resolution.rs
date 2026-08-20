@@ -1,5 +1,5 @@
 use komga_application::media_assets::{
-    BookMediaContentPort, BookMediaReaderPort, BookMediaRecord, BookPageRecord,
+    BookMediaContentPort, BookMediaReaderPort, BookMediaRecord, BookPageRecord, ImageOutputFormat,
     content_type_from_filename,
 };
 
@@ -13,8 +13,9 @@ async fn render_book_page_thumbnail(
     max_edge: u32,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     content
-        .render_page_thumbnail(media, page, page_number, max_edge)
+        .render_page_thumbnail(media, page, page_number, max_edge, ImageOutputFormat::Jpeg)
         .await
+        .map(|rendered| rendered.map(|rendered| rendered.bytes))
 }
 
 pub(crate) async fn load_book_thumbnail_page_source_bytes(

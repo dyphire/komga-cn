@@ -6,9 +6,9 @@ use std::path::Path;
 use image::GenericImageView;
 use image::imageops::FilterType;
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, MediaImageDimensions, book_media_is_epub, book_media_is_pdf,
-    book_media_is_rar_archive, book_media_is_single_image, book_media_is_zip_archive,
-    content_type_from_filename, is_supported_page_image_file_name,
+    BookMediaRecord, BookPageRecord, ImageOutputFormat, MediaImageDimensions, RenderedImage,
+    book_media_is_epub, book_media_is_pdf, book_media_is_rar_archive, book_media_is_single_image,
+    book_media_is_zip_archive, content_type_from_filename, is_supported_page_image_file_name,
 };
 use lopdf::Document as PdfDocument;
 use pdfium_render::prelude::*;
@@ -25,7 +25,8 @@ pub(crate) async fn resolve_book_page_bytes(
     page_number: u64,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if book_media_is_pdf(media) {
-        return render_pdf_page_as_jpeg(media, page_number);
+        return render_pdf_page(media, page_number, ImageOutputFormat::Jpeg)
+            .map(|rendered| rendered.map(|rendered| rendered.bytes));
     }
 
     let mut candidates = Vec::new();
@@ -70,15 +71,16 @@ pub(crate) async fn render_book_page_thumbnail(
     page: &BookPageRecord,
     page_number: u64,
     max_edge: u32,
-) -> anyhow::Result<Option<Vec<u8>>> {
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Option<RenderedImage>> {
     if book_media_is_pdf(media) {
-        return render_pdf_page_thumbnail(media, page_number, max_edge);
+        return render_pdf_page_thumbnail(media, page_number, max_edge, output_format);
     }
 
     let Some(bytes) = resolve_book_page_bytes(media, page, page_number).await? else {
         return Ok(None);
     };
-    render_image_thumbnail_as_jpeg(&bytes, max_edge).map(Some)
+    render_image_thumbnail(&bytes, max_edge, output_format).map(Some)
 }
 
 pub(crate) async fn load_archive_page_row(
@@ -163,10 +165,11 @@ pub(crate) fn load_generated_pdf_page_rows(
         .collect())
 }
 
-fn render_pdf_page_as_jpeg(
+pub(crate) fn render_pdf_page(
     media: &BookMediaRecord,
     page_number: u64,
-) -> anyhow::Result<Option<Vec<u8>>> {
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Option<RenderedImage>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
@@ -184,11 +187,12 @@ fn render_pdf_page_as_jpeg(
             height: PDF_RENDER_RESOLUTION,
         });
 
-    render_pdf_page_jpeg_at_size(
+    render_pdf_page_at_size(
         media,
         page_number,
         dimensions.width,
         dimensions.height,
+        output_format,
         "page",
     )
 }
@@ -224,13 +228,14 @@ pub(crate) fn read_pdf_page_as_single_page_pdf(
     Ok(Some(bytes))
 }
 
-fn render_pdf_page_jpeg_at_size(
+fn render_pdf_page_at_size(
     media: &BookMediaRecord,
     page_number: u64,
     target_width: u32,
     maximum_height: u32,
+    output_format: ImageOutputFormat,
     output_description: &str,
-) -> anyhow::Result<Option<Vec<u8>>> {
+) -> anyhow::Result<Option<RenderedImage>> {
     let pdfium = load_pdfium()?;
     let document = pdfium
         .load_pdf_from_file(&media.file_path, None)
@@ -274,31 +279,43 @@ fn render_pdf_page_jpeg_at_size(
         })?
         .into_rgb8();
 
-    let mut output = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(rendered)
-        .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "encode pdf page {page_number} {output_description} from '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    Ok(Some(output.into_inner()))
+    let image = image::DynamicImage::ImageRgb8(rendered);
+    encode_image_with_jpeg_fallback(
+        &image,
+        output_format,
+        &format!(
+            "encode pdf page {page_number} {output_description} from '{}': ",
+            media.file_path.display()
+        ),
+    )
+    .map(Some)
 }
 
 fn render_pdf_page_thumbnail(
     media: &BookMediaRecord,
     page_number: u64,
     max_edge: u32,
-) -> anyhow::Result<Option<Vec<u8>>> {
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Option<RenderedImage>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
 
-    render_pdf_page_jpeg_at_size(media, page_number, max_edge, max_edge, "thumbnail")
+    render_pdf_page_at_size(
+        media,
+        page_number,
+        max_edge,
+        max_edge,
+        output_format,
+        "thumbnail",
+    )
 }
 
-fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result<Vec<u8>> {
+fn render_image_thumbnail(
+    bytes: &[u8],
+    max_edge: u32,
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<RenderedImage> {
     let image =
         image::load_from_memory(bytes).context("render image thumbnail: decode image bytes")?;
     let dimensions = RasterImageDimensions::from_image(&image);
@@ -307,10 +324,52 @@ fn render_image_thumbnail_as_jpeg(bytes: &[u8], max_edge: u32) -> anyhow::Result
     } else {
         image
     };
+    encode_image_with_jpeg_fallback(
+        &resized,
+        output_format,
+        "render image thumbnail: encode image",
+    )
+}
+
+fn encode_image_with_jpeg_fallback(
+    image: &image::DynamicImage,
+    output_format: ImageOutputFormat,
+    context: &str,
+) -> anyhow::Result<RenderedImage> {
+    match encode_image(image, output_format) {
+        Ok(bytes) => Ok(RenderedImage {
+            bytes,
+            format: output_format,
+        }),
+        Err(error) if output_format != ImageOutputFormat::Jpeg => {
+            let jpeg_bytes = encode_image(image, ImageOutputFormat::Jpeg).map_err(|fallback| {
+                fallback.context(format!(
+                    "{context}: {} encoding failed: {error}; jpeg fallback failed",
+                    output_format.content_type()
+                ))
+            })?;
+            Ok(RenderedImage {
+                bytes: jpeg_bytes,
+                format: ImageOutputFormat::Jpeg,
+            })
+        }
+        Err(error) => Err(error).context(context.to_string()),
+    }
+}
+
+fn encode_image(
+    image: &image::DynamicImage,
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Vec<u8>> {
+    let image_format = match output_format {
+        ImageOutputFormat::Avif => image::ImageFormat::Avif,
+        ImageOutputFormat::Webp => image::ImageFormat::WebP,
+        ImageOutputFormat::Jpeg => image::ImageFormat::Jpeg,
+    };
     let mut output = std::io::Cursor::new(Vec::new());
-    resized
-        .write_to(&mut output, image::ImageFormat::Jpeg)
-        .context("render image thumbnail: encode jpeg")?;
+    image
+        .write_to(&mut output, image_format)
+        .with_context(|| format!("encode image as {}", output_format.content_type()))?;
     Ok(output.into_inner())
 }
 
@@ -667,7 +726,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use komga_application::media_assets::{BookMediaRecord, BookPageRecord};
+    use komga_application::media_assets::{BookMediaRecord, BookPageRecord, ImageOutputFormat};
     use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
@@ -827,7 +886,7 @@ mod tests {
             file_size: 0,
         };
 
-        let error = render_book_page_thumbnail(&media, &page, 1, 300)
+        let error = render_book_page_thumbnail(&media, &page, 1, 300, ImageOutputFormat::Jpeg)
             .await
             .expect_err("invalid image bytes must not become a missing thumbnail");
 

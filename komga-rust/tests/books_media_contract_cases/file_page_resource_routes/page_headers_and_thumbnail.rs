@@ -373,7 +373,7 @@ async fn router_persisted_cbz_page_route_reads_legacy_file_urls() {
 }
 
 #[tokio::test]
-async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
+async fn router_book_page_thumbnail_resizes_and_negotiates_webp() {
     let ctx = TestFixture::new("router-book-page-thumbnail-300px").await;
     seed_router_pdf_book(
         ctx.paths(),
@@ -429,6 +429,13 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
         .await
         .expect("book page thumbnail request should complete");
     assert_eq!(thumbnail_response.status(), StatusCode::OK);
+    assert_eq!(
+        thumbnail_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/jpeg")
+    );
     let thumbnail_bytes = axum::body::to_bytes(thumbnail_response.into_body(), usize::MAX)
         .await
         .expect("book page thumbnail body should read");
@@ -443,6 +450,78 @@ async fn router_book_page_thumbnail_resizes_largest_dimension_to_300px() {
     assert_eq!(thumbnail_max_dimension, 300);
     assert!(u64::from(thumbnail_image.width()) <= page_max_dimension);
     assert!(u64::from(thumbnail_image.height()) <= page_max_dimension);
+
+    let webp_response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .header(header::ACCEPT, "image/webp")
+                .body(Body::empty())
+                .expect("webp thumbnail request should build"),
+        )
+        .await
+        .expect("webp thumbnail request should complete");
+
+    assert_eq!(webp_response.status(), StatusCode::OK);
+    assert_eq!(
+        webp_response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("image/webp")
+    );
+    assert_eq!(
+        webp_response
+            .headers()
+            .get(header::VARY)
+            .and_then(|value| value.to_str().ok()),
+        Some("Accept")
+    );
+    let body = to_bytes(webp_response.into_body(), usize::MAX)
+        .await
+        .expect("webp thumbnail body should be readable");
+    assert_eq!(
+        image::guess_format(&body).expect("webp thumbnail body should expose a format"),
+        image::ImageFormat::WebP
+    );
+}
+
+#[tokio::test]
+async fn router_book_page_thumbnail_returns_not_acceptable_when_all_image_formats_are_rejected() {
+    let ctx = TestFixture::new("router-book-page-thumbnail-not-acceptable").await;
+    seed_router_pdf_book(
+        ctx.paths(),
+        "book-pdf-1",
+        "series-1",
+        "fixture-page.pdf",
+        "Readable Page Title",
+    )
+    .await;
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/pages/1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .header(
+                    header::ACCEPT,
+                    "image/avif;q=0,image/webp;q=0,image/jpeg;q=0",
+                )
+                .body(Body::empty())
+                .expect("not acceptable thumbnail request should build"),
+        )
+        .await
+        .expect("not acceptable thumbnail request should complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
 }
 
 #[tokio::test]

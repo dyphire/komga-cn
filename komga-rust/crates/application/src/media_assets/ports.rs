@@ -10,6 +10,29 @@ use super::{
     SeriesThumbnailRecord,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageOutputFormat {
+    Avif,
+    Webp,
+    Jpeg,
+}
+
+impl ImageOutputFormat {
+    pub const fn content_type(self) -> &'static str {
+        match self {
+            Self::Avif => "image/avif",
+            Self::Webp => "image/webp",
+            Self::Jpeg => "image/jpeg",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderedImage {
+    pub bytes: Vec<u8>,
+    pub format: ImageOutputFormat,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EpubNavigationExtension {
     pub positions: Vec<EpubNavigationPosition>,
@@ -325,7 +348,15 @@ pub trait ContentResolverPort: Send + Sync {
         page: &BookPageRecord,
         page_number: u64,
         max_edge: u32,
-    ) -> anyhow::Result<Option<Vec<u8>>>;
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>>;
+
+    async fn render_pdf_page(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>>;
 
     async fn archive_page_row(
         &self,

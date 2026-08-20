@@ -12,14 +12,14 @@ use crate::media_assets::thumbnails::shared::{
 };
 use crate::media_response_policy::MediaAssetResponse;
 use axum::Json;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
 use komga_application::identity_access::{AuthUser, AuthUserRole, user_has_role};
 use komga_application::media_assets::{
     BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset, BookMediaDeliveryDisposition,
     BookMediaDeliveryService, BookMediaPageRequest, BookMediaReaderPort, BookPageRecord,
-    BookThumbnailDelivery,
+    BookThumbnailDelivery, ImageOutputFormat,
 };
 use komga_application::operational::ServerSettingsPort;
 
@@ -77,15 +77,29 @@ impl<'a> BookMediaResponses<'a> {
         page_number: u32,
         options: BookPageResponseOptions,
     ) -> Response {
+        let explicit_convert = options.convert.is_some();
+        let negotiated = if options.content_negotiation && !explicit_convert {
+            match negotiate_page_representation(headers) {
+                Ok(representation) => Some(representation),
+                Err(()) => return StatusCode::NOT_ACCEPTABLE.into_response(),
+            }
+        } else {
+            None
+        };
         let request = BookMediaPageRequest {
             convert: options.convert,
             zero_based: options.zero_based,
-            prefer_pdf: options.content_negotiation && accept_header_prefers_pdf(headers),
+            prefer_pdf: matches!(negotiated, Some(PageRepresentation::Pdf)),
+            image_format: match negotiated {
+                Some(PageRepresentation::Image(format)) => Some(format),
+                Some(PageRepresentation::Pdf) | None => None,
+            },
         };
         let service = self.delivery_service();
         book_page_delivery_response(
             headers,
             service.book_page(user, book_id, page_number, request).await,
+            negotiated.is_some(),
         )
     }
 
@@ -109,6 +123,7 @@ impl<'a> BookMediaResponses<'a> {
             service
                 .book_page_raw(user, book_id, page_number_signed)
                 .await,
+            false,
         )
     }
 
@@ -119,12 +134,17 @@ impl<'a> BookMediaResponses<'a> {
         book_id: &str,
         page_number: u32,
     ) -> Response {
+        let output_format = match negotiate_image_output_format(headers) {
+            Ok(output_format) => output_format,
+            Err(()) => return StatusCode::NOT_ACCEPTABLE.into_response(),
+        };
         let service = self.delivery_service();
         book_page_thumbnail_delivery_response(
             headers,
             service
-                .book_page_thumbnail(user, book_id, page_number)
+                .book_page_thumbnail(user, book_id, page_number, output_format)
                 .await,
+            true,
         )
     }
 
@@ -279,7 +299,7 @@ impl<'a> OpdsBookMediaResponses<'a> {
 
 fn book_file_delivery_response(delivery: BookMediaDelivery) -> Response {
     match delivery {
-        BookMediaDelivery::Asset(asset) => asset_response(None, asset, false, false),
+        BookMediaDelivery::Asset(asset) => asset_response(None, asset, false, false, false),
         BookMediaDelivery::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookMediaDelivery::Forbidden => StatusCode::FORBIDDEN.into_response(),
         BookMediaDelivery::MissingFile => {
@@ -292,9 +312,15 @@ fn book_file_delivery_response(delivery: BookMediaDelivery) -> Response {
     }
 }
 
-fn book_page_delivery_response(headers: &HeaderMap, delivery: BookMediaDelivery) -> Response {
+fn book_page_delivery_response(
+    headers: &HeaderMap,
+    delivery: BookMediaDelivery,
+    vary_accept: bool,
+) -> Response {
     match delivery {
-        BookMediaDelivery::Asset(asset) => asset_response(Some(headers), asset, false, true),
+        BookMediaDelivery::Asset(asset) => {
+            asset_response(Some(headers), asset, false, true, vary_accept)
+        }
         BookMediaDelivery::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookMediaDelivery::Forbidden => StatusCode::FORBIDDEN.into_response(),
         BookMediaDelivery::MediaAnalysisFailed => {
@@ -315,9 +341,12 @@ fn book_page_delivery_response(headers: &HeaderMap, delivery: BookMediaDelivery)
 fn book_page_thumbnail_delivery_response(
     headers: &HeaderMap,
     delivery: BookMediaDelivery,
+    vary_accept: bool,
 ) -> Response {
     match delivery {
-        BookMediaDelivery::Asset(asset) => asset_response(Some(headers), asset, true, true),
+        BookMediaDelivery::Asset(asset) => {
+            asset_response(Some(headers), asset, true, true, vary_accept)
+        }
         BookMediaDelivery::NotFound => StatusCode::NOT_FOUND.into_response(),
         BookMediaDelivery::Forbidden => StatusCode::FORBIDDEN.into_response(),
         BookMediaDelivery::BadRequest(Some(error)) => {
@@ -385,6 +414,7 @@ fn asset_response(
     asset: BookMediaDeliveryAsset,
     include_etag: bool,
     include_last_modified: bool,
+    vary_accept: bool,
 ) -> Response {
     let last_modified = include_last_modified
         .then(|| {
@@ -399,6 +429,12 @@ fn asset_response(
     if include_etag {
         response = response.with_etag();
     }
+
+    let response = if vary_accept {
+        response.with_header(header::VARY, HeaderValue::from_static("Accept"))
+    } else {
+        response
+    };
 
     response
         .with_last_modified(last_modified)
@@ -435,94 +471,204 @@ fn page_rows_response(page_rows: Vec<BookPageRecord>) -> Response {
     .into_response()
 }
 
-fn accept_header_prefers_pdf(headers: &HeaderMap) -> bool {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PageRepresentation {
+    Pdf,
+    Image(ImageOutputFormat),
+}
+
+#[derive(Clone, Copy)]
+struct AcceptCandidate {
+    representation: PageRepresentation,
+    quality: f32,
+    specificity: u8,
+    image_priority: u8,
+}
+
+#[derive(Default)]
+struct ParsedAccept {
+    best: Option<AcceptCandidate>,
+    best_image: Option<AcceptCandidate>,
+    has_explicit_pdf: bool,
+    has_explicit_image: bool,
+    has_positive_image_wildcard: bool,
+    has_positive_any_wildcard: bool,
+}
+
+fn negotiate_page_representation(headers: &HeaderMap) -> Result<PageRepresentation, ()> {
     let Some(raw) = headers
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
     else {
-        return false;
+        return Ok(PageRepresentation::Image(ImageOutputFormat::Jpeg));
     };
 
-    #[derive(Clone, Copy)]
-    struct Candidate {
-        rank: i32,
-        quality: f32,
-        is_pdf: bool,
+    let parsed = parse_accept(raw);
+    if let Some(candidate) = parsed.best {
+        return Ok(candidate.representation);
     }
-
-    fn parse_quality(params: &str) -> f32 {
-        for part in params.split(';') {
-            let part = part.trim();
-            if let Some(value) = part.strip_prefix("q=")
-                && let Ok(parsed) = value.parse::<f32>()
-            {
-                return parsed.clamp(0.0, 1.0);
-            }
-        }
-        1.0
+    if (parsed.has_explicit_pdf || parsed.has_explicit_image)
+        && !parsed.has_positive_image_wildcard
+        && !parsed.has_positive_any_wildcard
+    {
+        return Err(());
     }
+    Ok(PageRepresentation::Image(ImageOutputFormat::Jpeg))
+}
 
-    let mut best: Option<Candidate> = None;
+fn negotiate_image_output_format(headers: &HeaderMap) -> Result<ImageOutputFormat, ()> {
+    let Some(raw) = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Ok(ImageOutputFormat::Jpeg);
+    };
+
+    let parsed = parse_accept(raw);
+    if let Some(PageRepresentation::Image(format)) =
+        parsed.best_image.map(|candidate| candidate.representation)
+    {
+        return Ok(format);
+    }
+    if parsed.has_explicit_image
+        && !parsed.has_positive_image_wildcard
+        && !parsed.has_positive_any_wildcard
+    {
+        return Err(());
+    }
+    Ok(ImageOutputFormat::Jpeg)
+}
+
+fn parse_accept(raw: &str) -> ParsedAccept {
+    let mut parsed = ParsedAccept::default();
     for entry in raw.split(',') {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            continue;
-        }
-
         let mut parts = entry.split(';');
         let media_type = parts
             .next()
             .map(str::trim)
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let params = parts.collect::<Vec<_>>().join(";");
-        let quality = parse_quality(&params);
+        if media_type.is_empty() {
+            continue;
+        }
+        let quality = parse_quality(parts);
+
+        let (representation, specificity, image_priority) = match media_type.as_str() {
+            "application/pdf" => {
+                parsed.has_explicit_pdf = true;
+                (PageRepresentation::Pdf, 3, 0)
+            }
+            "image/avif" => {
+                parsed.has_explicit_image = true;
+                (PageRepresentation::Image(ImageOutputFormat::Avif), 3, 3)
+            }
+            "image/webp" => {
+                parsed.has_explicit_image = true;
+                (PageRepresentation::Image(ImageOutputFormat::Webp), 3, 2)
+            }
+            "image/jpeg" => {
+                parsed.has_explicit_image = true;
+                (PageRepresentation::Image(ImageOutputFormat::Jpeg), 3, 1)
+            }
+            "image/*" => {
+                if quality > 0.0 {
+                    parsed.has_positive_image_wildcard = true;
+                }
+                (PageRepresentation::Image(ImageOutputFormat::Jpeg), 2, 1)
+            }
+            "*/*" => {
+                if quality > 0.0 {
+                    parsed.has_positive_any_wildcard = true;
+                }
+                (PageRepresentation::Image(ImageOutputFormat::Jpeg), 1, 1)
+            }
+            _ => continue,
+        };
+
         if quality <= 0.0 {
             continue;
         }
 
-        let candidate = if media_type == "application/pdf" {
-            Some(Candidate {
-                rank: 3,
-                quality,
-                is_pdf: true,
-            })
-        } else if media_type.starts_with("image/") && media_type != "image/*" {
-            Some(Candidate {
-                rank: 3,
-                quality,
-                is_pdf: false,
-            })
-        } else if media_type == "image/*" {
-            Some(Candidate {
-                rank: 2,
-                quality,
-                is_pdf: false,
-            })
-        } else if media_type == "*/*" {
-            Some(Candidate {
-                rank: 1,
-                quality,
-                is_pdf: false,
-            })
-        } else {
-            None
+        let candidate = AcceptCandidate {
+            representation,
+            quality,
+            specificity,
+            image_priority,
         };
-
-        let Some(candidate) = candidate else {
-            continue;
-        };
-        let replace = match best {
-            None => true,
-            Some(current) => {
-                candidate.rank > current.rank
-                    || (candidate.rank == current.rank && candidate.quality > current.quality)
-            }
-        };
-        if replace {
-            best = Some(candidate);
+        update_best_candidate(&mut parsed.best, candidate);
+        if matches!(candidate.representation, PageRepresentation::Image(_)) {
+            update_best_candidate(&mut parsed.best_image, candidate);
         }
     }
+    parsed
+}
 
-    best.map(|candidate| candidate.is_pdf).unwrap_or(false)
+fn parse_quality<'a>(params: impl IntoIterator<Item = &'a str>) -> f32 {
+    for part in params {
+        let Some((name, value)) = part.trim().split_once('=') else {
+            continue;
+        };
+        if name.trim().eq_ignore_ascii_case("q") {
+            return value
+                .trim()
+                .parse::<f32>()
+                .map(|quality| quality.clamp(0.0, 1.0))
+                .unwrap_or(0.0);
+        }
+    }
+    1.0
+}
+
+fn update_best_candidate(best: &mut Option<AcceptCandidate>, candidate: AcceptCandidate) {
+    let replace = match *best {
+        None => true,
+        Some(current) => candidate_is_better(candidate, current),
+    };
+    if replace {
+        *best = Some(candidate);
+    }
+}
+
+fn candidate_is_better(candidate: AcceptCandidate, current: AcceptCandidate) -> bool {
+    if candidate.quality != current.quality {
+        return candidate.quality > current.quality;
+    }
+    if candidate.specificity != current.specificity {
+        return candidate.specificity > current.specificity;
+    }
+    match (candidate.representation, current.representation) {
+        (PageRepresentation::Image(_), PageRepresentation::Image(_)) => {
+            candidate.image_priority > current.image_priority
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderValue;
+
+    use super::*;
+
+    #[test]
+    fn accept_negotiation_uses_quality_and_avif_tie_breaker() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("image/avif;q=0.8,image/webp;q=0.9"),
+        );
+        assert_eq!(
+            negotiate_page_representation(&headers),
+            Ok(PageRepresentation::Image(ImageOutputFormat::Webp))
+        );
+
+        headers.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("image/webp,image/avif"),
+        );
+        assert_eq!(
+            negotiate_page_representation(&headers),
+            Ok(PageRepresentation::Image(ImageOutputFormat::Avif))
+        );
+    }
 }

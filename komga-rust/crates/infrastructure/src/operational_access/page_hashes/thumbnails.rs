@@ -4,8 +4,8 @@ use std::io::ErrorKind;
 use std::io::Read;
 
 use komga_application::media_assets::{
-    BookMediaRecord, BookPageRecord, book_media_is_pdf, book_media_is_single_image,
-    content_type_from_filename,
+    BookMediaRecord, BookPageRecord, ImageOutputFormat, book_media_is_pdf,
+    book_media_is_single_image, content_type_from_filename,
 };
 use komga_application::operational::{PageHashThumbnail, PageHashUpsertCommand};
 use sqlx::SqlitePool;
@@ -80,15 +80,21 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
     };
 
     if let Some(max_edge) = resize_to {
-        let Some(bytes) = render_book_page_thumbnail(&media, &page, target.page_number, max_edge)
-            .await
-            .map_err(as_sqlx_protocol_error)?
+        let Some(rendered) = render_book_page_thumbnail(
+            &media,
+            &page,
+            target.page_number,
+            max_edge,
+            ImageOutputFormat::Jpeg,
+        )
+        .await
+        .map_err(as_sqlx_protocol_error)?
         else {
             return Ok(None);
         };
 
         return Ok(Some(PageHashThumbnail {
-            bytes,
+            bytes: rendered.bytes,
             media_type: "image/jpeg".to_string(),
         }));
     }
@@ -99,6 +105,7 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
             &page,
             target.page_number,
             pdf_render_max_edge(&page),
+            ImageOutputFormat::Jpeg,
         )
         .await
         .map_err(as_sqlx_protocol_error)?
@@ -108,7 +115,7 @@ pub(super) async fn load_unknown_page_hash_thumbnail(
 
         return Ok(Some(PageHashThumbnail {
             media_type: "image/jpeg".to_string(),
-            bytes,
+            bytes: bytes.bytes,
         }));
     }
 

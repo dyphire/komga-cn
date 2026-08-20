@@ -81,10 +81,11 @@ pub use ports::{
     ArchiveEntry, BookAccessRestrictions, BookMediaPort, BookProgressionInput,
     BookProgressionRecord, ContentAccessPort, ContentResolverPort, EntityExistencePort,
     EpubCoverImage, EpubExtensionBlob, EpubNavigationExtension, EpubNavigationLink,
-    EpubNavigationPosition, ManifestBookRecord, MediaImageDimensions, ProgressWriterPort,
-    ReadProgressReadPort, ReadProgressReaderPort, ReadProgressSurfacePort,
-    ReadlistTachiyomiCounters, SeriesArchiveEntries, SeriesBookNumberSort, SeriesRelationPort,
-    SeriesTachiyomiProgress, SeriesTachiyomiProgressBook, ThumbnailReadPort, ThumbnailWriterPort,
+    EpubNavigationPosition, ImageOutputFormat, ManifestBookRecord, MediaImageDimensions,
+    ProgressWriterPort, ReadProgressReadPort, ReadProgressReaderPort, ReadProgressSurfacePort,
+    ReadlistTachiyomiCounters, RenderedImage, SeriesArchiveEntries, SeriesBookNumberSort,
+    SeriesRelationPort, SeriesTachiyomiProgress, SeriesTachiyomiProgressBook, ThumbnailReadPort,
+    ThumbnailWriterPort,
 };
 pub use read_progress_service::{ReadProgressService, SeriesReadProgressWriterPort};
 pub use thumbnail_operations::{

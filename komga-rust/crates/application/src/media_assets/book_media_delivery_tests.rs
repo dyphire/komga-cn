@@ -7,16 +7,30 @@ use crate::identity_access::{AuthUser, AuthUserRole};
 use super::{
     BookAccessRestrictions, BookMediaContentPort, BookMediaDelivery, BookMediaDeliveryAsset,
     BookMediaDeliveryDisposition, BookMediaDeliveryService, BookMediaPageRequest,
-    BookMediaReaderPort, BookPageRecord, EpubCoverImage, MediaImageDimensions,
+    BookMediaReaderPort, BookPageRecord, EpubCoverImage, ImageOutputFormat, MediaImageDimensions,
+    RenderedImage,
 };
 
 fn clone_result<T: Clone>(result: &Result<T, String>) -> anyhow::Result<T> {
     result.clone().map_err(anyhow::Error::msg)
 }
 
+fn clone_rendered_result(
+    result: &Result<Option<Vec<u8>>, String>,
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Option<RenderedImage>> {
+    clone_result(result).map(|bytes| {
+        bytes.map(|bytes| RenderedImage {
+            bytes,
+            format: output_format,
+        })
+    })
+}
+
 #[derive(Default)]
 struct TestBookMediaReader {
     media_by_book: HashMap<String, super::BookMediaRecord>,
+    page_by_book: HashMap<String, BookPageRecord>,
     restriction_error: Option<String>,
     media_ready_error: Option<String>,
     book_page_error: Option<String>,
@@ -42,13 +56,13 @@ impl BookMediaReaderPort for TestBookMediaReader {
 
     async fn book_page(
         &self,
-        _book_id: &str,
+        book_id: &str,
         _page_number: u64,
     ) -> anyhow::Result<Option<BookPageRecord>> {
         if let Some(error) = self.book_page_error.clone() {
             return Err(anyhow::anyhow!(error));
         }
-        Ok(None)
+        Ok(self.page_by_book.get(book_id).cloned())
     }
 
     async fn book_restrictions(
@@ -121,8 +135,18 @@ impl BookMediaContentPort for TestBookMediaContent {
         _page: &BookPageRecord,
         _page_number: u64,
         _max_edge: u32,
-    ) -> anyhow::Result<Option<Vec<u8>>> {
-        clone_result(&self.thumbnail_bytes)
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>> {
+        clone_rendered_result(&self.thumbnail_bytes, output_format)
+    }
+
+    async fn render_pdf_page(
+        &self,
+        _media: &super::BookMediaRecord,
+        _page_number: u64,
+        output_format: ImageOutputFormat,
+    ) -> anyhow::Result<Option<RenderedImage>> {
+        clone_rendered_result(&self.pdf_page_bytes, output_format)
     }
 
     async fn archive_page_row(
@@ -302,11 +326,67 @@ async fn page_delivery_requires_page_streaming_role_even_for_admins() {
         .book_page(&user, "book-1", 1, BookMediaPageRequest::default())
         .await;
     let pages_delivery = service.book_pages(&user, "book-1").await;
-    let thumbnail_delivery = service.book_page_thumbnail(&user, "book-1", 1).await;
+    let thumbnail_delivery = service
+        .book_page_thumbnail(&user, "book-1", 1, ImageOutputFormat::Jpeg)
+        .await;
 
     assert_eq!(page_delivery, BookMediaDelivery::Forbidden);
     assert_eq!(pages_delivery, BookMediaDelivery::Forbidden);
     assert_eq!(thumbnail_delivery, BookMediaDelivery::Forbidden);
+}
+
+#[tokio::test]
+async fn book_page_renders_pdf_using_requested_image_format() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-pdf".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.pdf".to_string(),
+            file_path: PathBuf::from("/library/book.pdf"),
+            media_type: "application/pdf".to_string(),
+            page_count: 1,
+        },
+    );
+    reader.page_by_book.insert(
+        "book-pdf".to_string(),
+        BookPageRecord {
+            number: 1,
+            file_name: "1".to_string(),
+            media_type: "image/jpeg".to_string(),
+            width: Some(3_200),
+            height: Some(4_528),
+            file_size: -1,
+        },
+    );
+    let content = TestBookMediaContent {
+        pdf_page_bytes: Ok(Some(b"small-avif-fixture".to_vec())),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(
+            &admin_user(),
+            "book-pdf",
+            1,
+            BookMediaPageRequest {
+                image_format: Some(ImageOutputFormat::Avif),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert_eq!(
+        delivery,
+        BookMediaDelivery::Asset(BookMediaDeliveryAsset {
+            bytes: b"small-avif-fixture".to_vec(),
+            content_type: "image/avif".to_string(),
+            file_name: Some("book.pdf-1.avif".to_string()),
+            source_file: Some(PathBuf::from("/library/book.pdf")),
+            disposition: BookMediaDeliveryDisposition::Inline,
+        })
+    );
 }
 
 #[tokio::test]
@@ -694,7 +774,7 @@ async fn book_page_thumbnail_propagates_render_errors() {
     let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
 
     let delivery = service
-        .book_page_thumbnail(&admin_user(), "book-1", 1)
+        .book_page_thumbnail(&admin_user(), "book-1", 1, ImageOutputFormat::Jpeg)
         .await;
 
     assert_eq!(
