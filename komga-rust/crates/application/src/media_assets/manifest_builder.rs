@@ -1,3 +1,4 @@
+use super::page_retrieval::scale_pdf_page_dimensions;
 use crate::discovery::{
     BookDetailPort, BookReadModel, PersistedSeriesDetailRecord, SeriesDetailPort,
     SeriesReadingDirection,
@@ -10,7 +11,7 @@ use crate::media_assets::{
     BookAccessRestrictions, BookMediaPort, BookMediaRecord, BookPageRecord, ContentAccessPort,
     ContentResolverPort, EpubNavigationContentPort, EpubNavigationExtensionReaderPort,
     EpubNavigationLink, EpubNavigationLoadError, ManifestBookRecord, PersistedMediaFileRecord,
-    load_book_epub_navigation_extension,
+    book_media_is_pdf, load_book_epub_navigation_extension,
 };
 
 use komga_domain::discovery::{QueryRestrictions, content_allowed_by_restrictions};
@@ -155,11 +156,6 @@ pub trait ManifestContentPort: EpubNavigationContentPort {
         &self,
         media: &BookMediaRecord,
     ) -> anyhow::Result<Option<Vec<BookPageRecord>>>;
-
-    fn generated_pdf_page_rows(
-        &self,
-        media: &BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>>;
 }
 
 #[async_trait::async_trait]
@@ -172,13 +168,6 @@ where
         media: &BookMediaRecord,
     ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
         ContentResolverPort::archive_page_rows(self, media).await
-    }
-
-    fn generated_pdf_page_rows(
-        &self,
-        media: &BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>> {
-        ContentResolverPort::generated_pdf_page_rows(self, media)
     }
 }
 
@@ -426,24 +415,27 @@ async fn build_manifest_reading_order(
     profile: ManifestProfile,
 ) -> anyhow::Result<Vec<ManifestLinkItem>> {
     Ok(match (variant, profile) {
-        (ManifestVariant::Pdf, ManifestProfile::Pdf) => (1..=media.page_count.max(1))
+        (ManifestVariant::Pdf, ManifestProfile::Pdf) => (1..=media.page_count)
             .map(|page| link_item(ManifestHref::RawPage(page), "application/pdf"))
             .collect::<Vec<_>>(),
         (ManifestVariant::Divina, ManifestProfile::Pdf)
         | (ManifestVariant::Divina, ManifestProfile::Divina) => {
             let persisted_rows = reader.book_pages(book_id).await?;
             let effective_rows = if !persisted_rows.is_empty() {
-                reading_order_entries(
-                    persisted_rows,
-                    (profile == ManifestProfile::Pdf).then_some("image/jpeg"),
-                )
+                if book_media_is_pdf(media) {
+                    pdf_reading_order_entries(persisted_rows)
+                } else {
+                    reading_order_entries(persisted_rows, None)
+                }
+            } else if book_media_is_pdf(media) {
+                Vec::new()
             } else if let Some(archive_rows) = content.archive_page_rows(media).await? {
                 reading_order_entries(archive_rows, None)
             } else {
-                reading_order_entries(content.generated_pdf_page_rows(media)?, None)
+                Vec::new()
             };
 
-            if effective_rows.is_empty() {
+            if effective_rows.is_empty() && !book_media_is_pdf(media) {
                 vec![default_reading_order_entry(media_type)]
             } else {
                 effective_rows
@@ -488,6 +480,21 @@ fn reading_order_entries(
             entry
         })
         .collect()
+}
+
+fn pdf_reading_order_entries(page_rows: Vec<BookPageRecord>) -> Vec<ManifestLinkItem> {
+    let page_rows = page_rows
+        .into_iter()
+        .map(|page| {
+            let (width, height) = scale_pdf_page_dimensions(page.width, page.height);
+            BookPageRecord {
+                width,
+                height,
+                ..page
+            }
+        })
+        .collect();
+    reading_order_entries(page_rows, Some("image/jpeg"))
 }
 
 fn default_reading_order_entry(media_type: &str) -> ManifestLinkItem {

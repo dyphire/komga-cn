@@ -493,7 +493,7 @@ async fn router_book_raw_page_returns_bad_request_for_non_pdf_media_before_missi
 }
 
 #[tokio::test]
-async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
+async fn router_book_pages_without_persisted_pdf_rows_returns_empty_like_kotlin() {
     let ctx = TestFixture::new("router-book-pages-pdf-dimensions").await;
     seed_router_pdf_book(
         ctx.paths(),
@@ -525,19 +525,7 @@ async fn router_book_pages_generated_pdf_fallback_matches_kotlin_page_shape() {
     let rows = payload
         .as_array()
         .expect("pdf pages payload should be an array");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0].get("fileName"),
-        Some(&Value::String("1".to_string()))
-    );
-    assert_eq!(
-        rows[0].get("mediaType"),
-        Some(&Value::String("image/jpeg".to_string()))
-    );
-    assert!(rows[0].get("width").is_some_and(|value| !value.is_null()));
-    assert!(rows[0].get("height").is_some_and(|value| !value.is_null()));
-    assert!(rows[0].get("sizeBytes").is_some_and(Value::is_null));
-    assert_eq!(rows[0].get("size"), Some(&Value::String(String::new())));
+    assert!(rows.is_empty());
 }
 
 #[tokio::test]
@@ -602,8 +590,8 @@ async fn router_persisted_pdf_page_uses_jpeg_delivery_metadata() {
         .expect("persisted pdf page body should be readable");
     let image =
         image::load_from_memory(&body).expect("persisted pdf page body should decode as image");
-    assert_eq!(image.width(), 3_200);
-    assert_eq!(image.height(), 4_528);
+    assert_eq!(image.width(), 2_479);
+    assert_eq!(image.height(), 3_508);
 }
 
 #[tokio::test]

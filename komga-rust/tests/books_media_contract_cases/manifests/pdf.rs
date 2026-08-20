@@ -176,25 +176,59 @@ async fn router_book_manifest_divina_accepts_pdf_books() {
         payload
             .get("readingOrder")
             .and_then(Value::as_array)
-            .map(|v| v.len()),
-        Some(1)
+            .map(Vec::len),
+        Some(0)
     );
+}
+
+#[tokio::test]
+async fn router_book_manifest_divina_uses_dynamic_pdf_page_dimensions() {
+    let ctx = TestFixture::builder("router-book-manifest-divina-persisted-pdf-dimensions")
+        .with_seed(|paths| async move {
+            seed_router_pdf_book(
+                &paths,
+                "book-pdf-1",
+                "series-1",
+                "fixture-page.pdf",
+                "Readable Page Title",
+            )
+            .await;
+            seed_router_persisted_pdf_page(&paths, "book-pdf-1", 0, "page-1.pdf", 595, 842, None)
+                .await;
+        })
+        .build()
+        .await;
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/books/book-pdf-1/manifest/divina")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("persisted pdf divina manifest request should build"),
+        )
+        .await
+        .expect("persisted pdf divina manifest request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let entry = payload
+        .get("readingOrder")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.first())
+        .expect("persisted pdf divina manifest should expose a page");
     assert_eq!(
-        payload
-            .get("readingOrder")
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("href"))
-            .and_then(Value::as_str),
+        entry.get("href").and_then(Value::as_str),
         Some("http://localhost/api/v1/books/book-pdf-1/pages/1?contentNegotiation=false")
     );
     assert_eq!(
-        payload
-            .get("readingOrder")
-            .and_then(Value::as_array)
-            .and_then(|entries| entries.first())
-            .and_then(|entry| entry.get("type"))
-            .and_then(Value::as_str),
+        entry.get("type").and_then(Value::as_str),
         Some("image/jpeg")
     );
+    assert_eq!(entry.get("width"), Some(&json!(3200)));
+    assert_eq!(entry.get("height"), Some(&json!(4528)));
 }

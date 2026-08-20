@@ -386,35 +386,6 @@ async fn router_book_page_thumbnail_resizes_and_negotiates_webp() {
 
     let auth_token = ctx.login_admin().await;
 
-    let pages_response = ctx
-        .app()
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/api/v1/books/book-pdf-1/pages")
-                .header("x-auth-token", &auth_token)
-                .body(Body::empty())
-                .expect("book pages request should build"),
-        )
-        .await
-        .expect("book pages request should complete");
-    assert_eq!(pages_response.status(), StatusCode::OK);
-    let pages_payload = response_json(pages_response).await;
-    let rows = pages_payload
-        .as_array()
-        .expect("book pages payload should be an array");
-    let page_max_dimension = rows[0]
-        .get("width")
-        .and_then(Value::as_u64)
-        .expect("book page metadata should expose width")
-        .max(
-            rows[0]
-                .get("height")
-                .and_then(Value::as_u64)
-                .expect("book page metadata should expose height"),
-        );
-
     let thumbnail_response = ctx
         .app()
         .clone()
@@ -443,13 +414,7 @@ async fn router_book_page_thumbnail_resizes_and_negotiates_webp() {
         .expect("book page thumbnail should decode as image");
     let thumbnail_max_dimension = thumbnail_image.width().max(thumbnail_image.height());
 
-    assert!(
-        page_max_dimension > 300,
-        "page max dimension was {page_max_dimension}"
-    );
     assert_eq!(thumbnail_max_dimension, 300);
-    assert!(u64::from(thumbnail_image.width()) <= page_max_dimension);
-    assert!(u64::from(thumbnail_image.height()) <= page_max_dimension);
 
     let webp_response = ctx
         .app()

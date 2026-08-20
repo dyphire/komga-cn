@@ -375,18 +375,11 @@ pub trait ContentResolverPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<BookPageRecord>>;
 
-    fn generated_pdf_page_rows(
-        &self,
-        media: &BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>>;
-
     fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>>;
-
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>>;
 
     fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()

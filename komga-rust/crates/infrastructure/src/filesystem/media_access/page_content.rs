@@ -138,11 +138,7 @@ pub(crate) fn load_generated_pdf_page_rows(
     if !book_media_is_pdf(media) {
         return Ok(vec![]);
     }
-    let page_count = if media.page_count > 0 {
-        media.page_count
-    } else {
-        detect_pdf_page_count(media)?.unwrap_or(0)
-    };
+    let page_count = media.page_count;
     if page_count == 0 {
         return Ok(vec![]);
     }
@@ -398,16 +394,6 @@ fn encode_image(
     }
     .with_context(|| format!("encode image as {}", output_format.content_type()))?;
     Ok(output.into_inner())
-}
-
-pub(crate) fn detect_pdf_page_count(media: &BookMediaRecord) -> anyhow::Result<Option<u64>> {
-    if !book_media_is_pdf(media) {
-        return Ok(None);
-    }
-    let document = PdfDocument::load(&media.file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
-    })?;
-    Ok(Some(document.get_pages().len() as u64))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -750,11 +736,10 @@ mod tests {
     use anyhow::Context;
     use std::fs;
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use komga_application::media_assets::{BookMediaRecord, BookPageRecord, ImageOutputFormat};
-    use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -793,43 +778,6 @@ mod tests {
             .finish()
             .map(|cursor| cursor.into_inner())
             .context("finalize zip archive")
-    }
-
-    fn write_single_page_pdf(path: &Path) {
-        let mut document = PdfDocument::with_version("1.5");
-        let pages_id = document.new_object_id();
-        let page_id = document.new_object_id();
-        let content_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
-        let resources_id = document.add_object(dictionary! {});
-
-        document.objects.insert(
-            page_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Page",
-                "Parent" => pages_id,
-                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
-                "Contents" => content_id,
-                "Resources" => resources_id,
-            }),
-        );
-        document.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages",
-                "Kids" => vec![page_id.into()],
-                "Count" => 1,
-            }),
-        );
-
-        let catalog_id = document.add_object(dictionary! {
-            "Type" => "Catalog",
-            "Pages" => pages_id,
-        });
-        document.trailer.set("Root", catalog_id);
-        document.compress();
-        document
-            .save(path)
-            .expect("single-page pdf should be saved");
     }
 
     #[tokio::test]
@@ -1090,9 +1038,8 @@ mod tests {
     }
 
     #[test]
-    fn generated_pdf_rows_use_detected_page_count_when_media_count_missing() {
+    fn generated_pdf_rows_do_not_infer_page_count_when_media_count_missing() {
         let file_path = unique_temp_path("komga-media-pdf-archive");
-        write_single_page_pdf(&file_path);
 
         let media = BookMediaRecord {
             library_id: "lib".to_string(),
@@ -1103,12 +1050,7 @@ mod tests {
         };
 
         let rows = load_generated_pdf_page_rows(&media).expect("generated PDF rows should load");
-        assert_eq!(rows.len(), 1);
-        let bytes = read_pdf_page_as_single_page_pdf(&media, 1)
-            .expect("single pdf page extraction should not fail");
-        assert!(bytes.is_some());
-
-        let _ = fs::remove_file(file_path);
+        assert!(rows.is_empty());
     }
 
     #[tokio::test]
@@ -1236,7 +1178,7 @@ mod tests {
             file_name: "book.pdf".to_string(),
             file_path: file_path.clone(),
             media_type: "application/pdf".to_string(),
-            page_count: 0,
+            page_count: 1,
         };
 
         let error = load_generated_pdf_page_rows(&media)

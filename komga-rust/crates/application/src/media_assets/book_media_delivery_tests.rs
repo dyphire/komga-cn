@@ -32,6 +32,7 @@ struct TestBookMediaReader {
     media_by_book: HashMap<String, super::BookMediaRecord>,
     page_by_book: HashMap<String, BookPageRecord>,
     restriction_error: Option<String>,
+    media_not_ready: bool,
     media_ready_error: Option<String>,
     book_page_error: Option<String>,
     selected_thumbnail_error: Option<String>,
@@ -47,7 +48,7 @@ impl BookMediaReaderPort for TestBookMediaReader {
         if let Some(error) = self.media_ready_error.clone() {
             return Err(anyhow::anyhow!(error));
         }
-        Ok(true)
+        Ok(!self.media_not_ready)
     }
 
     async fn book_pages(&self, _book_id: &str) -> anyhow::Result<Vec<BookPageRecord>> {
@@ -91,7 +92,6 @@ struct TestBookMediaContent {
     page_bytes: Result<Option<Vec<u8>>, String>,
     thumbnail_bytes: Result<Option<Vec<u8>>, String>,
     pdf_page_bytes: Result<Option<Vec<u8>>, String>,
-    pdf_page_count: Result<Option<u64>, String>,
     media_file_bytes: Result<Option<Vec<u8>>, String>,
     media_file_exists: Result<bool, String>,
     media_file_size: Result<Option<i64>, String>,
@@ -107,7 +107,6 @@ impl Default for TestBookMediaContent {
             page_bytes: Ok(None),
             thumbnail_bytes: Ok(None),
             pdf_page_bytes: Ok(None),
-            pdf_page_count: Ok(None),
             media_file_bytes: Ok(None),
             media_file_exists: Ok(true),
             media_file_size: Ok(None),
@@ -172,26 +171,12 @@ impl BookMediaContentPort for TestBookMediaContent {
         Ok(None)
     }
 
-    fn generated_pdf_page_rows(
-        &self,
-        _media: &super::BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>> {
-        Ok(Vec::new())
-    }
-
     fn read_pdf_page_as_single_page_pdf(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>> {
         clone_result(&self.pdf_page_bytes)
-    }
-
-    fn detect_pdf_page_count(
-        &self,
-        _media: &super::BookMediaRecord,
-    ) -> anyhow::Result<Option<u64>> {
-        clone_result(&self.pdf_page_count)
     }
 
     fn media_file_exists(&self, _path: &Path) -> anyhow::Result<bool> {
@@ -336,8 +321,11 @@ async fn page_delivery_requires_page_streaming_role_even_for_admins() {
 }
 
 #[tokio::test]
-async fn book_page_renders_pdf_using_requested_image_format() {
-    let mut reader = TestBookMediaReader::default();
+async fn book_page_thumbnail_rejects_unready_media() {
+    let mut reader = TestBookMediaReader {
+        media_not_ready: true,
+        ..Default::default()
+    };
     reader.media_by_book.insert(
         "book-pdf".to_string(),
         super::BookMediaRecord {
@@ -348,15 +336,27 @@ async fn book_page_renders_pdf_using_requested_image_format() {
             page_count: 1,
         },
     );
-    reader.page_by_book.insert(
+    let content = TestBookMediaContent::default();
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page_thumbnail(&admin_user(), "book-pdf", 1, ImageOutputFormat::Jpeg)
+        .await;
+
+    assert_eq!(delivery, BookMediaDelivery::MediaAnalysisFailed);
+}
+
+#[tokio::test]
+async fn book_page_renders_pdf_using_requested_image_format() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
         "book-pdf".to_string(),
-        BookPageRecord {
-            number: 1,
-            file_name: "1".to_string(),
-            media_type: "image/jpeg".to_string(),
-            width: Some(3_200),
-            height: Some(4_528),
-            file_size: -1,
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.pdf".to_string(),
+            file_path: PathBuf::from("/library/book.pdf"),
+            media_type: "application/pdf".to_string(),
+            page_count: 1,
         },
     );
     let content = TestBookMediaContent {
@@ -387,6 +387,38 @@ async fn book_page_renders_pdf_using_requested_image_format() {
             disposition: BookMediaDeliveryDisposition::Inline,
         })
     );
+}
+
+#[tokio::test]
+async fn book_page_returns_missing_file_for_pdf_before_rendering() {
+    let mut reader = TestBookMediaReader::default();
+    reader.media_by_book.insert(
+        "book-pdf".to_string(),
+        super::BookMediaRecord {
+            library_id: "library-1".to_string(),
+            file_name: "book.pdf".to_string(),
+            file_path: PathBuf::from("/library/book.pdf"),
+            media_type: "application/pdf".to_string(),
+            page_count: 1,
+        },
+    );
+    let content = TestBookMediaContent {
+        media_file_exists: Ok(false),
+        pdf_page_bytes: Ok(Some(b"should-not-render".to_vec())),
+        ..Default::default()
+    };
+    let service = BookMediaDeliveryService::new(&reader, &content, &IdentityBookIdResolver);
+
+    let delivery = service
+        .book_page(
+            &admin_user(),
+            "book-pdf",
+            1,
+            BookMediaPageRequest::default(),
+        )
+        .await;
+
+    assert_eq!(delivery, BookMediaDelivery::MissingFile);
 }
 
 #[tokio::test]

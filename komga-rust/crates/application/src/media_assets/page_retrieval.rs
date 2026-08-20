@@ -26,6 +26,26 @@ pub struct PersistedMediaFileRecord {
     pub sub_type: Option<String>,
 }
 
+pub(crate) fn scale_pdf_page_dimensions(
+    width: Option<i64>,
+    height: Option<i64>,
+) -> (Option<i64>, Option<i64>) {
+    const PDF_RESOLUTION: f64 = 3200.0;
+
+    let (Some(width), Some(height)) = (width, height) else {
+        return (None, None);
+    };
+    let min_edge = width.min(height);
+    if min_edge <= 0 {
+        return (Some(width), Some(height));
+    }
+
+    let scale = PDF_RESOLUTION / min_edge as f64;
+    let scaled_width = (width as f64 * scale).round().max(1.0) as i64;
+    let scaled_height = (height as f64 * scale).round().max(1.0) as i64;
+    (Some(scaled_width), Some(scaled_height))
+}
+
 pub fn content_type_from_filename(file_name: &str, default_mime_type: &str) -> String {
     let extension = file_name
         .rsplit_once('.')

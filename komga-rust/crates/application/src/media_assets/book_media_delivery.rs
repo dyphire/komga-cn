@@ -6,6 +6,7 @@ use crate::discovery::{PersistedBookIdResolverPort, resolve_persisted_book_id};
 use crate::identity_access::{AuthUser, AuthUserRole, user_has_role};
 
 use super::book_access::BookAccessContext;
+use super::page_retrieval::scale_pdf_page_dimensions;
 use super::{
     BookAccessRestrictions, BookMediaPort, BookMediaRecord, BookPageRecord, ContentAccessPort,
     ContentResolverPort, EntityThumbnailBinary, EpubCoverImage, ImageOutputFormat,
@@ -212,18 +213,11 @@ pub trait BookMediaContentPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<BookPageRecord>>;
 
-    fn generated_pdf_page_rows(
-        &self,
-        media: &BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>>;
-
     fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>>;
-
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>>;
 
     fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()
@@ -317,23 +311,12 @@ where
         ContentResolverPort::pdf_page_row(self, media, page_number)
     }
 
-    fn generated_pdf_page_rows(
-        &self,
-        media: &BookMediaRecord,
-    ) -> anyhow::Result<Vec<BookPageRecord>> {
-        ContentResolverPort::generated_pdf_page_rows(self, media)
-    }
-
     fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::read_pdf_page_as_single_page_pdf(self, media, page_number)
-    }
-
-    fn detect_pdf_page_count(&self, media: &BookMediaRecord) -> anyhow::Result<Option<u64>> {
-        ContentResolverPort::detect_pdf_page_count(self, media)
     }
 
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
@@ -461,19 +444,50 @@ where
             return BookMediaDelivery::NotFound;
         }
 
-        if request.prefer_pdf && book_media_is_pdf(&media) {
-            return self
-                .pdf_page_asset(&media, requested_page_number as u64)
-                .await;
+        if book_media_is_pdf(&media) {
+            if requested_page_number as u64 > media.page_count {
+                return page_number_does_not_exist();
+            }
+            match self.content.media_file_exists(&media.file_path) {
+                Ok(true) => {}
+                Ok(false) => return BookMediaDelivery::MissingFile,
+                Err(error) => return BookMediaDelivery::Internal(error),
+            }
+            if request.prefer_pdf {
+                return self
+                    .pdf_page_asset(&media, requested_page_number as u64)
+                    .await;
+            }
+
+            let output_format = request.image_format.unwrap_or(ImageOutputFormat::Jpeg);
+            let rendered = match self
+                .content
+                .render_pdf_page(&media, requested_page_number as u64, output_format)
+                .await
+            {
+                Ok(Some(rendered)) => rendered,
+                Ok(None) => return page_number_does_not_exist(),
+                Err(error) => return BookMediaDelivery::Internal(error),
+            };
+            let content = match self.resolve_page_content(
+                rendered.bytes,
+                rendered.format.content_type(),
+                requested_convert,
+            ) {
+                Ok(content) => content,
+                Err(delivery) => return delivery,
+            };
+
+            return BookMediaDelivery::Asset(page_asset(
+                &media,
+                requested_page_number,
+                content.content_type,
+                content.bytes,
+            ));
         }
 
         let page_row = match self
-            .load_book_page_row(
-                &resolved_book_id,
-                &media,
-                requested_page_number as u64,
-                true,
-            )
+            .load_book_page_row(&resolved_book_id, &media, requested_page_number as u64)
             .await
         {
             Ok(Some(row)) => row,
@@ -481,56 +495,19 @@ where
             Err(error) => return BookMediaDelivery::Internal(error),
         };
 
-        let content = if requested_convert.is_none()
-            && book_media_is_pdf(&media)
-            && let Some(output_format) = request.image_format
+        let bytes = match self
+            .content
+            .resolve_page_bytes(&media, &page_row, requested_page_number as u64)
+            .await
         {
-            let rendered = match self
-                .content
-                .render_pdf_page(&media, requested_page_number as u64, output_format)
-                .await
-            {
-                Ok(Some(rendered)) => rendered,
-                Ok(None) => return BookMediaDelivery::NotFound,
-                Err(error) => return BookMediaDelivery::Internal(error),
-            };
-            ResolvedPageContent {
-                bytes: rendered.bytes,
-                content_type: rendered.format.content_type().to_string(),
-            }
-        } else {
-            let bytes = match self
-                .content
-                .resolve_page_bytes(&media, &page_row, requested_page_number as u64)
-                .await
-            {
-                Ok(Some(bytes)) => bytes,
-                Ok(None) => return BookMediaDelivery::NotFound,
-                Err(error) => return BookMediaDelivery::Internal(error),
-            };
-            let content_type = page_row_media_type(&page_row, &media);
-            match requested_convert {
-                Some(convert) => {
-                    let target_content_type = convert.content_type();
-                    let converted = match self.content.convert_image_bytes(
-                        &bytes,
-                        &content_type,
-                        target_content_type,
-                    ) {
-                        Ok(Some(converted)) => converted,
-                        Ok(None) => return BookMediaDelivery::NotFound,
-                        Err(error) => return BookMediaDelivery::Internal(error),
-                    };
-                    ResolvedPageContent {
-                        bytes: converted,
-                        content_type: target_content_type.to_string(),
-                    }
-                }
-                None => ResolvedPageContent {
-                    bytes,
-                    content_type,
-                },
-            }
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return BookMediaDelivery::NotFound,
+            Err(error) => return BookMediaDelivery::Internal(error),
+        };
+        let content_type = page_row_media_type(&page_row, &media);
+        let content = match self.resolve_page_content(bytes, &content_type, requested_convert) {
+            Ok(content) => content,
+            Err(delivery) => return delivery,
         };
 
         BookMediaDelivery::Asset(page_asset(
@@ -614,12 +591,28 @@ where
             Ok(false) => return BookMediaDelivery::Forbidden,
             Err(error) => return BookMediaDelivery::Internal(error),
         }
+        match self.reader.book_media_is_ready(&resolved_book_id).await {
+            Ok(true) => {}
+            Ok(false) => return BookMediaDelivery::MediaAnalysisFailed,
+            Err(error) => return BookMediaDelivery::Internal(error),
+        }
         if !book_media_supports_page_api(&media) {
             return BookMediaDelivery::NotFound;
         }
 
+        if book_media_is_pdf(&media) {
+            if page_number as u64 > media.page_count {
+                return page_number_does_not_exist();
+            }
+            match self.content.media_file_exists(&media.file_path) {
+                Ok(true) => {}
+                Ok(false) => return BookMediaDelivery::MissingFile,
+                Err(error) => return BookMediaDelivery::Internal(error),
+            }
+        }
+
         let page_row = match self
-            .load_book_page_row(&resolved_book_id, &media, page_number as u64, true)
+            .load_book_page_row(&resolved_book_id, &media, page_number as u64)
             .await
         {
             Ok(Some(row)) => row,
@@ -751,13 +744,37 @@ where
         Ok(context.content_allowed(restrictions.age_rating, &restrictions.labels))
     }
 
-    async fn pdf_page_asset(&self, media: &BookMediaRecord, page_number: u64) -> BookMediaDelivery {
-        let page_count = match self.content.detect_pdf_page_count(media) {
-            Ok(Some(count)) => count,
-            Ok(None) => media.page_count,
-            Err(error) => return BookMediaDelivery::Internal(error),
+    fn resolve_page_content(
+        &self,
+        bytes: Vec<u8>,
+        source_content_type: &str,
+        requested_convert: Option<PageImageConversion>,
+    ) -> Result<ResolvedPageContent, BookMediaDelivery> {
+        let Some(convert) = requested_convert else {
+            return Ok(ResolvedPageContent {
+                bytes,
+                content_type: source_content_type.to_string(),
+            });
         };
-        if page_number > page_count {
+
+        let target_content_type = convert.content_type();
+        let converted =
+            match self
+                .content
+                .convert_image_bytes(&bytes, source_content_type, target_content_type)
+            {
+                Ok(Some(converted)) => converted,
+                Ok(None) => return Err(BookMediaDelivery::NotFound),
+                Err(error) => return Err(BookMediaDelivery::Internal(error)),
+            };
+        Ok(ResolvedPageContent {
+            bytes: converted,
+            content_type: target_content_type.to_string(),
+        })
+    }
+
+    async fn pdf_page_asset(&self, media: &BookMediaRecord, page_number: u64) -> BookMediaDelivery {
+        if page_number > media.page_count {
             return page_number_does_not_exist();
         }
         let bytes = match self
@@ -782,7 +799,6 @@ where
         book_id: &str,
         media: &BookMediaRecord,
         page_number: u64,
-        allow_pdf_fallback: bool,
     ) -> anyhow::Result<Option<BookPageRecord>> {
         match self.reader.book_page(book_id, page_number).await {
             Ok(Some(row)) => Ok(Some(if book_media_is_pdf(media) {
@@ -797,7 +813,7 @@ where
                 if let Some(row) = self.content.archive_page_row(media, page_number).await? {
                     return Ok(Some(row));
                 }
-                if allow_pdf_fallback {
+                if book_media_is_pdf(media) {
                     return self.content.pdf_page_row(media, page_number);
                 }
                 Ok(None)
@@ -828,9 +844,8 @@ where
             return Ok(Some(archive_rows));
         }
 
-        let generated_pdf_rows = self.content.generated_pdf_page_rows(media)?;
-        if !generated_pdf_rows.is_empty() {
-            return Ok(Some(generated_pdf_rows));
+        if book_media_is_pdf(media) {
+            return Ok(Some(Vec::new()));
         }
 
         if !book_media_is_single_image(media) {
@@ -1042,42 +1057,11 @@ fn map_pdf_pages_for_delivery(page_rows: Vec<BookPageRecord>) -> Vec<BookPageRec
 }
 
 fn map_pdf_page_for_delivery(page: BookPageRecord) -> BookPageRecord {
-    let dimensions = scale_pdf_dimensions(page.width, page.height);
+    let (width, height) = scale_pdf_page_dimensions(page.width, page.height);
     BookPageRecord {
         media_type: "image/jpeg".to_string(),
-        width: dimensions.width,
-        height: dimensions.height,
+        width,
+        height,
         ..page
-    }
-}
-
-struct PageDimensions {
-    width: Option<i64>,
-    height: Option<i64>,
-}
-
-fn scale_pdf_dimensions(width: Option<i64>, height: Option<i64>) -> PageDimensions {
-    const PDF_RESOLUTION: f64 = 3200.0;
-
-    let (Some(width), Some(height)) = (width, height) else {
-        return PageDimensions {
-            width: None,
-            height: None,
-        };
-    };
-    let min_edge = width.min(height);
-    if min_edge <= 0 {
-        return PageDimensions {
-            width: Some(width),
-            height: Some(height),
-        };
-    }
-
-    let scale = PDF_RESOLUTION / min_edge as f64;
-    let scaled_width = (width as f64 * scale).round().max(1.0) as i64;
-    let scaled_height = (height as f64 * scale).round().max(1.0) as i64;
-    PageDimensions {
-        width: Some(scaled_width),
-        height: Some(scaled_height),
     }
 }
