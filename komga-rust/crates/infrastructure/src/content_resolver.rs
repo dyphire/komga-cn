@@ -44,7 +44,7 @@ impl ContentResolverPort for ContentResolver {
         page_number: u64,
         output_format: ImageOutputFormat,
     ) -> anyhow::Result<Option<RenderedImage>> {
-        page_content::render_pdf_page(media, page_number, output_format)
+        page_content::render_pdf_page(media, page_number, output_format).await
     }
 
     async fn archive_page_row(

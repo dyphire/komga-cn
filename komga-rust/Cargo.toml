@@ -83,6 +83,9 @@ name = "komga-rust"
 version.workspace = true
 edition.workspace = true
 
+[features]
+image-nasm = ["komga-infrastructure/image-nasm"]
+
 [dependencies]
 axum.workspace = true
 base64.workspace = true

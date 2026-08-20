@@ -17,7 +17,10 @@ use zip::ZipArchive;
 use crate::load_pdfium;
 use crate::rar_support::{list_rar_entries, read_rar_entry_bytes};
 
-const PDF_RENDER_RESOLUTION: u32 = 3_200;
+// 300 PPI for an A4-sized page.
+const PDF_MAX_RENDER_EDGE: u32 = 3_508;
+const AVIF_ENCODING_SPEED: u8 = 7;
+const AVIF_ENCODING_QUALITY: u8 = 80;
 
 pub(crate) async fn resolve_book_page_bytes(
     media: &BookMediaRecord,
@@ -26,6 +29,7 @@ pub(crate) async fn resolve_book_page_bytes(
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if book_media_is_pdf(media) {
         return render_pdf_page(media, page_number, ImageOutputFormat::Jpeg)
+            .await
             .map(|rendered| rendered.map(|rendered| rendered.bytes));
     }
 
@@ -74,7 +78,7 @@ pub(crate) async fn render_book_page_thumbnail(
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<Option<RenderedImage>> {
     if book_media_is_pdf(media) {
-        return render_pdf_page_thumbnail(media, page_number, max_edge, output_format);
+        return render_pdf_page_thumbnail(media, page_number, max_edge, output_format).await;
     }
 
     let Some(bytes) = resolve_book_page_bytes(media, page, page_number).await? else {
@@ -165,7 +169,7 @@ pub(crate) fn load_generated_pdf_page_rows(
         .collect())
 }
 
-pub(crate) fn render_pdf_page(
+pub(crate) async fn render_pdf_page(
     media: &BookMediaRecord,
     page_number: u64,
     output_format: ImageOutputFormat,
@@ -174,6 +178,19 @@ pub(crate) fn render_pdf_page(
         return Ok(None);
     }
 
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        render_pdf_page_blocking(&media, page_number, output_format)
+    })
+    .await
+    .context("join PDF page render task")?
+}
+
+fn render_pdf_page_blocking(
+    media: &BookMediaRecord,
+    page_number: u64,
+    output_format: ImageOutputFormat,
+) -> anyhow::Result<Option<RenderedImage>> {
     let document = PdfDocument::load(&media.file_path).map_err(|error| {
         anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
     })?;
@@ -183,8 +200,8 @@ pub(crate) fn render_pdf_page(
     let dimensions = pdf_page_dimensions(&document, page_number as u32)
         .map(scale_pdf_page_dimensions)
         .unwrap_or(PdfPageDimensions {
-            width: PDF_RENDER_RESOLUTION,
-            height: PDF_RENDER_RESOLUTION,
+            width: PDF_MAX_RENDER_EDGE,
+            height: PDF_MAX_RENDER_EDGE,
         });
 
     render_pdf_page_at_size(
@@ -291,7 +308,7 @@ fn render_pdf_page_at_size(
     .map(Some)
 }
 
-fn render_pdf_page_thumbnail(
+async fn render_pdf_page_thumbnail(
     media: &BookMediaRecord,
     page_number: u64,
     max_edge: u32,
@@ -301,14 +318,19 @@ fn render_pdf_page_thumbnail(
         return Ok(None);
     }
 
-    render_pdf_page_at_size(
-        media,
-        page_number,
-        max_edge,
-        max_edge,
-        output_format,
-        "thumbnail",
-    )
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        render_pdf_page_at_size(
+            &media,
+            page_number,
+            max_edge,
+            max_edge,
+            output_format,
+            "thumbnail",
+        )
+    })
+    .await
+    .context("join PDF thumbnail render task")?
 }
 
 fn render_image_thumbnail(
@@ -361,15 +383,20 @@ fn encode_image(
     image: &image::DynamicImage,
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<Vec<u8>> {
-    let image_format = match output_format {
-        ImageOutputFormat::Avif => image::ImageFormat::Avif,
-        ImageOutputFormat::Webp => image::ImageFormat::WebP,
-        ImageOutputFormat::Jpeg => image::ImageFormat::Jpeg,
-    };
     let mut output = std::io::Cursor::new(Vec::new());
-    image
-        .write_to(&mut output, image_format)
-        .with_context(|| format!("encode image as {}", output_format.content_type()))?;
+    match output_format {
+        ImageOutputFormat::Avif => {
+            let encoder = image::codecs::avif::AvifEncoder::new_with_speed_quality(
+                &mut output,
+                AVIF_ENCODING_SPEED,
+                AVIF_ENCODING_QUALITY,
+            );
+            image.write_with_encoder(encoder)
+        }
+        ImageOutputFormat::Webp => image.write_to(&mut output, image::ImageFormat::WebP),
+        ImageOutputFormat::Jpeg => image.write_to(&mut output, image::ImageFormat::Jpeg),
+    }
+    .with_context(|| format!("encode image as {}", output_format.content_type()))?;
     Ok(output.into_inner())
 }
 
@@ -434,12 +461,12 @@ fn pdf_page_dimensions(document: &PdfDocument, page_number: u32) -> Option<PdfPa
 }
 
 fn scale_pdf_page_dimensions(dimensions: PdfPageDimensions) -> PdfPageDimensions {
-    let min_edge = f64::from(dimensions.width.min(dimensions.height));
-    if min_edge <= 0.0 {
+    let max_edge = dimensions.width.max(dimensions.height);
+    if max_edge == 0 {
         return dimensions;
     }
 
-    let scale = f64::from(PDF_RENDER_RESOLUTION) / min_edge;
+    let scale = f64::from(PDF_MAX_RENDER_EDGE) / f64::from(max_edge);
     PdfPageDimensions {
         width: (f64::from(dimensions.width) * scale).round().max(1.0) as u32,
         height: (f64::from(dimensions.height) * scale).round().max(1.0) as u32,

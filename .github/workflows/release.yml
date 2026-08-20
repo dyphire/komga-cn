@@ -215,6 +215,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup NASM
+        uses: ilammy/setup-nasm@v1
+
       - name: Display versions
         run: |
           echo "Current version: ${{ needs.version.outputs.version_current }}"
@@ -253,12 +256,12 @@ jobs:
       - name: Build Rust release binary with cross
         if: matrix.platform == 'linux'
         run: |
-          cross build --manifest-path komga-rust/Cargo.toml --locked --release --bin komga-rust --target ${{ matrix.target }}
+          cross build --manifest-path komga-rust/Cargo.toml --locked --release --features image-nasm --bin komga-rust --target ${{ matrix.target }}
 
       - name: Build Rust release binary
         if: matrix.platform != 'linux'
         run: |
-          cargo build --manifest-path komga-rust/Cargo.toml --locked --release --bin komga-rust --target ${{ matrix.target }}
+          cargo build --manifest-path komga-rust/Cargo.toml --locked --release --features image-nasm --bin komga-rust --target ${{ matrix.target }}
 
       - name: Package release artifacts
         run: |

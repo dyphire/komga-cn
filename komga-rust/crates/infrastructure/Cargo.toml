@@ -3,6 +3,9 @@ name = "komga-infrastructure"
 version.workspace = true
 edition.workspace = true
 
+[features]
+image-nasm = ["image/nasm"]
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
