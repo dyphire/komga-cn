@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use komga_application::operational::ServerSettingsPort;
 use komga_application::runtime_sse::RuntimeSseEventSink;
-use komga_application::task_processing::{CleanupEmptySetsPolicy, ThumbnailRegenerationPolicy};
+use komga_application::task_processing::CleanupEmptySetsPolicy;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
 use komga_infrastructure::{DatabaseHandle, ServerSettingsStore};
@@ -38,7 +38,6 @@ pub(crate) async fn task_runtime_context(
         task_read_pool,
     )
     .with_cleanup_empty_sets_policy(runtime_policies.cleanup_empty_sets)
-    .with_thumbnail_regeneration_policy(runtime_policies.thumbnail_regeneration)
     .with_runtime_events(runtime_events)
     .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
         owns_main_database: Some(matches!(
@@ -62,7 +61,6 @@ pub(crate) async fn task_runtime_context(
 
 struct TaskRuntimePolicies {
     cleanup_empty_sets: CleanupEmptySetsPolicy,
-    thumbnail_regeneration: ThumbnailRegenerationPolicy,
 }
 
 async fn load_task_runtime_policies(config: &RuntimeConfig) -> TaskRuntimePolicies {
@@ -75,9 +73,6 @@ async fn load_task_runtime_policies(config: &RuntimeConfig) -> TaskRuntimePolici
         cleanup_empty_sets: CleanupEmptySetsPolicy {
             delete_empty_collections: settings.delete_empty_collections,
             delete_empty_read_lists: settings.delete_empty_read_lists,
-        },
-        thumbnail_regeneration: ThumbnailRegenerationPolicy {
-            generated_thumbnail_max_edge: settings.thumbnail_size.max_edge(),
         },
     }
 }
