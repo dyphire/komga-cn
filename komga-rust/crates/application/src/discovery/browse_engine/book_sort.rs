@@ -14,6 +14,11 @@ pub(super) fn sort_books(
         return;
     }
 
+    let fallback_number_sort_desc = sort_modes
+        .last()
+        .map(|m| m.is_descending())
+        .unwrap_or(false);
+
     books.sort_by(|left, right| {
         for sort_mode in sort_modes {
             let ordering = match sort_mode {
@@ -115,7 +120,22 @@ pub(super) fn sort_books(
                 return ordering;
             }
         }
-        left.id.cmp(&right.id)
+        left
+            .series_id
+            .cmp(&right.series_id)
+            .then({
+                if fallback_number_sort_desc {
+                    right
+                        .metadata_number_sort
+                        .partial_cmp(&left.metadata_number_sort)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                } else {
+                    left
+                        .metadata_number_sort
+                        .partial_cmp(&right.metadata_number_sort)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }
+            })
     });
 }
 

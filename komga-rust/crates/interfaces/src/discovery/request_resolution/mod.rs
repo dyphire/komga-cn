@@ -16,9 +16,9 @@ use komga_application::discovery::{
 };
 use komga_domain::common_ids::{CollectionId, LibraryId};
 use komga_domain::discovery::{
-    AgeRatingCondition, CompositeSeriesCondition, DateCondition, DiscoveryError, FilterOperator,
-    InclusionCondition, ReadStatusCondition, SeriesCondition, SeriesFilter, SeriesSort,
-    SeriesStatus, SeriesStatusCondition, SeriesValueCondition, StringCondition,
+    AgeRatingCondition, BookSort, CompositeSeriesCondition, DateCondition, DiscoveryError,
+    FilterOperator, InclusionCondition, ReadStatusCondition, SeriesCondition, SeriesFilter,
+    SeriesSort, SeriesStatus, SeriesStatusCondition, SeriesValueCondition, StringCondition,
 };
 pub use readlists::{resolve_readlist_books_query, resolve_readlists_query};
 use serde_json::Value;
@@ -165,7 +165,12 @@ pub fn resolve_deprecated_books_request(
     let search = requested_query_values(query, "search")
         .and_then(|values| values.into_iter().next())
         .filter(|value| !value.trim().is_empty());
-    let sorted = !query_values(query, "sort").is_empty() || search.is_some();
+    let query_sort_values = decoded_query_values(query, "sort");
+    let mut sort = parse_book_sorts_from_json_values(&query_sort_values, search.is_some());
+    if sort.is_empty() && search.is_some() {
+        sort.push(BookSort::RelevanceAsc);
+    }
+    let sorted = !sort.is_empty();
 
     Ok(ResolvedBooksBrowseRequest {
         request: BooksBrowseRequest {
@@ -176,7 +181,7 @@ pub fn resolve_deprecated_books_request(
                 media_statuses,
                 released_after,
             )?,
-            sort: vec![],
+            sort,
             search,
             page: PageRequest {
                 page,
@@ -194,7 +199,10 @@ pub fn resolve_series_books_request(
     query: &str,
 ) -> Result<ResolvedBooksBrowseRequest, DiscoveryRequestError> {
     let filter = legacy_series_books_book_filter(series_id, query)?;
-    let sort = legacy_series_books_sort_from_query(query);
+    let mut sort = legacy_series_books_sort_from_query(query);
+    if sort.is_empty() {
+        sort.push(BookSort::NumberSortAsc);
+    }
     let page = query_usize(query, "page", 0);
     let size = query_usize(query, "size", 20).max(1);
     let unpaged = query_bool(query, "unpaged");
