@@ -188,6 +188,32 @@ pub enum BookSortMode {
     RelevanceDesc,
 }
 
+impl BookSortMode {
+    pub(super) fn is_descending(&self) -> bool {
+        matches!(
+            self,
+            BookSortMode::TitleDesc
+                | BookSortMode::NameDesc
+                | BookSortMode::SeriesTitleDesc
+                | BookSortMode::CreatedDateDesc
+                | BookSortMode::LastModifiedDateDesc
+                | BookSortMode::FileSizeDesc
+                | BookSortMode::FileHashDesc
+                | BookSortMode::UrlDesc
+                | BookSortMode::MediaStatusDesc
+                | BookSortMode::MediaCommentDesc
+                | BookSortMode::MediaTypeDesc
+                | BookSortMode::MediaPagesCountDesc
+                | BookSortMode::ReadProgressLastModifiedDateDesc
+                | BookSortMode::ReadProgressReadDateDesc
+                | BookSortMode::ReleaseDateDesc
+                | BookSortMode::NumberSortDesc
+                | BookSortMode::ReadListNumberDesc
+                | BookSortMode::RelevanceDesc
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SeriesSortMode {
     TitleAsc,
