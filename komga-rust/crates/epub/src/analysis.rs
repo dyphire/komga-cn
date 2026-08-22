@@ -5,6 +5,7 @@ use std::path::Path;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use indexmap::IndexMap;
 use quick_xml::Reader as XmlReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
@@ -99,12 +100,11 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     for item in &spine {
         add_media_file(&mut media_files, item, "EPUB_PAGE", &entries);
     }
-    let mut assets = manifest
+    let assets = manifest
         .values()
         .filter(|item| !spine_id_set.contains(&item.id))
         .cloned()
         .collect::<Vec<_>>();
-    assets.sort_by_key(|item| resource_name(&item.href));
     for item in &assets {
         add_media_file(&mut media_files, item, "EPUB_ASSET", &entries);
     }
@@ -182,11 +182,10 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     let comment = (!comment_parts.is_empty()).then(|| comment_parts.join(" "));
     let extension_blob =
         encode_extension(positions, is_fixed_layout, &toc, &landmarks, &page_list)?;
-    let mut files = media_files
+    let files = media_files
         .iter()
         .map(|file| file.file_name.clone())
         .collect::<Vec<_>>();
-    files.sort();
 
     Ok(EpubAnalysis {
         page_count,
@@ -207,7 +206,7 @@ fn parse_rootfile(bytes: &[u8]) -> Result<Option<String>, EpubAnalysisError> {
 fn parse_manifest(
     bytes: &[u8],
     rootfile_path: &str,
-) -> Result<HashMap<String, EpubManifestItem>, EpubAnalysisError> {
+) -> Result<IndexMap<String, EpubManifestItem>, EpubAnalysisError> {
     parse_epub_manifest_items(bytes, rootfile_path).map_err(parse_error("parse EPUB manifest"))
 }
 
@@ -295,7 +294,7 @@ fn resource_name(href: &str) -> String {
 
 fn divina_pages<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
-    manifest: &HashMap<String, EpubManifestItem>,
+    manifest: &IndexMap<String, EpubManifestItem>,
     spine: &[EpubManifestItem],
     entries: &HashMap<String, ZipEntryMetadata>,
 ) -> Result<Vec<EpubAnalysisPage>, EpubAnalysisError> {
@@ -623,7 +622,7 @@ fn navigation<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     package: &[u8],
     rootfile_path: &str,
-    manifest: &HashMap<String, EpubManifestItem>,
+    manifest: &IndexMap<String, EpubManifestItem>,
 ) -> NavigationParts {
     let nav_path = manifest
         .values()

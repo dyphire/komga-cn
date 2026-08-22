@@ -66,6 +66,7 @@ pdfium-render = { version = "0.9.4", git = "https://github.com/ajrcarey/pdfium-r
 unrar = "0.5.8"
 unicode-normalization = "0.1.25"
 icu = "2.3.0"
+indexmap = "2.9.0"
 libc = "0.2.189"
 mimalloc = "0.1.52"
 windows-sys = "0.61.2"

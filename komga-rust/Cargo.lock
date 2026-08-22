@@ -2735,6 +2735,7 @@ dependencies = [
 name = "komga-domain"
 version = "0.1.0"
 dependencies = [
+ "icu",
  "unicode-normalization",
 ]
 
@@ -2745,6 +2746,7 @@ dependencies = [
  "flate2",
  "iepub",
  "image",
+ "indexmap 2.14.0",
  "quick-xml",
  "serde_json",
  "zip 9.0.0-pre3",
@@ -2763,6 +2765,7 @@ dependencies = [
  "getrandom 0.4.3",
  "icu",
  "image",
+ "indexmap 2.14.0",
  "komga-application",
  "komga-build-support",
  "komga-domain",

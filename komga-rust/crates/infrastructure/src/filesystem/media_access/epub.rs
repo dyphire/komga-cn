@@ -127,7 +127,7 @@ fn extract_image_from_html_page<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     page_path: &str,
     opf_dir: &str,
-    manifest: &std::collections::HashMap<String, komga_epub::EpubManifestItem>,
+    manifest: &indexmap::IndexMap<String, komga_epub::EpubManifestItem>,
     archive_path: &Path,
 ) -> anyhow::Result<Option<komga_epub::EpubManifestItem>> {
     let html_bytes = read_zip_entry_bytes_normalized_result(archive, page_path, archive_path)?;
