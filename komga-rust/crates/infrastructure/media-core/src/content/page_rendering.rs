@@ -10,6 +10,7 @@ use komga_application::media_assets::{
     book_media_is_epub, book_media_is_pdf, book_media_is_rar_archive, book_media_is_single_image,
     book_media_is_zip_archive, content_type_from_filename, is_supported_page_image_file_name,
 };
+use komga_domain::discovery::compare_book_names;
 use lopdf::Document as PdfDocument;
 use pdfium_render::prelude::*;
 use zip::ZipArchive;
@@ -597,6 +598,7 @@ async fn load_zip_archive_page_rows(
                 file_size: entry.size().try_into().unwrap_or(i64::MAX),
             });
         }
+        rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
         Ok((!rows.is_empty()).then_some(rows))
     })
     .await
@@ -625,6 +627,8 @@ fn load_rar_archive_page_rows(
             file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
         })
         .collect::<Vec<_>>();
+    let mut rows = rows;
+    rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
     Ok((!rows.is_empty()).then_some(rows))
 }
 
