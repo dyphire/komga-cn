@@ -1,4 +1,4 @@
-use komga_application::discovery::CollectionListQuery;
+use komga_application::discovery::{CollectionListQuery, CollectionsSort};
 
 use super::{query_bool, query_value, query_values};
 
@@ -25,6 +25,12 @@ pub fn resolve_collection_list_request(query: &str) -> ResolvedCollectionListReq
         .map(str::to_string)
         .collect::<Vec<_>>();
     let unpaged = query_bool(query, "unpaged");
+    let sort = query_values(query, "sort")
+        .into_iter()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(parse_collections_sort)
+        .unwrap_or(CollectionsSort::SearchOrName);
 
     ResolvedCollectionListRequest {
         query: CollectionListQuery {
@@ -32,7 +38,36 @@ pub fn resolve_collection_list_request(query: &str) -> ResolvedCollectionListReq
             size,
             unpaged,
             search,
+            sort,
         },
         requested_library_ids,
+    }
+}
+
+pub fn parse_collections_sort(value: &str) -> CollectionsSort {
+    let mut parts = value.splitn(2, ',');
+    let field = parts.next().unwrap_or_default().trim();
+    let direction = parts.next().unwrap_or("asc").trim();
+
+    if field.eq_ignore_ascii_case("name") {
+        if direction.eq_ignore_ascii_case("desc") {
+            CollectionsSort::NameDesc
+        } else {
+            CollectionsSort::NameAsc
+        }
+    } else if field.eq_ignore_ascii_case("createdDate") {
+        if direction.eq_ignore_ascii_case("desc") {
+            CollectionsSort::CreatedDateDesc
+        } else {
+            CollectionsSort::CreatedDateAsc
+        }
+    } else if field.eq_ignore_ascii_case("lastModifiedDate") {
+        if direction.eq_ignore_ascii_case("desc") {
+            CollectionsSort::LastModifiedDateDesc
+        } else {
+            CollectionsSort::LastModifiedDateAsc
+        }
+    } else {
+        CollectionsSort::SearchOrName
     }
 }

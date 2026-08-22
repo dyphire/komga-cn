@@ -18,7 +18,7 @@ use komga_application::discovery::{
     CollectionMutationError, CollectionMutationInput, CollectionReadModel, PageRequest,
     SeriesBrowseRequest, SeriesReadModel,
 };
-use komga_domain::discovery::PageEnvelope;
+use komga_domain::discovery::{PageEnvelope, SeriesSort};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -178,7 +178,11 @@ pub(crate) async fn collection_series(
             &domain_context,
             SeriesBrowseRequest {
                 filter,
-                sort: vec![],
+                sort: if collection.ordered {
+                    vec![]
+                } else {
+                    vec![SeriesSort::MetadataTitleSortAsc]
+                },
                 search: None,
                 page: PageRequest {
                     page,
