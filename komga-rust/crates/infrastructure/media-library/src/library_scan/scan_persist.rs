@@ -1,5 +1,6 @@
 use anyhow::Context;
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_domain::discovery::compare_book_names;
@@ -270,6 +271,10 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                 || scanned
                     .series_ids_requiring_book_sync
                     .contains(&series.series_id);
+            let created_date_unix_seconds = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after UNIX_EPOCH")
+                .as_secs() as i64;
             for book in &series.books {
                 if sync_books || !active_book_ids.contains(&book.book_id) {
                     let book_updated = sqlx::query(
@@ -306,8 +311,8 @@ WHERE ID = ?
                     if book_updated == 0 {
                         let inserted = sqlx::query(
                                 r#"INSERT OR IGNORE INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE,
-                             LIBRARY_ID, oneshot)
-VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
+                             LIBRARY_ID, oneshot, CREATED_DATE)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))"#,
                             )
                             .bind(&book.book_id)
                             .bind(book.file_last_modified_unix_seconds)
@@ -317,6 +322,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?)"#,
                             .bind(book.file_size)
                             .bind(&library_id)
                             .bind(book.oneshot)
+                            .bind(created_date_unix_seconds)
                             .execute(pool)
                             .await
                             .context("failed to insert BOOK rows")?
