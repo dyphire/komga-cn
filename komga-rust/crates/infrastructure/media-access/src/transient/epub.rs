@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::io::Read;
 
+use indexmap::IndexMap;
 use quick_xml::Reader as XmlReader;
 use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
@@ -86,7 +86,7 @@ fn compute_transient_epub_page_count<R: Read + std::io::Seek>(
 
 fn extract_transient_epub_divina_pages<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
-    manifest: &HashMap<String, TransientEpubManifestItem>,
+    manifest: &IndexMap<String, TransientEpubManifestItem>,
     spine: &[TransientEpubManifestItem],
 ) -> anyhow::Result<Vec<TransientBookPage>> {
     let mut pages = Vec::new();
@@ -181,7 +181,7 @@ pub(super) fn parse_transient_epub_rootfile_path(container_xml: &[u8]) -> Option
 pub(super) fn parse_transient_epub_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
-) -> anyhow::Result<HashMap<String, TransientEpubManifestItem>> {
+) -> anyhow::Result<IndexMap<String, TransientEpubManifestItem>> {
     parse_epub_manifest_items(package_document, rootfile_path)
         .map(|manifest| {
             manifest
@@ -202,7 +202,7 @@ pub(super) fn parse_transient_epub_manifest_items(
 
 pub(super) fn parse_transient_epub_spine_items(
     package_document: &[u8],
-    manifest: &HashMap<String, TransientEpubManifestItem>,
+    manifest: &IndexMap<String, TransientEpubManifestItem>,
 ) -> anyhow::Result<Vec<TransientEpubManifestItem>> {
     let spine_ids = parse_epub_spine_itemrefs(package_document)
         .map_err(|error| anyhow::anyhow!(error).context("parse transient EPUB spine"))?;
