@@ -354,11 +354,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
             ..TaskRuntimeOwnershipOverrides::default()
         },
     )
-    .await
-    .with_cleanup_empty_sets_policy(CleanupEmptySetsPolicy {
-        delete_empty_collections: true,
-        delete_empty_read_lists: true,
-    });
+    .await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(

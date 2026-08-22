@@ -659,9 +659,9 @@ mod tests {
             .bind(true)
             .bind(width)
             .bind(height)
-                .execute(&pool)
-                .await
-                .expect("generated thumbnail row should be inserted");
+            .execute(&pool)
+            .await
+            .expect("generated thumbnail row should be inserted");
         }
         sqlx::query(
             "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",

@@ -60,15 +60,18 @@ pub struct SqliteFilesystemLibraryScanPipeline {
 }
 
 impl SqliteFilesystemLibraryScanPipeline {
-    pub fn for_runtime(runtime: &JobRuntime<'_>) -> Self {
-        Self {
+    pub async fn for_runtime(runtime: &JobRuntime<'_>) -> anyhow::Result<Self> {
+        Ok(Self {
             owns_main_database: runtime.database().owns_main_database(),
             owns_filesystem_scan_output: runtime.filesystem().owns_filesystem_scan_output(),
             task_read_pool: runtime.database().read_pool().clone(),
             task_write_pool: runtime.database().write_pool().clone(),
-            cleanup_empty_sets_policy: runtime.cleanup_empty_sets_policy(),
+            cleanup_empty_sets_policy: runtime
+                .cleanup_empty_sets_policy()
+                .await
+                .map_err(TaskProcessingError::runtime)?,
             runtime_events: runtime.runtime_events_arc(),
-        }
+        })
     }
 
     pub(crate) async fn execute_scan(

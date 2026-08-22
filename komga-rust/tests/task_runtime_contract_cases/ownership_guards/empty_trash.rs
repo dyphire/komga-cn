@@ -5,14 +5,6 @@ async fn run_empty_trash(paths: &RuntimeDbPaths) {
     run_empty_trash_with_runtime(runtime).await;
 }
 
-async fn run_empty_trash_with_cleanup_policy(
-    paths: &RuntimeDbPaths,
-    cleanup_policy: CleanupEmptySetsPolicy,
-) {
-    let runtime = runtime_task_context_with_cleanup_policy(paths, cleanup_policy).await;
-    run_empty_trash_with_runtime(runtime).await;
-}
-
 async fn run_empty_trash_with_runtime(runtime: TaskRuntimeContext) {
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -295,19 +287,30 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
     .bind(vec![0_u8])
     .bind("USER_UPLOADED")
     .bind(true)
+        .execute(&pool)
+        .await
+        .expect("readlist thumbnail should be inserted for empty-set cleanup verification");
+    sqlx::query(
+        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) \
+         ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
+    )
+    .bind("DELETE_EMPTY_COLLECTIONS")
+    .bind("1")
     .execute(&pool)
     .await
-    .expect("readlist thumbnail should be inserted for empty-set cleanup verification");
+    .expect("delete empty collections setting should be seeded");
+    sqlx::query(
+        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) \
+         ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
+    )
+    .bind("DELETE_EMPTY_READLISTS")
+    .bind("1")
+    .execute(&pool)
+    .await
+    .expect("delete empty readlists setting should be seeded");
     pool.close().await;
 
-    run_empty_trash_with_cleanup_policy(
-        ctx.paths(),
-        CleanupEmptySetsPolicy {
-            delete_empty_collections: true,
-            delete_empty_read_lists: true,
-        },
-    )
-    .await;
+    run_empty_trash(ctx.paths()).await;
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await

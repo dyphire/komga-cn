@@ -2,7 +2,7 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventLog, RuntimeSseEventSink};
-use komga_application::task_processing::{CleanupEmptySetsPolicy, TaskQueueRecord};
+use komga_application::task_processing::TaskQueueRecord;
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
 use komga_infrastructure::{
@@ -57,15 +57,6 @@ async fn runtime_task_context_with_runtime_events(
     runtime_task_context(paths)
         .await
         .with_runtime_events(runtime_events)
-}
-
-async fn runtime_task_context_with_cleanup_policy(
-    paths: &RuntimeDbPaths,
-    cleanup_policy: CleanupEmptySetsPolicy,
-) -> TaskRuntimeContext {
-    runtime_task_context(paths)
-        .await
-        .with_cleanup_empty_sets_policy(cleanup_policy)
 }
 
 async fn runtime_task_context_with_overrides(
