@@ -2,13 +2,8 @@ use std::collections::HashMap;
 
 use crate::random_tokens::random_hex_token;
 use crate::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 use komga_domain::discovery::{
-    DiscoveryQueryContext, PageEnvelope, content_allowed_by_restrictions,
+    DiscoveryQueryContext, PageEnvelope, compare_book_names, content_allowed_by_restrictions,
 };
 
 use super::{
@@ -507,8 +502,7 @@ async fn sort_collections_by_search(
 }
 
 fn sort_collections_by_name(content: &mut [CollectionReadModel]) {
-    let collator = collections_unicode_collator();
-    content.sort_by(|left, right| collator.compare(left.name.as_str(), right.name.as_str()));
+    content.sort_by(|left, right| compare_book_names(left.name.as_str(), right.name.as_str()));
 }
 
 fn paginate_collections(
@@ -534,13 +528,6 @@ fn paginate_collections(
             .collect::<Vec<_>>()
     };
     PageEnvelope::from_slice(page_content, page, page_size, total_elements)
-}
-
-fn collections_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for collections sorting should construct")
 }
 
 fn generated_collection_id() -> String {
