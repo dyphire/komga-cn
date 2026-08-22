@@ -1,89 +1,121 @@
-use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+use icu::collator::{
+    Collator,
+    options::{CollatorOptions, Strength},
+};
+use icu::locale::locale;
+use std::cmp::Ordering;
+use std::sync::OnceLock;
 
-pub fn compare_book_names(left: &str, right: &str) -> std::cmp::Ordering {
-    let left = normalize_sort_key(left);
-    let right = normalize_sort_key(right);
-    natural_cmp(&left, &right)
+pub fn compare_book_names(left: &str, right: &str) -> Ordering {
+    let left = split_into_segments(left);
+    let right = split_into_segments(right);
+    compare_segments(&left, &right)
 }
 
-fn normalize_sort_key(value: &str) -> String {
-    value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .nfd()
-        .filter(|ch| !is_combining_mark(*ch))
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
+fn book_names_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
+    static COLLATOR: OnceLock<icu::collator::CollatorBorrowed<'static>> = OnceLock::new();
+    COLLATOR.get_or_init(|| {
+        let mut options = CollatorOptions::default();
+        options.strength = Some(Strength::Tertiary);
+        Collator::try_new(locale!("und").into(), options)
+            .expect("unicode collator for book name sorting should construct")
+    })
 }
 
-fn natural_cmp(left: &str, right: &str) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+enum Segment {
+    Text(String),
+    Number(f64),
+}
 
-    let left = left.as_bytes();
-    let right = right.as_bytes();
-    let mut left_index = 0usize;
-    let mut right_index = 0usize;
-
-    while left_index < left.len() && right_index < right.len() {
-        let left_is_digit = left[left_index].is_ascii_digit();
-        let right_is_digit = right[right_index].is_ascii_digit();
-
-        if left_is_digit && right_is_digit {
-            let left_end = digit_run_end(left, left_index);
-            let right_end = digit_run_end(right, right_index);
-            let ordering =
-                compare_digit_runs(&left[left_index..left_end], &right[right_index..right_end]);
-            if ordering != Ordering::Equal {
-                return ordering;
+fn split_into_segments(value: &str) -> Vec<Segment> {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return vec![Segment::Text(String::new())];
+    }
+    let mut segments = Vec::new();
+    let mut chars = normalized.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            let mut num_str = String::new();
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() {
+                    num_str.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
             }
-            left_index = left_end;
-            right_index = right_end;
-            continue;
+            if chars.peek() == Some(&'.') {
+                chars.next();
+                num_str.push('.');
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        num_str.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if let Ok(num) = num_str.parse::<f64>() {
+                segments.push(Segment::Number(num));
+            } else {
+                segments.push(Segment::Text(num_str));
+            }
+        } else {
+            let mut text = String::new();
+            while let Some(&c) = chars.peek() {
+                if !c.is_ascii_digit() {
+                    text.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+            segments.push(Segment::Text(text));
         }
+    }
+    merge_segments(segments)
+}
 
-        let ordering = left[left_index].cmp(&right[right_index]);
+fn merge_segments(segments: Vec<Segment>) -> Vec<Segment> {
+    let mut result = Vec::new();
+    for segment in segments {
+        match segment {
+            Segment::Text(text) => {
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some(Segment::Text(prev)) = result.last_mut() {
+                    prev.push_str(&text);
+                } else {
+                    result.push(Segment::Text(text));
+                }
+            }
+            Segment::Number(num) => {
+                result.push(Segment::Number(num));
+            }
+        }
+    }
+    if result.is_empty() {
+        result.push(Segment::Text(String::new()));
+    }
+    result
+}
+
+fn compare_segments(left: &[Segment], right: &[Segment]) -> Ordering {
+    use std::cmp::Ordering;
+    let mut left_iter = left.iter();
+    let mut right_iter = right.iter();
+    while let (Some(l), Some(r)) = (left_iter.next(), right_iter.next()) {
+        let ordering = match (l, r) {
+            (Segment::Number(nl), Segment::Number(nr)) => {
+                nl.partial_cmp(nr).unwrap_or(Ordering::Equal)
+            }
+            (Segment::Text(tl), Segment::Text(tr)) => book_names_collator().compare(tl, tr),
+            (Segment::Number(_), Segment::Text(_)) => Ordering::Less,
+            (Segment::Text(_), Segment::Number(_)) => Ordering::Greater,
+        };
         if ordering != Ordering::Equal {
             return ordering;
         }
-        left_index += 1;
-        right_index += 1;
     }
-
     left.len().cmp(&right.len())
-}
-
-fn digit_run_end(bytes: &[u8], start: usize) -> usize {
-    let mut index = start;
-    while index < bytes.len() && bytes[index].is_ascii_digit() {
-        index += 1;
-    }
-    index
-}
-
-fn compare_digit_runs(left: &[u8], right: &[u8]) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-
-    let left_trimmed = trim_leading_zeroes(left);
-    let right_trimmed = trim_leading_zeroes(right);
-    let significant = left_trimmed.len().cmp(&right_trimmed.len());
-    if significant != Ordering::Equal {
-        return significant;
-    }
-
-    let lexical = left_trimmed.cmp(right_trimmed);
-    if lexical != Ordering::Equal {
-        return lexical;
-    }
-
-    left.len().cmp(&right.len())
-}
-
-fn trim_leading_zeroes(bytes: &[u8]) -> &[u8] {
-    let first_non_zero = bytes.iter().position(|byte| *byte != b'0');
-    match first_non_zero {
-        Some(index) => &bytes[index..],
-        None if bytes.is_empty() => bytes,
-        None => &bytes[bytes.len() - 1..],
-    }
 }

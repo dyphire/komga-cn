@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use komga_domain::discovery::compare_book_names;
+
 use super::models::{BookRow, BookSortMode};
 
 pub(super) fn sort_books(
@@ -15,30 +17,12 @@ pub(super) fn sort_books(
     books.sort_by(|left, right| {
         for sort_mode in sort_modes {
             let ordering = match sort_mode {
-                BookSortMode::TitleAsc => left
-                    .title
-                    .to_ascii_lowercase()
-                    .cmp(&right.title.to_ascii_lowercase()),
-                BookSortMode::TitleDesc => right
-                    .title
-                    .to_ascii_lowercase()
-                    .cmp(&left.title.to_ascii_lowercase()),
-                BookSortMode::NameAsc => left
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&right.name.to_ascii_lowercase()),
-                BookSortMode::NameDesc => right
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&left.name.to_ascii_lowercase()),
-                BookSortMode::SeriesTitleAsc => left
-                    .series_title_sort
-                    .to_ascii_lowercase()
-                    .cmp(&right.series_title_sort.to_ascii_lowercase()),
-                BookSortMode::SeriesTitleDesc => right
-                    .series_title_sort
-                    .to_ascii_lowercase()
-                    .cmp(&left.series_title_sort.to_ascii_lowercase()),
+                BookSortMode::TitleAsc => compare_book_names(&left.title, &right.title),
+                BookSortMode::TitleDesc => compare_book_names(&right.title, &left.title),
+                BookSortMode::NameAsc => compare_book_names(&left.name, &right.name),
+                BookSortMode::NameDesc => compare_book_names(&right.name, &left.name),
+                BookSortMode::SeriesTitleAsc => compare_book_names(&left.series_title_sort, &right.series_title_sort),
+                BookSortMode::SeriesTitleDesc => compare_book_names(&right.series_title_sort, &left.series_title_sort),
                 BookSortMode::CreatedDateAsc => left.created.cmp(&right.created),
                 BookSortMode::CreatedDateDesc => right.created.cmp(&left.created),
                 BookSortMode::LastModifiedDateAsc => left.last_modified.cmp(&right.last_modified),
