@@ -2737,6 +2737,7 @@ version = "0.1.0"
 dependencies = [
  "icu",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
