@@ -2,11 +2,6 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 
 use crate::contracts::common::PageDto;
 use crate::contracts::discovery::BookDto;
@@ -14,6 +9,7 @@ use crate::helpers::{query_bool, query_value, query_values};
 use crate::identity_access::auth::Admin;
 use crate::state::DiscoveryState;
 use komga_application::identity_access::user_id;
+use komga_domain::discovery::compare_book_names;
 
 use super::super::persisted::common_helpers::{decode_query_component, internal_error_response};
 
@@ -75,21 +71,13 @@ struct DuplicateBooksPageSlice {
     total_elements: usize,
 }
 
-fn duplicate_books_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for duplicate books sorting should construct")
-}
-
-fn compare_duplicate_book_unicode_strings(
-    collator: &icu::collator::CollatorBorrowed<'_>,
+fn compare_duplicate_book_names(
     left: Option<&str>,
     right: Option<&str>,
     descending: bool,
 ) -> std::cmp::Ordering {
     let ordering = match (left, right) {
-        (Some(left), Some(right)) => collator.compare(left, right),
+        (Some(left), Some(right)) => compare_book_names(left, right),
         (None, Some(_)) => std::cmp::Ordering::Less,
         (Some(_), None) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
@@ -193,18 +181,15 @@ fn sort_duplicate_book_payloads(
     books: &mut [DuplicateBookPayload],
     sort_modes: &[DuplicateBooksSortMode],
 ) {
-    let unicode_collator = duplicate_books_unicode_collator();
     books.sort_by(|left, right| {
         for sort_mode in sort_modes {
             let ordering = match sort_mode.field {
-                DuplicateBooksSortField::Name => compare_duplicate_book_unicode_strings(
-                    &unicode_collator,
+                DuplicateBooksSortField::Name => compare_duplicate_book_names(
                     Some(left.payload.name.as_str()),
                     Some(right.payload.name.as_str()),
                     sort_mode.descending,
                 ),
-                DuplicateBooksSortField::Series => compare_duplicate_book_unicode_strings(
-                    &unicode_collator,
+                DuplicateBooksSortField::Series => compare_duplicate_book_names(
                     Some(left.series_title_sort.as_str()),
                     Some(right.series_title_sort.as_str()),
                     sort_mode.descending,
@@ -254,8 +239,7 @@ fn sort_duplicate_book_payloads(
                     right.payload.media.pages_count,
                     sort_mode.descending,
                 ),
-                DuplicateBooksSortField::MetadataTitle => compare_duplicate_book_unicode_strings(
-                    &unicode_collator,
+                DuplicateBooksSortField::MetadataTitle => compare_duplicate_book_names(
                     Some(left.payload.metadata.title.as_str()),
                     Some(right.payload.metadata.title.as_str()),
                     sort_mode.descending,

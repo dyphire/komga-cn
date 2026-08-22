@@ -2,7 +2,7 @@ use icu::collator::{
     Collator,
     options::{CollatorOptions, Strength},
 };
-use icu::locale::locale;
+use icu::locale::{locale, Locale};
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -12,14 +12,85 @@ pub fn compare_book_names(left: &str, right: &str) -> Ordering {
     compare_segments(&left, &right)
 }
 
-fn book_names_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
+fn system_locale_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
     static COLLATOR: OnceLock<icu::collator::CollatorBorrowed<'static>> = OnceLock::new();
     COLLATOR.get_or_init(|| {
         let mut options = CollatorOptions::default();
         options.strength = Some(Strength::Tertiary);
-        Collator::try_new(locale!("und").into(), options)
+        Collator::try_new(system_locale().into(), options)
             .expect("unicode collator for book name sorting should construct")
     })
+}
+
+fn system_locale() -> Locale {
+    std::env::var("LANG")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .ok()
+        .as_deref()
+        .and_then(parse_locale)
+        .or_else(|| macos_system_locale())
+        .or_else(|| windows_system_locale())
+        .unwrap_or_else(|| locale!("und"))
+}
+
+fn parse_locale(value: &str) -> Option<Locale> {
+    let lang = value.split('.').next().unwrap_or(value).replace('_', "-");
+    lang.parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_system_locale() -> Option<Locale> {
+    use std::ffi::{CStr, c_char, c_int};
+
+    unsafe extern "C" {
+        fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+    }
+    const LC_ALL: c_int = 6;
+
+    unsafe {
+        let locale_ptr = setlocale(LC_ALL, std::ptr::null());
+        if locale_ptr.is_null() {
+            return None;
+        }
+        CStr::from_ptr(locale_ptr)
+            .to_str()
+            .ok()
+            .and_then(parse_locale)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_system_locale() -> Option<Locale> {
+    None
+}
+
+#[cfg(windows)]
+fn windows_system_locale() -> Option<Locale> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
+
+    let mut buffer = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
+    let len = unsafe {
+        GetUserDefaultLocaleName(buffer.as_mut_ptr(), buffer.len() as i32)
+    };
+
+    if len > 0 && (len as usize) < buffer.len() {
+        let locale_name = OsString::from_wide(&buffer[..len as usize - 1]);
+        locale_name.into_string().ok().and_then(|s| parse_locale(&s))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(windows))]
+fn windows_system_locale() -> Option<Locale> {
+    None
+}
+
+fn book_names_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
+    system_locale_collator()
 }
 
 enum Segment {
