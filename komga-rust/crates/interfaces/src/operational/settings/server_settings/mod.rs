@@ -96,8 +96,7 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
         && !value.is_null()
     {
         command.delete_empty_collections = Some(
-            value
-                .as_bool()
+            json_bool(value)
                 .ok_or_else(|| anyhow::anyhow!("deleteEmptyCollections must be a boolean"))?,
         );
     }
@@ -106,8 +105,7 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
         && !value.is_null()
     {
         command.delete_empty_read_lists = Some(
-            value
-                .as_bool()
+            json_bool(value)
                 .ok_or_else(|| anyhow::anyhow!("deleteEmptyReadLists must be a boolean"))?,
         );
     }
@@ -115,18 +113,16 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
     if let Some(value) = payload.get("rememberMeDurationDays")
         && !value.is_null()
     {
-        command.remember_me_duration_days =
-            Some(value.as_u64().ok_or_else(|| {
-                anyhow::anyhow!("rememberMeDurationDays must be a positive integer")
-            })?);
+        command.remember_me_duration_days = Some(json_u64(value).ok_or_else(|| {
+            anyhow::anyhow!("rememberMeDurationDays must be a positive integer")
+        })?);
     }
 
     if let Some(value) = payload.get("renewRememberMeKey")
         && !value.is_null()
     {
         command.renew_remember_me_key = Some(
-            value
-                .as_bool()
+            json_bool(value)
                 .ok_or_else(|| anyhow::anyhow!("renewRememberMeKey must be a boolean"))?,
         );
     }
@@ -147,8 +143,7 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
         && !value.is_null()
     {
         command.task_pool_size = Some(
-            value
-                .as_u64()
+            json_u64(value)
                 .ok_or_else(|| anyhow::anyhow!("taskPoolSize must be a positive integer"))?,
         );
     }
@@ -168,8 +163,7 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
         && !value.is_null()
     {
         command.kobo_proxy = Some(
-            value
-                .as_bool()
+            json_bool(value)
                 .ok_or_else(|| anyhow::anyhow!("koboProxy must be a boolean"))?,
         );
     }
@@ -196,11 +190,36 @@ fn optional_integer_patch(
 ) -> anyhow::Result<ServerSettingPatch<u64>> {
     match payload.get(field) {
         Some(Value::Null) => Ok(ServerSettingPatch::Clear),
-        Some(value) => value
-            .as_u64()
+        Some(value) => json_u64(value)
             .map(ServerSettingPatch::Set)
             .ok_or_else(|| anyhow::anyhow!("{}", type_error)),
         None => Ok(ServerSettingPatch::Unchanged),
+    }
+}
+
+/// Parse a JSON value as a non-negative integer, tolerating numeric strings.
+///
+/// The legacy webui serializes number inputs (`v-text-field type="number"`) as
+/// JSON strings, which strict `serde_json::Value::as_u64` rejects. Kotlin's
+/// Jackson backend coerces these automatically, so we do the same for parity.
+fn json_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64(),
+        Value::String(string) => string.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+/// Parse a JSON value as a boolean, tolerating string representations.
+fn json_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(boolean) => Some(*boolean),
+        Value::String(string) => match string.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" => Some(true),
+            "false" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
