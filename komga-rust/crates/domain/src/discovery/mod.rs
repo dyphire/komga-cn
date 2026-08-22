@@ -6,7 +6,7 @@ mod models;
 mod sorts;
 mod write_ports;
 
-pub use book_name_sort::compare_book_names;
+pub use book_name_sort::{compare_book_names};
 pub use envelopes::PageEnvelope;
 pub use errors::{DiscoveryError, UnsupportedDiscoverySemantics};
 pub use filter::{
