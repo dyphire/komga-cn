@@ -182,6 +182,7 @@ WHERE ID = ?"#,
         }
 
         let discovered_series_ids = scanned.discovered_series_ids.clone();
+        let mut series_with_deleted_books = HashSet::new();
         let active_book_ids = soft_delete_missing_scan_rows(
             pool,
             &library_id,
@@ -189,9 +190,11 @@ WHERE ID = ?"#,
             &scanned.discovered_book_ids,
             &mut runtime_events,
             &mut changed_series_ids,
+            &mut series_with_deleted_books,
         )
         .await?;
 
+        let mut series_updated_in_main_loop = HashSet::new();
         for series in &scanned.series_rows {
             let mut inserted_in_series = Vec::<InsertedBookCandidate>::new();
             let series_updated = sqlx::query(
@@ -223,6 +226,7 @@ WHERE ID = ?
             .rows_affected();
 
             if series_updated != 0 {
+                series_updated_in_main_loop.insert(series.series_id.clone());
                 changed_series_ids.insert(series.series_id.clone());
             }
 
@@ -389,6 +393,22 @@ WHERE BOOK_ID = ?"#,
 
         persist_scanned_sidecars(pool, &library_id, &scanned.sidecars).await?;
 
+        for series_id in &series_with_deleted_books {
+            if !series_updated_in_main_loop.contains(series_id) {
+                sqlx::query(
+                    r#"UPDATE SERIES SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?"#,
+                )
+                .bind(series_id)
+                .execute(pool)
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!(error).context(format!(
+                        "failed to refresh LAST_MODIFIED_DATE for series with deleted books '{series_id}': "
+                    ))
+                })?;
+            }
+        }
+
         sqlx::query(
             r#"UPDATE SERIES
 SET BOOK_COUNT = (SELECT COUNT(*)
@@ -536,6 +556,7 @@ async fn soft_delete_missing_scan_rows(
     discovered_book_ids: &HashSet<String>,
     runtime_events: &mut RuntimeSseEventBuffer,
     changed_series_ids: &mut HashSet<String>,
+    series_with_deleted_books: &mut HashSet<String>,
 ) -> anyhow::Result<HashSet<String>> {
     let existing_series = sqlx::query(
         r#"SELECT ID
@@ -635,6 +656,7 @@ WHERE ID = ?"#,
             RuntimeSseMutationKind::Changed,
         );
         changed_series_ids.insert(series_id.clone());
+        series_with_deleted_books.insert(series_id.clone());
     }
 
     Ok(active_book_ids)

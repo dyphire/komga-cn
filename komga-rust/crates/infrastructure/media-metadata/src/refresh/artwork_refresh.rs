@@ -89,6 +89,10 @@ pub async fn refresh_book_local_artwork(
                 resolve_stored_path(book_row.get::<String, _>("LIBRARY_ROOT").as_str());
             let artwork_urls = load_book_local_artwork_urls(&library_root, &book_url).await?;
 
+            if artwork_urls.is_empty() {
+                break 'result Ok(());
+            }
+
             for (index, artwork_url) in artwork_urls.into_iter().enumerate() {
                 let selected = if index == 0 {
                     MarkSelectedPreference::IfNoneOrGenerated
@@ -109,9 +113,9 @@ pub async fn refresh_book_local_artwork(
 
         sqlx::query(
             r#"
-            UPDATE THUMBNAIL_BOOK
-            SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE BOOK_ID = ?
+                UPDATE THUMBNAIL_BOOK
+                SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE BOOK_ID = ?
             "#,
         )
         .bind(&book_id)
@@ -120,22 +124,6 @@ pub async fn refresh_book_local_artwork(
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
                 "failed to refresh THUMBNAIL_BOOK rows for '{book_id}': "
-            ))
-        })?;
-
-        sqlx::query(
-            r#"
-            UPDATE BOOK
-            SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE ID = ?
-            "#,
-        )
-        .bind(&book_id)
-        .execute(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to refresh BOOK row while updating local artwork for '{book_id}': "
             ))
         })?;
 
@@ -421,6 +409,10 @@ pub async fn refresh_series_local_artwork(
                 resolve_stored_path(series_row.get::<String, _>("LIBRARY_ROOT").as_str());
             let artwork_urls = load_series_local_artwork_urls(&library_root, &series_url).await?;
 
+            if artwork_urls.is_empty() {
+                break 'result Ok(());
+            }
+
             for (index, artwork_url) in artwork_urls.into_iter().enumerate() {
                 let selected = import_series_local_artwork_thumbnail(
                     pool,
@@ -440,9 +432,9 @@ pub async fn refresh_series_local_artwork(
 
         sqlx::query(
             r#"
-            UPDATE THUMBNAIL_SERIES
-            SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE SERIES_ID = ?
+                UPDATE THUMBNAIL_SERIES
+                SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
+                WHERE SERIES_ID = ?
             "#,
         )
         .bind(&series_id)
@@ -451,22 +443,6 @@ pub async fn refresh_series_local_artwork(
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
                 "failed to refresh THUMBNAIL_SERIES rows for '{series_id}': "
-            ))
-        })?;
-
-        sqlx::query(
-            r#"
-            UPDATE SERIES
-            SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE ID = ?
-            "#,
-        )
-        .bind(&series_id)
-        .execute(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to refresh SERIES row while updating local artwork for '{series_id}': "
             ))
         })?;
 
