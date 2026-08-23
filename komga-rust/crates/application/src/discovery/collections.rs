@@ -17,6 +17,18 @@ pub struct CollectionListQuery {
     pub size: usize,
     pub unpaged: bool,
     pub search: Option<String>,
+    pub sort: CollectionsSort,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CollectionsSort {
+    NameAsc,
+    NameDesc,
+    CreatedDateAsc,
+    CreatedDateDesc,
+    LastModifiedDateAsc,
+    LastModifiedDateDesc,
+    SearchOrName,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,10 +125,33 @@ where
         }
         content.retain(|collection| !collection.series_ids.is_empty());
 
-        if let Some(search) = query.search.as_deref() {
+        let search_filtered = if let Some(search) = query.search.as_deref() {
             sort_collections_by_search(self.search, &mut content, search, search_limit).await?;
+            true
         } else {
-            sort_collections_by_name(&mut content);
+            false
+        };
+
+        match query.sort {
+            CollectionsSort::SearchOrName => {
+                if !search_filtered {
+                    sort_collections_by_name(&mut content);
+                }
+            }
+            CollectionsSort::NameAsc => sort_collections_by_name(&mut content),
+            CollectionsSort::NameDesc => sort_collections_by_name_desc(&mut content),
+            CollectionsSort::CreatedDateAsc => {
+                sort_collections_by_created_date(&mut content, false)
+            }
+            CollectionsSort::CreatedDateDesc => {
+                sort_collections_by_created_date(&mut content, true)
+            }
+            CollectionsSort::LastModifiedDateAsc => {
+                sort_collections_by_last_modified_date(&mut content, false)
+            }
+            CollectionsSort::LastModifiedDateDesc => {
+                sort_collections_by_last_modified_date(&mut content, true)
+            }
         }
 
         Ok(paginate_collections(
@@ -505,6 +540,26 @@ fn sort_collections_by_name(content: &mut [CollectionReadModel]) {
     content.sort_by(|left, right| compare_book_names(left.name.as_str(), right.name.as_str()));
 }
 
+fn sort_collections_by_name_desc(content: &mut [CollectionReadModel]) {
+    content.sort_by(|left, right| compare_book_names(right.name.as_str(), left.name.as_str()));
+}
+
+fn sort_collections_by_created_date(content: &mut [CollectionReadModel], descending: bool) {
+    if descending {
+        content.sort_by(|left, right| right.created_date.cmp(&left.created_date));
+    } else {
+        content.sort_by(|left, right| left.created_date.cmp(&right.created_date));
+    }
+}
+
+fn sort_collections_by_last_modified_date(content: &mut [CollectionReadModel], descending: bool) {
+    if descending {
+        content.sort_by(|left, right| right.last_modified_date.cmp(&left.last_modified_date));
+    } else {
+        content.sort_by(|left, right| left.last_modified_date.cmp(&right.last_modified_date));
+    }
+}
+
 fn paginate_collections(
     content: Vec<CollectionReadModel>,
     page: usize,
@@ -549,7 +604,8 @@ mod tests {
 
     use super::{
         CollectionListQuery, CollectionMutationError, CollectionMutationInput,
-        CollectionMutationService, CollectionProjectionService, collection_from_record,
+        CollectionMutationService, CollectionProjectionService, CollectionsSort,
+        collection_from_record,
     };
 
     #[tokio::test]
@@ -566,6 +622,7 @@ mod tests {
                     size: 20,
                     unpaged: false,
                     search: Some("space".to_string()),
+                    sort: CollectionsSort::SearchOrName,
                 },
             )
             .await
@@ -582,6 +639,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn collection_projection_service_filters_by_search_before_explicit_sort() {
+        let ports = TestCollectionPorts::new();
+        let service = CollectionProjectionService::new(&ports, &ports, &ports);
+
+        let page = service
+            .list_collections(
+                &context_with_libraries(["library-a", "library-b", "library-c"]),
+                None,
+                CollectionListQuery {
+                    page: 0,
+                    size: 20,
+                    unpaged: false,
+                    search: Some("space".to_string()),
+                    sort: CollectionsSort::NameAsc,
+                },
+            )
+            .await
+            .expect("collections should resolve");
+
+        assert_eq!(page.total_elements, 2);
+        assert_eq!(
+            page.content
+                .iter()
+                .map(|collection| collection.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Alpha", "Beta"],
+        );
+    }
+
+    #[tokio::test]
     async fn collection_projection_service_sorts_by_name_before_pagination() {
         let ports = TestCollectionPorts::new();
         let service = CollectionProjectionService::new(&ports, &ports, &ports);
@@ -595,6 +682,7 @@ mod tests {
                     size: 2,
                     unpaged: false,
                     search: None,
+                    sort: CollectionsSort::SearchOrName,
                 },
             )
             .await
