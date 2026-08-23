@@ -198,22 +198,6 @@ pub async fn refresh_book_metadata(
                 .context(format!("failed to refresh BOOK_METADATA for '{book_id}'"))
         })?;
 
-        sqlx::query(
-            r#"
-            UPDATE BOOK
-            SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-            WHERE ID = ?
-            "#,
-        )
-        .bind(&book_id)
-        .execute(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to refresh BOOK row timestamp for '{book_id}': "
-            ))
-        })?;
-
         let book_context = sqlx::query(
             r#"
             SELECT SERIES_ID, LIBRARY_ID
@@ -400,21 +384,6 @@ pub async fn refresh_series_metadata(
             anyhow::anyhow!(error).context(format!(
                 "failed to refresh SERIES_METADATA for '{series_id}': "
             ))
-        })?;
-
-        sqlx::query(
-            r#"
-                UPDATE SERIES
-                SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-                WHERE ID = ?
-                "#,
-        )
-        .bind(&series_id)
-        .execute(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error)
-                .context(format!("failed to refresh SERIES row for '{series_id}'"))
         })?;
 
         sqlx::query(
