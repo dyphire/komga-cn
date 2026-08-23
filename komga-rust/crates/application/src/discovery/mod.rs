@@ -33,7 +33,7 @@ pub use browse_engine::{
 };
 pub use collections::{
     CollectionCreateResult, CollectionListQuery, CollectionMutationError, CollectionMutationInput,
-    CollectionMutationService, CollectionProjectionService,
+    CollectionMutationService, CollectionProjectionService, CollectionsSort,
 };
 pub use detail_port::{
     BookDetailPort, CollectionMutationPort, CollectionPort, CollectionProjectionPort,
