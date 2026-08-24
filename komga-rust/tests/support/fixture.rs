@@ -7,8 +7,8 @@ use std::pin::Pin;
 use axum::Router;
 use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::RuntimeConfig;
-use komga_infrastructure::connect_task_write_pool;
-use komga_infrastructure::{SearchIndexLifecycle, rebuild_index_from_database};
+use komga_infrastructure::persistence::connect_task_write_pool;
+use komga_infrastructure::{search::SearchIndexLifecycle, search::rebuild_index_from_database};
 use komga_interfaces::state::RuntimeSseEventHub;
 use std::sync::Arc;
 

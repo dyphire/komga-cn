@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use std::collections::BTreeMap;
 
 use axum::Json;
@@ -58,7 +56,7 @@ pub(crate) async fn patch_client_settings_global(
 ) -> Response {
     let settings = match parse_client_settings_global_payload(&body) {
         Ok(settings) => settings,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     match app
@@ -78,7 +76,7 @@ pub(crate) async fn patch_client_settings_user(
 ) -> Response {
     let settings = match parse_client_settings_user_payload(&body) {
         Ok(settings) => settings,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     match app
@@ -98,7 +96,7 @@ pub(crate) async fn delete_client_settings_global(
 ) -> Response {
     let keys = match parse_client_settings_delete_keys(&body) {
         Ok(keys) => keys,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     match app
@@ -118,7 +116,7 @@ pub(crate) async fn delete_client_settings_user(
 ) -> Response {
     let keys = match parse_client_settings_delete_keys(&body) {
         Ok(keys) => keys,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     match app
@@ -131,31 +129,31 @@ pub(crate) async fn delete_client_settings_user(
     }
 }
 
-fn parse_client_settings_global_payload(body: &[u8]) -> Result<ClientGlobalSettings, Response> {
+fn parse_client_settings_global_payload(body: &[u8]) -> Result<ClientGlobalSettings, StatusCode> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
     let Some(object) = value.as_object() else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
 
     let mut settings = BTreeMap::new();
     for (key, item) in object {
         if !is_valid_client_settings_key(key) {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         }
         let Some(item) = item.as_object() else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         let Some(value) = item.get("value").and_then(Value::as_str) else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         if value.trim().is_empty() {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         }
         let Some(allow_unauthorized) = item.get("allowUnauthorized").and_then(Value::as_bool)
         else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         settings.insert(
             key.to_string(),
@@ -169,27 +167,27 @@ fn parse_client_settings_global_payload(body: &[u8]) -> Result<ClientGlobalSetti
     Ok(settings)
 }
 
-fn parse_client_settings_user_payload(body: &[u8]) -> Result<ClientUserSettings, Response> {
+fn parse_client_settings_user_payload(body: &[u8]) -> Result<ClientUserSettings, StatusCode> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
     let Some(object) = value.as_object() else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
 
     let mut settings = BTreeMap::new();
     for (key, item) in object {
         if !is_valid_client_settings_key(key) {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         }
         let Some(item) = item.as_object() else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         let Some(value) = item.get("value").and_then(Value::as_str) else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         if value.trim().is_empty() {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         }
         settings.insert(
             key.to_string(),
@@ -202,21 +200,21 @@ fn parse_client_settings_user_payload(body: &[u8]) -> Result<ClientUserSettings,
     Ok(settings)
 }
 
-fn parse_client_settings_delete_keys(body: &[u8]) -> Result<Vec<String>, Response> {
+fn parse_client_settings_delete_keys(body: &[u8]) -> Result<Vec<String>, StatusCode> {
     let Ok(value) = serde_json::from_slice::<Value>(body) else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
     let Some(items) = value.as_array() else {
-        return Err(StatusCode::BAD_REQUEST.into_response());
+        return Err(StatusCode::BAD_REQUEST);
     };
 
     let mut keys = Vec::new();
     for item in items {
         let Some(key) = item.as_str().filter(|value| !value.is_empty()) else {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         };
         if !is_valid_client_settings_key(key) {
-            return Err(StatusCode::BAD_REQUEST.into_response());
+            return Err(StatusCode::BAD_REQUEST);
         }
         keys.push(key.to_string());
     }
@@ -314,7 +312,7 @@ mod tests {
         let response = parse_client_settings_user_payload(payload)
             .expect_err("blank-only values should be rejected");
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(response, axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -341,7 +339,7 @@ mod tests {
         let response = parse_client_settings_delete_keys(br#"[" reader.zoom "]"#)
             .expect_err("whitespace-padded keys should fail raw validation");
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(response, axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[test]
@@ -353,7 +351,7 @@ mod tests {
             let response = parse_client_settings_delete_keys(invalid_payload)
                 .expect_err("following segments must start with lowercase letter or digit");
 
-            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(response, axum::http::StatusCode::BAD_REQUEST);
         }
     }
 }

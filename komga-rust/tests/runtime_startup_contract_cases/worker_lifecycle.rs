@@ -1,9 +1,10 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::DatabaseHandle;
-use komga_infrastructure::TaskRuntimeOwnershipOverrides;
+use komga_infrastructure::persistence::DatabaseHandle;
+use komga_infrastructure::tasks::TaskRuntimeOwnershipOverrides;
 use komga_infrastructure::{
-    bootstrap_pool, connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    persistence::bootstrap_pool, persistence::connect_task_pool,
+    persistence::connect_task_write_pool, persistence::default_read_max_connections,
 };
 
 #[test]
@@ -39,7 +40,7 @@ fn runtime_startup_prepare_task_queue_enqueues_search_rebuild_without_processing
     let (logs, queued_rebuild_tasks) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            let background = komga_infrastructure::prepare_task_queue(
+            let background = komga_infrastructure::tasks::prepare_task_queue(
                 runtime_task_context(&config).await,
                 Some("RebuildIndex"),
             )
@@ -113,9 +114,11 @@ fn runtime_startup_prepare_task_queue_applies_configured_task_pool_size() {
     });
 
     let task_pool_size = runtime.block_on(async {
-        let background =
-            komga_infrastructure::prepare_task_queue(runtime_task_context(&config).await, None)
-                .await;
+        let background = komga_infrastructure::tasks::prepare_task_queue(
+            runtime_task_context(&config).await,
+            None,
+        )
+        .await;
         background.task_pool_size()
     });
 
@@ -139,7 +142,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
             let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
                 .await
                 .expect("test private read pool should open");
-            komga_infrastructure::TaskRuntimeContext::new(
+            komga_infrastructure::tasks::TaskRuntimeContext::new(
                 DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
@@ -164,7 +167,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
 
     let logs = capture_contract_log_async(&config, async move {
         let _background =
-            komga_infrastructure::prepare_task_queue(runtime, Some("RebuildIndex")).await;
+            komga_infrastructure::tasks::prepare_task_queue(runtime, Some("RebuildIndex")).await;
     });
 
     let events = parse_json_log_lines(&logs);
@@ -214,7 +217,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
                 connect_task_pool(root.join("database.sqlite"), default_read_max_connections())
                     .await
                     .expect("test private read pool should open");
-            komga_infrastructure::TaskRuntimeContext::new(
+            komga_infrastructure::tasks::TaskRuntimeContext::new(
                 main_db,
                 root.join("tasks.sqlite"),
                 root.join("lucene"),
@@ -238,7 +241,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
 
     let (logs, queued_rebuild_tasks) = capture_contract_log_async_result(&config, async move {
         let background =
-            komga_infrastructure::prepare_task_queue(runtime, Some("RebuildIndex")).await;
+            komga_infrastructure::tasks::prepare_task_queue(runtime, Some("RebuildIndex")).await;
         background
             .queued_task_counts()
             .await
@@ -300,9 +303,11 @@ fn runtime_startup_prepare_task_queue_logs_no_startup_library_scan_skip_when_no_
     let (logs, queued_scan_tasks) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            let background =
-                komga_infrastructure::prepare_task_queue(runtime_task_context(&config).await, None)
-                    .await;
+            let background = komga_infrastructure::tasks::prepare_task_queue(
+                runtime_task_context(&config).await,
+                None,
+            )
+            .await;
             background
                 .queued_task_counts()
                 .await
@@ -372,7 +377,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     let (run_logs, ()) = capture_contract_log_async_result(&config, {
         let config = config.clone();
         async move {
-            komga_infrastructure::process_startup_library_scans(
+            komga_infrastructure::tasks::process_startup_library_scans(
                 runtime_task_context(&config).await,
             )
             .await;
@@ -432,7 +437,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     let disabled_startup_logs = capture_contract_log_async(&disabled_startup_config, {
         let config = disabled_startup_config.clone();
         async move {
-            komga_infrastructure::process_startup_library_scans(
+            komga_infrastructure::tasks::process_startup_library_scans(
                 runtime_task_context(&config).await,
             )
             .await;
@@ -469,7 +474,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
             let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
                 .await
                 .expect("test private read pool should open");
-            komga_infrastructure::TaskRuntimeContext::new(
+            komga_infrastructure::tasks::TaskRuntimeContext::new(
                 DatabaseHandle::file_backed(db_path)
                     .await
                     .expect("test db should open"),
@@ -493,7 +498,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
     skip_config.log_file = skip_root.join("logs").join("komga.log");
 
     let skip_logs = capture_contract_log_async(&skip_config, async move {
-        komga_infrastructure::process_startup_library_scans(skip_runtime).await;
+        komga_infrastructure::tasks::process_startup_library_scans(skip_runtime).await;
     });
     let skip_events = parse_json_log_lines(&skip_logs);
     let skip = runtime_event_with_component(
@@ -530,7 +535,7 @@ fn runtime_startup_library_scan_processing_logs_no_libraries_skip_boundary() {
     let logs = capture_contract_log_async(&config, {
         let config = config.clone();
         async move {
-            komga_infrastructure::process_startup_library_scans(
+            komga_infrastructure::tasks::process_startup_library_scans(
                 runtime_task_context(&config).await,
             )
             .await;

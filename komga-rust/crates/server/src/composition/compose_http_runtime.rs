@@ -19,15 +19,25 @@ use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventSource}
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile as ConfigRuntimeProfile;
 use komga_config::writer_ownership::WriterKind;
-use komga_infrastructure::ServerSettingsStore;
+use komga_infrastructure::operational::ServerSettingsStore;
 use komga_infrastructure::{
-    ActuatorSnapshotAccess, AnnouncementAccess, ClaimAccess, ClientSettingsAccess, ContentResolver,
-    DiscoveryDetailAccess, DiscoveryQuerySupportAccess, FilesystemBookImport,
-    FilesystemBrowseAccess, FontAccess, HistoryAccess, IdentityAccess, LibraryCatalogAccess,
-    MediaReader, OpdsCatalogAccess, OpdsPersistedAccess, OperationalMetricsAccess, PageHashAccess,
-    ProgressWriter, RemoteFeedAccess, SearchSyncAdapter, SqliteBookMetadataPort,
-    SqliteDiscoveryBrowseService, SseBookEventEmitter, SyncpointAccess, TaskEnqueueAdapter,
-    ThumbnailWriter, TransientBookAccess, ZipArchiveBuilder, load_remember_me_runtime_settings,
+    discovery::{
+        DiscoveryDetailAccess, DiscoveryQuerySupportAccess, LibraryCatalogAccess,
+        SqliteDiscoveryBrowseService,
+    },
+    identity::{ClaimAccess, IdentityAccess},
+    media::{
+        ContentResolver, FilesystemBookImport, MediaReader, ProgressWriter, SqliteBookMetadataPort,
+        SseBookEventEmitter, ThumbnailWriter, TransientBookAccess, ZipArchiveBuilder,
+    },
+    opds::{OpdsCatalogAccess, OpdsPersistedAccess},
+    operational::{
+        ActuatorSnapshotAccess, AnnouncementAccess, ClientSettingsAccess, FilesystemBrowseAccess,
+        FontAccess, HistoryAccess, OperationalMetricsAccess, PageHashAccess, RemoteFeedAccess,
+        SyncpointAccess, load_remember_me_runtime_settings,
+    },
+    search::SearchSyncAdapter,
+    tasks::TaskEnqueueAdapter,
 };
 use komga_interfaces::state::{
     AuthDatabaseState, DiscoveryAuthState, HttpAppState, HttpServices, IdentityState,

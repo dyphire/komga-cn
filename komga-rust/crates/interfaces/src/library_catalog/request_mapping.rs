@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use crate::contracts::common::ViolationDto;
 use crate::helpers::validation_error_response;
 use axum::response::Response;
@@ -10,12 +8,14 @@ use serde_json::Value;
 
 use super::handlers::bad_request_response;
 
-pub(super) fn parse_create_library_change_set(body: &Value) -> Result<LibraryChangeSet, Response> {
+pub(super) fn parse_create_library_change_set(
+    body: &Value,
+) -> Result<LibraryChangeSet, Box<Response>> {
     let changes = parse_library_change_set(body, "library create payload must be a JSON object")?;
     if changes.name.is_none() || changes.root.is_none() {
-        return Err(bad_request_response(
+        return Err(Box::new(bad_request_response(
             "library create payload must include name and root",
-        ));
+        )));
     }
     if changes
         .name
@@ -26,20 +26,22 @@ pub(super) fn parse_create_library_change_set(body: &Value) -> Result<LibraryCha
             .as_deref()
             .is_some_and(|value| value.trim().is_empty())
     {
-        return Err(bad_request_response(
+        return Err(Box::new(bad_request_response(
             "library create payload must provide non-empty name and root",
-        ));
+        )));
     }
     Ok(changes)
 }
 
-pub(super) fn parse_update_library_change_set(body: &Value) -> Result<LibraryChangeSet, Response> {
+pub(super) fn parse_update_library_change_set(
+    body: &Value,
+) -> Result<LibraryChangeSet, Box<Response>> {
     let mut normalized = match body.as_object() {
         Some(body) => body.clone(),
         None => {
-            return Err(bad_request_response(
+            return Err(Box::new(bad_request_response(
                 "library update payload must be a JSON object",
-            ));
+            )));
         }
     };
 
@@ -47,9 +49,9 @@ pub(super) fn parse_update_library_change_set(body: &Value) -> Result<LibraryCha
     normalize_nullable_patch_string_field(&mut normalized, "root", &mut violations)?;
     normalize_nullable_patch_string_field(&mut normalized, "name", &mut violations)?;
     if !violations.is_empty() {
-        return Err(validation_error_response(violations));
+        return Err(Box::new(validation_error_response(violations)));
     }
-    normalize_nullable_patch_string_array_field(&mut normalized, "scanDirectoryExclusions")?;
+    normalize_nullable_patch_string_array_field(&mut normalized, "scanDirectoryExclusions");
 
     parse_library_change_set(
         &Value::Object(normalized),
@@ -70,10 +72,10 @@ pub(super) fn is_deep_scan_query(query: &str) -> bool {
 fn parse_library_change_set(
     body: &Value,
     invalid_message: &str,
-) -> Result<LibraryChangeSet, Response> {
+) -> Result<LibraryChangeSet, Box<Response>> {
     let body = match body.as_object() {
         Some(body) => body,
-        None => return Err(bad_request_response(invalid_message)),
+        None => return Err(Box::new(bad_request_response(invalid_message))),
     };
 
     let mut changes = LibraryChangeSet::default();
@@ -148,12 +150,14 @@ fn apply_string_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<String>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
     let Some(value) = value.as_str() else {
-        return Err(bad_request_response(&format!("{key} must be a string")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} must be a string"
+        ))));
     };
     *field = Some(value.to_string());
     Ok(())
@@ -163,15 +167,19 @@ fn apply_scan_interval_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<LibraryScanInterval>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
     let Some(value) = value.as_str() else {
-        return Err(bad_request_response(&format!("{key} must be a string")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} must be a string"
+        ))));
     };
     let Some(scan_interval) = LibraryScanInterval::from_persisted_name(value) else {
-        return Err(bad_request_response(&format!("{key} has an invalid value")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} has an invalid value"
+        ))));
     };
     *field = Some(scan_interval);
     Ok(())
@@ -181,15 +189,19 @@ fn apply_series_cover_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<LibrarySeriesCover>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
     let Some(value) = value.as_str() else {
-        return Err(bad_request_response(&format!("{key} must be a string")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} must be a string"
+        ))));
     };
     let Some(series_cover) = LibrarySeriesCover::from_persisted_name(value) else {
-        return Err(bad_request_response(&format!("{key} has an invalid value")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} has an invalid value"
+        ))));
     };
     *field = Some(series_cover);
     Ok(())
@@ -199,12 +211,14 @@ fn apply_bool_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<bool>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
     let Some(value) = value.as_bool() else {
-        return Err(bad_request_response(&format!("{key} must be a boolean")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} must be a boolean"
+        ))));
     };
     *field = Some(value);
     Ok(())
@@ -214,7 +228,7 @@ fn apply_optional_string_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<Option<String>>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
@@ -223,9 +237,9 @@ fn apply_optional_string_field(
         return Ok(());
     }
     let Some(value) = value.as_str() else {
-        return Err(bad_request_response(&format!(
+        return Err(Box::new(bad_request_response(&format!(
             "{key} must be a string or null"
-        )));
+        ))));
     };
     *field = Some(if value.chars().all(|ch| ch.is_whitespace()) {
         None
@@ -239,21 +253,21 @@ fn apply_string_array_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
     field: &mut Option<Vec<String>>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
     let Some(values) = value.as_array() else {
-        return Err(bad_request_response(&format!(
+        return Err(Box::new(bad_request_response(&format!(
             "{key} must be an array of strings"
-        )));
+        ))));
     };
     let mut next = Vec::with_capacity(values.len());
     for entry in values {
         let Some(entry) = entry.as_str() else {
-            return Err(bad_request_response(&format!(
+            return Err(Box::new(bad_request_response(&format!(
                 "{key} must be an array of strings"
-            )));
+            ))));
         };
         next.push(entry.to_string());
     }
@@ -265,7 +279,7 @@ fn normalize_nullable_patch_string_field(
     body: &mut serde_json::Map<String, Value>,
     key: &str,
     violations: &mut Vec<ViolationDto>,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     let Some(value) = body.get(key) else {
         return Ok(());
     };
@@ -274,7 +288,9 @@ fn normalize_nullable_patch_string_field(
         return Ok(());
     }
     let Some(value) = value.as_str() else {
-        return Err(bad_request_response(&format!("{key} must be a string")));
+        return Err(Box::new(bad_request_response(&format!(
+            "{key} must be a string"
+        ))));
     };
     if value.trim().is_empty() {
         violations.push(ViolationDto {
@@ -288,14 +304,13 @@ fn normalize_nullable_patch_string_field(
 fn normalize_nullable_patch_string_array_field(
     body: &mut serde_json::Map<String, Value>,
     key: &str,
-) -> Result<(), Response> {
+) {
     let Some(value) = body.get_mut(key) else {
-        return Ok(());
+        return;
     };
     if value.is_null() {
         *value = Value::Array(vec![]);
     }
-    Ok(())
 }
 
 #[cfg(test)]

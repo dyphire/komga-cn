@@ -20,11 +20,14 @@ use super::super::access_control::{
 };
 use super::super::http_helpers::internal_error_response;
 
-async fn ensure_series_exists(app: &MediaAssetsState, series_id: &str) -> Result<(), Response> {
+async fn ensure_series_exists(
+    app: &MediaAssetsState,
+    series_id: &str,
+) -> Result<(), Box<Response>> {
     match app.thumbnail_reader.series_exists(series_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(StatusCode::NOT_FOUND.into_response()),
-        Err(error) => Err(internal_error_response(error)),
+        Ok(false) => Err(Box::new(StatusCode::NOT_FOUND.into_response())),
+        Err(error) => Err(Box::new(internal_error_response(error))),
     }
 }
 
@@ -38,7 +41,7 @@ pub(crate) async fn series_thumbnail(
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
 
     if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-        return response;
+        return *response;
     }
 
     match user_can_access_series_media(&app, &resolved_series_id, &user).await {
@@ -70,7 +73,7 @@ pub(crate) async fn series_thumbnails(
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-        return response;
+        return *response;
     }
     match user_can_access_series_media(&app, &resolved_series_id, &user).await {
         Ok(true) => {}
@@ -103,7 +106,7 @@ pub(crate) async fn series_thumbnail_by_id(
     let unrestricted_all_libraries = user_has_unrestricted_all_libraries(&user);
     if !unrestricted_all_libraries {
         if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-            return response;
+            return *response;
         }
         match user_can_access_series_media(&app, &resolved_series_id, &user).await {
             Ok(true) => {}
@@ -146,7 +149,7 @@ pub(crate) async fn series_thumbnail_upload(
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-        return response;
+        return *response;
     }
     match app
         .thumbnail_reader
@@ -161,7 +164,7 @@ pub(crate) async fn series_thumbnail_upload(
 
     let upload = match parse_thumbnail_upload(multipart, "series").await {
         Ok(parsed) => parsed,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
@@ -192,7 +195,7 @@ pub(crate) async fn series_thumbnail_select(
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-        return response;
+        return *response;
     }
     match app
         .thumbnail_reader
@@ -225,7 +228,7 @@ pub(crate) async fn series_thumbnail_delete(
     let resolved_series_id =
         resolve_persisted_series_id(app.series_id_resolver.as_ref(), &series_id).await;
     if let Err(response) = ensure_series_exists(&app, &resolved_series_id).await {
-        return response;
+        return *response;
     }
     let thumbnail = match app
         .thumbnail_reader

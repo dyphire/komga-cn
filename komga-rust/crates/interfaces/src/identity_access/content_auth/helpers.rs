@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -113,7 +111,7 @@ pub(super) fn looks_like_kotlin_user_email(value: &str) -> bool {
     has_all_non_empty_segments && domain.contains('.')
 }
 
-pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<AuthUserRole>, Response> {
+pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<AuthUserRole>, &'static str> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
@@ -122,16 +120,16 @@ pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<AuthUserRol
     }
 
     let Some(values) = value.as_array() else {
-        return Err(bad_request("roles must be an array of strings"));
+        return Err("roles must be an array of strings");
     };
 
     let mut roles = BTreeSet::new();
     for value in values {
         let Some(role) = value.as_str() else {
-            return Err(bad_request("roles must be an array of strings"));
+            return Err("roles must be an array of strings");
         };
-        let role = AuthUserRole::from_persisted_name(role)
-            .ok_or_else(|| bad_request("roles contains an unknown role"))?;
+        let role =
+            AuthUserRole::from_persisted_name(role).ok_or("roles contains an unknown role")?;
         roles.insert(role);
     }
     Ok(roles.into_iter().collect())
@@ -139,7 +137,7 @@ pub(super) fn parse_roles_array(value: Option<&Value>) -> Result<Vec<AuthUserRol
 
 pub(super) fn parse_string_set_optional(
     value: Option<&Value>,
-) -> Result<Option<Vec<String>>, Response> {
+) -> Result<Option<Vec<String>>, &'static str> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -148,13 +146,13 @@ pub(super) fn parse_string_set_optional(
     }
 
     let Some(values) = value.as_array() else {
-        return Err(bad_request("labels must be an array of strings"));
+        return Err("labels must be an array of strings");
     };
 
     let mut labels = BTreeSet::new();
     for value in values {
         let Some(label) = value.as_str() else {
-            return Err(bad_request("labels must be an array of strings"));
+            return Err("labels must be an array of strings");
         };
         let label = label.trim();
         if label.is_empty() {
@@ -168,7 +166,7 @@ pub(super) fn parse_string_set_optional(
 
 pub(super) fn parse_age_restriction_optional(
     value: Option<&Value>,
-) -> Result<Option<AgeRestrictionPatch>, Response> {
+) -> Result<Option<AgeRestrictionPatch>, &'static str> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -177,20 +175,18 @@ pub(super) fn parse_age_restriction_optional(
     }
 
     let Some(object) = value.as_object() else {
-        return Err(bad_request("ageRestriction must be an object"));
+        return Err("ageRestriction must be an object");
     };
 
     let Some(age) = object.get("age").and_then(Value::as_i64) else {
-        return Err(bad_request("ageRestriction.age must be an integer"));
+        return Err("ageRestriction.age must be an integer");
     };
     if age < 0 {
-        return Err(bad_request("ageRestriction.age must be >= 0"));
+        return Err("ageRestriction.age must be >= 0");
     }
 
     let Some(restriction) = object.get("restriction").and_then(Value::as_str) else {
-        return Err(bad_request(
-            "ageRestriction.restriction must be ALLOW_ONLY, EXCLUDE, or NONE",
-        ));
+        return Err("ageRestriction.restriction must be ALLOW_ONLY, EXCLUDE, or NONE");
     };
 
     match restriction {
@@ -203,41 +199,35 @@ pub(super) fn parse_age_restriction_optional(
             allow_only: false,
         })),
         "NONE" => Ok(None),
-        _ => Err(bad_request(
-            "ageRestriction.restriction must be ALLOW_ONLY, EXCLUDE, or NONE",
-        )),
+        _ => Err("ageRestriction.restriction must be ALLOW_ONLY, EXCLUDE, or NONE"),
     }
 }
 
 pub(super) fn parse_shared_libraries_patch(
     value: Option<&Value>,
-) -> Result<SharedLibrariesPatch, Response> {
+) -> Result<SharedLibrariesPatch, &'static str> {
     let Some(value) = value else {
-        return Err(bad_request("sharedLibraries is required"));
+        return Err("sharedLibraries is required");
     };
     let Some(object) = value.as_object() else {
-        return Err(bad_request("sharedLibraries must be an object"));
+        return Err("sharedLibraries must be an object");
     };
 
     let Some(all) = object.get("all").and_then(Value::as_bool) else {
-        return Err(bad_request("sharedLibraries.all must be a boolean"));
+        return Err("sharedLibraries.all must be a boolean");
     };
 
     let library_ids = if all {
         Vec::new()
     } else {
         let Some(ids) = object.get("libraryIds").and_then(Value::as_array) else {
-            return Err(bad_request(
-                "sharedLibraries.libraryIds must be an array of strings",
-            ));
+            return Err("sharedLibraries.libraryIds must be an array of strings");
         };
 
         let mut normalized = BTreeSet::new();
         for value in ids {
             let Some(library_id) = value.as_str() else {
-                return Err(bad_request(
-                    "sharedLibraries.libraryIds must be an array of strings",
-                ));
+                return Err("sharedLibraries.libraryIds must be an array of strings");
             };
             let library_id = library_id.trim();
             if library_id.is_empty() {
@@ -253,7 +243,7 @@ pub(super) fn parse_shared_libraries_patch(
 
 pub(super) fn parse_shared_libraries_create(
     value: Option<&Value>,
-) -> Result<SharedLibrariesPatch, Response> {
+) -> Result<SharedLibrariesPatch, &'static str> {
     let Some(value) = value else {
         return Ok(SharedLibrariesPatch {
             all: true,
@@ -336,11 +326,11 @@ pub(super) async fn required_authenticated_user(
     headers: &HeaderMap,
     connection_info: RequestConnectionInfo,
     app: &IdentityAccessState,
-) -> Result<AuthUser, Response> {
+) -> Result<AuthUser, StatusCode> {
     match authenticated_user(headers, connection_info, app).await {
         Ok(Some(user)) => Ok(user),
-        Ok(None) => Err(StatusCode::UNAUTHORIZED.into_response()),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Ok(None) => Err(StatusCode::UNAUTHORIZED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }
 
@@ -495,16 +485,15 @@ pub(super) fn query_bool(query: &str, key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::StatusCode;
     use serde_json::json;
 
     use super::*;
 
     #[test]
     fn parse_roles_array_rejects_unknown_roles() {
-        let response = parse_roles_array(Some(&json!(["PAGE_STREAMING", "BROKEN"])))
-            .expect_err("unknown roles should return a bad request response");
+        let error = parse_roles_array(Some(&json!(["PAGE_STREAMING", "BROKEN"])))
+            .expect_err("unknown roles should be rejected");
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(error, "roles contains an unknown role");
     }
 }

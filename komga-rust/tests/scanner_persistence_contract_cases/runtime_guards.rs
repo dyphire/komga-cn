@@ -1,9 +1,10 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::DatabaseHandle;
-use komga_infrastructure::TaskRuntimeOwnershipOverrides;
+use komga_infrastructure::persistence::DatabaseHandle;
+use komga_infrastructure::tasks::TaskRuntimeOwnershipOverrides;
 use komga_infrastructure::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    persistence::connect_task_pool, persistence::connect_task_write_pool,
+    persistence::default_read_max_connections,
 };
 
 #[tokio::test]
@@ -190,7 +191,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     .expect("claimed task row should be inserted");
     tasks_pool.close().await;
 
-    let _background = komga_infrastructure::prepare_task_queue(
+    let _background = komga_infrastructure::tasks::prepare_task_queue(
         runtime_task_context_from_config(&fixture.config).await,
         None,
     )
@@ -275,7 +276,8 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         owns_search_index: Some(false),
     });
 
-    let background = komga_infrastructure::prepare_task_queue(runtime, Some("RebuildIndex")).await;
+    let background =
+        komga_infrastructure::tasks::prepare_task_queue(runtime, Some("RebuildIndex")).await;
 
     let verify_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await

@@ -28,7 +28,7 @@ pub(crate) async fn users_me_api_keys_create(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     let Some(comment) = api_key_comment_from_request(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
@@ -69,7 +69,7 @@ pub(crate) async fn users_me_api_keys_list(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if auth_db.demo_mode && !user_is_admin(&current_user) {
         return StatusCode::FORBIDDEN.into_response();
@@ -101,7 +101,7 @@ pub(crate) async fn users_me_api_keys_delete(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     match persisted_delete_api_key_by_id(identity, user_id(&current_user), &api_key_id).await {
@@ -121,7 +121,7 @@ pub(crate) async fn users_me_authentication_activity(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if auth_db.demo_mode && !user_is_admin(&current_user) {
         return StatusCode::FORBIDDEN.into_response();
@@ -152,7 +152,7 @@ pub(crate) async fn users_authentication_activity(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) {
         return StatusCode::FORBIDDEN.into_response();
@@ -180,7 +180,7 @@ pub(crate) async fn users_by_id_authentication_activity_latest(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 
 use super::documents;
-use super::index_lifecycle::{
+use super::lifecycle::{
     SearchDocument, SearchEntityType, SearchError, SearchEvent, SearchIndexLifecycle,
     SearchQueryLifecycle, SearchScoredHit, prepare_for_rebuild,
 };

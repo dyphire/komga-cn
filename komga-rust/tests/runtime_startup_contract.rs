@@ -1,7 +1,8 @@
-use komga_infrastructure::TaskRuntimeOwnershipOverrides;
-use komga_infrastructure::{DatabaseHandle, search_analyzer_version};
+use komga_infrastructure::tasks::TaskRuntimeOwnershipOverrides;
+use komga_infrastructure::{persistence::DatabaseHandle, search::search_analyzer_version};
 use komga_infrastructure::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    persistence::connect_task_pool, persistence::connect_task_write_pool,
+    persistence::default_read_max_connections,
 };
 
 mod runtime_startup_contract_cases;
@@ -14,14 +15,14 @@ use tantivy::schema::{STORED, STRING, Schema};
 
 async fn runtime_task_context(
     config: &komga_config::env_config::RuntimeConfig,
-) -> komga_infrastructure::TaskRuntimeContext {
+) -> komga_infrastructure::tasks::TaskRuntimeContext {
     let task_write_pool = connect_task_write_pool(&config.database_file)
         .await
         .expect("test private write pool should open");
     let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
         .await
         .expect("test private read pool should open");
-    komga_infrastructure::TaskRuntimeContext::new(
+    komga_infrastructure::tasks::TaskRuntimeContext::new(
         DatabaseHandle::file_backed(config.database_file.clone())
             .await
             .expect("test db should open"),

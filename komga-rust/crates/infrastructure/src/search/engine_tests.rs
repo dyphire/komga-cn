@@ -4,10 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sqlx::SqlitePool;
 
 use super::SearchIndexEngine;
-use crate::search::index_lifecycle::{
+use crate::persistence::sqlite::connect_main_write_context;
+use crate::search::lifecycle::{
     SearchDocument, SearchEntityType, SearchField, SearchFieldEntry, SearchIndexLifecycle,
 };
-use crate::sqlite::connect_main_write_context;
 
 struct SearchIndexEngineFixture {
     database_file: PathBuf,

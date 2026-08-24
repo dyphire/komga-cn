@@ -1,8 +1,8 @@
 use bcrypt::{DEFAULT_COST, hash as hash_bcrypt_password};
 use komga_application::identity_access::{AuthOutcome, AuthenticationPort};
 use komga_infrastructure::{
-    ContentResolver, DatabaseHandle, IdentityAccess, bootstrap_pool,
-    persisted_update_password_by_user_id,
+    identity::IdentityAccess, identity::persisted_update_password_by_user_id,
+    media::ContentResolver, persistence::DatabaseHandle, persistence::bootstrap_pool,
 };
 use std::sync::Arc;
 use tempfile::TempDir;

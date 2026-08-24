@@ -36,7 +36,7 @@ use activity_routes::{
     users_me_authentication_activity,
 };
 use helpers::{
-    generated_user_id, looks_like_kotlin_user_email, parse_age_restriction_optional,
+    bad_request, generated_user_id, looks_like_kotlin_user_email, parse_age_restriction_optional,
     parse_roles_array, parse_shared_libraries_create, parse_shared_libraries_patch,
     parse_string_set_optional, password_from_request, register_discovery_principal,
     required_authenticated_user, spring_error, validation_error,
@@ -173,7 +173,7 @@ pub(super) async fn users_create(
 ) -> Response {
     let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) {
         return StatusCode::FORBIDDEN.into_response();
@@ -200,21 +200,21 @@ pub(super) async fn users_create(
 
     let roles = match parse_roles_array(payload.get("roles")) {
         Ok(roles) => roles,
-        Err(response) => return response,
+        Err(message) => return bad_request(message),
     };
     let labels_allow = match parse_string_set_optional(payload.get("labelsAllow")) {
         Ok(labels) => labels,
-        Err(response) => return response,
+        Err(message) => return bad_request(message),
     }
     .unwrap_or_default();
     let labels_exclude = match parse_string_set_optional(payload.get("labelsExclude")) {
         Ok(labels) => labels,
-        Err(response) => return response,
+        Err(message) => return bad_request(message),
     }
     .unwrap_or_default();
     let age_restriction = match parse_age_restriction_optional(payload.get("ageRestriction")) {
         Ok(age_restriction) => age_restriction,
-        Err(response) => return response,
+        Err(message) => return bad_request(message),
     };
 
     let new_user_id = generated_user_id();
@@ -225,7 +225,7 @@ pub(super) async fn users_create(
 
     let shared_libraries = match parse_shared_libraries_create(payload.get("sharedLibraries")) {
         Ok(shared_libraries) => shared_libraries,
-        Err(response) => return response,
+        Err(message) => return bad_request(message),
     };
 
     match app
@@ -268,7 +268,7 @@ pub(super) async fn users_delete(
     let auth_db = &app.auth_db;
     let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
@@ -306,7 +306,7 @@ pub(super) async fn users_update(
     let auth_db = &app.auth_db;
     let current_user = match required_authenticated_user(&headers, connection_info, &app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();
@@ -322,7 +322,7 @@ pub(super) async fn users_update(
     let roles_patch = if payload.contains_key("roles") {
         match parse_roles_array(payload.get("roles")) {
             Ok(roles) => Some(roles),
-            Err(response) => return response,
+            Err(message) => return bad_request(message),
         }
     } else {
         None
@@ -331,7 +331,7 @@ pub(super) async fn users_update(
     let shared_libraries_patch_raw = if payload.contains_key("sharedLibraries") {
         match parse_shared_libraries_patch(payload.get("sharedLibraries")) {
             Ok(shared_libraries) => Some(shared_libraries),
-            Err(response) => return response,
+            Err(message) => return bad_request(message),
         }
     } else {
         None
@@ -340,7 +340,7 @@ pub(super) async fn users_update(
     let labels_allow_patch = if payload.contains_key("labelsAllow") {
         match parse_string_set_optional(payload.get("labelsAllow")) {
             Ok(labels) => Some(labels.unwrap_or_default()),
-            Err(response) => return response,
+            Err(message) => return bad_request(message),
         }
     } else {
         None
@@ -349,7 +349,7 @@ pub(super) async fn users_update(
     let labels_exclude_patch = if payload.contains_key("labelsExclude") {
         match parse_string_set_optional(payload.get("labelsExclude")) {
             Ok(labels) => Some(labels.unwrap_or_default()),
-            Err(response) => return response,
+            Err(message) => return bad_request(message),
         }
     } else {
         None
@@ -358,7 +358,7 @@ pub(super) async fn users_update(
     let age_restriction_patch = if payload.contains_key("ageRestriction") {
         match parse_age_restriction_optional(payload.get("ageRestriction")) {
             Ok(age_restriction) => Some(age_restriction),
-            Err(response) => return response,
+            Err(message) => return bad_request(message),
         }
     } else {
         None
@@ -435,7 +435,7 @@ pub(super) async fn users_me_password(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
 
     let Some(password) = password_from_request(&body) else {
@@ -463,7 +463,7 @@ pub(super) async fn users_by_id_password(
     let identity = &app.identity;
     let current_user = match required_authenticated_user(&headers, connection_info, app).await {
         Ok(user) => user,
-        Err(response) => return response,
+        Err(status) => return status.into_response(),
     };
     if !user_is_admin(&current_user) && user_id(&current_user) != target_user_id {
         return StatusCode::FORBIDDEN.into_response();

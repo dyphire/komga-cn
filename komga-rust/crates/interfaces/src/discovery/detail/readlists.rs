@@ -93,7 +93,7 @@ pub(crate) async fn readlist_create(
     };
     let input = match parse_readlist_create_input(&payload) {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let created = match app.persisted_sets.create_readlist(input).await {
@@ -112,48 +112,63 @@ pub(crate) async fn readlist_create(
     }
 }
 
-#[allow(clippy::result_large_err)]
-fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput, Response> {
+fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput, Box<Response>> {
     let Some(payload) = payload.as_object() else {
-        return Err(readlist_create_bad_request(
+        return Err(Box::new(readlist_create_bad_request(
             "Request body must be a JSON object",
-        ));
+        )));
     };
 
     let name = match payload.get("name") {
         Some(value) => match value.as_str() {
             Some(value) => value,
-            None => return Err(readlist_create_bad_request("name must be a string")),
+            None => {
+                return Err(Box::new(readlist_create_bad_request(
+                    "name must be a string",
+                )));
+            }
         },
         None => {
-            return Err(readlist_create_bad_request(
+            return Err(Box::new(readlist_create_bad_request(
                 "Required field 'name' is not present",
-            ));
+            )));
         }
     };
     let summary = match payload.get("summary") {
         Some(value) => match value.as_str() {
             Some(value) => value,
-            None => return Err(readlist_create_bad_request("summary must be a string")),
+            None => {
+                return Err(Box::new(readlist_create_bad_request(
+                    "summary must be a string",
+                )));
+            }
         },
         None => "",
     };
     let ordered = match payload.get("ordered") {
         Some(value) => match value.as_bool() {
             Some(value) => value,
-            None => return Err(readlist_create_bad_request("ordered must be a boolean")),
+            None => {
+                return Err(Box::new(readlist_create_bad_request(
+                    "ordered must be a boolean",
+                )));
+            }
         },
         None => true,
     };
     let book_values = match payload.get("bookIds") {
         Some(value) => match value.as_array() {
             Some(value) => value,
-            None => return Err(readlist_create_bad_request("bookIds must be an array")),
+            None => {
+                return Err(Box::new(readlist_create_bad_request(
+                    "bookIds must be an array",
+                )));
+            }
         },
         None => {
-            return Err(readlist_create_bad_request(
+            return Err(Box::new(readlist_create_bad_request(
                 "Required field 'bookIds' is not present",
-            ));
+            )));
         }
     };
 
@@ -176,9 +191,9 @@ fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput,
     let mut saw_duplicate_book_id = false;
     for value in book_values {
         let Some(book_id) = value.as_str() else {
-            return Err(readlist_create_bad_request(
+            return Err(Box::new(readlist_create_bad_request(
                 "bookIds must be an array of strings",
-            ));
+            )));
         };
         let book_id = book_id.to_string();
         if !seen_book_ids.insert(book_id.clone()) {
@@ -196,7 +211,7 @@ fn parse_readlist_create_input(payload: &Value) -> Result<ReadlistMutationInput,
     }
 
     if !violations.is_empty() {
-        return Err(validation_error_response(violations));
+        return Err(Box::new(validation_error_response(violations)));
     }
 
     Ok(ReadlistMutationInput {

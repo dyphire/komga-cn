@@ -17,26 +17,16 @@ use crate::state::MediaAssetsState;
 use super::super::access_control::user_can_access_book_media;
 use super::super::http_helpers::internal_error_response;
 
-async fn load_thumbnail_book_media(
-    app: &MediaAssetsState,
-    book_id: &str,
-) -> Result<Option<PersistedBookMedia>, Response> {
-    app.thumbnail_reader
-        .book_media(book_id)
-        .await
-        .map_err(internal_error_response)
-}
-
 async fn ensure_thumbnail_book_access(
     app: &MediaAssetsState,
     book_id: &str,
     user: &AuthUser,
     media: &PersistedBookMedia,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     match user_can_access_book_media(app.book_media_reader.as_ref(), book_id, user, media).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(StatusCode::FORBIDDEN.into_response()),
-        Err(error) => Err(internal_error_response(error)),
+        Ok(false) => Err(Box::new(StatusCode::FORBIDDEN.into_response())),
+        Err(error) => Err(Box::new(internal_error_response(error))),
     }
 }
 
@@ -44,17 +34,17 @@ async fn ensure_book_thumbnail_belongs(
     app: &MediaAssetsState,
     book_id: &str,
     thumbnail_id: &str,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     match app.thumbnail_reader.book_exists(book_id).await {
         Ok(true) => {}
-        Ok(false) => return Err(StatusCode::NOT_FOUND.into_response()),
-        Err(error) => return Err(internal_error_response(error)),
+        Ok(false) => return Err(Box::new(StatusCode::NOT_FOUND.into_response())),
+        Err(error) => return Err(Box::new(internal_error_response(error))),
     }
     let belongs = app
         .thumbnail_reader
         .book_thumbnails(book_id)
         .await
-        .map_err(internal_error_response)?
+        .map_err(|error| Box::new(internal_error_response(error)))?
         .into_iter()
         .any(|thumbnail| thumbnail.id == thumbnail_id);
     if belongs {
@@ -66,9 +56,9 @@ async fn ensure_book_thumbnail_belongs(
         .book_thumbnail_by_id(thumbnail_id)
         .await
     {
-        Ok(Some(_)) => Err(StatusCode::BAD_REQUEST.into_response()),
-        Ok(None) => Err(StatusCode::NOT_FOUND.into_response()),
-        Err(error) => Err(internal_error_response(error)),
+        Ok(Some(_)) => Err(Box::new(StatusCode::BAD_REQUEST.into_response())),
+        Ok(None) => Err(Box::new(StatusCode::NOT_FOUND.into_response())),
+        Err(error) => Err(Box::new(internal_error_response(error))),
     }
 }
 
@@ -78,13 +68,13 @@ pub(crate) async fn book_thumbnail(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let media = match load_thumbnail_book_media(&app, &book_id).await {
+    let media = match app.thumbnail_reader.book_media(&book_id).await {
         Ok(Some(media)) => media,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(response) => return response,
+        Err(error) => return internal_error_response(error),
     };
     if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await {
-        return response;
+        return *response;
     }
 
     match app.thumbnail_reader.selected_book_thumbnail(&book_id).await {
@@ -108,13 +98,13 @@ pub(crate) async fn book_thumbnail_by_id(
     headers: HeaderMap,
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
-    let media = match load_thumbnail_book_media(&app, &book_id).await {
+    let media = match app.thumbnail_reader.book_media(&book_id).await {
         Ok(Some(media)) => media,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(response) => return response,
+        Err(error) => return internal_error_response(error),
     };
     if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -123,15 +113,15 @@ pub(crate) async fn book_thumbnail_by_id(
         .await
     {
         Ok(Some(thumbnail)) => {
-            let owner_media = match load_thumbnail_book_media(&app, &thumbnail.owner_id).await {
+            let owner_media = match app.thumbnail_reader.book_media(&thumbnail.owner_id).await {
                 Ok(Some(media)) => media,
                 Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-                Err(response) => return response,
+                Err(error) => return internal_error_response(error),
             };
             if let Err(response) =
                 ensure_thumbnail_book_access(&app, &thumbnail.owner_id, &user, &owner_media).await
             {
-                return response;
+                return *response;
             }
             response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail)
         }
@@ -145,15 +135,15 @@ pub(crate) async fn book_thumbnails(
     Authenticated(user): Authenticated,
     Path(book_id): Path<String>,
 ) -> Response {
-    match load_thumbnail_book_media(&app, &book_id).await {
+    match app.thumbnail_reader.book_media(&book_id).await {
         Ok(Some(media)) => {
             if let Err(response) = ensure_thumbnail_book_access(&app, &book_id, &user, &media).await
             {
-                return response;
+                return *response;
             }
         }
         Ok(None) => {}
-        Err(response) => return response,
+        Err(error) => return internal_error_response(error),
     }
 
     match app.thumbnail_reader.book_thumbnails(&book_id).await {
@@ -195,7 +185,7 @@ pub(crate) async fn book_thumbnail_upload(
 
     let upload = match parse_thumbnail_upload(multipart, "book").await {
         Ok(parsed) => parsed,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
@@ -224,7 +214,7 @@ pub(crate) async fn book_thumbnail_select(
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_book_thumbnail_belongs(&app, &book_id, &thumbnail_id).await {
-        return response;
+        return *response;
     }
 
     match app.thumbnails.select_book(&thumbnail_id).await {
@@ -240,7 +230,7 @@ pub(crate) async fn book_thumbnail_delete(
     Path((book_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_book_thumbnail_belongs(&app, &book_id, &thumbnail_id).await {
-        return response;
+        return *response;
     }
 
     match app.thumbnails.delete_book(&thumbnail_id).await {

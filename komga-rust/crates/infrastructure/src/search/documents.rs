@@ -1,10 +1,8 @@
 use anyhow::Context;
 use sqlx::Row;
 
-use crate::parsing::parse_sqlite_group_concat_values;
-use crate::search::index_lifecycle::{
-    SearchDocument, SearchEntityType, SearchField, SearchFieldEntry,
-};
+use crate::persistence::sqlite::codecs::parse_sqlite_group_concat_values;
+use crate::search::lifecycle::{SearchDocument, SearchEntityType, SearchField, SearchFieldEntry};
 
 const AUTHOR_ROLE_DELIMITER: &str = "::";
 
@@ -657,7 +655,7 @@ mod tests {
     use sqlx::SqlitePool;
 
     use super::*;
-    use crate::sqlite::{connect_test_pool, setup};
+    use crate::persistence::sqlite::{connect_test_pool, schema};
 
     fn temp_db_path(case_id: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -674,7 +672,7 @@ mod tests {
         let pool = connect_test_pool(db_path.as_path(), 1)
             .await
             .expect("temporary sqlite db should open");
-        setup::bootstrap_pool(&pool)
+        schema::bootstrap_pool(&pool)
             .await
             .expect("temporary sqlite db should bootstrap main schema");
         (db_path, pool)

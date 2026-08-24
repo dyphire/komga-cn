@@ -62,7 +62,7 @@ pub(crate) async fn library_create_route(
 ) -> Response {
     let changes = match parse_create_library_change_set(&body) {
         Ok(changes) => changes,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     LibraryCatalogCommands::new(&app)
         .create_library(changes)
@@ -77,7 +77,7 @@ pub(crate) async fn library_update_route(
 ) -> Response {
     let changes = match parse_update_library_change_set(&body) {
         Ok(changes) => changes,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     LibraryCatalogCommands::new(&app)
         .update_library(&library_id, changes)

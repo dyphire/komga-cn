@@ -9,7 +9,10 @@ use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::{ServerSettingsStore, bootstrap_pool, bootstrap_tasks_pool};
+use komga_infrastructure::{
+    operational::ServerSettingsStore,
+    persistence::{bootstrap_pool, bootstrap_tasks_pool},
+};
 use std::sync::Arc;
 
 mod admin_cli;
@@ -199,7 +202,7 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
         "Checking main sqlite schema gate",
     );
 
-    let main_pool = komga_infrastructure::connect_read_pool(database_file)
+    let main_pool = komga_infrastructure::persistence::connect_read_pool(database_file)
         .await
         .map_err(|error| {
             schema_gate_failure(
@@ -238,7 +241,7 @@ async fn validate_tasks_startup_schema_gate(config: &RuntimeConfig) -> std::io::
         "Checking tasks sqlite schema gate",
     );
 
-    let tasks_pool = komga_infrastructure::connect_read_pool(&config.tasks_db_file)
+    let tasks_pool = komga_infrastructure::persistence::connect_read_pool(&config.tasks_db_file)
         .await
         .map_err(|error| {
             schema_gate_failure(

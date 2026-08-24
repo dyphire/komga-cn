@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_infrastructure::SqlitePersistenceContext;
-use komga_infrastructure::evict_shared_pools_for_paths;
+use komga_infrastructure::persistence::SqlitePersistenceContext;
+use komga_infrastructure::persistence::evict_shared_pools_for_paths;
 use tokio::sync::OnceCell;
 
 use crate::support::sqlite::connect_test_pool;

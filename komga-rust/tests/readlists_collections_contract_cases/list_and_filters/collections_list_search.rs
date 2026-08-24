@@ -1,5 +1,5 @@
 use super::*;
-use komga_infrastructure::{SearchEntityType, SearchIndexLifecycle};
+use komga_infrastructure::{search::SearchEntityType, search::SearchIndexLifecycle};
 
 #[tokio::test]
 async fn router_collections_supports_search_library_id_and_unpaged() {

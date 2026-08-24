@@ -45,18 +45,18 @@ async fn load_accessible_book_media(
     app: &MediaAssetsState,
     book_id: &str,
     user: &AuthUser,
-) -> Result<PersistedBookMedia, Response> {
+) -> Result<PersistedBookMedia, Box<Response>> {
     let Some(media) = (match app.book_media_reader.book_media(book_id).await {
         Ok(media) => media,
-        Err(error) => return Err(internal_error_response(error)),
+        Err(error) => return Err(Box::new(internal_error_response(error))),
     }) else {
-        return Err(StatusCode::NOT_FOUND.into_response());
+        return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
     };
 
     match user_can_access_book_media(app.book_media_reader.as_ref(), book_id, user, &media).await {
         Ok(true) => {}
-        Ok(false) => return Err(StatusCode::FORBIDDEN.into_response()),
-        Err(error) => return Err(internal_error_response(error)),
+        Ok(false) => return Err(Box::new(StatusCode::FORBIDDEN.into_response())),
+        Err(error) => return Err(Box::new(internal_error_response(error))),
     }
 
     Ok(media)
@@ -86,13 +86,6 @@ async fn persist_and_record_read_progress(
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn book_exists(app: &MediaAssetsState, book_id: &str) -> Result<bool, Response> {
-    app.read_progress_reader
-        .book_exists(book_id)
-        .await
-        .map_err(internal_error_response)
-}
-
 pub(crate) async fn book_read_progress(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
@@ -100,9 +93,9 @@ pub(crate) async fn book_read_progress(
     Path(book_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let supports_persisted_flow = match book_exists(&app, &book_id).await {
+    let supports_persisted_flow = match app.read_progress_reader.book_exists(&book_id).await {
         Ok(exists) => exists,
-        Err(response) => return response,
+        Err(error) => return internal_error_response(error),
     };
 
     if !supports_persisted_flow {
@@ -114,7 +107,7 @@ pub(crate) async fn book_read_progress(
     };
 
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
-        return response;
+        return *response;
     }
     let persisted_user_id = Some(user_id(&user));
     let page_count = match app.read_progress_reader.book_page_count(&book_id).await {
@@ -193,9 +186,9 @@ pub(crate) async fn book_read_progress_delete(
     headers: HeaderMap,
     Path(book_id): Path<String>,
 ) -> Response {
-    let supports_persisted_flow = match book_exists(&app, &book_id).await {
+    let supports_persisted_flow = match app.read_progress_reader.book_exists(&book_id).await {
         Ok(exists) => exists,
-        Err(response) => return response,
+        Err(error) => return internal_error_response(error),
     };
 
     if !supports_persisted_flow {
@@ -203,7 +196,7 @@ pub(crate) async fn book_read_progress_delete(
     }
 
     if let Err(response) = load_accessible_book_media(&app, &book_id, &user).await {
-        return response;
+        return *response;
     }
     let token = match request_progress_token(&app.identity, &headers, &user) {
         Ok(token) => token,

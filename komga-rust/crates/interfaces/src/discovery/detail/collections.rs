@@ -379,7 +379,7 @@ pub(crate) async fn collection_create(
     };
     let input = match parse_collection_create_input(&payload) {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let created = match app.persisted_sets.create_collection(input).await {
@@ -398,45 +398,58 @@ pub(crate) async fn collection_create(
     }
 }
 
-#[allow(clippy::result_large_err)]
-fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationInput, Response> {
+fn parse_collection_create_input(
+    payload: &Value,
+) -> Result<CollectionMutationInput, Box<Response>> {
     let Some(payload) = payload.as_object() else {
-        return Err(collection_create_bad_request(
+        return Err(Box::new(collection_create_bad_request(
             "Request body must be a JSON object",
-        ));
+        )));
     };
 
     let name = match payload.get("name") {
         Some(value) => match value.as_str() {
             Some(value) => value,
-            None => return Err(collection_create_bad_request("name must be a string")),
+            None => {
+                return Err(Box::new(collection_create_bad_request(
+                    "name must be a string",
+                )));
+            }
         },
         None => {
-            return Err(collection_create_bad_request(
+            return Err(Box::new(collection_create_bad_request(
                 "Required field 'name' is not present",
-            ));
+            )));
         }
     };
     let ordered = match payload.get("ordered") {
         Some(value) => match value.as_bool() {
             Some(value) => value,
-            None => return Err(collection_create_bad_request("ordered must be a boolean")),
+            None => {
+                return Err(Box::new(collection_create_bad_request(
+                    "ordered must be a boolean",
+                )));
+            }
         },
         None => {
-            return Err(collection_create_bad_request(
+            return Err(Box::new(collection_create_bad_request(
                 "Required field 'ordered' is not present",
-            ));
+            )));
         }
     };
     let series_values = match payload.get("seriesIds") {
         Some(value) => match value.as_array() {
             Some(value) => value,
-            None => return Err(collection_create_bad_request("seriesIds must be an array")),
+            None => {
+                return Err(Box::new(collection_create_bad_request(
+                    "seriesIds must be an array",
+                )));
+            }
         },
         None => {
-            return Err(collection_create_bad_request(
+            return Err(Box::new(collection_create_bad_request(
                 "Required field 'seriesIds' is not present",
-            ));
+            )));
         }
     };
 
@@ -459,9 +472,9 @@ fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationIn
     let mut saw_duplicate_series_id = false;
     for value in series_values {
         let Some(series_id) = value.as_str() else {
-            return Err(collection_create_bad_request(
+            return Err(Box::new(collection_create_bad_request(
                 "seriesIds must be an array of strings",
-            ));
+            )));
         };
         let series_id = series_id.to_string();
         if !seen_series_ids.insert(series_id.clone()) {
@@ -479,7 +492,7 @@ fn parse_collection_create_input(payload: &Value) -> Result<CollectionMutationIn
     }
 
     if !violations.is_empty() {
-        return Err(validation_error_response(violations));
+        return Err(Box::new(validation_error_response(violations)));
     }
 
     Ok(CollectionMutationInput {
@@ -519,16 +532,15 @@ fn collection_bad_request(path: &str, message: &str) -> Response {
         .into_response()
 }
 
-#[allow(clippy::result_large_err)]
 fn parse_collection_update_input(
     payload: &Value,
     request_path: &str,
-) -> Result<CollectionPatchInput, Response> {
+) -> Result<CollectionPatchInput, Box<Response>> {
     let Some(payload) = payload.as_object() else {
-        return Err(collection_bad_request(
+        return Err(Box::new(collection_bad_request(
             request_path,
             "Request body must be a JSON object",
-        ));
+        )));
     };
 
     let name = match payload.get("name") {
@@ -536,10 +548,10 @@ fn parse_collection_update_input(
         Some(value) => match value.as_str() {
             Some(value) => Some(value.to_string()),
             None => {
-                return Err(collection_bad_request(
+                return Err(Box::new(collection_bad_request(
                     request_path,
                     "name must be a string",
-                ));
+                )));
             }
         },
     };
@@ -548,10 +560,10 @@ fn parse_collection_update_input(
         Some(value) => match value.as_bool() {
             Some(value) => Some(value),
             None => {
-                return Err(collection_bad_request(
+                return Err(Box::new(collection_bad_request(
                     request_path,
                     "ordered must be a boolean",
-                ));
+                )));
             }
         },
     };
@@ -560,10 +572,10 @@ fn parse_collection_update_input(
         Some(value) => match value.as_array() {
             Some(value) => Some(value),
             None => {
-                return Err(collection_bad_request(
+                return Err(Box::new(collection_bad_request(
                     request_path,
                     "seriesIds must be an array",
-                ));
+                )));
             }
         },
     };
@@ -590,10 +602,10 @@ fn parse_collection_update_input(
             let mut saw_duplicate_series_id = false;
             for value in series_values {
                 let Some(series_id) = value.as_str() else {
-                    return Err(collection_bad_request(
+                    return Err(Box::new(collection_bad_request(
                         request_path,
                         "seriesIds must be an array of strings",
-                    ));
+                    )));
                 };
                 let series_id = series_id.to_string();
                 if !seen_series_ids.insert(series_id.clone()) {
@@ -616,7 +628,7 @@ fn parse_collection_update_input(
     };
 
     if !violations.is_empty() {
-        return Err(validation_error_response(violations));
+        return Err(Box::new(validation_error_response(violations)));
     }
 
     Ok(CollectionPatchInput {
@@ -681,7 +693,7 @@ pub(crate) async fn collection_update(
     };
     let patch = match parse_collection_update_input(&payload, &request_path) {
         Ok(input) => input,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let existing = match app
         .persisted_sets

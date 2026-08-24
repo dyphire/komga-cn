@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -163,7 +161,7 @@ pub(crate) async fn series_metadata_update(
 
     let patch = match parse_series_metadata_patch(body) {
         Ok(patch) => patch,
-        Err(response) => return response,
+        Err(message) => return bad_request_response(&message),
     };
 
     let event_emitter = RuntimeSeriesEventEmitter {
@@ -202,7 +200,7 @@ impl SeriesEventEmitter for RuntimeSeriesEventEmitter<'_> {
 
 fn parse_series_metadata_patch(
     body: &serde_json::Map<String, Value>,
-) -> Result<SeriesMetadataPatch, Response> {
+) -> Result<SeriesMetadataPatch, String> {
     Ok(SeriesMetadataPatch {
         status: optional_series_status_field(body, "status")?,
         status_lock: optional_bool_field(body, "statusLock")?,
@@ -238,17 +236,12 @@ fn parse_series_metadata_patch(
 fn optional_reading_direction_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Option<SeriesReadingDirection>>, Response> {
+) -> Result<Option<Option<SeriesReadingDirection>>, String> {
     match optional_nullable_string_field(body, key)? {
         Some(Some(value)) => SeriesReadingDirection::parse(&value)
             .map(Some)
             .map(Some)
-            .ok_or_else(|| {
-                spring_error_response(
-                    StatusCode::BAD_REQUEST,
-                    format!("{key} has an invalid value"),
-                )
-            }),
+            .ok_or_else(|| format!("{key} has an invalid value")),
         Some(None) => Ok(Some(None)),
         None => Ok(None),
     }
@@ -257,14 +250,11 @@ fn optional_reading_direction_field(
 fn optional_series_status_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<SeriesStatus>, Response> {
+) -> Result<Option<SeriesStatus>, String> {
     match optional_string_field(body, key)? {
-        Some(value) => SeriesStatus::parse(&value).map(Some).ok_or_else(|| {
-            spring_error_response(
-                StatusCode::BAD_REQUEST,
-                format!("{key} has an invalid value"),
-            )
-        }),
+        Some(value) => SeriesStatus::parse(&value)
+            .map(Some)
+            .ok_or_else(|| format!("{key} has an invalid value")),
         None => Ok(None),
     }
 }
@@ -272,13 +262,13 @@ fn optional_series_status_field(
 fn optional_bool_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<bool>, Response> {
+) -> Result<Option<bool>, String> {
     match body.get(key) {
         Some(value) if value.is_null() => Ok(None),
         Some(value) => value
             .as_bool()
             .map(Some)
-            .ok_or_else(|| bad_request_response(&format!("{key} must be a boolean or null"))),
+            .ok_or_else(|| format!("{key} must be a boolean or null")),
         None => Ok(None),
     }
 }
@@ -286,13 +276,13 @@ fn optional_bool_field(
 fn optional_string_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<String>, Response> {
+) -> Result<Option<String>, String> {
     match body.get(key) {
         Some(value) if value.is_null() => Ok(None),
         Some(value) => value
             .as_str()
             .map(|value| Some(value.to_string()))
-            .ok_or_else(|| bad_request_response(&format!("{key} must be a string or null"))),
+            .ok_or_else(|| format!("{key} must be a string or null")),
         None => Ok(None),
     }
 }
@@ -300,13 +290,13 @@ fn optional_string_field(
 fn optional_nullable_string_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Option<String>>, Response> {
+) -> Result<Option<Option<String>>, String> {
     match body.get(key) {
         Some(value) if value.is_null() => Ok(Some(None)),
         Some(value) => value
             .as_str()
             .map(|value| Some(Some(value.to_string())))
-            .ok_or_else(|| bad_request_response(&format!("{key} must be a string or null"))),
+            .ok_or_else(|| format!("{key} must be a string or null")),
         None => Ok(None),
     }
 }
@@ -314,7 +304,7 @@ fn optional_nullable_string_field(
 fn optional_nullable_u32_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Option<u32>>, Response> {
+) -> Result<Option<Option<u32>>, String> {
     let Some(value) = body.get(key) else {
         return Ok(None);
     };
@@ -323,15 +313,10 @@ fn optional_nullable_u32_field(
     }
 
     let Some(value) = value.as_i64() else {
-        return Err(bad_request_response(&format!(
-            "{key} must be an integer or null"
-        )));
+        return Err(format!("{key} must be an integer or null"));
     };
     if !(0..=i64::from(u32::MAX)).contains(&value) {
-        return Err(bad_request_response(&format!(
-            "{key} must be between 0 and {}",
-            u32::MAX,
-        )));
+        return Err(format!("{key} must be between 0 and {}", u32::MAX));
     }
 
     Ok(Some(Some(value as u32)))
@@ -340,7 +325,7 @@ fn optional_nullable_u32_field(
 fn optional_string_list_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<String>>, Response> {
+) -> Result<Option<Vec<String>>, String> {
     let Some(value) = body.get(key) else {
         return Ok(None);
     };
@@ -349,9 +334,7 @@ fn optional_string_list_field(
     }
 
     let Some(values) = value.as_array() else {
-        return Err(bad_request_response(&format!(
-            "{key} must be an array or null"
-        )));
+        return Err(format!("{key} must be an array or null"));
     };
     let values = values
         .iter()
@@ -359,7 +342,7 @@ fn optional_string_list_field(
             value
                 .as_str()
                 .map(str::to_string)
-                .ok_or_else(|| bad_request_response(&format!("{key} entries must be strings")))
+                .ok_or_else(|| format!("{key} entries must be strings"))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -369,7 +352,7 @@ fn optional_string_list_field(
 fn optional_links_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<SeriesMetadataLinkRecord>>, Response> {
+) -> Result<Option<Vec<SeriesMetadataLinkRecord>>, String> {
     let Some(value) = body.get(key) else {
         return Ok(None);
     };
@@ -378,22 +361,20 @@ fn optional_links_field(
     }
 
     let Some(values) = value.as_array() else {
-        return Err(bad_request_response(&format!(
-            "{key} must be an array or null"
-        )));
+        return Err(format!("{key} must be an array or null"));
     };
 
     let values = values
         .iter()
         .map(|value| {
             let Some(object) = value.as_object() else {
-                return Err(bad_request_response("links entries must be objects"));
+                return Err("links entries must be objects".to_string());
             };
             let Some(label) = object.get("label").and_then(Value::as_str) else {
-                return Err(bad_request_response("links.label must be a string"));
+                return Err("links.label must be a string".to_string());
             };
             let Some(url) = object.get("url").and_then(Value::as_str) else {
-                return Err(bad_request_response("links.url must be a string"));
+                return Err("links.url must be a string".to_string());
             };
             Ok(SeriesMetadataLinkRecord {
                 label: label.to_string(),
@@ -408,7 +389,7 @@ fn optional_links_field(
 fn optional_alternate_titles_field(
     body: &serde_json::Map<String, Value>,
     key: &str,
-) -> Result<Option<Vec<SeriesAlternateTitleRecord>>, Response> {
+) -> Result<Option<Vec<SeriesAlternateTitleRecord>>, String> {
     let Some(value) = body.get(key) else {
         return Ok(None);
     };
@@ -416,29 +397,21 @@ fn optional_alternate_titles_field(
         return Ok(Some(Vec::new()));
     }
 
-    let Some(values) = body.get(key).and_then(Value::as_array) else {
-        return Err(bad_request_response(&format!(
-            "{key} must be an array or null"
-        )));
+    let Some(values) = value.as_array() else {
+        return Err(format!("{key} must be an array or null"));
     };
 
     let values = values
         .iter()
         .map(|value| {
             let Some(object) = value.as_object() else {
-                return Err(bad_request_response(
-                    "alternateTitles entries must be objects",
-                ));
+                return Err("alternateTitles entries must be objects".to_string());
             };
             let Some(label) = object.get("label").and_then(Value::as_str) else {
-                return Err(bad_request_response(
-                    "alternateTitles.label must be a string",
-                ));
+                return Err("alternateTitles.label must be a string".to_string());
             };
             let Some(title) = object.get("title").and_then(Value::as_str) else {
-                return Err(bad_request_response(
-                    "alternateTitles.title must be a string",
-                ));
+                return Err("alternateTitles.title must be a string".to_string());
             };
             Ok(SeriesAlternateTitleRecord {
                 label: label.to_string(),

@@ -39,20 +39,19 @@ fn decoded_collection_id(query: &str) -> Option<String> {
     decoded_ids(query, "collection_id").into_iter().next()
 }
 
-#[allow(clippy::result_large_err)]
 async fn resolve_query_context_or_unauthorized(
     identity: &crate::state::IdentityState,
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
     requested_library_ids: Option<&[String]>,
-) -> Result<DiscoveryQueryContext, Response> {
+) -> Result<DiscoveryQueryContext, Box<Response>> {
     match auth_state
         .resolve_query_context_with_persistence(identity, headers, requested_library_ids)
         .await
     {
         Ok(Some(context)) => Ok(context),
-        Ok(None) => Err(StatusCode::UNAUTHORIZED.into_response()),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Ok(None) => Err(Box::new(StatusCode::UNAUTHORIZED.into_response())),
+        Err(_) => Err(Box::new(StatusCode::INTERNAL_SERVER_ERROR.into_response())),
     }
 }
 
@@ -61,13 +60,12 @@ struct CollectionFacetScope {
     collection_ids: Option<Vec<String>>,
 }
 
-#[allow(clippy::result_large_err)]
 async fn resolve_collection_facet_scope(
     identity: &crate::state::IdentityState,
     auth_state: &DiscoveryAuthState,
     headers: &HeaderMap,
     query: &str,
-) -> Result<CollectionFacetScope, Response> {
+) -> Result<CollectionFacetScope, Box<Response>> {
     let library_ids = decoded_library_ids(query);
     let requested_library_ids = (!library_ids.is_empty()).then_some(library_ids.as_slice());
     let context =
@@ -104,7 +102,7 @@ pub(crate) async fn authors_names(
     .await
     {
         Ok(context) => context,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     match app
@@ -132,7 +130,7 @@ pub(crate) async fn authors_roles(
     .await
     {
         Ok(context) => context,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     match app
@@ -172,7 +170,7 @@ pub(crate) async fn authors_deprecated_get(
     .await
     {
         Ok(context) => context,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let scope = if let Some(library_id) = library_id {
@@ -211,7 +209,7 @@ pub(crate) async fn authors_v2(
     let query = uri.query().unwrap_or_default();
     let (authors, page, size, unpaged) = match scoped_authors_v2(&app, &headers, query).await {
         Ok(result) => result,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     Json(paged_values_payload(authors, page, size, unpaged)).into_response()
@@ -221,7 +219,7 @@ async fn scoped_authors_v2(
     app: &DiscoveryState,
     headers: &HeaderMap,
     query: &str,
-) -> Result<(Vec<PersistedAuthorEntry>, usize, usize, bool), Response> {
+) -> Result<(Vec<PersistedAuthorEntry>, usize, usize, bool), Box<Response>> {
     let search = query_value(query, "search")
         .filter(|value| !value.is_empty())
         .map(decode_query_component);
@@ -275,7 +273,7 @@ async fn scoped_authors_v2(
         .await
     {
         Ok(values) => values,
-        Err(error) => return Err(internal_error_response(error)),
+        Err(error) => return Err(Box::new(internal_error_response(error))),
     };
 
     if let Some(role) = role {
@@ -300,7 +298,7 @@ async fn author_values_v2_handler(
     let query = uri.query().unwrap_or_default();
     let (authors, page, size, unpaged) = match scoped_authors_v2(app, headers, query).await {
         Ok(result) => result,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let mut values = authors
         .into_iter()
@@ -348,7 +346,7 @@ async fn collection_facet_handler(
             .await
         {
             Ok(scope) => scope,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
 
     let domain_context = to_domain_query_context(scope.context.clone());
@@ -379,7 +377,7 @@ async fn scalar_facet_v2_handler(
             .await
         {
             Ok(scope) => scope,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
     let domain_context = to_domain_query_context(scope.context.clone());
     let facet_scope = FacetScope {
@@ -444,7 +442,7 @@ async fn tags_v2_handler(app: &DiscoveryState, headers: &HeaderMap, uri: &Uri) -
     .await
     {
         Ok(context) => context,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let scope = if !library_ids.is_empty() {
         ReferentialTagsScope::Libraries(library_ids)

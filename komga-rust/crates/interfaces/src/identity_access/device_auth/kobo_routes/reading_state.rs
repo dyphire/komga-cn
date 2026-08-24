@@ -4,8 +4,8 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::{
-    DeviceSyncPort, KoboReadingStateSnapshot, KoboReadingStateStatus, KoboReadingStateUpdate,
-    now_sync_marker, user_id,
+    KoboReadingStateSnapshot, KoboReadingStateStatus, KoboReadingStateUpdate, now_sync_marker,
+    user_id,
 };
 use serde::{Deserialize, Serialize};
 
@@ -134,16 +134,6 @@ fn default_kobo_location_type() -> String {
     "KoboSpan".to_string()
 }
 
-async fn persisted_book_exists(
-    device_sync: &dyn DeviceSyncPort,
-    book_id: &str,
-) -> Result<bool, Response> {
-    device_sync
-        .persisted_book_exists(book_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
 pub(crate) async fn kobo_library_book_state(
     State(app): State<IdentityAccessState>,
     Path((auth_token, book_id)): Path<(String, String)>,
@@ -164,9 +154,9 @@ pub(crate) async fn kobo_library_book_state(
     };
 
     let device_sync = app.identity.device_sync();
-    let book_exists = match persisted_book_exists(device_sync, &book_id).await {
+    let book_exists = match device_sync.persisted_book_exists(&book_id).await {
         Ok(exists) => exists,
-        Err(response) => return response,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     if !book_exists {
         let proxy_path = format!("/v1/library/{book_id}/state");
@@ -276,9 +266,9 @@ pub(crate) async fn kobo_library_book_state_update(
     };
 
     let device_sync = app.identity.device_sync();
-    let book_exists = match persisted_book_exists(device_sync, &book_id).await {
+    let book_exists = match device_sync.persisted_book_exists(&book_id).await {
         Ok(exists) => exists,
-        Err(response) => return response,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     if !book_exists {
         let proxy_path = format!("/v1/library/{book_id}/state");

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 
-use crate::sqlite::{connect_test_pool, setup};
+use crate::persistence::sqlite::{connect_test_pool, schema};
 
 pub(crate) struct BootstrappedBookFixture {
     pub(crate) db_path: PathBuf,
@@ -25,7 +25,7 @@ impl BootstrappedBookFixture {
         let pool = connect_test_pool(db_path.as_path(), 1)
             .await
             .expect("temporary sqlite db should open");
-        setup::bootstrap_pool(&pool)
+        schema::bootstrap_pool(&pool)
             .await
             .expect("temporary sqlite db should bootstrap main schema");
         Self { db_path, pool }

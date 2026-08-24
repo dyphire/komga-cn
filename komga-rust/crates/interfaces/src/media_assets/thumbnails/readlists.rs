@@ -18,18 +18,14 @@ use super::super::access_control::{
 };
 use super::super::http_helpers::internal_error_response;
 
-async fn readlist_exists(app: &MediaAssetsState, readlist_id: &str) -> Result<bool, Response> {
-    app.thumbnail_reader
-        .readlist_exists(readlist_id)
-        .await
-        .map_err(internal_error_response)
-}
-
-async fn ensure_readlist_exists(app: &MediaAssetsState, readlist_id: &str) -> Result<(), Response> {
-    match readlist_exists(app, readlist_id).await {
+async fn ensure_readlist_exists(
+    app: &MediaAssetsState,
+    readlist_id: &str,
+) -> Result<(), Box<Response>> {
+    match app.thumbnail_reader.readlist_exists(readlist_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(StatusCode::NOT_FOUND.into_response()),
-        Err(response) => Err(response),
+        Ok(false) => Err(Box::new(StatusCode::NOT_FOUND.into_response())),
+        Err(error) => Err(Box::new(internal_error_response(error))),
     }
 }
 
@@ -65,8 +61,8 @@ pub(crate) async fn readlist_thumbnail(
                 Err(error) => return internal_error_response(error),
             }
 
-            if let Err(response) = readlist_exists(&app, &readlist_id).await {
-                return response;
+            if let Err(error) = app.thumbnail_reader.readlist_exists(&readlist_id).await {
+                return internal_error_response(error);
             }
         }
         Err(error) => return internal_error_response(error),
@@ -97,10 +93,10 @@ pub(crate) async fn readlist_thumbnails(
                 .into_response();
             }
 
-            match readlist_exists(&app, &readlist_id).await {
+            match app.thumbnail_reader.readlist_exists(&readlist_id).await {
                 Ok(true) => return Json(Vec::<ReadListThumbnailDto>::new()).into_response(),
                 Ok(false) => {}
-                Err(response) => return response,
+                Err(error) => return internal_error_response(error),
             }
         }
         Err(error) => return internal_error_response(error),
@@ -146,12 +142,12 @@ pub(crate) async fn readlist_thumbnail_upload(
     multipart: Multipart,
 ) -> Response {
     if let Err(response) = ensure_readlist_exists(&app, &readlist_id).await {
-        return response;
+        return *response;
     }
 
     let upload = match parse_thumbnail_upload(multipart, "readlist").await {
         Ok(parsed) => parsed,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
@@ -180,7 +176,7 @@ pub(crate) async fn readlist_thumbnail_select(
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_readlist_exists(&app, &readlist_id).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -211,7 +207,7 @@ pub(crate) async fn readlist_thumbnail_delete(
     Path((readlist_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_readlist_exists(&app, &readlist_id).await {
-        return response;
+        return *response;
     }
     match app
         .thumbnail_reader

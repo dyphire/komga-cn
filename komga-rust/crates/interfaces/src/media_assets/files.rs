@@ -149,7 +149,7 @@ async fn book_protected_resource_response(
     };
     let media = match load_epub_book_media(app, book_id).await {
         Ok(media) => media,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if !user_has_role(&user, AuthUserRole::PageStreaming) {
         return StatusCode::FORBIDDEN.into_response();
@@ -236,22 +236,22 @@ async fn fixed_layout_resource_dimensions(
 async fn load_epub_book_media(
     app: &MediaAssetsState,
     book_id: &str,
-) -> Result<PersistedBookMedia, Response> {
+) -> Result<PersistedBookMedia, Box<Response>> {
     let Some(media) = (match app.book_media_reader.book_media(book_id).await {
         Ok(media) => media,
-        Err(error) => return Err(internal_error_response(error)),
+        Err(error) => return Err(Box::new(internal_error_response(error))),
     }) else {
-        return Err(StatusCode::NOT_FOUND.into_response());
+        return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
     };
 
     if !book_media_is_epub(&media) {
-        return Err(spring_error_response(
+        return Err(Box::new(spring_error_response(
             StatusCode::BAD_REQUEST,
             format!(
                 "Book media type '{}' not compatible with requested profile",
                 media.media_type
             ),
-        ));
+        )));
     }
 
     Ok(media)

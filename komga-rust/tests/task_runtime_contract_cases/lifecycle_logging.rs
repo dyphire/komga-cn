@@ -123,7 +123,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
                     .expect("task enqueue should succeed");
             }
 
-            komga_infrastructure::run_background_task_iteration(task_queue, runtime)
+            komga_infrastructure::tasks::run_background_task_iteration(task_queue, runtime)
                 .await
                 .expect_err("unsupported task should fail the background task iteration")
                 .to_string()

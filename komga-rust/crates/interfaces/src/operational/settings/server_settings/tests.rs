@@ -17,7 +17,7 @@ use komga_application::task_processing::{
     LibraryTaskBatch, QueueStatus, SubmitUrgency, TaskKind, TaskQueue, TaskQueueAdmin,
     TaskQueueRecord, TaskRequest,
 };
-use komga_infrastructure::ServerSettingsStore;
+use komga_infrastructure::operational::ServerSettingsStore;
 use serde_json::json;
 
 use crate::identity_access::auth::Admin;
@@ -334,7 +334,7 @@ async fn sqlite_fixture(case: &str) -> ServerSettingsSqliteFixture {
 
 async fn cleanup_fixture(root: PathBuf) {
     let db_path = root.join("main.db");
-    let evicted = komga_infrastructure::evict_shared_pools_for_paths(&[db_path]);
+    let evicted = komga_infrastructure::persistence::evict_shared_pools_for_paths(&[db_path]);
     for pool in evicted {
         pool.close().await;
     }

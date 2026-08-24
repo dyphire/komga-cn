@@ -21,11 +21,11 @@ use super::super::http_helpers::internal_error_response;
 async fn ensure_collection_exists(
     app: &MediaAssetsState,
     collection_id: &str,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     match app.thumbnail_reader.collection_exists(collection_id).await {
         Ok(true) => Ok(()),
-        Ok(false) => Err(StatusCode::NOT_FOUND.into_response()),
-        Err(error) => Err(internal_error_response(error)),
+        Ok(false) => Err(Box::new(StatusCode::NOT_FOUND.into_response())),
+        Err(error) => Err(Box::new(internal_error_response(error))),
     }
 }
 
@@ -43,7 +43,7 @@ pub(crate) async fn collection_thumbnail(
         };
 
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -85,7 +85,7 @@ pub(crate) async fn collection_thumbnails(
     }
 
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -115,7 +115,7 @@ pub(crate) async fn collection_thumbnail_by_id(
     }
 
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -144,12 +144,12 @@ pub(crate) async fn collection_thumbnail_upload(
     multipart: Multipart,
 ) -> Response {
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
 
     let upload = match parse_thumbnail_upload(multipart, "collection").await {
         Ok(parsed) => parsed,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let Some(dimensions) = thumbnail_dimensions(&upload.bytes) else {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
@@ -178,7 +178,7 @@ pub(crate) async fn collection_thumbnail_select(
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
 
     match app
@@ -205,7 +205,7 @@ pub(crate) async fn collection_thumbnail_delete(
     Path((collection_id, thumbnail_id)): Path<(String, String)>,
 ) -> Response {
     if let Err(response) = ensure_collection_exists(&app, &collection_id).await {
-        return response;
+        return *response;
     }
     match app
         .thumbnail_reader

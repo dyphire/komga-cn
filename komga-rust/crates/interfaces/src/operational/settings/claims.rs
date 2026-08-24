@@ -12,17 +12,10 @@ use crate::contracts::identity_access::{ClaimStatusDto, UserDto};
 use crate::state::OperationalApiState;
 use komga_application::identity_access::{AuthUser, AuthUserRole};
 
-async fn load_claim_status(app: &OperationalApiState) -> Result<bool, Response> {
-    app.claim
-        .load_claim_status()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
 pub(crate) async fn get_claim_status(State(app): State<OperationalApiState>) -> Response {
-    let is_claimed = match load_claim_status(&app).await {
+    let is_claimed = match app.claim.load_claim_status().await {
         Ok(is_claimed) => is_claimed,
-        Err(response) => return response,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     Json(ClaimStatusDto { is_claimed }).into_response()
@@ -38,10 +31,10 @@ pub(crate) async fn post_claim(
         return StatusCode::BAD_REQUEST.into_response();
     };
 
-    match load_claim_status(&app).await {
+    match app.claim.load_claim_status().await {
         Ok(true) => return claim_already_claimed_response(),
         Ok(false) => {}
-        Err(response) => return response,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 
     let hashed_password = match hash_bcrypt_password(password, DEFAULT_COST) {

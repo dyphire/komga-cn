@@ -6,11 +6,15 @@ use komga_application::task_processing::TaskQueueRecord;
 use komga_config::profile::RuntimeMode;
 use komga_config::writer_ownership::WriterOwnershipPolicy;
 use komga_infrastructure::{
-    DatabaseHandle, SearchEntityType, SearchIndexLifecycle, search_analyzer_version,
+    persistence::DatabaseHandle, search::SearchEntityType, search::SearchIndexLifecycle,
+    search::search_analyzer_version,
 };
-use komga_infrastructure::{TaskQueueScheduler, TaskRuntimeContext, TaskRuntimeOwnershipOverrides};
 use komga_infrastructure::{
-    connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    persistence::connect_task_pool, persistence::connect_task_write_pool,
+    persistence::default_read_max_connections,
+};
+use komga_infrastructure::{
+    tasks::TaskQueueScheduler, tasks::TaskRuntimeContext, tasks::TaskRuntimeOwnershipOverrides,
 };
 use serde_json::{Value, json};
 use sqlx::Row;

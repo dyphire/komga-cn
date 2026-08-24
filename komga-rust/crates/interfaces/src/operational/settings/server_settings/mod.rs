@@ -113,9 +113,10 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
     if let Some(value) = payload.get("rememberMeDurationDays")
         && !value.is_null()
     {
-        command.remember_me_duration_days = Some(json_u64(value).ok_or_else(|| {
-            anyhow::anyhow!("rememberMeDurationDays must be a positive integer")
-        })?);
+        command.remember_me_duration_days =
+            Some(json_u64(value).ok_or_else(|| {
+                anyhow::anyhow!("rememberMeDurationDays must be a positive integer")
+            })?);
     }
 
     if let Some(value) = payload.get("renewRememberMeKey")
@@ -162,10 +163,8 @@ fn settings_update_command(payload: &Value) -> anyhow::Result<ServerSettingsUpda
     if let Some(value) = payload.get("koboProxy")
         && !value.is_null()
     {
-        command.kobo_proxy = Some(
-            json_bool(value)
-                .ok_or_else(|| anyhow::anyhow!("koboProxy must be a boolean"))?,
-        );
+        command.kobo_proxy =
+            Some(json_bool(value).ok_or_else(|| anyhow::anyhow!("koboProxy must be a boolean"))?);
     }
 
     command.kobo_port = optional_integer_patch(

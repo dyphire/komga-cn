@@ -1,0 +1,104 @@
+use std::collections::{HashMap, HashSet};
+
+use komga_application::task_processing::{
+    RefreshBookMetadataPayload, SeriesPayload, TaskKind, TaskQueueRecord, TaskRequest,
+};
+
+use super::scan_models::{
+    ScannedSeriesRow, ScannedSidecarRow, ScannedSidecarSource, ScannedSidecarType,
+};
+
+pub(crate) fn enqueue_sidecar_refresh_tasks(
+    tasks: &mut Vec<TaskQueueRecord>,
+    series_rows: &[ScannedSeriesRow],
+    sidecars: &[ScannedSidecarRow],
+    changed_sidecar_urls: &[String],
+    priority: i32,
+) {
+    let changed_sidecar_urls = changed_sidecar_urls.iter().cloned().collect::<HashSet<_>>();
+    let mut series_by_url = HashMap::new();
+    let mut book_by_url = HashMap::new();
+    for series in series_rows {
+        series_by_url.insert(series.series_url.clone(), series.series_id.clone());
+        for book in &series.books {
+            book_by_url.insert(book.book_url.clone(), book.book_id.clone());
+        }
+    }
+
+    let mut seen_series_metadata: HashSet<String> = HashSet::new();
+    let mut seen_series_artwork: HashSet<String> = HashSet::new();
+    let mut seen_books_metadata: HashSet<String> = HashSet::new();
+    let mut seen_books_artwork: HashSet<String> = HashSet::new();
+    let mut book_series_by_url = HashMap::new();
+    for series in series_rows {
+        for book in &series.books {
+            book_series_by_url.insert(book.book_url.clone(), series.series_id.clone());
+        }
+    }
+    for sidecar in sidecars {
+        if !changed_sidecar_urls.contains(&sidecar.url) {
+            continue;
+        }
+        if sidecar.last_modified_unix_seconds < 0 {
+            continue;
+        }
+
+        match (sidecar.source, sidecar.sidecar_type) {
+            (ScannedSidecarSource::Series, ScannedSidecarType::Metadata) => {
+                if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
+                    && seen_series_metadata.insert(series_id.clone())
+                {
+                    tasks.push(
+                        TaskRequest::with_payload(
+                            TaskKind::RefreshSeriesMetadata,
+                            SeriesPayload::new(series_id.clone()),
+                        )
+                        .priority(priority)
+                        .group(series_id.clone())
+                        .into_queue_record(),
+                    );
+                }
+            }
+            (ScannedSidecarSource::Series, ScannedSidecarType::Artwork) => {
+                if let Some(series_id) = series_by_url.get(&sidecar.parent_url)
+                    && seen_series_artwork.insert(series_id.clone())
+                {
+                    tasks.push(
+                        TaskRequest::new(TaskKind::RefreshSeriesLocalArtwork)
+                            .priority(priority)
+                            .into_queue_record_with_id(series_id),
+                    );
+                }
+            }
+            (ScannedSidecarSource::Book, ScannedSidecarType::Metadata) => {
+                if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
+                    && seen_books_metadata.insert(book_id.clone())
+                {
+                    let group_id = book_series_by_url.get(&sidecar.parent_url).cloned();
+                    {
+                        let mut req = TaskRequest::with_payload(
+                            TaskKind::RefreshBookMetadata,
+                            RefreshBookMetadataPayload::new(book_id.clone()),
+                        )
+                        .priority(priority);
+                        if let Some(ref gid) = group_id {
+                            req = req.group(gid.clone());
+                        }
+                        tasks.push(req.into_queue_record());
+                    }
+                }
+            }
+            (ScannedSidecarSource::Book, ScannedSidecarType::Artwork) => {
+                if let Some(book_id) = book_by_url.get(&sidecar.parent_url)
+                    && seen_books_artwork.insert(book_id.clone())
+                {
+                    tasks.push(
+                        TaskRequest::new(TaskKind::RefreshBookLocalArtwork)
+                            .priority(priority)
+                            .into_queue_record_with_id(book_id),
+                    );
+                }
+            }
+        }
+    }
+}

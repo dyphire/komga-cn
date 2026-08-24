@@ -290,24 +290,17 @@ async fn runtime_empty_trash_cleans_up_empty_sets_with_thumbnails_in_kotlin_orde
         .execute(&pool)
         .await
         .expect("readlist thumbnail should be inserted for empty-set cleanup verification");
-    sqlx::query(
-        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) \
-         ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
-    )
-    .bind("DELETE_EMPTY_COLLECTIONS")
-    .bind("1")
-    .execute(&pool)
-    .await
-    .expect("delete empty collections setting should be seeded");
-    sqlx::query(
-        "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) \
-         ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
-    )
-    .bind("DELETE_EMPTY_READLISTS")
-    .bind("1")
-    .execute(&pool)
-    .await
-    .expect("delete empty readlists setting should be seeded");
+    for key in ["DELETE_EMPTY_COLLECTIONS", "DELETE_EMPTY_READLISTS"] {
+        sqlx::query(
+            "INSERT INTO SERVER_SETTINGS(KEY, VALUE) VALUES(?, ?) \
+             ON CONFLICT(KEY) DO UPDATE SET VALUE = excluded.VALUE",
+        )
+        .bind(key)
+        .bind("1")
+        .execute(&pool)
+        .await
+        .expect("delete empty-set setting should be seeded");
+    }
     pool.close().await;
 
     run_empty_trash(ctx.paths()).await;

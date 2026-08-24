@@ -3,7 +3,6 @@ use axum::body::Bytes;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use komga_application::identity_access::DeviceSyncPort;
 
 use super::{
     ensure_kobo_book_access, proxied_missing_kobo_book_response,
@@ -13,16 +12,6 @@ use crate::access_log::RequestConnectionInfo;
 use crate::identity_access::device_auth::auth_resolvers::required_kobo_user;
 use crate::identity_access::device_auth::kobo_request_base_url;
 use crate::state::IdentityAccessState;
-
-async fn persisted_book_exists(
-    device_sync: &dyn DeviceSyncPort,
-    book_id: &str,
-) -> Result<bool, Response> {
-    device_sync
-        .persisted_book_exists(book_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
 
 pub(crate) async fn kobo_library_book_metadata(
     State(app): State<IdentityAccessState>,
@@ -47,9 +36,9 @@ pub(crate) async fn kobo_library_book_metadata(
     let metadata = match device_sync.load_kobo_metadata_record(&book_id).await {
         Ok(Some(metadata)) => metadata,
         Ok(None) => {
-            let book_exists = match persisted_book_exists(device_sync, &book_id).await {
+            let book_exists = match device_sync.persisted_book_exists(&book_id).await {
                 Ok(exists) => exists,
-                Err(response) => return response,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
             };
             if !book_exists {
                 let proxy_path = format!("/v1/library/{book_id}/metadata");

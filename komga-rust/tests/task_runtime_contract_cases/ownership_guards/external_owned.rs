@@ -46,7 +46,7 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
         },
     )
     .await;
-    komga_infrastructure::cleanup_authentication_activity_once(&runtime)
+    komga_infrastructure::tasks::cleanup_authentication_activity_once(&runtime)
         .await
         .expect("auth cleanup should skip cleanly when main database is external-owned");
 

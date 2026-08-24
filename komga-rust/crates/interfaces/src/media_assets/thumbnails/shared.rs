@@ -248,7 +248,7 @@ pub(super) async fn load_collection_mosaic_bytes(
 pub(super) async fn parse_thumbnail_upload(
     mut multipart: Multipart,
     entity_name: &str,
-) -> Result<ThumbnailUpload, Response> {
+) -> Result<ThumbnailUpload, Box<Response>> {
     let mut image_bytes = None::<Vec<u8>>;
     let mut media_type = None::<String>;
     let mut selected = true;
@@ -257,7 +257,12 @@ pub(super) async fn parse_thumbnail_upload(
         let field = match multipart.next_field().await {
             Ok(Some(field)) => field,
             Ok(None) => break,
-            Err(error) => return Err(invalid_thumbnail_upload_response(entity_name, error)),
+            Err(error) => {
+                return Err(Box::new(invalid_thumbnail_upload_response(
+                    entity_name,
+                    error,
+                )));
+            }
         };
 
         match field.name() {
@@ -266,17 +271,24 @@ pub(super) async fn parse_thumbnail_upload(
                 let bytes = match field.bytes().await {
                     Ok(bytes) => bytes,
                     Err(error) => {
-                        return Err(invalid_thumbnail_upload_response(entity_name, error));
+                        return Err(Box::new(invalid_thumbnail_upload_response(
+                            entity_name,
+                            error,
+                        )));
                     }
                 };
                 if bytes.is_empty() {
-                    return Err(empty_thumbnail_upload_response(entity_name));
+                    return Err(Box::new(empty_thumbnail_upload_response(entity_name)));
                 }
 
                 let resolved_media_type =
                     match resolve_thumbnail_media_type(content_type.as_deref(), bytes.as_ref()) {
                         Some(media_type) => media_type,
-                        None => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response()),
+                        None => {
+                            return Err(Box::new(
+                                StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response(),
+                            ));
+                        }
                     };
                 image_bytes = Some(bytes.to_vec());
                 media_type = Some(resolved_media_type);
@@ -285,17 +297,20 @@ pub(super) async fn parse_thumbnail_upload(
                 let value = match field.text().await {
                     Ok(value) => value,
                     Err(error) => {
-                        return Err(invalid_thumbnail_upload_response(entity_name, error));
+                        return Err(Box::new(invalid_thumbnail_upload_response(
+                            entity_name,
+                            error,
+                        )));
                     }
                 };
                 selected = match value.trim().to_ascii_lowercase().as_str() {
                     "" | "true" => true,
                     "false" => false,
                     _ => {
-                        return Err(spring_error_response(
+                        return Err(Box::new(spring_error_response(
                             StatusCode::BAD_REQUEST,
                             format!("{entity_name} thumbnail selected field must be true or false"),
-                        ));
+                        )));
                     }
                 };
             }
@@ -304,10 +319,10 @@ pub(super) async fn parse_thumbnail_upload(
     }
 
     let Some(bytes) = image_bytes else {
-        return Err(empty_thumbnail_upload_response(entity_name));
+        return Err(Box::new(empty_thumbnail_upload_response(entity_name)));
     };
     let Some(media_type) = media_type else {
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response());
+        return Err(Box::new(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response()));
     };
 
     Ok(ThumbnailUpload {

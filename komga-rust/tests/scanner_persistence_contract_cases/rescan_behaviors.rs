@@ -5,7 +5,7 @@ use komga_application::runtime_sse::{
     RuntimeSseEvent, RuntimeSseEventLog, RuntimeSseEventSink, RuntimeSseEventStore,
 };
 use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
-use komga_infrastructure::SqliteFilesystemLibraryScanPipeline;
+use komga_infrastructure::media::SqliteFilesystemLibraryScanPipeline;
 use std::sync::Arc;
 
 #[tokio::test]

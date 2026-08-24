@@ -1,5 +1,5 @@
 use bcrypt::{DEFAULT_COST, hash};
-use komga_infrastructure::{
+use komga_infrastructure::identity::{
     list_persisted_user_emails, load_persisted_user_by_email, update_persisted_user_passwords,
 };
 use sqlx::SqlitePool;
@@ -192,7 +192,7 @@ pub(super) async fn run_admin_cli_commands(
     database_file: &Path,
     commands: &AdminCliCommands,
 ) -> Result<(), AdminCliActionError> {
-    let pool = komga_infrastructure::connect_write_pool(database_file)
+    let pool = komga_infrastructure::persistence::connect_write_pool(database_file)
         .await
         .map_err(|error| AdminCliActionError::new(format!("failed to open database: {error}")))?;
 
@@ -252,7 +252,7 @@ pub(super) async fn run_admin_cli_commands(
         })?;
 
     for user in users {
-        komga_infrastructure::invalidate_user_sessions(user.id.as_str());
+        komga_infrastructure::identity::invalidate_user_sessions(user.id.as_str());
         println!("Reset password for user: {}", user.email);
     }
 

@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_infrastructure::{
-    InitialBootstrapUserWriteModel, bootstrap_pool, bootstrap_tasks_pool,
-    persist_initial_bootstrap_users,
+    identity::InitialBootstrapUserWriteModel, identity::persist_initial_bootstrap_users,
+    persistence::bootstrap_pool, persistence::bootstrap_tasks_pool,
 };
 
 fn run_cli(args: &[&str]) -> std::process::Output {

@@ -13,8 +13,10 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
     let mut config = runtime_config_for_logging_contract("komga-runtime-startup-lifecycle");
     fs::create_dir_all(&config.lucene_data_directory)
         .expect("lucene directory should be created for startup lifecycle test");
-    komga_infrastructure::SearchIndexLifecycle::bootstrap(config.lucene_data_directory.as_path())
-        .expect("startup lifecycle test should bootstrap a valid search index");
+    komga_infrastructure::search::SearchIndexLifecycle::bootstrap(
+        config.lucene_data_directory.as_path(),
+    )
+    .expect("startup lifecycle test should bootstrap a valid search index");
     let listener = runtime.block_on(async {
         tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
