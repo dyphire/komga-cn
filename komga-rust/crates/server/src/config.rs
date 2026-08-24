@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_config::env_config::RuntimeConfig;
-use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::{
-    persistence::{
-        DatabaseHandle, connect_task_pool, connect_task_write_pool, default_read_max_connections,
-    },
-    tasks::{TaskRuntimeContext, TaskRuntimeOwnershipOverrides},
+use komga_config::writer_ownership::WriterKind;
+use komga_infrastructure_base::{
+    DatabaseHandle, connect_task_pool, connect_task_write_pool, default_read_max_connections,
+};
+use komga_infrastructure_jobs::{
+    TaskRuntimeContext, TaskRuntimeContextParams, TaskRuntimeOwnership,
 };
 
 pub(crate) async fn task_runtime_context(
@@ -23,35 +23,30 @@ pub(crate) async fn task_runtime_context(
     let task_read_pool = connect_task_pool(main_db.database_file(), default_read_max_connections())
         .await
         .expect("failed to create private read pool");
-    TaskRuntimeContext::new(
+    TaskRuntimeContext::new(TaskRuntimeContextParams {
         main_db,
-        config.tasks_db_file.clone(),
-        config.lucene_data_directory.clone(),
-        matches!(
-            config.writer_decision(WriterKind::TasksDatabase),
-            WriterDecision::Allowed | WriterDecision::Isolated
-        ),
-        config.task_pool_size,
+        tasks_db_file: config.tasks_db_file.clone(),
+        lucene_data_directory: config.lucene_data_directory.clone(),
+        consumes_queue: config
+            .writer_decision(WriterKind::TasksDatabase)
+            .allows_write(),
+        ownership: TaskRuntimeOwnership {
+            owns_main_database: config
+                .writer_decision(WriterKind::MainDatabase)
+                .allows_write(),
+            owns_filesystem_scan_output: config
+                .writer_decision(WriterKind::FilesystemScanOutput)
+                .allows_write(),
+            owns_sidecar_output: config
+                .writer_decision(WriterKind::SidecarOutput)
+                .allows_write(),
+            owns_search_index: config
+                .writer_decision(WriterKind::SearchIndex)
+                .allows_write(),
+        },
+        task_pool_size: config.task_pool_size,
         task_write_pool,
         task_read_pool,
-    )
-    .with_runtime_events(runtime_events)
-    .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
-        owns_main_database: Some(matches!(
-            config.writer_decision(WriterKind::MainDatabase),
-            WriterDecision::Allowed | WriterDecision::Isolated
-        )),
-        owns_filesystem_scan_output: Some(matches!(
-            config.writer_decision(WriterKind::FilesystemScanOutput),
-            WriterDecision::Allowed | WriterDecision::Isolated
-        )),
-        owns_sidecar_output: Some(matches!(
-            config.writer_decision(WriterKind::SidecarOutput),
-            WriterDecision::Allowed | WriterDecision::Isolated
-        )),
-        owns_search_index: Some(matches!(
-            config.writer_decision(WriterKind::SearchIndex),
-            WriterDecision::Allowed | WriterDecision::Isolated
-        )),
+        runtime_events,
     })
 }

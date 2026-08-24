@@ -1,39 +1,26 @@
-# komga-infrastructure
+# Infrastructure crates
 
-`komga-infrastructure` owns the concrete adapters behind the Rust runtime. Its public API is
-grouped by the capability modules exposed from `src/lib.rs`; implementation belongs to the same
-capability that owns the behavior and its persisted data.
+The infrastructure layer is split into focused crates so consumers compile only the adapters they
+use. Each crate owns the persisted data and application ports for one capability; consumers import
+that capability directly instead of through a facade crate.
 
-## Module ownership
+## Crates
 
-- `persistence`: SQLite pool topology, schema bootstrap, transactions, codecs, and stored-path
-  primitives. It must not own entity-specific queries.
-- `file_io`: file lifecycle primitives shared across capabilities.
-- `identity`: users, authentication, sessions, claims, device authentication, and Kobo sync.
-- `discovery`: books, series, collections, readlists, libraries, visibility, and deletion.
-- `media`: content delivery, format primitives, analysis, metadata, progress, import,
-  maintenance, transient books, and library scanning.
+- `base`: SQLite topology, schema bootstrap, transactions, file I/O, and stored-path primitives.
+- `discovery`: books, series, collections, readlists, libraries, visibility, and discovery queries.
+- `identity`: users, authentication, sessions, device authentication, and Kobo sync.
+- `jobs`: concrete task dispatch, job implementations, runtime context, and worker orchestration.
+- `media-access`: import, reading progress, transient media, and media access events.
+- `media-core`: content resolution and archive/format primitives.
+- `media-library`: analysis, library scans, and library maintenance.
+- `media-metadata`: metadata refresh, artwork, thumbnails, and read-progress persistence.
+- `operational`: settings, announcements, metrics, history, filesystem browsing, fonts, and
+  synchronization administration.
 - `opds`: OPDS catalog adapters, persisted feed queries, and record mapping.
-- `operational`: settings, announcements, metrics, history, filesystem browsing, fonts, page
-  hashes, remote feeds, and sync-point administration.
 - `search`: analyzers, documents, index lifecycle, the search engine, and synchronization.
-- `tasks`: queue persistence, scheduling, worker runtime, dispatch, and thin job orchestration.
-- `shared`: small crate-wide primitives with no capability ownership, currently random token and
-  identifier generation.
+- `tasks`: generic queue persistence, scheduling, execution pools, and execution loops.
+- `test-support`: shared fixtures for infrastructure crate tests.
 
-## Dependency rules
-
-- Capability modules may depend on `persistence` and `shared` primitives.
-- `tasks` may invoke capability entry points, but queue and dispatch modules must not own media,
-  discovery, identity, or search business SQL.
-- Capability-specific SQLite rows and queries stay private to their owning module.
-- Cross-capability behavior uses typed entry points or existing application ports, not shared raw
-  rows or generic access/helper modules.
-- HTTP parsing, response shaping, and route ownership remain outside this crate.
-- Pure domain rules and application use-case contracts remain in `komga-domain` and
-  `komga-application`.
-
-Consumers should import through the owning module, for example `persistence::DatabaseHandle`,
-`media::ContentResolver`, or `tasks::TaskRuntimeContext`. When adding behavior, extend the deepest
-existing owner before creating another adapter or top-level module. Keep `src/lib.rs` limited to
-module declarations and crate-private shared primitives.
+`tasks` contains no concrete domain job implementations. `jobs` depends on `tasks` and the
+capability crates to connect queue records to application task requests. `base` remains below the
+capability crates and must not depend on application or domain code.

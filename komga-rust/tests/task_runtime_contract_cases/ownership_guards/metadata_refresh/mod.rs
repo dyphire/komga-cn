@@ -105,8 +105,7 @@ async fn runtime_refresh_book_metadata_imports_comicinfo_from_embedded_archive()
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("embedded ComicInfo metadata task should process successfully");
 
@@ -196,8 +195,7 @@ async fn runtime_refresh_book_metadata_can_import_readlists_without_applying_boo
 
         let runtime = runtime_task_context(ctx.paths()).await;
         let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-        scheduler
-            .process_available(&runtime.job()).await
+        komga_infrastructure_jobs::process_available(&scheduler, &runtime).await
             .expect("runtime should process readlist-only RefreshBookMetadata tasks successfully");
 
         let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -287,8 +285,7 @@ async fn runtime_refresh_book_metadata_applies_comicinfo_number_when_capability_
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should process number-only RefreshBookMetadata tasks successfully");
 
@@ -380,8 +377,7 @@ async fn runtime_refresh_book_metadata_applies_remaining_comicinfo_fields_with_l
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should process remaining ComicInfo metadata fields successfully");
 
@@ -517,8 +513,7 @@ async fn runtime_refresh_book_metadata_does_not_run_comicinfo_for_isbn_or_tags_o
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should process ComicInfo gate metadata tasks successfully");
 

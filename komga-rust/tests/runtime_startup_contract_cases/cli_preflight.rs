@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use komga_infrastructure::{
-    identity::InitialBootstrapUserWriteModel, identity::persist_initial_bootstrap_users,
-    persistence::bootstrap_pool, persistence::bootstrap_tasks_pool,
+use komga_infrastructure_base::{bootstrap_pool, bootstrap_tasks_pool};
+use komga_infrastructure_identity::{
+    InitialBootstrapUserWriteModel, persist_initial_bootstrap_users,
 };
 
 fn run_cli(args: &[&str]) -> std::process::Output {

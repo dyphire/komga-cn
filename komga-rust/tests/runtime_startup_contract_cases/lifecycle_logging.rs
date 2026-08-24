@@ -13,7 +13,7 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
     let mut config = runtime_config_for_logging_contract("komga-runtime-startup-lifecycle");
     fs::create_dir_all(&config.lucene_data_directory)
         .expect("lucene directory should be created for startup lifecycle test");
-    komga_infrastructure::search::SearchIndexLifecycle::bootstrap(
+    komga_infrastructure_search::SearchIndexLifecycle::bootstrap(
         config.lucene_data_directory.as_path(),
     )
     .expect("startup lifecycle test should bootstrap a valid search index");

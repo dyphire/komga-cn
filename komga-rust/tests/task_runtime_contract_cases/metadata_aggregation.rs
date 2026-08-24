@@ -66,8 +66,7 @@ async fn runtime_aggregate_series_metadata_refreshes_series_books_metadata_surfa
         )
         .await
         .expect("task enqueue should succeed");
-    let processed = scheduler
-        .process_available(&runtime.job())
+    let processed = komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("aggregate-series-metadata task should process for series booksMetadata fixture");
     assert_eq!(processed, 1);
@@ -187,8 +186,7 @@ async fn runtime_aggregate_series_metadata_preserves_series_metadata_title_and_s
         )
         .await
         .expect("task enqueue should succeed");
-    let processed = scheduler
-        .process_available(&runtime.job())
+    let processed = komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("aggregate-series-metadata task should preserve series metadata title fields");
     assert_eq!(processed, 1);

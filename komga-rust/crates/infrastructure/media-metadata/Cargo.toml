@@ -1,0 +1,28 @@
+[package]
+name = "komga-infrastructure-media-metadata"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+image.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-infrastructure-base = { path = "../base" }
+komga-infrastructure-media-core = { path = "../media-core" }
+language-tags.workspace = true
+lopdf.workspace = true
+pdfium-render.workspace = true
+quick-xml.workspace = true
+rxing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+url.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }

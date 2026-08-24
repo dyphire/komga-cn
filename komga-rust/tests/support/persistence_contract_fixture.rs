@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use komga_infrastructure::persistence::SqlitePersistenceContext;
-use komga_infrastructure::persistence::evict_shared_pools_for_paths;
+use komga_infrastructure_base::SqlitePersistenceContext;
+use komga_infrastructure_base::evict_shared_pools_for_paths;
 use tokio::sync::OnceCell;
 
 use crate::support::sqlite::connect_test_pool;
@@ -248,12 +248,13 @@ pub async fn seed_tasks_db_from_flyway(path: &Path) -> anyhow::Result<()> {
 }
 
 fn main_migration_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/infrastructure/sqlx-migrations/main")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/infrastructure/base/sqlx-migrations/main")
 }
 
 fn tasks_migration_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../komga/src/flyway/resources/tasks/migration/sqlite")
+        .join("crates/infrastructure/base/sqlx-migrations/tasks")
 }
 
 pub fn cleanup(paths: RuntimeDbPaths) {

@@ -32,18 +32,17 @@ async fn enqueue_delete_series(scheduler: &mut TaskQueueScheduler, series_id: &s
 async fn runtime_blocks_book_delete_when_main_database_is_external_owned() {
     let ctx = TestFixture::new("runtime-blocked-main-database-delete-book").await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked main-database delete-book should still drain cleanly");
 
@@ -123,18 +122,17 @@ async fn runtime_blocks_series_delete_when_main_database_is_external_owned() {
     .expect("blocked delete-series series sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked main-database delete-series should still drain cleanly");
 
@@ -220,8 +218,7 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book runtime should stage soft deletion cleanly");
 
@@ -319,8 +316,7 @@ async fn runtime_delete_book_emits_book_changed_event_after_soft_delete() {
         runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book runtime should process successfully for sse contract");
 
@@ -418,8 +414,7 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book oneshot runtime should stage soft deletion cleanly");
 
@@ -614,8 +609,7 @@ async fn runtime_delete_book_oneshot_deletes_every_book_in_the_series() {
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book oneshot full-series runtime should process successfully");
 
@@ -705,8 +699,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book missing-file runtime should still drain cleanly");
 
@@ -831,8 +824,7 @@ async fn runtime_delete_book_oneshot_skips_soft_delete_when_series_directory_is_
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-book oneshot readonly runtime should still drain cleanly");
 
@@ -957,8 +949,7 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-series runtime should stage soft deletion cleanly");
 
@@ -1075,8 +1066,7 @@ async fn runtime_delete_series_emits_series_changed_event_after_soft_delete() {
         runtime_task_context_with_runtime_events(ctx.paths(), ctx.runtime_events_arc()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-series runtime should process successfully for sse contract");
 
@@ -1120,8 +1110,7 @@ async fn runtime_delete_series_skips_soft_delete_when_series_directory_is_missin
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_series(&mut scheduler, "series-1").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("delete-series missing-directory runtime should still drain cleanly");
 

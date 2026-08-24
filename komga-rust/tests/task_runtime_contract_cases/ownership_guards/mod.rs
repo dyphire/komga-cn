@@ -87,8 +87,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task() {
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should execute Kotlin persisted RefreshBookMetadata tasks successfully");
 
@@ -186,11 +185,11 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
     .expect("oneshot book metadata row should be inserted for series metadata fixture");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_search_index: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_search_index: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
@@ -206,8 +205,7 @@ async fn runtime_refresh_series_metadata_applies_oneshot_provider_fields() {
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("oneshot refresh-series-metadata task should process successfully");
 
@@ -282,8 +280,7 @@ async fn runtime_executes_kotlin_persisted_refresh_book_metadata_task_with_defau
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job()).await
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime).await
         .expect("runtime should restore default RefreshBookMetadata capabilities for persisted Kotlin tasks");
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -375,8 +372,7 @@ async fn runtime_executes_kotlin_persisted_repair_extension_task() {
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should execute Kotlin persisted RepairExtension tasks successfully");
 

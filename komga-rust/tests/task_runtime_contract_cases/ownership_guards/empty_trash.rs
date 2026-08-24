@@ -14,8 +14,7 @@ async fn run_empty_trash_with_runtime(runtime: TaskRuntimeContext) {
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("empty-trash cleanup should process successfully");
 }

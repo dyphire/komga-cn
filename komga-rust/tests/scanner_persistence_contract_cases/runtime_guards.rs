@@ -1,11 +1,12 @@
 use super::support::*;
 use super::*;
-use komga_infrastructure::persistence::DatabaseHandle;
-use komga_infrastructure::tasks::TaskRuntimeOwnershipOverrides;
-use komga_infrastructure::{
-    persistence::connect_task_pool, persistence::connect_task_write_pool,
-    persistence::default_read_max_connections,
+use komga_application::runtime_sse::RuntimeSseEventStore;
+use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_base::{
+    connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
+use komga_infrastructure_jobs::{TaskRuntimeContextParams, TaskRuntimeOwnership};
+use std::sync::Arc;
 
 #[tokio::test]
 async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_external_owned() {
@@ -31,28 +32,28 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
     let task_read_pool = connect_task_pool(&fixture.paths.main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext::new(
-        DatabaseHandle::file_backed(fixture.paths.main_db.clone())
+    let runtime = TaskRuntimeContext::new(TaskRuntimeContextParams {
+        main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
             .await
             .expect("test db should open"),
-        fixture.paths.tasks_db.clone(),
-        fixture.config.lucene_data_directory.clone(),
-        true,
-        1,
+        tasks_db_file: fixture.paths.tasks_db.clone(),
+        lucene_data_directory: fixture.config.lucene_data_directory.clone(),
+        consumes_queue: true,
+        ownership: TaskRuntimeOwnership {
+            owns_filesystem_scan_output: false,
+            ..TaskRuntimeOwnership::all_owned()
+        },
+        task_pool_size: 1,
         task_write_pool,
         task_read_pool,
-    )
-    .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
-        owns_filesystem_scan_output: Some(false),
-        ..TaskRuntimeOwnershipOverrides::default()
+        runtime_events: Arc::new(RuntimeSseEventStore::default()),
     });
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
         .enqueue(scan_library_task("library-1", 900, false))
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked scan-output task should still drain cleanly");
 
@@ -120,8 +121,7 @@ async fn scanner_unknown_task_type_is_not_completed_or_silently_skipped() {
         .await
         .expect("task enqueue should succeed");
 
-    let error = scheduler
-        .process_available(&runtime.job())
+    let error = komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect_err("unknown task type should surface as runtime error instead of being completed");
     assert!(
@@ -191,7 +191,7 @@ async fn scanner_startup_releases_previously_claimed_persisted_tasks() {
     .expect("claimed task row should be inserted");
     tasks_pool.close().await;
 
-    let _background = komga_infrastructure::tasks::prepare_task_queue(
+    let _background = komga_infrastructure_jobs::prepare_task_queue(
         runtime_task_context_from_config(&fixture.config).await,
         None,
     )
@@ -258,26 +258,27 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
     let task_read_pool = connect_task_pool(&fixture.paths.main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
-    let runtime = TaskRuntimeContext::new(
-        DatabaseHandle::file_backed(fixture.paths.main_db.clone())
+    let runtime = TaskRuntimeContext::new(TaskRuntimeContextParams {
+        main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
             .await
             .expect("test db should open"),
-        fixture.paths.tasks_db.clone(),
-        fixture.config.lucene_data_directory.clone(),
-        false,
-        1,
+        tasks_db_file: fixture.paths.tasks_db.clone(),
+        lucene_data_directory: fixture.config.lucene_data_directory.clone(),
+        consumes_queue: false,
+        ownership: TaskRuntimeOwnership {
+            owns_main_database: false,
+            owns_filesystem_scan_output: false,
+            owns_sidecar_output: false,
+            owns_search_index: false,
+        },
+        task_pool_size: 1,
         task_write_pool,
         task_read_pool,
-    )
-    .with_ownership_overrides(TaskRuntimeOwnershipOverrides {
-        owns_main_database: Some(false),
-        owns_filesystem_scan_output: Some(false),
-        owns_sidecar_output: Some(false),
-        owns_search_index: Some(false),
+        runtime_events: Arc::new(RuntimeSseEventStore::default()),
     });
 
     let background =
-        komga_infrastructure::tasks::prepare_task_queue(runtime, Some("RebuildIndex")).await;
+        komga_infrastructure_jobs::prepare_task_queue(runtime, Some("RebuildIndex")).await;
 
     let verify_pool = connect_test_pool(fixture.paths.tasks_db.as_path(), 1)
         .await
@@ -335,8 +336,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
         .enqueue(scan_library_task("library-1", 900, false))
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("initial scan should seed scanner persistence state");
 
@@ -396,8 +396,7 @@ async fn scanner_persisted_scan_library_payload_overrides_legacy_id_target_and_d
 
     let runtime = runtime_task_context_from_config(&fixture.config).await;
     let replay = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    replay
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&replay, &runtime)
         .await
         .expect("legacy scan-library payload precedence row should process successfully");
 
@@ -447,8 +446,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         .enqueue(scan_library_task("library-1", 900, false))
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("initial scan should seed underscore deep replay state");
 
@@ -470,8 +468,7 @@ async fn scanner_persisted_scan_library_recovers_deep_flag_from_underscore_legac
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job()).await
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime).await
         .expect("underscore legacy scan-library id should process successfully after canonical payload restoration");
 
     assert_eq!(

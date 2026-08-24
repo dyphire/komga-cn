@@ -3,7 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::identity_access::AuthUserRole;
 use komga_config::env_config::RuntimeConfig;
-use komga_infrastructure::identity::{
+use komga_infrastructure_base::{connect_read_pool, connect_write_pool};
+use komga_infrastructure_identity::{
     InitialBootstrapUserWriteModel, load_persisted_user_count, persist_initial_bootstrap_users,
 };
 
@@ -12,16 +13,13 @@ pub(super) async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         return;
     }
 
-    let pool =
-        match komga_infrastructure::persistence::connect_read_pool(config.database_file.as_path())
-            .await
-        {
-            Ok(pool) => pool,
-            Err(error) => {
-                eprintln!("failed to open database for noclaim bootstrap: {error}");
-                return;
-            }
-        };
+    let pool = match connect_read_pool(config.database_file.as_path()).await {
+        Ok(pool) => pool,
+        Err(error) => {
+            eprintln!("failed to open database for noclaim bootstrap: {error}");
+            return;
+        }
+    };
 
     let existing_users = load_persisted_user_count(&pool).await;
 
@@ -86,16 +84,13 @@ pub(super) async fn ensure_noclaim_initial_users(config: &RuntimeConfig) {
         });
     }
 
-    let write_pool =
-        match komga_infrastructure::persistence::connect_write_pool(config.database_file.as_path())
-            .await
-        {
-            Ok(pool) => pool,
-            Err(error) => {
-                eprintln!("failed to open write database for noclaim bootstrap: {error}");
-                return;
-            }
-        };
+    let write_pool = match connect_write_pool(config.database_file.as_path()).await {
+        Ok(pool) => pool,
+        Err(error) => {
+            eprintln!("failed to open write database for noclaim bootstrap: {error}");
+            return;
+        }
+    };
 
     if let Err(error) = persist_initial_bootstrap_users(&write_pool, &users_to_persist).await {
         eprintln!("failed to persist noclaim bootstrap users: {error}");

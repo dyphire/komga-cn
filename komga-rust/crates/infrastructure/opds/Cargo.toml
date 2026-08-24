@@ -1,0 +1,19 @@
+[package]
+name = "komga-infrastructure-opds"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+icu.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-infrastructure-base = { path = "../base" }
+komga-infrastructure-search = { path = "../search" }
+sqlx.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

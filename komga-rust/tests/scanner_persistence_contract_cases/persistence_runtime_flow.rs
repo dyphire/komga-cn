@@ -2,7 +2,7 @@ use super::support::*;
 use super::*;
 use crate::support::sqlite::connect_test_pool;
 use komga_application::task_processing::{LibraryScanPipeline, ScanOneLibrary};
-use komga_infrastructure::media::SqliteFilesystemLibraryScanPipeline;
+use komga_infrastructure_media_library::library_scan::SqliteFilesystemLibraryScanPipeline;
 
 #[tokio::test]
 async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_book_and_sidecar_tables()

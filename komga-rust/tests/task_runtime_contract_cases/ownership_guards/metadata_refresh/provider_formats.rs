@@ -273,8 +273,7 @@ async fn runtime_refresh_book_metadata_applies_epub_provider_patch_when_title_ca
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should process EPUB RefreshBookMetadata tasks successfully");
 
@@ -378,8 +377,7 @@ async fn runtime_refresh_book_metadata_applies_barcode_isbn_for_non_epub_books()
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("runtime should process barcode RefreshBookMetadata tasks successfully");
 

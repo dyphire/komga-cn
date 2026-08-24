@@ -17,7 +17,7 @@ struct NormalizedMigration {
     sql: String,
 }
 
-pub fn configure_infrastructure_build(manifest_dir: &Path, out_dir: &Path) {
+pub fn configure_sqlite_build(manifest_dir: &Path, out_dir: &Path) {
     println!("cargo:rerun-if-changed=build.rs");
 
     let main_dir = manifest_dir.join("sqlx-migrations/main");
@@ -43,16 +43,21 @@ pub fn configure_infrastructure_build(manifest_dir: &Path, out_dir: &Path) {
         &tasks_dir,
         &target_root.join("tasks-prefix-schema-inventories.json"),
     );
+}
+
+pub fn configure_pdfium_build(manifest_dir: &Path) {
+    println!("cargo:rerun-if-changed=build.rs");
     prepare_pdfium_vendor(manifest_dir);
 }
 
 fn prepare_pdfium_vendor(manifest_dir: &Path) {
     let workspace_root = manifest_dir
-        .join("../..")
-        .canonicalize()
-        .unwrap_or_else(|error| {
+        .ancestors()
+        .find(|candidate| candidate.join("vendor/pdfium-release").is_file())
+        .and_then(|candidate| candidate.canonicalize().ok())
+        .unwrap_or_else(|| {
             panic!(
-                "failed to resolve workspace root from {}: {error}",
+                "failed to resolve workspace root from {}",
                 manifest_dir.display()
             )
         });

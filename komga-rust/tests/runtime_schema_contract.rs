@@ -1,7 +1,6 @@
-use komga_infrastructure::persistence::SqlitePersistenceContext;
-use komga_infrastructure::{
-    persistence::bootstrap_pool, persistence::bootstrap_tasks_pool,
-    persistence::connect_main_write_context, persistence::connect_write_pool,
+use komga_infrastructure_base::{
+    SqlitePersistenceContext, bootstrap_pool, bootstrap_tasks_pool, connect_main_write_context,
+    connect_write_pool,
 };
 use sqlx::Row;
 use std::path::Path;
@@ -265,7 +264,7 @@ async fn migrate_legacy_main_schema_to_latest_inventory() {
         &ctx.paths().main_db,
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(
-                "crates/infrastructure/sqlx-migrations/main/V20200706141854__initial_migration.sql",
+                "crates/infrastructure/base/sqlx-migrations/main/V20200706141854__initial_migration.sql",
             )
             .as_path(),
     )
@@ -307,7 +306,7 @@ async fn migrate_legacy_main_schema_without_flyway_history_to_latest_inventory()
         &ctx.paths().main_db,
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(
-                "crates/infrastructure/sqlx-migrations/main/V20200706141854__initial_migration.sql",
+                "crates/infrastructure/base/sqlx-migrations/main/V20200706141854__initial_migration.sql",
             )
             .as_path(),
     )

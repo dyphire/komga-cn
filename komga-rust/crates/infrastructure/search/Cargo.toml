@@ -1,0 +1,14 @@
+[package]
+name = "komga-infrastructure-search"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+komga-application = { path = "../../application" }
+komga-infrastructure-base = { path = "../base" }
+sqlx.workspace = true
+tantivy.workspace = true
+tokio.workspace = true

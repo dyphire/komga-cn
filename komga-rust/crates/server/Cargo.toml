@@ -2,6 +2,7 @@
 name = "komga-server"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 axum.workspace = true
@@ -33,7 +34,17 @@ tracing-subscriber.workspace = true
 komga-config = { path = "../config" }
 komga-domain = { path = "../domain" }
 komga-application = { path = "../application" }
-komga-infrastructure = { path = "../infrastructure" }
+komga-infrastructure-identity = { path = "../infrastructure/identity" }
+komga-infrastructure-jobs = { path = "../infrastructure/jobs" }
+komga-infrastructure-operational = { path = "../infrastructure/operational" }
+komga-infrastructure-opds = { path = "../infrastructure/opds" }
+komga-infrastructure-tasks = { path = "../infrastructure/tasks" }
+komga-infrastructure-media-access = { path = "../infrastructure/media-access" }
+komga-infrastructure-media-metadata = { path = "../infrastructure/media-metadata" }
+komga-infrastructure-base = { path = "../infrastructure/base" }
+komga-infrastructure-discovery = { path = "../infrastructure/discovery" }
+komga-infrastructure-media-core = { path = "../infrastructure/media-core" }
+komga-infrastructure-search = { path = "../infrastructure/search" }
 komga-interfaces = { path = "../interfaces" }
 komga-kepubify = { path = "../kepubify" }
 

@@ -4,11 +4,12 @@ use komga_application::task_processing::TaskQueueAdmin;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile;
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
-use komga_infrastructure::tasks::TaskRuntimeContext;
-use komga_infrastructure::{
-    persistence::DatabaseHandle,
-    search::{SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild},
-    tasks::{RuntimeBackgroundState, prepare_task_queue, process_startup_library_scans},
+use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_jobs::{
+    RuntimeBackgroundState, TaskRuntimeContext, prepare_task_queue, process_startup_library_scans,
+};
+use komga_infrastructure_search::{
+    SearchStartupLifecycle, decide_startup_lifecycle, prepare_for_rebuild,
 };
 use komga_interfaces::state::RuntimeSseEventHub;
 use std::path::PathBuf;

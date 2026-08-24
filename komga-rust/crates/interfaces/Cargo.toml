@@ -2,6 +2,7 @@
 name = "komga-interfaces"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [features]
 allow-missing-webui-dist = []
@@ -41,7 +42,10 @@ zip.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]
-komga-infrastructure = { path = "../infrastructure" }
+komga-infrastructure-base = { path = "../infrastructure/base" }
+komga-infrastructure-identity = { path = "../infrastructure/identity" }
+komga-infrastructure-media-core = { path = "../infrastructure/media-core" }
+komga-infrastructure-operational = { path = "../infrastructure/operational" }
 sqlx.workspace = true
 tower.workspace = true
 

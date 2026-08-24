@@ -1,0 +1,32 @@
+[package]
+name = "komga-infrastructure-media-core"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+image-nasm = ["image/nasm"]
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+flate2.workspace = true
+image.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-epub = { path = "../../epub" }
+komga-infrastructure-base = { path = "../base" }
+lopdf.workspace = true
+pdfium-render.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+unrar.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }
+
+[build-dependencies]
+komga-build-support = { path = "../../build-support" }

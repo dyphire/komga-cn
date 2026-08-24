@@ -5,7 +5,19 @@ members = [
   "crates/kepubify",
   "crates/domain",
   "crates/application",
-  "crates/infrastructure",
+  "crates/infrastructure/base",
+  "crates/infrastructure/search",
+  "crates/infrastructure/media-core",
+  "crates/infrastructure/discovery",
+  "crates/infrastructure/media-library",
+  "crates/infrastructure/media-metadata",
+  "crates/infrastructure/media-access",
+  "crates/infrastructure/identity",
+  "crates/infrastructure/jobs",
+  "crates/infrastructure/operational",
+  "crates/infrastructure/opds",
+  "crates/infrastructure/tasks",
+  "crates/infrastructure/test-support",
   "crates/interfaces",
   "crates/config",
   "crates/oauth",
@@ -82,9 +94,10 @@ strip = true
 name = "komga-rust"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [features]
-image-nasm = ["komga-infrastructure/image-nasm"]
+image-nasm = ["komga-infrastructure-media-core/image-nasm"]
 
 [dependencies]
 axum.workspace = true
@@ -99,7 +112,7 @@ komga-config = { path = "crates/config" }
 komga-server = { path = "crates/server" }
 komga-domain = { path = "crates/domain" }
 komga-application = { path = "crates/application" }
-komga-infrastructure = { path = "crates/infrastructure" }
+komga-infrastructure-media-core = { path = "crates/infrastructure/media-core" }
 komga-interfaces = { path = "crates/interfaces" }
 mimalloc.workspace = true
 
@@ -128,3 +141,13 @@ async-trait.workspace = true
 openidconnect.workspace = true
 chrono.workspace = true
 komga-interfaces = { path = "crates/interfaces", features = ["allow-missing-webui-dist"] }
+komga-infrastructure-base = { path = "crates/infrastructure/base" }
+komga-infrastructure-identity = { path = "crates/infrastructure/identity" }
+komga-infrastructure-jobs = { path = "crates/infrastructure/jobs" }
+komga-infrastructure-operational = { path = "crates/infrastructure/operational" }
+komga-infrastructure-opds = { path = "crates/infrastructure/opds" }
+komga-infrastructure-tasks = { path = "crates/infrastructure/tasks" }
+komga-infrastructure-search = { path = "crates/infrastructure/search" }
+komga-infrastructure-media-access = { path = "crates/infrastructure/media-access" }
+komga-infrastructure-media-library = { path = "crates/infrastructure/media-library" }
+komga-infrastructure-media-metadata = { path = "crates/infrastructure/media-metadata" }

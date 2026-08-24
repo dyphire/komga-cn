@@ -1,0 +1,9 @@
+[package]
+name = "komga-infrastructure-test-support"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+komga-infrastructure-base = { path = "../base" }
+sqlx.workspace = true

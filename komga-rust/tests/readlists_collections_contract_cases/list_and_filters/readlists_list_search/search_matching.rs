@@ -1,5 +1,5 @@
 use super::*;
-use komga_infrastructure::{search::SearchEntityType, search::SearchIndexLifecycle};
+use komga_infrastructure_search::{SearchEntityType, SearchIndexLifecycle};
 
 #[tokio::test]
 async fn router_readlists_search_uses_relevance_order_like_kotlin() {

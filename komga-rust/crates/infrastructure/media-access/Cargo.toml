@@ -1,0 +1,28 @@
+[package]
+name = "komga-infrastructure-media-access"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+image.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-epub = { path = "../../epub" }
+komga-infrastructure-base = { path = "../base" }
+komga-infrastructure-media-core = { path = "../media-core" }
+komga-infrastructure-media-library = { path = "../media-library" }
+komga-infrastructure-media-metadata = { path = "../media-metadata" }
+pdfium-render.workspace = true
+quick-xml.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+unrar.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }
+lopdf.workspace = true

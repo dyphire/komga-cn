@@ -1,0 +1,25 @@
+[package]
+name = "komga-infrastructure-media-library"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+image.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-epub = { path = "../../epub" }
+komga-infrastructure-base = { path = "../base" }
+komga-infrastructure-discovery = { path = "../discovery" }
+komga-infrastructure-media-core = { path = "../media-core" }
+lopdf.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+unrar.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }

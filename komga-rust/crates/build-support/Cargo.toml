@@ -2,6 +2,7 @@
 name = "komga-build-support"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 flate2.workspace = true

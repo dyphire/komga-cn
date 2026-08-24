@@ -38,15 +38,15 @@ async fn runtime_blocks_authentication_activity_cleanup_when_main_database_is_ex
     .expect("authentication activity row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
-    komga_infrastructure::tasks::cleanup_authentication_activity_once(&runtime)
+    komga_infrastructure_jobs::cleanup_authentication_activity_once(&runtime)
         .await
         .expect("auth cleanup should skip cleanly when main database is external-owned");
 
@@ -117,12 +117,12 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
     .expect("stale media page row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            owns_search_index: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            owns_search_index: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
@@ -134,8 +134,7 @@ async fn runtime_blocks_book_media_analysis_when_main_database_is_external_owned
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked main-database analyze-book should still drain cleanly");
 
@@ -215,11 +214,11 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
     .expect("book sidecar row should be inserted");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_sidecar_output: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_sidecar_output: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
@@ -232,8 +231,7 @@ async fn runtime_blocks_sidecar_metadata_refresh_when_sidecar_output_is_external
         ))
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked sidecar metadata refresh should still drain cleanly");
 
@@ -280,11 +278,11 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
     .expect("series metadata title should be updated for aggregation fixture");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
@@ -300,8 +298,7 @@ async fn runtime_blocks_series_metadata_aggregation_when_main_database_is_extern
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked main-database aggregation should still drain cleanly");
 
@@ -347,11 +344,11 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         .expect("readlist members should be removed for cleanup fixture");
     pool.close().await;
 
-    let runtime = runtime_task_context_with_overrides(
+    let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
-        TaskRuntimeOwnershipOverrides {
-            owns_main_database: Some(false),
-            ..TaskRuntimeOwnershipOverrides::default()
+        TaskRuntimeOwnership {
+            owns_main_database: false,
+            ..TaskRuntimeOwnership::all_owned()
         },
     )
     .await;
@@ -363,8 +360,7 @@ async fn runtime_blocks_empty_trash_cleanup_when_main_database_is_external_owned
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("blocked main-database cleanup should still drain cleanly");
 

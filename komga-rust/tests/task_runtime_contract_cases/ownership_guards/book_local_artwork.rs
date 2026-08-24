@@ -44,7 +44,7 @@ async fn runtime_skips_book_local_artwork_refresh_when_library_import_local_artw
         ))
         .await
         .expect("task enqueue should succeed");
-    scheduler.process_available(&runtime.job()).await.expect(
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime).await.expect(
         "book local artwork refresh should skip cleanly when library.importLocalArtwork is disabled",
     );
 
@@ -128,9 +128,11 @@ async fn runtime_executes_kotlin_persisted_refresh_book_local_artwork_task() {
 
     let runtime = runtime_task_context(ctx.paths()).await;
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
-    scheduler.process_available(&runtime.job()).await.expect(
-        "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
-    );
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
+        .await
+        .expect(
+            "runtime should execute Kotlin persisted RefreshBookLocalArtwork tasks successfully",
+        );
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -192,8 +194,7 @@ async fn runtime_imports_multiple_filesystem_book_local_artworks_and_selects_onl
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("book local artwork refresh should import multiple filesystem candidates cleanly");
 
@@ -280,9 +281,11 @@ async fn runtime_preserves_existing_non_generated_selection_when_importing_book_
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler.process_available(&runtime.job()).await.expect(
-        "book local artwork refresh should preserve existing non-generated selections cleanly",
-    );
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
+        .await
+        .expect(
+            "book local artwork refresh should preserve existing non-generated selections cleanly",
+        );
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
         .await
@@ -373,8 +376,7 @@ async fn runtime_replaces_generated_selection_when_importing_book_local_artworks
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("book local artwork refresh should replace generated selection cleanly");
 
@@ -462,8 +464,7 @@ async fn runtime_book_local_artwork_refresh_emits_thumbnail_book_added_events() 
         )
         .await
         .expect("task enqueue should succeed");
-    scheduler
-        .process_available(&runtime.job())
+    komga_infrastructure_jobs::process_available(&scheduler, &runtime)
         .await
         .expect("book local artwork refresh should complete for sse contract");
 

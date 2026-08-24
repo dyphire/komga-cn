@@ -18,7 +18,7 @@ pub(super) async fn connect_test_pool(
 ) -> Result<sqlx::SqlitePool, sqlx::Error> {
     sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(max_connections)
-        .connect_with(komga_infrastructure::persistence::file_backed_connect_options(path))
+        .connect_with(komga_infrastructure_base::file_backed_connect_options(path))
         .await
 }
 
@@ -43,7 +43,7 @@ pub(super) fn create_stale_schema_search_index(index_dir: &std::path::Path) {
 }
 
 pub(super) fn create_runtime_index_with_stale_analyzer_version(index_dir: &std::path::Path) {
-    komga_infrastructure::search::SearchIndexLifecycle::bootstrap(index_dir)
+    komga_infrastructure_search::SearchIndexLifecycle::bootstrap(index_dir)
         .expect("runtime index fixture should bootstrap");
     fs::write(
         index_dir.join(ANALYZER_VERSION_MARKER_FILE),

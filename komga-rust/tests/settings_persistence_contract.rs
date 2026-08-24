@@ -1,7 +1,7 @@
 use crate::support::sqlite::connect_test_pool;
 use komga_application::operational::{ServerSettingChange, ServerSettingsPort};
-use komga_infrastructure::operational::ServerSettingsStore;
-use komga_infrastructure::persistence::connect_main_write_context;
+use komga_infrastructure_base::connect_main_write_context;
+use komga_infrastructure_operational::ServerSettingsStore;
 
 mod support;
 

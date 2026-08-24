@@ -1,6 +1,6 @@
 use axum::Router;
 use komga_application::operational::StartupTimingState;
-use komga_infrastructure::persistence::close_all_shared_pools;
+use komga_infrastructure_base::close_all_shared_pools;
 use komga_interfaces::state::RuntimeSseEventHub;
 use std::future::{Future, IntoFuture};
 use std::net::SocketAddr;

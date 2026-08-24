@@ -25,8 +25,7 @@ fn scheduler_logs_truthful_success_lifecycle_at_commit_boundaries() {
                 .enqueue(task)
                 .await
                 .expect("task enqueue should succeed");
-            scheduler
-                .process_available(&runtime.job())
+            komga_infrastructure_jobs::process_available(&scheduler, &runtime)
                 .await
                 .expect("upgrade-index lifecycle fixture should process successfully")
         }
@@ -105,9 +104,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
         let failed_task = failed_task.clone();
         let disowned_task = disowned_task.clone();
         async move {
-            let runtime = runtime_task_context_from_config(&config)
-                .await
-                .with_task_pool_size(2);
+            let runtime = runtime_task_context_from_config_with_task_pool_size(&config, 2).await;
             let task_queue = std::sync::Arc::new(tokio::sync::Mutex::new(
                 TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await,
             ));
@@ -123,7 +120,7 @@ fn scheduler_logs_failure_with_concurrent_success_without_fake_success_events() 
                     .expect("task enqueue should succeed");
             }
 
-            komga_infrastructure::tasks::run_background_task_iteration(task_queue, runtime)
+            komga_infrastructure_jobs::run_background_task_iteration(task_queue, runtime)
                 .await
                 .expect_err("unsupported task should fail the background task iteration")
                 .to_string()
@@ -219,8 +216,7 @@ fn scheduler_logs_recover_before_reclaiming_owned_work() {
                 .expect("recover fixture should claim the queued task before recovery");
             assert_eq!(claimed.id, "UpgradeIndex:logging-recover");
 
-            scheduler
-                .recover_and_process(&runtime.job())
+            komga_infrastructure_jobs::recover_and_process(&scheduler, &runtime)
                 .await
                 .expect("recover fixture should reclaim and complete the disowned task")
         }

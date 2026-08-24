@@ -1,0 +1,22 @@
+[package]
+name = "komga-infrastructure-identity"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bcrypt.workspace = true
+komga-application = { path = "../../application" }
+komga-infrastructure-base = { path = "../base" }
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }
+tokio.workspace = true

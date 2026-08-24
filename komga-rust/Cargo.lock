@@ -2751,45 +2751,259 @@ dependencies = [
 ]
 
 [[package]]
-name = "komga-infrastructure"
+name = "komga-infrastructure-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "getrandom 0.4.3",
+ "komga-build-support",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "komga-infrastructure-discovery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "komga-application",
+ "komga-domain",
+ "komga-infrastructure-base",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-search",
+ "komga-infrastructure-test-support",
+ "serde",
+ "sqlx",
+ "time",
+ "tokio",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "komga-infrastructure-identity"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.23.1",
  "bcrypt",
- "flate2",
+ "komga-application",
+ "komga-infrastructure-base",
+ "komga-infrastructure-test-support",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "komga-infrastructure-jobs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
  "futures-util",
- "getrandom 0.4.3",
  "icu",
+ "image",
+ "komga-application",
+ "komga-domain",
+ "komga-epub",
+ "komga-infrastructure-base",
+ "komga-infrastructure-discovery",
+ "komga-infrastructure-identity",
+ "komga-infrastructure-media-access",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-media-library",
+ "komga-infrastructure-media-metadata",
+ "komga-infrastructure-operational",
+ "komga-infrastructure-search",
+ "komga-infrastructure-tasks",
+ "komga-infrastructure-test-support",
+ "lopdf",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tracing",
+ "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-media-access"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "image",
+ "komga-application",
+ "komga-domain",
+ "komga-epub",
+ "komga-infrastructure-base",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-media-library",
+ "komga-infrastructure-media-metadata",
+ "komga-infrastructure-test-support",
+ "lopdf",
+ "pdfium-render",
+ "quick-xml",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "unrar",
+ "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-media-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "flate2",
  "image",
  "komga-application",
  "komga-build-support",
  "komga-domain",
  "komga-epub",
- "komga-kepubify",
+ "komga-infrastructure-base",
+ "komga-infrastructure-test-support",
+ "lopdf",
+ "pdfium-render",
+ "regex",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "unrar",
+ "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-media-library"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "image",
+ "komga-application",
+ "komga-domain",
+ "komga-epub",
+ "komga-infrastructure-base",
+ "komga-infrastructure-discovery",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-test-support",
+ "lopdf",
+ "sha2 0.11.0",
+ "sqlx",
+ "tokio",
+ "unrar",
+ "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-media-metadata"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "image",
+ "komga-application",
+ "komga-domain",
+ "komga-infrastructure-base",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-test-support",
  "language-tags",
- "libc",
  "lopdf",
  "pdfium-render",
  "quick-xml",
- "regex",
- "reqwest 0.13.4",
- "rusqlite",
  "rxing",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "sqlx",
- "tantivy",
+ "tokio",
+ "url",
+ "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-opds"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "icu",
+ "komga-application",
+ "komga-domain",
+ "komga-infrastructure-base",
+ "komga-infrastructure-search",
+ "sqlx",
+ "tokio",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "komga-infrastructure-operational"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "image",
+ "komga-application",
+ "komga-infrastructure-base",
+ "komga-infrastructure-media-core",
+ "libc",
+ "reqwest 0.13.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlx",
  "time",
  "tokio",
- "tracing",
- "unicode-normalization",
- "unrar",
- "url",
  "windows-sys 0.61.2",
  "zip 9.0.0-pre3",
+]
+
+[[package]]
+name = "komga-infrastructure-search"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "komga-application",
+ "komga-infrastructure-base",
+ "sqlx",
+ "tantivy",
+ "tokio",
+]
+
+[[package]]
+name = "komga-infrastructure-tasks"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "komga-application",
+ "komga-infrastructure-base",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "komga-infrastructure-test-support"
+version = "0.1.0"
+dependencies = [
+ "komga-infrastructure-base",
+ "sqlx",
 ]
 
 [[package]]
@@ -2810,7 +3024,10 @@ dependencies = [
  "komga-application",
  "komga-build-support",
  "komga-domain",
- "komga-infrastructure",
+ "komga-infrastructure-base",
+ "komga-infrastructure-identity",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-operational",
  "komga-kepubify",
  "komga-oauth",
  "lopdf",
@@ -2874,7 +3091,17 @@ dependencies = [
  "komga-application",
  "komga-config",
  "komga-domain",
- "komga-infrastructure",
+ "komga-infrastructure-base",
+ "komga-infrastructure-identity",
+ "komga-infrastructure-jobs",
+ "komga-infrastructure-media-access",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-media-library",
+ "komga-infrastructure-media-metadata",
+ "komga-infrastructure-opds",
+ "komga-infrastructure-operational",
+ "komga-infrastructure-search",
+ "komga-infrastructure-tasks",
  "komga-interfaces",
  "komga-server",
  "lopdf",
@@ -2914,7 +3141,17 @@ dependencies = [
  "komga-build-support",
  "komga-config",
  "komga-domain",
- "komga-infrastructure",
+ "komga-infrastructure-base",
+ "komga-infrastructure-discovery",
+ "komga-infrastructure-identity",
+ "komga-infrastructure-jobs",
+ "komga-infrastructure-media-access",
+ "komga-infrastructure-media-core",
+ "komga-infrastructure-media-metadata",
+ "komga-infrastructure-opds",
+ "komga-infrastructure-operational",
+ "komga-infrastructure-search",
+ "komga-infrastructure-tasks",
  "komga-interfaces",
  "komga-kepubify",
  "lopdf",

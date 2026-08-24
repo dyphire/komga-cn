@@ -1,8 +1,8 @@
 use super::*;
-use komga_infrastructure::persistence::bootstrap_pool;
-use komga_infrastructure::{
-    identity::IdentityAccess, media::ContentResolver, persistence::DatabaseHandle,
-};
+use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_base::bootstrap_pool;
+use komga_infrastructure_identity::IdentityAccess;
+use komga_infrastructure_media_core::ContentResolver;
 use std::path::PathBuf;
 use std::sync::Arc;
 

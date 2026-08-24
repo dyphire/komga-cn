@@ -2,6 +2,7 @@
 name = "komga-oauth"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 oauth2.workspace = true

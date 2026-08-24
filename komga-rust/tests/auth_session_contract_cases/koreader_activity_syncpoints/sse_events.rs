@@ -5,7 +5,7 @@ use komga_application::media_assets::{
     BookImportService, BooksImportEntry, BooksImportPayload, ImportCopyMode,
 };
 use komga_application::runtime_sse::RuntimeSseEventSink;
-use komga_infrastructure::media::FilesystemBookImport;
+use komga_infrastructure_media_access::FilesystemBookImport;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;

@@ -1,0 +1,38 @@
+[package]
+name = "komga-infrastructure-jobs"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+futures-util.workspace = true
+icu.workspace = true
+image.workspace = true
+komga-application = { path = "../../application" }
+komga-domain = { path = "../../domain" }
+komga-epub = { path = "../../epub" }
+komga-infrastructure-base = { path = "../base" }
+komga-infrastructure-discovery = { path = "../discovery" }
+komga-infrastructure-identity = { path = "../identity" }
+komga-infrastructure-media-access = { path = "../media-access" }
+komga-infrastructure-media-core = { path = "../media-core" }
+komga-infrastructure-media-library = { path = "../media-library" }
+komga-infrastructure-media-metadata = { path = "../media-metadata" }
+komga-infrastructure-operational = { path = "../operational" }
+komga-infrastructure-search = { path = "../search" }
+komga-infrastructure-tasks = { path = "../tasks" }
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+komga-infrastructure-test-support = { path = "../test-support" }
+lopdf.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "komga-infrastructure-base"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+getrandom.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+komga-build-support = { path = "../../build-support" }
