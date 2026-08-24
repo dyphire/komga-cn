@@ -845,6 +845,7 @@ async fn schedule_startup_library_scan_batch(
     action: &str,
 ) -> anyhow::Result<ScheduledLibraryScanBatch> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
+        .await?
         .schedule(
             ScanSchedulingTrigger::Startup,
             &LibraryScanScheduleState::default(),
@@ -858,6 +859,7 @@ async fn schedule_periodic_library_scan_batch(
     last_run_by_library: &HashMap<String, tokio::time::Instant>,
 ) -> anyhow::Result<ScheduledLibraryScanBatch> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
+        .await?
         .schedule(
             ScanSchedulingTrigger::Tick,
             &LibraryScanScheduleState {
@@ -876,6 +878,7 @@ async fn sync_periodic_library_scan_state(
     last_run_by_library: &mut HashMap<String, tokio::time::Instant>,
 ) -> anyhow::Result<()> {
     SqliteFilesystemLibraryScanPipeline::for_runtime(&runtime.job())
+        .await?
         .sync_periodic_library_scan_state(last_run_by_library)
         .await
         .context("build periodic library scan state")

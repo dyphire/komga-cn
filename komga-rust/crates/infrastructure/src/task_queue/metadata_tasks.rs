@@ -116,7 +116,10 @@ pub(super) async fn generate_book_thumbnail(
         runtime.database().write_pool(),
         runtime.runtime_events(),
         book_id,
-        runtime.thumbnail_regeneration_policy(),
+        runtime
+            .thumbnail_regeneration_policy()
+            .await
+            .map_err(TaskProcessingError::runtime)?,
     )
     .await
     .map_err(TaskProcessingError::runtime)

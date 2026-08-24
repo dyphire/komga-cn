@@ -27,12 +27,13 @@ pub(super) async fn cleanup_empty_sets(
         return Ok(());
     }
 
-    cleanup_empty_sets_rows(
-        runtime.database().write_pool(),
-        runtime.cleanup_empty_sets_policy(),
-    )
-    .await
-    .map_err(TaskProcessingError::runtime)
+    let policy = runtime
+        .cleanup_empty_sets_policy()
+        .await
+        .map_err(TaskProcessingError::runtime)?;
+    cleanup_empty_sets_rows(runtime.database().write_pool(), policy)
+        .await
+        .map_err(TaskProcessingError::runtime)
 }
 
 pub(in crate::task_queue) async fn empty_trash_rows(

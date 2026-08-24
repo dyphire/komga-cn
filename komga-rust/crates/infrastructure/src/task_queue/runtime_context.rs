@@ -2,12 +2,15 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use komga_application::operational::ServerSettingsPort;
 use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventStore};
 use komga_application::task_processing::{CleanupEmptySetsPolicy, ThumbnailRegenerationPolicy};
 use sqlx::SqlitePool;
 
+use crate::context::SqlitePersistenceContext;
 use crate::database_handle::DatabaseHandle;
 use crate::search::engine::SearchIndexEngine;
+use crate::sqlite::ServerSettingsStore;
 
 #[derive(Clone)]
 pub struct TaskRuntimeContext {
@@ -19,8 +22,6 @@ pub struct TaskRuntimeContext {
     owns_filesystem_scan_output: bool,
     owns_sidecar_output: bool,
     owns_search_index: bool,
-    cleanup_empty_sets_policy: CleanupEmptySetsPolicy,
-    thumbnail_regeneration_policy: ThumbnailRegenerationPolicy,
     task_pool_size: usize,
     task_write_pool: SqlitePool,
     task_read_pool: SqlitePool,
@@ -86,8 +87,6 @@ impl TaskRuntimeContext {
             owns_filesystem_scan_output: true,
             owns_sidecar_output: true,
             owns_search_index: true,
-            cleanup_empty_sets_policy: CleanupEmptySetsPolicy::default(),
-            thumbnail_regeneration_policy: ThumbnailRegenerationPolicy::default(),
             task_pool_size,
             task_write_pool,
             task_read_pool,
@@ -119,22 +118,6 @@ impl TaskRuntimeContext {
 
     pub fn with_runtime_events(mut self, runtime_events: Arc<dyn RuntimeSseEventSink>) -> Self {
         self.runtime_events = runtime_events;
-        self
-    }
-
-    pub fn with_cleanup_empty_sets_policy(
-        mut self,
-        cleanup_empty_sets_policy: CleanupEmptySetsPolicy,
-    ) -> Self {
-        self.cleanup_empty_sets_policy = cleanup_empty_sets_policy;
-        self
-    }
-
-    pub fn with_thumbnail_regeneration_policy(
-        mut self,
-        thumbnail_regeneration_policy: ThumbnailRegenerationPolicy,
-    ) -> Self {
-        self.thumbnail_regeneration_policy = thumbnail_regeneration_policy;
         self
     }
 
@@ -188,14 +171,35 @@ impl JobRuntime<'_> {
         }
     }
 
-    pub(in crate::task_queue) fn cleanup_empty_sets_policy(&self) -> CleanupEmptySetsPolicy {
-        self.runtime.cleanup_empty_sets_policy
+    pub(in crate::task_queue) async fn cleanup_empty_sets_policy(
+        &self,
+    ) -> anyhow::Result<CleanupEmptySetsPolicy> {
+        let server_settings = ServerSettingsStore::from_context(SqlitePersistenceContext::new(
+            self.database().write_pool().clone(),
+        ));
+        let settings = server_settings
+            .load_settings()
+            .await
+            .map_err(|error| anyhow::anyhow!(error).context("load cleanup policy setting"))?;
+        Ok(CleanupEmptySetsPolicy {
+            delete_empty_collections: settings.delete_empty_collections,
+            delete_empty_read_lists: settings.delete_empty_read_lists,
+        })
     }
 
-    pub(in crate::task_queue) fn thumbnail_regeneration_policy(
+    pub(in crate::task_queue) async fn thumbnail_regeneration_policy(
         &self,
-    ) -> ThumbnailRegenerationPolicy {
-        self.runtime.thumbnail_regeneration_policy
+    ) -> anyhow::Result<ThumbnailRegenerationPolicy> {
+        let server_settings = ServerSettingsStore::from_context(SqlitePersistenceContext::new(
+            self.database().write_pool().clone(),
+        ));
+        let settings = server_settings
+            .load_settings()
+            .await
+            .map_err(|error| anyhow::anyhow!(error).context("load thumbnail size setting"))?;
+        Ok(ThumbnailRegenerationPolicy {
+            generated_thumbnail_max_edge: settings.thumbnail_size.max_edge(),
+        })
     }
 
     pub(in crate::task_queue) fn runtime_events(&self) -> &dyn RuntimeSseEventSink {
@@ -257,11 +261,6 @@ impl std::fmt::Debug for TaskRuntimeContext {
             )
             .field("owns_sidecar_output", &self.owns_sidecar_output)
             .field("owns_search_index", &self.owns_search_index)
-            .field("cleanup_empty_sets_policy", &self.cleanup_empty_sets_policy)
-            .field(
-                "thumbnail_regeneration_policy",
-                &self.thumbnail_regeneration_policy,
-            )
             .field("task_pool_size", &self.task_pool_size)
             .field("task_write_pool", &self.task_write_pool)
             .field("task_read_pool", &self.task_read_pool)
