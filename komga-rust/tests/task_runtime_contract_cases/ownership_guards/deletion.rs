@@ -280,8 +280,8 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     );
     assert_eq!(
         series_row.get::<i64, _>("BOOK_COUNT"),
-        0,
-        "delete-book runtime should immediately recompute active series book count excluding soft-deleted books"
+        1,
+        "delete-book runtime should keep trash-staged books in the series book count until EmptyTrash performs hard cleanup"
     );
     assert_ne!(
         series_row.get::<String, _>("LAST_MODIFIED"),
@@ -485,8 +485,8 @@ async fn runtime_delete_book_oneshot_soft_deletes_series_and_removes_series_side
     );
     assert_eq!(
         series_row.get::<i64, _>("BOOK_COUNT"),
-        0,
-        "delete-book oneshot runtime should recompute active book count to zero"
+        1,
+        "delete-book oneshot runtime should keep the trash-staged book in the series book count"
     );
     assert_ne!(
         series_row.get::<String, _>("LAST_MODIFIED"),
@@ -752,7 +752,7 @@ async fn runtime_delete_book_soft_deletes_rows_when_book_file_is_already_missing
     );
     assert_eq!(thumbnail_count, 2);
     assert_eq!(read_progress_count, 1);
-    assert_eq!(series_row.get::<i64, _>("BOOK_COUNT"), 0);
+    assert_eq!(series_row.get::<i64, _>("BOOK_COUNT"), 1);
 }
 
 #[tokio::test]
@@ -1020,8 +1020,8 @@ async fn runtime_delete_series_soft_deletes_rows_and_removes_series_sidecar_file
     );
     assert_eq!(
         series_row.get::<i64, _>("BOOK_COUNT"),
-        0,
-        "delete-series runtime should immediately recompute active book count to zero"
+        1,
+        "delete-series runtime should keep trash-staged books in the series book count until EmptyTrash performs hard cleanup"
     );
     assert_ne!(
         series_row.get::<String, _>("LAST_MODIFIED"),

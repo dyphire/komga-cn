@@ -42,10 +42,11 @@ async fn router_series_latest_includes_deleted_series_by_default() {
         .get("content")
         .and_then(Value::as_array)
         .expect("series latest default payload should expose content array");
-    let ids = content
+    let mut ids = content
         .iter()
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
+    ids.sort_unstable();
     assert_eq!(ids, vec!["series-1", "series-deleted"]);
 }
 
