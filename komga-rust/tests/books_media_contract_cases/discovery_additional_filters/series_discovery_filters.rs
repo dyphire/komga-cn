@@ -1,8 +1,8 @@
 use super::*;
 
 #[tokio::test]
-async fn router_series_latest_excludes_deleted_series_by_default() {
-    let ctx = TestFixture::builder("router-series-latest-default-deleted-hidden")
+async fn router_series_latest_includes_deleted_series_by_default() {
+    let ctx = TestFixture::builder("router-series-latest-default-deleted-visible")
         .with_seed(|paths| async move {
             seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
                 .await;
@@ -46,7 +46,7 @@ async fn router_series_latest_excludes_deleted_series_by_default() {
         .iter()
         .filter_map(|entry| entry.get("id").and_then(Value::as_str))
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["series-1"]);
+    assert_eq!(ids, vec!["series-1", "series-deleted"]);
 }
 
 #[tokio::test]
