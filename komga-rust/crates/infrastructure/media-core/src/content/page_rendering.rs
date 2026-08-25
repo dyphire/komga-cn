@@ -610,6 +610,9 @@ async fn load_zip_archive_page_rows(
             });
         }
         rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
+        for (index, row) in rows.iter_mut().enumerate() {
+            row.number = (index as u64) + 1;
+        }
         Ok((!rows.is_empty()).then_some(rows))
     })
     .await
@@ -645,6 +648,9 @@ pub async fn load_rar_archive_page_rows(
             .collect::<Vec<_>>();
         let mut rows = rows;
         rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
+        for (index, row) in rows.iter_mut().enumerate() {
+            row.number = (index as u64) + 1;
+        }
         Ok((!rows.is_empty()).then_some(rows))
     })
     .await
