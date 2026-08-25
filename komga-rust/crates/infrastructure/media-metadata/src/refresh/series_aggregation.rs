@@ -135,7 +135,6 @@ pub async fn aggregate_series_metadata(
                                 SELECT COUNT(*)
                                 FROM BOOK
                                 WHERE BOOK.SERIES_ID = SERIES.ID
-                                  AND BOOK.DELETED_DATE IS NULL
                             )
                         WHERE ID = ?
                         "#,
@@ -211,7 +210,6 @@ async fn load_series_book_metadata_aggregate(
         FROM BOOK b
         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
         WHERE b.SERIES_ID = ?
-          AND b.DELETED_DATE IS NULL
         ORDER BY bm.NUMBER_SORT ASC, b.ID ASC
         "#,
     )
@@ -252,7 +250,6 @@ async fn load_series_book_metadata_aggregate(
         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
         JOIN BOOK_METADATA_AUTHOR bmaa ON bmaa.BOOK_ID = b.ID
         WHERE b.SERIES_ID = ?
-          AND b.DELETED_DATE IS NULL
         ORDER BY bm.NUMBER_SORT ASC, b.ID ASC, bmaa.ROWID ASC
         "#,
     )
@@ -283,7 +280,6 @@ async fn load_series_book_metadata_aggregate(
         JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
         JOIN BOOK_METADATA_TAG bmt ON bmt.BOOK_ID = b.ID
         WHERE b.SERIES_ID = ?
-          AND b.DELETED_DATE IS NULL
         ORDER BY bm.NUMBER_SORT ASC, b.ID ASC, bmt.ROWID ASC
         "#,
     )
