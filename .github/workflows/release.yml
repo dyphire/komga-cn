@@ -65,9 +65,34 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
+          node-version-file: 'next-ui/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: next-ui/package-lock.json
+
+      # next UI reads the commit from the working tree, so it builds before the web UI patch is applied
+      - name: Build next UI
+        working-directory: next-ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload next UI dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextui-dist
+          path: next-ui/dist/**
+          if-no-files-found: error
+
+      - uses: actions/setup-node@v7
+        with:
           node-version-file: 'komga-webui/.nvmrc'
           cache: 'npm'
           cache-dependency-path: komga-webui/package-lock.json
+
+      - name: Patch web UI build config
+        run: |
+          set -euo pipefail
+          git apply --verbose patches/komga-webui-disable-fork-ts-checker.patch
 
       - name: Build web UI
         working-directory: komga-webui
@@ -82,25 +107,6 @@ jobs:
         with:
           name: webui-dist
           path: komga-webui/dist/**
-          if-no-files-found: error
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: 'next-ui/.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: next-ui/package-lock.json
-
-      - name: Build next UI
-        working-directory: next-ui
-        run: |
-          npm ci
-          npm run build
-
-      - name: Upload next UI dist
-        uses: actions/upload-artifact@v7
-        with:
-          name: nextui-dist
-          path: next-ui/dist/**
           if-no-files-found: error
 
   binary_release:

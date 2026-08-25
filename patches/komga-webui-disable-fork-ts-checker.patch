@@ -1,0 +1,27 @@
+Disable fork-ts-checker in the web UI build.
+
+The type checker runs in a forked 4GB process that always OOMs: the
+`$eventHub: Vue` property declared on the Vue interface in main.ts is
+self-referential, which makes type instantiation explode across every
+component (8GB is not enough either). It therefore never produced a
+single diagnostic, it only burned ~80s of build time.
+
+ts-loader runs with transpileOnly, so the emitted bundle is identical.
+
+diff --git a/komga-webui/vue.config.js b/komga-webui/vue.config.js
+index 52e2553d..839385fe 100644
+--- a/komga-webui/vue.config.js
++++ b/komga-webui/vue.config.js
+@@ -20,6 +20,12 @@ module.exports = {
+     },
+   },
+
++  // the type checker OOMs on the self-referential `$eventHub: Vue` declared in main.ts,
++  // so it never produced any result anyway; ts-loader runs with transpileOnly regardless
++  chainWebpack: config => {
++    config.plugins.delete('fork-ts-checker')
++  },
++
+   // custom rule for readium and r2d2bc css that needs to be made available, but untouched
+   configureWebpack: {
+     module: {
