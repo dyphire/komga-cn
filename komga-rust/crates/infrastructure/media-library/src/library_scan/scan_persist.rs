@@ -409,6 +409,16 @@ WHERE BOOK_ID = ?"#,
             }
         }
 
+        restore_deleted_scan_matches(
+            pool,
+            &library_id,
+            &inserted_series,
+            &inserted_books,
+            &mut changed_series_ids,
+            &mut book_metadata_refreshes,
+        )
+        .await?;
+
         sqlx::query(
             r#"UPDATE SERIES
 SET BOOK_COUNT = (SELECT COUNT(*)
@@ -432,15 +442,6 @@ WHERE LIBRARY_ID = ?"#,
                     "failed to apply Kotlin-like series numbering after scan for '{library_id}'"
                 ))
             })?;
-        restore_deleted_scan_matches(
-            pool,
-            &library_id,
-            &inserted_series,
-            &inserted_books,
-            &mut changed_series_ids,
-            &mut book_metadata_refreshes,
-        )
-        .await?;
 
         break 'outcome PersistScannedLibraryOutcome {
             renumbered_book_ids,
@@ -471,7 +472,6 @@ async fn resort_scanned_series_books(
 FROM BOOK b
 LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
 WHERE b.SERIES_ID = ?
-  AND b.DELETED_DATE IS NULL
 ORDER BY b.ID ASC"#,
         )
         .bind(&series_id)
