@@ -407,8 +407,7 @@ WHERE BOOK_ID = ?"#,
             r#"UPDATE SERIES
 SET BOOK_COUNT = (SELECT COUNT(*)
                   FROM BOOK
-                  WHERE BOOK.SERIES_ID = SERIES.ID
-                    AND BOOK.DELETED_DATE IS NULL)
+                  WHERE BOOK.SERIES_ID = SERIES.ID)
 WHERE LIBRARY_ID = ?"#,
         )
         .bind(&library_id)
