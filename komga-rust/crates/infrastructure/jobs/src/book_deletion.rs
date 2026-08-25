@@ -565,7 +565,6 @@ pub(crate) async fn soft_delete_book_rows(
             SELECT COUNT(*)
             FROM BOOK
             WHERE BOOK.SERIES_ID = SERIES.ID
-              AND BOOK.DELETED_DATE IS NULL
         ),
             LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
         WHERE ID = ?
@@ -773,7 +772,6 @@ pub(crate) async fn soft_delete_series_book_rows(
             SELECT COUNT(*)
             FROM BOOK
             WHERE BOOK.SERIES_ID = SERIES.ID
-              AND BOOK.DELETED_DATE IS NULL
         ),
             LAST_MODIFIED_DATE = STRFTIME('%Y-%m-%d %H:%M:%f', 'now')
         WHERE ID = ?
