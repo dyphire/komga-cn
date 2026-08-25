@@ -797,8 +797,8 @@ async fn router_discovery_series_get_does_not_inject_relevance_for_unsupported_e
 }
 
 #[tokio::test]
-async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() {
-    let ctx = TestFixture::builder("router-discovery-series-list-default-deleted-hidden")
+async fn router_discovery_series_list_includes_soft_deleted_series_by_default() {
+    let ctx = TestFixture::builder("router-discovery-series-list-default-deleted-visible")
         .with_seed(|paths| async move {
             seed_router_custom_series(&paths, "series-deleted", "Deleted Series", "library-1")
                 .await;
@@ -834,7 +834,9 @@ async fn router_discovery_series_list_excludes_soft_deleted_series_by_default() 
 
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
-    assert_eq!(series_page_ids(&payload), vec!["series-1"]);
+    let mut ids = series_page_ids(&payload);
+    ids.sort();
+    assert_eq!(ids, vec!["series-1", "series-deleted"]);
 }
 
 #[tokio::test]

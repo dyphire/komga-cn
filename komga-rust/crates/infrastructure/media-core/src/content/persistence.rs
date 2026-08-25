@@ -208,7 +208,7 @@ pub async fn load_series_book_ids(
         r#"SELECT b.ID AS ID
          FROM BOOK b
          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         WHERE b.SERIES_ID = ?
          ORDER BY COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) ASC, b.ID ASC"#,
     )
     .bind(series_id)
@@ -229,7 +229,7 @@ pub async fn load_series_book_number_sorts(
         r#"SELECT b.ID AS ID, COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS NUMBER_SORT
          FROM BOOK b
          LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
-         WHERE b.SERIES_ID = ? AND b.DELETED_DATE IS NULL
+         WHERE b.SERIES_ID = ?
          ORDER BY COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) ASC, b.ID ASC"#,
     )
     .bind(series_id)
