@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{ErrorKind, Read};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 
 use komga_application::task_processing::{HashedPageToDeletePayload, TaskProcessingError};
 use komga_domain::discovery::MediaStatus;
+use zip::CompressionMethod;
+use zip::write::{SimpleFileOptions, ZipWriter};
 use zip::ZipArchive;
 
-use super::archive::{StoredArchiveEntry, build_stored_zip_archive, metadata_updated_unix_seconds};
+use super::archive::metadata_updated_unix_seconds;
 use super::persistence::{
     PersistedHashedPageToDelete, load_book_archive_source as load_persisted_book_archive_source,
     load_book_hashed_pages as load_persisted_book_hashed_pages,
@@ -252,12 +254,11 @@ pub(crate) fn rewrite_zip_book_without_pages(
         delete_by_page_number.insert(page.page_number, page.clone());
     }
 
-    let mut kept_entries = Vec::<StoredArchiveEntry>::new();
-    let mut removed_pages = Vec::<HashedPageToDelete>::new();
+    let mut removed_pages = Vec::new();
     let mut page_number = 0_i64;
 
     for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| {
+        let entry = archive.by_index(index).map_err(|error| {
             TaskProcessingError::runtime(format!(
                 "failed to read zip entry index {index} for '{}': {error}",
                 archive_path.display(),
@@ -291,49 +292,89 @@ pub(crate) fn rewrite_zip_book_without_pages(
 
         if let Some(removed) = should_remove {
             removed_pages.push(removed);
+        }
+    }
+
+    if removed_pages.is_empty() || removed_pages.len() != pages_to_delete.len() {
+        return Ok(Vec::new());
+    }
+
+    let temp_path = archive_path.with_extension("komga-page-removal.tmp");
+    let temp_file = fs::File::create(&temp_path).map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "failed to create temporary archive '{}': {error}",
+            temp_path.display(),
+        ))
+    })?;
+    let mut zip_writer = ZipWriter::new(temp_file);
+
+    let mut page_number = 0_i64;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| {
+            TaskProcessingError::runtime(format!(
+                "failed to read zip entry index {index} for '{}': {error}",
+                archive_path.display(),
+            ))
+        })?;
+        if entry.is_dir() {
             continue;
         }
 
-        let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).map_err(|error| {
+        let entry_name = entry
+            .name()
+            .map_err(|error| {
+                TaskProcessingError::runtime(format!(
+                    "failed to read zip entry name index {index} for '{}': {error}",
+                    archive_path.display(),
+                ))
+            })?
+            .into_owned();
+        let should_remove = if is_supported_page_image_file_name(&entry_name) {
+            page_number += 1;
+            delete_by_page_number
+                .get(&page_number)
+                .filter(|candidate| {
+                    candidate.file_name == entry_name
+                        && candidate.media_type == media_type_from_entry_name(&entry_name)
+                })
+                .is_some()
+        } else {
+            false
+        };
+
+        if should_remove {
+            continue;
+        }
+
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+
+        zip_writer.start_file(&entry_name, options).map_err(|error| {
             TaskProcessingError::runtime(format!(
-                "failed to read zip entry '{}' bytes for '{}': {error}",
+                "failed to start zip entry '{}' for '{}': {error}",
                 entry_name,
                 archive_path.display(),
             ))
         })?;
-        kept_entries.push(StoredArchiveEntry {
-            file_name: entry_name,
-            bytes,
-        });
+        std::io::copy(&mut entry, &mut zip_writer).map_err(|error| {
+            TaskProcessingError::runtime(format!(
+                "failed to copy zip entry '{}' for '{}': {error}",
+                entry_name,
+                archive_path.display(),
+            ))
+        })?;
     }
 
     // Windows refuses to replace the archive while the source ZIP reader still owns the file.
     drop(archive);
-
-    if removed_pages.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    if removed_pages.len() != pages_to_delete.len() {
-        return Ok(Vec::new());
-    }
-
-    if kept_entries.is_empty() {
-        return Err(TaskProcessingError::runtime(format!(
-            "refused to rewrite '{}' with zero entries after page deletion",
-            archive_path.display(),
-        )));
-    }
-
-    let rewritten = build_stored_zip_archive(kept_entries)?;
-    let temp_path = archive_path.with_extension("komga-page-removal.tmp");
-    fs::write(&temp_path, rewritten).map_err(|error| {
+    zip_writer.finish().map_err(|error| {
         TaskProcessingError::runtime(format!(
-            "failed to write temporary rewritten archive '{}': {error}",
+            "failed to finalize temporary archive '{}': {error}",
             temp_path.display(),
         ))
     })?;
+
     fs::rename(&temp_path, archive_path).map_err(|error| {
         let _ = fs::remove_file(&temp_path);
         TaskProcessingError::runtime(format!(
