@@ -1,10 +1,12 @@
 use anyhow::Context;
 use std::collections::HashSet;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
+use tokio::task::spawn_blocking;
 
 use komga_domain::media_assets::ThumbnailType;
 
@@ -17,19 +19,38 @@ use super::scan_models::{
 };
 
 fn compute_file_sha256(path: &Path) -> anyhow::Result<String> {
-    let bytes = fs::read(path).map_err(|error| {
+    let file = fs::File::open(path).map_err(|error| {
         anyhow::anyhow!(error).context(format!(
-            "failed to read book file for restore '{}': ",
+            "failed to open book file for restore '{}': ",
             path.display()
         ))
     })?;
+    let mut reader = std::io::BufReader::new(file);
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buffer = [0u8; 65536];
+    loop {
+        let bytes_read = reader.read(&mut buffer).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to read book file for restore '{}': ",
+                path.display()
+            ))
+        })?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
     Ok(hasher
         .finalize()
         .iter()
         .map(|value| format!("{value:02x}"))
         .collect::<String>())
+}
+pub(super) async fn compute_file_sha256_async(path: &Path) -> anyhow::Result<String> {
+    let path = path.to_path_buf();
+    spawn_blocking(move || compute_file_sha256(&path))
+        .await
+        .context("join file SHA-256 computation task")?
 }
 pub(super) async fn try_restore_deleted_books(
     pool: &SqlitePool,
@@ -56,8 +77,10 @@ ORDER BY ID ASC"#,
             continue;
         }
 
-        let inserted_hash =
-            compute_file_sha256(resolve_rooted_path(library_root, &inserted.book_url).as_path())?;
+        let inserted_hash = compute_file_sha256_async(
+            resolve_rooted_path(library_root, &inserted.book_url).as_path(),
+        )
+        .await?;
         sqlx::query(
             r#"UPDATE BOOK
 SET FILE_HASH = ?, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
@@ -395,10 +418,11 @@ ORDER BY s.ID ASC"#,
 
         let mut inserted_books_with_hash = Vec::<(InsertedBookCandidate, String)>::new();
         for book in &inserted.books {
-            inserted_books_with_hash.push((
-                book.clone(),
-                compute_file_sha256(resolve_rooted_path(library_root, &book.book_url).as_path())?,
-            ));
+            let book_hash = compute_file_sha256_async(
+                resolve_rooted_path(library_root, &book.book_url).as_path(),
+            )
+            .await?;
+            inserted_books_with_hash.push((book.clone(), book_hash));
         }
 
         let mut matched_deleted_series_id = None::<String>;
