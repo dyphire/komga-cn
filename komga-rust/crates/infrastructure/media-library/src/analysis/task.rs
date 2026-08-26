@@ -84,9 +84,9 @@ pub async fn analyze_book(
             })
             .collect(),
         epub_extension_blob: analysis.epub_extension_blob,
-        comicinfo_blob: load_comicinfo_bytes_from_path(&file_path, &analysis.media_type)
+        comicinfo_blob: load_comicinfo_bytes_from_path(&file_path_for_error, &analysis.media_type)
             .unwrap_or_default(),
-        epub_package_blob: load_epub_package_document_from_path(&file_path, &analysis.media_type)
+        epub_package_blob: load_epub_package_document_from_path(&file_path_for_error, &analysis.media_type)
             .await
             .unwrap_or_default(),
     };
