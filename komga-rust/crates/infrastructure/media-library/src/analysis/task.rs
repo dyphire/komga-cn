@@ -38,13 +38,20 @@ pub async fn analyze_book(
     };
 
     let file_path = resolve_library_item_path(&input.root, &input.url);
-    let analysis =
-        analyze_book_media_file(&file_path, input.analyze_dimensions).map_err(|error| {
-            TaskProcessingError::runtime(format!(
-                "failed to analyze media file for '{book_id}' ('{}'): {error}",
-                file_path.display(),
-            ))
-        })?;
+    let file_path_for_error = file_path.clone();
+    let analysis = tokio::task::spawn_blocking(move || {
+        analyze_book_media_file(&file_path, input.analyze_dimensions)
+    })
+    .await
+    .map_err(|error| {
+        TaskProcessingError::runtime(format!("analyze_book task panicked: {error}"))
+    })?
+    .map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "failed to analyze media file for '{book_id}' ('{}'): {error}",
+            file_path_for_error.display(),
+        ))
+    })?;
 
     let persisted = AnalyzedBookMedia {
         status: analysis.status,
