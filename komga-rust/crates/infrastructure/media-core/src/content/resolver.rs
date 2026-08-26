@@ -70,12 +70,12 @@ impl ContentResolverPort for ContentResolver {
         page_content::load_pdf_page_row(media, page_number)
     }
 
-    fn read_pdf_page_as_single_page_pdf(
+    async fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>> {
-        page_content::read_pdf_page_as_single_page_pdf(media, page_number)
+        page_content::read_pdf_page_as_single_page_pdf(media, page_number).await
     }
 
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {

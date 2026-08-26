@@ -375,7 +375,7 @@ pub trait ContentResolverPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<BookPageRecord>>;
 
-    fn read_pdf_page_as_single_page_pdf(
+    async fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,

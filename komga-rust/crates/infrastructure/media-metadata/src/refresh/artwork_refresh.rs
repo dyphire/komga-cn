@@ -205,7 +205,7 @@ pub async fn generate_book_thumbnail(
         };
 
         let thumbnail = if book_media_is_pdf(&media) {
-            let Some(rendered) = render_pdf_thumbnail(&media, configured_max_edge)? else {
+            let Some(rendered) = render_pdf_thumbnail(&media, configured_max_edge).await? else {
                 break 'result Ok(());
             };
             rendered
@@ -214,7 +214,8 @@ pub async fn generate_book_thumbnail(
                 &book_id,
                 &cover.bytes,
                 configured_max_edge,
-            )?
+            )
+            .await?
         } else {
             let Some(page_row) = find_best_cover_page(pool, &book_id, &media).await? else {
                 break 'result Ok(());
@@ -239,7 +240,8 @@ pub async fn generate_book_thumbnail(
                 &book_id,
                 &thumbnail_bytes,
                 configured_max_edge,
-            )?
+            )
+            .await?
         };
 
         let selected_thumbnail_type = sqlx::query(

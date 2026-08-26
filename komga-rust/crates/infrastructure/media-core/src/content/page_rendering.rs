@@ -66,7 +66,7 @@ pub async fn resolve_book_page_bytes(
     if let Some(bytes) = read_zip_archive_page_bytes(media, page, page_number).await? {
         return Ok(Some(bytes));
     }
-    if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number)? {
+    if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number).await? {
         return Ok(Some(bytes));
     }
     Ok(None)
@@ -86,7 +86,9 @@ pub async fn render_book_page_thumbnail(
     let Some(bytes) = resolve_book_page_bytes(media, page, page_number).await? else {
         return Ok(None);
     };
-    render_image_thumbnail(&bytes, max_edge, output_format).map(Some)
+    render_image_thumbnail(bytes, max_edge, output_format)
+        .await
+        .map(Some)
 }
 
 pub async fn load_archive_page_row(
@@ -114,7 +116,7 @@ pub async fn load_archive_page_rows(
         return load_zip_archive_page_rows(media).await;
     }
     if book_media_is_rar_archive(media) {
-        return load_rar_archive_page_rows(media);
+        return load_rar_archive_page_rows(media).await;
     }
     Ok(None)
 }
@@ -212,35 +214,40 @@ fn render_pdf_page_blocking(
     )
 }
 
-pub fn read_pdf_page_as_single_page_pdf(
+pub async fn read_pdf_page_as_single_page_pdf(
     media: &BookMediaRecord,
     page_number: u64,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if !book_media_is_pdf(media) || page_number == 0 {
         return Ok(None);
     }
-    let mut document = PdfDocument::load(&media.file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
-    })?;
-    let pages = document.get_pages();
-    if !pages.contains_key(&(page_number as u32)) {
-        return Ok(None);
-    }
-    let to_delete = pages
-        .keys()
-        .copied()
-        .filter(|number| *number != page_number as u32)
-        .collect::<Vec<_>>();
-    document.delete_pages(&to_delete);
-    document.prune_objects();
-    let mut bytes = Vec::new();
-    document.save_to(&mut bytes).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "save pdf page {page_number} from '{}': ",
-            media.file_path.display()
-        ))
-    })?;
-    Ok(Some(bytes))
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut document = PdfDocument::load(&media.file_path).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+        })?;
+        let pages = document.get_pages();
+        if !pages.contains_key(&(page_number as u32)) {
+            return Ok(None);
+        }
+        let to_delete = pages
+            .keys()
+            .copied()
+            .filter(|number| *number != page_number as u32)
+            .collect::<Vec<_>>();
+        document.delete_pages(&to_delete);
+        document.prune_objects();
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "save pdf page {page_number} from '{}': ",
+                media.file_path.display()
+            ))
+        })?;
+        Ok(Some(bytes))
+    })
+    .await
+    .context("join PDF page read task")?
 }
 
 fn render_pdf_page_at_size(
@@ -331,24 +338,28 @@ async fn render_pdf_page_thumbnail(
     .context("join PDF thumbnail render task")?
 }
 
-fn render_image_thumbnail(
-    bytes: &[u8],
+async fn render_image_thumbnail(
+    bytes: Vec<u8>,
     max_edge: u32,
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<RenderedImage> {
-    let image =
-        image::load_from_memory(bytes).context("render image thumbnail: decode image bytes")?;
-    let dimensions = RasterImageDimensions::from_image(&image);
-    let resized = if dimensions.max_edge() > max_edge {
-        image.resize(max_edge, max_edge, FilterType::Lanczos3)
-    } else {
-        image
-    };
-    encode_image_with_jpeg_fallback(
-        &resized,
-        output_format,
-        "render image thumbnail: encode image",
-    )
+    tokio::task::spawn_blocking(move || {
+        let image =
+            image::load_from_memory(&bytes).context("render image thumbnail: decode image bytes")?;
+        let dimensions = RasterImageDimensions::from_image(&image);
+        let resized = if dimensions.max_edge() > max_edge {
+            image.resize(max_edge, max_edge, FilterType::Lanczos3)
+        } else {
+            image
+        };
+        encode_image_with_jpeg_fallback(
+            &resized,
+            output_format,
+            "render image thumbnail: encode image",
+        )
+    })
+    .await
+    .context("join image thumbnail render task")?
 }
 
 fn encode_image_with_jpeg_fallback(
@@ -608,37 +619,45 @@ async fn load_zip_archive_page_rows(
     .context("join zip archive row read task")?
 }
 
-fn load_rar_archive_page_rows(
+pub async fn load_rar_archive_page_rows(
     media: &BookMediaRecord,
 ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
-    let rows = list_rar_entries(&media.file_path)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "read rar archive '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .into_iter()
-        .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
-        .enumerate()
-        .map(|(index, entry)| BookPageRecord {
-            number: (index as u64) + 1,
-            file_name: entry.file_name.clone(),
-            media_type: content_type_from_filename(&entry.file_name, "image/jpeg"),
-            width: None,
-            height: None,
-            file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
-        })
-        .collect::<Vec<_>>();
-    let mut rows = rows;
-    rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
-    for (index, row) in rows.iter_mut().enumerate() {
-        row.number = (index as u64) + 1;
+    if !book_media_is_rar_archive(media) {
+        return Ok(None);
     }
-    Ok((!rows.is_empty()).then_some(rows))
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        let rows = list_rar_entries(&media.file_path)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "list rar archive entries '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .into_iter()
+            .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
+            .enumerate()
+            .map(|(index, entry)| BookPageRecord {
+                number: (index as u64) + 1,
+                file_name: entry.file_name.clone(),
+                media_type: content_type_from_filename(&entry.file_name, "image/jpeg"),
+                width: None,
+                height: None,
+                file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
+            })
+            .collect::<Vec<_>>();
+            let mut rows = rows;
+            rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
+            for (index, row) in rows.iter_mut().enumerate() {
+                row.number = (index as u64) + 1;
+            }
+        Ok((!rows.is_empty()).then_some(rows))
+    })
+    .await
+    .context("join RAR archive row read task")?
 }
 
-fn read_rar_archive_page_bytes(
+async fn read_rar_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -646,23 +665,35 @@ fn read_rar_archive_page_bytes(
     if !book_media_is_rar_archive(media) || page_number == 0 {
         return Ok(None);
     }
-    if !page.file_name.is_empty()
-        && let Some(bytes) = read_rar_entry_bytes(&media.file_path, &page.file_name)?
-    {
-        return Ok(Some(bytes));
-    }
-    let page_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("convert rar page number {page_number}"))
-    })?;
-    let Some(page_file_name) = load_rar_archive_page_rows(media)?
-        .unwrap_or_default()
-        .into_iter()
-        .nth(page_index)
-        .map(|row| row.file_name)
-    else {
-        return Ok(None);
-    };
-    read_rar_entry_bytes(&media.file_path, &page_file_name)
+    let media = media.clone();
+    let page = page.clone();
+    tokio::task::spawn_blocking(move || {
+        if !page.file_name.is_empty()
+            && let Some(bytes) = read_rar_entry_bytes(&media.file_path, &page.file_name)?
+        {
+            return Ok(Some(bytes));
+        }
+        let page_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
+            anyhow::anyhow!(error).context(format!("convert rar page number {page_number}"))
+        })?;
+        let Some(page_file_name) = list_rar_entries(&media.file_path)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "list rar archive entries '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .into_iter()
+            .filter(|entry| is_supported_page_image_file_name(&entry.file_name))
+            .nth(page_index)
+            .map(|entry| entry.file_name)
+        else {
+            return Ok(None);
+        };
+        read_rar_entry_bytes(&media.file_path, &page_file_name)
+    })
+    .await
+    .context("join RAR archive page read task")?
 }
 
 pub async fn read_media_file_bytes(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
@@ -1122,8 +1153,8 @@ mod tests {
         let _ = fs::remove_file(file_path);
     }
 
-    #[test]
-    fn read_pdf_page_as_single_page_pdf_propagates_pdf_load_errors() {
+    #[tokio::test]
+    async fn read_pdf_page_as_single_page_pdf_propagates_pdf_load_errors() {
         let file_path = unique_temp_path("komga-media-invalid-pdf");
         fs::write(&file_path, b"not-a-pdf").expect("invalid pdf file should be written");
 
@@ -1136,6 +1167,7 @@ mod tests {
         };
 
         let error = read_pdf_page_as_single_page_pdf(&media, 1)
+            .await
             .expect_err("invalid pdf must not become missing raw page");
 
         assert!(
