@@ -32,16 +32,32 @@ impl ScanFollowUpPlanner {
 
         let mut follow_up_tasks = Vec::<TaskQueueRecord>::new();
 
-        let hashing_flags = load_library_hashing_flags(&self.pool, library_id)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
-            })?;
-        let analyzable_book_ids = load_books_requiring_analysis(&self.pool, &scan_result.book_ids)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
-            })?
+        let (hashing_flags, maintenance_flags, analyzable_book_ids) = tokio::join!(
+            async {
+                load_library_hashing_flags(&self.pool, library_id)
+                    .await
+                    .map_err(|error| {
+                        TaskProcessingError::runtime(format!("load library hashing flags: {error}"))
+                    })
+            },
+            async {
+                load_library_maintenance_flags(&self.pool, library_id)
+                    .await
+                    .map_err(|error| {
+                        TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
+                    })
+            },
+            async {
+                load_books_requiring_analysis(&self.pool, &scan_result.book_ids)
+                    .await
+                    .map_err(|error| {
+                        TaskProcessingError::runtime(format!("load books requiring analysis: {error}"))
+                    })
+            },
+        );
+        let hashing_flags = hashing_flags?;
+        let maintenance_flags = maintenance_flags?;
+        let analyzable_book_ids = analyzable_book_ids?
             .into_iter()
             .collect::<HashSet<_>>();
         for series in &scan_result.series_rows {
@@ -57,41 +73,68 @@ impl ScanFollowUpPlanner {
             }
         }
 
-        if hashing_flags.hash_files {
-            let book_ids = load_books_with_missing_file_hash(&self.pool, library_id, false)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books with missing file hash: {error}"
-                    ))
-                })?;
-            for book_id in book_ids {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
-                        .priority(LOWEST_PRIORITY)
-                        .into_queue_record(),
-                );
-            }
-        }
+        let (hash_file_ids, hash_koreader_ids, extension_repair_books) = tokio::join!(
+            async {
+                if hashing_flags.hash_files {
+                    load_books_with_missing_file_hash(&self.pool, library_id, false)
+                        .await
+                        .map_err(|error| {
+                            TaskProcessingError::runtime(format!(
+                                "load books with missing file hash: {error}"
+                            ))
+                        })
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+            async {
+                if hashing_flags.hash_koreader {
+                    load_books_with_missing_file_hash(&self.pool, library_id, true)
+                        .await
+                        .map_err(|error| {
+                            TaskProcessingError::runtime(format!(
+                                "load books with missing koreader hash: {error}"
+                            ))
+                        })
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+            async {
+                if maintenance_flags.repair_extensions {
+                    load_books_for_extension_repair(&self.pool, library_id)
+                        .await
+                        .map_err(|error| {
+                            TaskProcessingError::runtime(format!(
+                                "load books for extension repair: {error}"
+                            ))
+                        })
+                } else {
+                    Ok(Vec::new())
+                }
+            },
+        );
+        let hash_file_ids = hash_file_ids?;
+        let hash_koreader_ids = hash_koreader_ids?;
+        let extension_repair_books = extension_repair_books?;
 
-        if hashing_flags.hash_koreader {
-            let book_ids = load_books_with_missing_file_hash(&self.pool, library_id, true)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books with missing koreader hash: {error}"
-                    ))
-                })?;
-            for book_id in book_ids {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(
-                        TaskKind::HashBookKoreader,
-                        BookPayload::new(book_id),
-                    )
+        for book_id in hash_file_ids {
+            follow_up_tasks.push(
+                TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
                     .priority(LOWEST_PRIORITY)
                     .into_queue_record(),
-                );
-            }
+            );
+        }
+
+        for book_id in hash_koreader_ids {
+            follow_up_tasks.push(
+                TaskRequest::with_payload(
+                    TaskKind::HashBookKoreader,
+                    BookPayload::new(book_id),
+                )
+                .priority(LOWEST_PRIORITY)
+                .into_queue_record(),
+            );
         }
 
         if hashing_flags.hash_pages {
@@ -110,30 +153,16 @@ impl ScanFollowUpPlanner {
                 .into_queue_record_with_id(library_id),
         );
 
-        let maintenance_flags = load_library_maintenance_flags(&self.pool, library_id)
-            .await
-            .map_err(|error| {
-                TaskProcessingError::runtime(format!("load library maintenance flags: {error}"))
-            })?;
-        if maintenance_flags.repair_extensions {
-            let books = load_books_for_extension_repair(&self.pool, library_id)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books for extension repair: {error}"
-                    ))
-                })?;
-            for book in books {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(
-                        TaskKind::RepairExtension,
-                        BookPayload::new(book.book_id.clone()),
-                    )
-                    .priority(LOW_PRIORITY)
-                    .group(book.series_id.clone())
-                    .into_queue_record(),
-                );
-            }
+        for book in extension_repair_books {
+            follow_up_tasks.push(
+                TaskRequest::with_payload(
+                    TaskKind::RepairExtension,
+                    BookPayload::new(book.book_id.clone()),
+                )
+                .priority(LOW_PRIORITY)
+                .group(book.series_id.clone())
+                .into_queue_record(),
+            );
         }
         if maintenance_flags.convert_to_cbz {
             follow_up_tasks.push(

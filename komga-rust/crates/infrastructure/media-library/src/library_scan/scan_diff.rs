@@ -1,6 +1,5 @@
 use anyhow::Context;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::io::ErrorKind;
 
 use sqlx::{Row, SqlitePool};
@@ -8,9 +7,10 @@ use sqlx::{Row, SqlitePool};
 use komga_infrastructure_base::stored_paths::resolve_stored_path;
 
 use super::scan_discovery::{
-    build_sidecars, collect_series_directories, is_hidden_path, is_supported_book_file,
-    metadata_updated_unix_seconds, path_file_name_utf8, path_file_stem_utf8,
-    resolve_oneshot_series_id, route_safe_scanner_id, scanner_url_key,
+    build_sidecars, collect_series_directories_async, is_hidden_path, is_supported_book_file,
+    metadata_updated_unix_seconds, normalize_scanner_path_key, path_file_name_utf8,
+    path_file_stem_utf8, read_dir_entries_async, resolve_oneshot_series_id,
+    route_safe_scanner_id, scanner_url_key_from_normalized_root,
 };
 use super::scan_models::{
     ExistingScannedBookRow, ExistingScannedSeriesRow, LibraryScanConfig, ScannedBookRow,
@@ -37,9 +37,10 @@ pub(super) async fn scan_library(
         existing_series_by_url,
         deep_scan,
     )
+    .await
 }
 
-pub(super) fn build_scanned_library(
+pub(super) async fn build_scanned_library(
     scan_config: LibraryScanConfig,
     existing_books_by_url: HashMap<String, ExistingScannedBookRow>,
     existing_series_by_url: HashMap<String, ExistingScannedSeriesRow>,
@@ -51,7 +52,7 @@ pub(super) fn build_scanned_library(
         .map(|value| value.to_ascii_lowercase());
 
     let root = resolve_stored_path(&scan_config.root);
-    match fs::metadata(&root) {
+    match tokio::fs::metadata(&root).await {
         Ok(_) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {
             return Ok(unavailable_scanned_library());
@@ -63,17 +64,17 @@ pub(super) fn build_scanned_library(
             )));
         }
     }
+    let normalized_root = normalize_scanner_path_key(root.as_path());
     let existing_books_by_url = existing_books_by_url
         .into_iter()
-        .map(|(url, row)| (scanner_url_key(root.as_path(), &url), row))
+        .map(|(url, row)| (scanner_url_key_from_normalized_root(&normalized_root, root.as_path(), &url), row))
         .collect::<HashMap<_, _>>();
     let existing_series_by_url = existing_series_by_url
         .into_iter()
-        .map(|(url, row)| (scanner_url_key(root.as_path(), &url), row))
+        .map(|(url, row)| (scanner_url_key_from_normalized_root(&normalized_root, root.as_path(), &url), row))
         .collect::<HashMap<_, _>>();
 
-    let mut discovered = Vec::new();
-    collect_series_directories(root.as_path(), &scan_config, &mut discovered)?;
+    let discovered = collect_series_directories_async(root.as_path(), &scan_config).await?;
 
     let mut sidecars = Vec::new();
     let mut series_rows = Vec::new();
@@ -90,7 +91,7 @@ pub(super) fn build_scanned_library(
         let series_is_oneshot = oneshots_directory
             .as_ref()
             .is_some_and(|value| series_url.to_ascii_lowercase().contains(value));
-        let series_dir_metadata = fs::metadata(&series_dir).map_err(|error| {
+        let series_dir_metadata = tokio::fs::metadata(&series_dir).await.map_err(|error| {
             anyhow::anyhow!(error).context(format!(
                 "failed to read series directory metadata for '{}': ",
                 series_dir.display()
@@ -98,36 +99,15 @@ pub(super) fn build_scanned_library(
         })?;
         let series_dir_last_modified_unix_seconds =
             metadata_updated_unix_seconds(&series_dir_metadata, series_dir.as_path())?;
-
-        let entries = fs::read_dir(&series_dir).map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to scan series directory '{}': ",
-                series_dir.display()
-            ))
-        })?;
+        let entries = read_dir_entries_async(&series_dir).await?;
 
         let mut books = Vec::new();
         let mut changed_book_candidates = Vec::new();
         let mut sidecar_candidates = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to read directory entry in '{}': ",
-                    series_dir.display()
-                ))
-            })?;
-            let path = entry.path();
-
+        for (path, metadata) in entries {
             if is_hidden_path(path.as_path()) {
                 continue;
             }
-
-            let metadata = entry.metadata().map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to read metadata for '{}': ",
-                    path.display()
-                ))
-            })?;
 
             if !metadata.is_file() {
                 continue;
@@ -135,7 +115,7 @@ pub(super) fn build_scanned_library(
 
             if is_supported_book_file(path.as_path(), &scan_config) {
                 let book_url = path.to_string_lossy().to_string();
-                let book_url_key = scanner_url_key(root.as_path(), &book_url);
+                let book_url_key = scanner_url_key_from_normalized_root(&normalized_root, root.as_path(), &book_url);
                 let book_id = existing_books_by_url
                     .get(&book_url_key)
                     .map(|existing| existing.book_id.clone())
@@ -148,7 +128,7 @@ pub(super) fn build_scanned_library(
                     && existing.file_last_modified_unix_seconds != file_last_modified_unix_seconds
                 {
                     let candidate_series_id = if series_is_oneshot {
-                        resolve_oneshot_series_id(&existing_books_by_url, root.as_path(), &book_url)
+                        resolve_oneshot_series_id(&existing_books_by_url, &normalized_root, root.as_path(), &book_url)
                     } else {
                         regular_series_id.clone()
                     };
@@ -200,9 +180,10 @@ pub(super) fn build_scanned_library(
                 false,
             )?);
             for book in &books {
-                let book_url_key = scanner_url_key(root.as_path(), &book.book_url);
+                let book_url_key = scanner_url_key_from_normalized_root(&normalized_root, root.as_path(), &book.book_url);
                 let series_id = resolve_oneshot_series_id(
                     &existing_books_by_url,
+                    &normalized_root,
                     root.as_path(),
                     &book.book_url,
                 );
@@ -235,7 +216,7 @@ pub(super) fn build_scanned_library(
 
         let series_id = regular_series_id;
         let existing_series =
-            existing_series_by_url.get(&scanner_url_key(root.as_path(), &series_url));
+            existing_series_by_url.get(&scanner_url_key_from_normalized_root(&normalized_root, root.as_path(), &series_url));
         let series_changed = existing_series.is_some_and(|existing| {
             existing.file_last_modified_unix_seconds != series_last_modified_unix_seconds
         });
@@ -334,7 +315,10 @@ WHERE LIBRARY_ID = ?"#,
         ))
     })?
     .into_iter()
-    .map(|row| row.get::<String, _>("EXCLUSION"))
+    .map(|row| {
+        let exclusion = row.get::<String, _>("EXCLUSION");
+        exclusion.replace('\\', "/").to_ascii_lowercase()
+    })
     .collect::<Vec<_>>();
 
     Ok(Some(LibraryScanConfig {
@@ -437,8 +421,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn scan_propagates_root_metadata_errors() {
+    #[tokio::test]
+    async fn scan_propagates_root_metadata_errors() {
         let root = temp_library_path("root-metadata-error");
         std::fs::create_dir_all(&root).expect("scan fixture root should exist");
         std::fs::write(root.join("blocked"), b"not a directory")
@@ -451,6 +435,7 @@ mod tests {
             HashMap::new(),
             false,
         )
+        .await
         .expect_err("scanner root metadata errors should be propagated");
 
         assert!(

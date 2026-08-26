@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use komga_infrastructure_base::stored_paths::resolve_rooted_path;
+use tokio::task::spawn_blocking;
 
 use super::scan_models::{
     ExistingScannedBookRow, LibraryScanConfig, ScannedBookRow, ScannedSidecarRow,
@@ -69,6 +70,54 @@ pub(super) fn collect_series_directories(
     Ok(())
 }
 
+pub(super) async fn collect_series_directories_async(
+    root: &Path,
+    scan_config: &LibraryScanConfig,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let root = root.to_path_buf();
+    let scan_config = scan_config.clone();
+    spawn_blocking(move || {
+        let mut discovered = Vec::new();
+        collect_series_directories(&root, &scan_config, &mut discovered)?;
+        Ok::<_, anyhow::Error>(discovered)
+    })
+    .await?
+}
+
+pub(super) async fn read_dir_entries_async(
+    dir: &Path,
+) -> anyhow::Result<Vec<(PathBuf, fs::Metadata)>> {
+    let dir = dir.to_path_buf();
+    spawn_blocking(move || {
+        let entries = fs::read_dir(&dir).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to scan directory '{}': ",
+                dir.display()
+            ))
+        })?;
+
+        let mut result = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to read directory entry in '{}': ",
+                    dir.display()
+                ))
+            })?;
+            let path = entry.path();
+            let metadata = entry.metadata().map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to read metadata for '{}': ",
+                    path.display()
+                ))
+            })?;
+            result.push((path, metadata));
+        }
+        Ok::<_, anyhow::Error>(result)
+    })
+    .await?
+}
+
 pub(super) fn is_hidden_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -111,36 +160,78 @@ pub(super) fn path_file_stem_utf8(path: &Path) -> anyhow::Result<&str> {
 }
 
 pub(super) fn is_library_path_excluded(path: &Path, exclusions: &[String]) -> bool {
+    if exclusions.is_empty() {
+        return false;
+    }
+
     let path_key = path
         .to_string_lossy()
         .replace('\\', "/")
         .to_ascii_lowercase();
-    exclusions.iter().any(|entry| {
-        let exclusion = entry.replace('\\', "/").to_ascii_lowercase();
-        if exclusion.is_empty() {
-            return false;
-        }
-
-        path_key.contains(&exclusion)
-    })
+    exclusions
+        .iter()
+        .any(|exclusion| !exclusion.is_empty() && path_key.contains(exclusion.as_str()))
 }
 
 pub(super) fn resolve_oneshot_series_id(
     existing_books_by_url: &HashMap<String, ExistingScannedBookRow>,
-    library_root: &Path,
+    normalized_root: &str,
+    root: &Path,
     book_url: &str,
 ) -> String {
     existing_books_by_url
-        .get(&scanner_url_key(library_root, book_url))
+        .get(&scanner_url_key_from_normalized_root(
+            normalized_root,
+            root,
+            book_url,
+        ))
         .map(|existing| existing.series_id.clone())
         .unwrap_or_else(|| {
-            let resolved_path = resolve_rooted_path(library_root, book_url);
+            let resolved_path = resolve_rooted_path(root, book_url);
             route_safe_scanner_id("series", resolved_path.as_path())
         })
 }
 
+#[allow(dead_code)]
 pub(super) fn scanner_url_key(root: &Path, stored_url: &str) -> String {
     normalize_scanner_path_key(resolve_rooted_path(root, stored_url).as_path())
+}
+
+pub(super) fn scanner_url_key_from_normalized_root(
+    normalized_root: &str,
+    root: &Path,
+    stored_url: &str,
+) -> String {
+    if !stored_url.is_empty()
+        && !stored_url.starts_with('/')
+        && !stored_url.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
+        && !Path::new(stored_url)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        if let Some(url_part) = normalize_url_path_segment(stored_url) {
+            return format!("{normalized_root}/{url_part}");
+        }
+    }
+
+    normalize_scanner_path_key(resolve_rooted_path(root, stored_url).as_path())
+}
+
+fn normalize_url_path_segment(url: &str) -> Option<String> {
+    if let Some(c) = url.chars().next() {
+        if c.is_ascii_alphabetic() && url.len() > 1 && url.as_bytes()[1] == b':' {
+            return None;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        Some(url.replace('\\', "/").to_ascii_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        Some(url.to_string())
+    }
 }
 
 pub(super) fn normalize_scanner_path_key(path: &Path) -> String {
@@ -171,6 +262,16 @@ pub(super) fn build_sidecars(
     include_series_sidecars: bool,
 ) -> anyhow::Result<Vec<ScannedSidecarRow>> {
     let mut sidecars = Vec::new();
+
+    let book_by_name: HashMap<String, Vec<&ScannedBookRow>> = {
+        let mut map = HashMap::new();
+        for book in books {
+            map.entry(book.book_name.to_ascii_lowercase())
+                .or_insert_with(Vec::new)
+                .push(book);
+        }
+        map
+    };
 
     'candidate: for (path, metadata) in sidecar_candidates {
         let file_name = path_file_name_utf8(path)?;
@@ -218,8 +319,17 @@ pub(super) fn build_sidecars(
             continue;
         }
 
-        for book in books {
-            if is_image && is_book_artwork_sidecar(file_stem, &book.book_name) {
+        if is_image {
+            let base = file_stem.to_ascii_lowercase();
+            let matched = book_by_name.get(&base).and_then(|candidates| candidates.first()).or_else(|| {
+                let (prefix, suffix) = base.rsplit_once('-')?;
+                if suffix.chars().all(|c| c.is_ascii_digit()) && !suffix.is_empty() {
+                    book_by_name.get(prefix).and_then(|candidates| candidates.first())
+                } else {
+                    None
+                }
+            });
+            if let Some(book) = matched {
                 sidecars.push(ScannedSidecarRow {
                     url: path.to_string_lossy().to_string(),
                     parent_url: book.book_url.clone(),
@@ -235,6 +345,7 @@ pub(super) fn build_sidecars(
     Ok(sidecars)
 }
 
+#[allow(dead_code)]
 pub(super) fn is_book_artwork_sidecar(base_name: &str, book_name: &str) -> bool {
     let base_name = base_name.to_ascii_lowercase();
     let book_name = book_name.to_ascii_lowercase();

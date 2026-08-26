@@ -576,7 +576,8 @@ WHERE LIBRARY_ID = ?
         .map(|row| row.get::<String, _>("ID"))
         .filter(|series_id| !discovered_series_ids.contains(series_id))
         .collect::<Vec<_>>();
-    let missing_series_id_set = missing_series_ids.iter().cloned().collect::<HashSet<_>>();
+    let missing_series_id_set =
+        missing_series_ids.iter().cloned().collect::<HashSet<_>>();
 
     for (book_id, series_id) in &existing_books {
         if discovered_book_ids.contains(book_id) || !missing_series_id_set.contains(series_id) {
@@ -792,29 +793,46 @@ async fn load_changed_sidecars(
         return Ok(Vec::new());
     }
 
-    let existing_rows = sqlx::query(
-        r#"SELECT URL,
+    let scanned_urls: Vec<String> = scanned_sidecars.iter().map(|s| s.url.clone()).collect();
+    let mut existing = std::collections::HashMap::new();
+
+    const CHUNK_SIZE: usize = 500;
+    for chunk in scanned_urls.chunks(CHUNK_SIZE) {
+        let urls: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let mut query_builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            r#"SELECT URL,
        CASE
            WHEN typeof(LAST_MODIFIED_TIME) IN ('integer', 'real') THEN CAST(LAST_MODIFIED_TIME AS INTEGER)
            ELSE unixepoch(LAST_MODIFIED_TIME)
        END AS LAST_MODIFIED_TIME
 FROM SIDECAR
-WHERE LIBRARY_ID = ?"#,
-    )
-    .bind(library_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| anyhow::anyhow!(error).context( format!("failed to load existing sidecars for '{library_id}'")))?;
+WHERE LIBRARY_ID = "#,
+        );
+        query_builder.push_bind(library_id);
+        query_builder.push(" AND URL IN (");
+        let mut separated = query_builder.separated(", ");
+        for url in &urls {
+            separated.push_bind(url);
+        }
+        separated.push_unseparated(")");
 
-    let existing = existing_rows
-        .into_iter()
-        .map(|row| {
-            (
+        let rows = query_builder
+            .build()
+            .fetch_all(pool)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load existing sidecars for '{library_id}': "
+                ))
+            })?;
+
+        for row in rows {
+            existing.insert(
                 row.get::<String, _>("URL"),
                 row.get::<Option<i64>, _>("LAST_MODIFIED_TIME"),
-            )
-        })
-        .collect::<std::collections::HashMap<_, _>>();
+            );
+        }
+    }
 
     Ok(scanned_sidecars
         .iter()
