@@ -1,6 +1,7 @@
 use std::io::{Cursor, ErrorKind};
 use std::path::Path;
 
+use anyhow::Context;
 use komga_application::media_assets::BookMediaRecord;
 use komga_domain::media_assets::ThumbnailType;
 use pdfium_render::prelude::*;
@@ -116,100 +117,111 @@ pub(super) async fn book_thumbnail_housekeeping(
     Ok(())
 }
 
-pub(super) fn render_generated_thumbnail_from_image_bytes(
+pub(super) async fn render_generated_thumbnail_from_image_bytes(
     book_id: &str,
     thumbnail_bytes: &[u8],
     configured_max_edge: u32,
 ) -> anyhow::Result<RenderedThumbnail> {
-    let image = image::load_from_memory(thumbnail_bytes).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to decode generated thumbnail source for '{book_id}': "
-        ))
-    })?;
-    let source_max_edge = image.width().max(image.height()).max(1);
-    let effective_max_edge = configured_max_edge.min(source_max_edge);
-    let resized = image.thumbnail(effective_max_edge, effective_max_edge);
-    let width = i64::from(resized.width());
-    let height = i64::from(resized.height());
-    let mut output = Cursor::new(Vec::new());
-    resized
-        .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| {
+    let thumbnail_bytes = thumbnail_bytes.to_vec();
+    let book_id = book_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let image = image::load_from_memory(&thumbnail_bytes).map_err(|error| {
             anyhow::anyhow!(error).context(format!(
-                "failed to encode generated thumbnail for '{book_id}': "
+                "failed to decode generated thumbnail source for '{book_id}': "
             ))
         })?;
-    Ok(RenderedThumbnail {
-        bytes: output.into_inner(),
-        media_type: "image/jpeg".to_string(),
-        width,
-        height,
+        let source_max_edge = image.width().max(image.height()).max(1);
+        let effective_max_edge = configured_max_edge.min(source_max_edge);
+        let resized = image.thumbnail(effective_max_edge, effective_max_edge);
+        let width = i64::from(resized.width());
+        let height = i64::from(resized.height());
+        let mut output = Cursor::new(Vec::new());
+        resized
+            .write_to(&mut output, image::ImageFormat::Jpeg)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to encode generated thumbnail for '{book_id}': "
+                ))
+            })?;
+        Ok(RenderedThumbnail {
+            bytes: output.into_inner(),
+            media_type: "image/jpeg".to_string(),
+            width,
+            height,
+        })
     })
+    .await
+    .context("join generated thumbnail render task")?
 }
 
-pub(super) fn render_pdf_thumbnail(
+pub(super) async fn render_pdf_thumbnail(
     media: &BookMediaRecord,
     configured_max_edge: u32,
 ) -> anyhow::Result<Option<RenderedThumbnail>> {
-    let pdfium = load_pdfium()?;
-    let document = pdfium
-        .load_pdf_from_file(&media.file_path, None)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to load PDF for thumbnail generation '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    let page = match document.pages().first() {
-        Ok(page) => page,
-        Err(PdfiumError::NoPagesInDocument) => return Ok(None),
-        Err(error) => {
-            return Err(anyhow::anyhow!(format!(
-                "failed to load first PDF page for thumbnail generation '{}': {error}",
-                media.file_path.display()
-            )));
-        }
-    };
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        let pdfium = load_pdfium()?;
+        let document = pdfium
+            .load_pdf_from_file(&media.file_path, None)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load PDF for thumbnail generation '{}': ",
+                    media.file_path.display()
+                ))
+            })?;
+        let page = match document.pages().first() {
+            Ok(page) => page,
+            Err(PdfiumError::NoPagesInDocument) => return Ok(None),
+            Err(error) => {
+                return Err(anyhow::anyhow!(format!(
+                    "failed to load first PDF page for thumbnail generation '{}': {error}",
+                    media.file_path.display()
+                )));
+            }
+        };
 
-    let rendered = page
-        .render_with_config(
-            &PdfRenderConfig::new()
-                .set_target_width(i32::try_from(configured_max_edge).unwrap_or(i32::MAX))
-                .set_maximum_height(i32::try_from(configured_max_edge).unwrap_or(i32::MAX)),
-        )
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to render PDF page for thumbnail generation '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .as_image()
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to convert PDF render to image '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .into_rgb8();
+        let rendered = page
+            .render_with_config(
+                &PdfRenderConfig::new()
+                    .set_target_width(i32::try_from(configured_max_edge).unwrap_or(i32::MAX))
+                    .set_maximum_height(i32::try_from(configured_max_edge).unwrap_or(i32::MAX)),
+            )
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to render PDF page for thumbnail generation '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .as_image()
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to convert PDF render to image '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .into_rgb8();
 
-    let width = i64::from(rendered.width());
-    let height = i64::from(rendered.height());
-    let mut output = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(rendered)
-        .write_to(&mut output, image::ImageFormat::Jpeg)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to encode PDF thumbnail for '{}': ",
-                media.file_path.display()
-            ))
-        })?;
+        let width = i64::from(rendered.width());
+        let height = i64::from(rendered.height());
+        let mut output = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(rendered)
+            .write_to(&mut output, image::ImageFormat::Jpeg)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to encode PDF thumbnail for '{}': ",
+                    media.file_path.display()
+                ))
+            })?;
 
-    Ok(Some(RenderedThumbnail {
-        bytes: output.into_inner(),
-        media_type: "image/jpeg".to_string(),
-        width,
-        height,
-    }))
+        Ok(Some(RenderedThumbnail {
+            bytes: output.into_inner(),
+            media_type: "image/jpeg".to_string(),
+            width,
+            height,
+        }))
+    })
+    .await
+    .context("join PDF thumbnail render task")?
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -675,8 +687,8 @@ mod tests {
             .expect("broken first-page PDF fixture should be saved");
     }
 
-    #[test]
-    fn render_pdf_thumbnail_propagates_first_page_load_errors() {
+    #[tokio::test]
+    async fn render_pdf_thumbnail_propagates_first_page_load_errors() {
         let path = unique_temp_path("komga-pdf-thumbnail-broken-first-page");
         write_pdf_with_broken_first_page(&path);
         let media = BookMediaRecord {
@@ -687,7 +699,7 @@ mod tests {
             page_count: 1,
         };
 
-        let error = match render_pdf_thumbnail(&media, 300) {
+        let error = match render_pdf_thumbnail(&media, 300).await {
             Ok(_) => panic!("broken first PDF page must not become a missing generated thumbnail"),
             Err(error) => error,
         };

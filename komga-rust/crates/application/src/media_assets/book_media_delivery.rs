@@ -213,7 +213,7 @@ pub trait BookMediaContentPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<BookPageRecord>>;
 
-    fn read_pdf_page_as_single_page_pdf(
+    async fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
@@ -311,12 +311,12 @@ where
         ContentResolverPort::pdf_page_row(self, media, page_number)
     }
 
-    fn read_pdf_page_as_single_page_pdf(
+    async fn read_pdf_page_as_single_page_pdf(
         &self,
         media: &BookMediaRecord,
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>> {
-        ContentResolverPort::read_pdf_page_as_single_page_pdf(self, media, page_number)
+        ContentResolverPort::read_pdf_page_as_single_page_pdf(self, media, page_number).await
     }
 
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
@@ -780,6 +780,7 @@ where
         let bytes = match self
             .content
             .read_pdf_page_as_single_page_pdf(media, page_number)
+            .await
         {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return page_number_does_not_exist(),

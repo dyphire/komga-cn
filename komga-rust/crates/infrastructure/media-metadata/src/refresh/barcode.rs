@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use anyhow::Context;
 use komga_application::media_assets::{
     BookMediaRecord, book_media_is_epub, book_media_is_pdf, book_media_is_single_image,
 };
@@ -69,7 +70,9 @@ async fn load_barcode_candidate_image_bytes(
     page_number: u64,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     if book_media_is_pdf(media) {
-        return Ok(Some(render_pdf_page_image_for_barcode(media, page_number)?));
+        return Ok(Some(
+            render_pdf_page_image_for_barcode(media, page_number).await?,
+        ));
     }
 
     if book_media_is_single_image(media) && page_number == 1 {
@@ -99,60 +102,65 @@ async fn load_barcode_candidate_image_bytes(
     resolve_book_page_bytes(media, &page, page_number).await
 }
 
-fn render_pdf_page_image_for_barcode(
+async fn render_pdf_page_image_for_barcode(
     media: &BookMediaRecord,
     page_number: u64,
 ) -> anyhow::Result<Vec<u8>> {
-    let pdfium = load_pdfium()?;
-    let document = pdfium
-        .load_pdf_from_file(&media.file_path, None)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to load PDF for barcode refresh '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    let page = document
-        .pages()
-        .get(i32::try_from(page_number.saturating_sub(1)).unwrap_or(i32::MAX))
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to load PDF page {page_number} for barcode refresh '{}': ",
-                media.file_path.display()
-            ))
-        })?;
+    let media = media.clone();
+    tokio::task::spawn_blocking(move || {
+        let pdfium = load_pdfium()?;
+        let document = pdfium
+            .load_pdf_from_file(&media.file_path, None)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load PDF for barcode refresh '{}': ",
+                    media.file_path.display()
+                ))
+            })?;
+        let page = document
+            .pages()
+            .get(i32::try_from(page_number.saturating_sub(1)).unwrap_or(i32::MAX))
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load PDF page {page_number} for barcode refresh '{}': ",
+                    media.file_path.display()
+                ))
+            })?;
 
-    let rendered = page
-        .render_with_config(
-            &PdfRenderConfig::new()
-                .set_target_width(2400)
-                .set_maximum_height(3200),
-        )
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to render PDF page {page_number} for barcode refresh '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .as_image()
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to convert PDF barcode render to image '{}': ",
-                media.file_path.display()
-            ))
-        })?
-        .into_rgb8();
+        let rendered = page
+            .render_with_config(
+                &PdfRenderConfig::new()
+                    .set_target_width(2400)
+                    .set_maximum_height(3200),
+            )
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to render PDF page {page_number} for barcode refresh '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .as_image()
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to convert PDF barcode render to image '{}': ",
+                    media.file_path.display()
+                ))
+            })?
+            .into_rgb8();
 
-    let mut output = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(rendered)
-        .write_to(&mut output, image::ImageFormat::Png)
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to encode rendered PDF barcode candidate '{}': ",
-                media.file_path.display()
-            ))
-        })?;
-    Ok(output.into_inner())
+        let mut output = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(rendered)
+            .write_to(&mut output, image::ImageFormat::Png)
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to encode rendered PDF barcode candidate '{}': ",
+                    media.file_path.display()
+                ))
+            })?;
+        Ok(output.into_inner())
+    })
+    .await
+    .context("join PDF barcode render task")?
 }
 
 fn decode_ean13_isbn(image_bytes: &[u8]) -> anyhow::Result<Option<String>> {

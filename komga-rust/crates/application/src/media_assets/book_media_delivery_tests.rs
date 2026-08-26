@@ -171,7 +171,7 @@ impl BookMediaContentPort for TestBookMediaContent {
         Ok(None)
     }
 
-    fn read_pdf_page_as_single_page_pdf(
+    async fn read_pdf_page_as_single_page_pdf(
         &self,
         _media: &super::BookMediaRecord,
         _page_number: u64,
