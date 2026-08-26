@@ -78,6 +78,36 @@ pub(super) async fn load_book_page_row_for_refresh(
     }))
 }
 
+pub(super) async fn load_cached_comicinfo_bytes(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let row = sqlx::query(
+        "SELECT COMICINFO_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .context("query cached comicinfo bytes")?;
+
+    Ok(row.and_then(|row| row.get::<Option<Vec<u8>>, _>("COMICINFO_BLOB")))
+}
+
+pub(super) async fn load_cached_epub_package_document(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let row = sqlx::query(
+        "SELECT EPUB_PACKAGE_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .context("query cached epub package document")?;
+
+    Ok(row.and_then(|row| row.get::<Option<Vec<u8>>, _>("EPUB_PACKAGE_BLOB")))
+}
+
 pub(super) async fn load_book_metadata_for_refresh(
     pool: &SqlitePool,
     book_id: &str,
