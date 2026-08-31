@@ -14,6 +14,7 @@ komga-epub = { path = "../../epub" }
 komga-infrastructure-base = { path = "../base" }
 komga-infrastructure-discovery = { path = "../discovery" }
 komga-infrastructure-media-core = { path = "../media-core" }
+komga-infrastructure-media-metadata = { path = "../media-metadata" }
 lopdf.workspace = true
 sha2.workspace = true
 sqlx.workspace = true

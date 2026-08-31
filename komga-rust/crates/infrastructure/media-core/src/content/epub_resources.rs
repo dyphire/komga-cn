@@ -371,6 +371,66 @@ pub async fn load_epub_package_document(
     })
 }
 
+pub async fn load_epub_package_document_from_path(
+    path: &Path,
+    media_type: &str,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    if !media_type.eq_ignore_ascii_case("application/epub+zip") {
+        return Ok(None);
+    }
+    if is_mobi_path(path) {
+        return with_mobi_publication(path, |publication| {
+            publication
+                .resource_bytes("OEBPS/content.opf")
+                .map_err(|error| anyhow::anyhow!(error))
+        })
+        .await;
+    }
+    let path = path.to_path_buf();
+    let display_path = path.display().to_string();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Vec<u8>>> {
+        let file = File::open(&path).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to open EPUB package source '{}': ",
+                path.display()
+            ))
+        })?;
+        let mut archive = ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to open EPUB package archive '{}': ",
+                path.display()
+            ))
+        })?;
+        let container_xml = read_zip_entry_bytes_normalized_required(
+            &mut archive,
+            "META-INF/container.xml",
+            path.as_path(),
+        )?;
+        let rootfile_path = parse_epub_rootfile_path(&container_xml)?.ok_or_else(|| {
+            anyhow::anyhow!(format!(
+                "failed to resolve EPUB package document rootfile in '{}'",
+                path.display()
+            ))
+        })?;
+        let package_document =
+            read_zip_entry_bytes_normalized_required(&mut archive, &rootfile_path, path.as_path())?;
+        Ok(Some(package_document))
+    })
+    .await
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to join EPUB package document load for '{}': ",
+            display_path
+        ))
+    })?;
+    result.map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to load EPUB package document from '{}': ",
+            display_path
+        ))
+    })
+}
+
 fn is_mobi_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())

@@ -2,6 +2,7 @@ pub mod content;
 pub mod formats;
 
 pub use content::ContentResolver;
+pub use content::epub_resources::load_epub_package_document_from_path;
 pub use formats::ZipArchiveBuilder;
 
 pub fn expected_extension_for_media_type(media_type: &str) -> Option<&'static str> {
