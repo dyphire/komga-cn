@@ -12,7 +12,7 @@ use komga_infrastructure_media_core::content::epub_resources::load_epub_package_
 
 use super::SeriesMetadataImportPatch;
 use super::epub::extract_epub_series_patch;
-use super::queries::{load_cached_comicinfo_bytes, load_cached_epub_package_document};
+use super::queries::{load_cached_comicinfo_bytes, load_cached_epub_package_document, CacheLookup};
 use super::sources::{extract_comicinfo_series_patch, load_mylar_series_patch};
 use super::support::{
     canonicalize_string_set, dedupe_strings_preserve_order, generated_collection_id,
@@ -158,13 +158,13 @@ async fn load_comicinfo_series_patch_for_book(
         return Ok(None);
     }
 
-    let xml = if let Some(cached) = load_cached_comicinfo_bytes(pool, &source.book_id).await? {
-        cached
-    } else {
-        match load_comicinfo_bytes_for_media(&source.media)? {
+    let xml = match load_cached_comicinfo_bytes(pool, &source.book_id).await? {
+        CacheLookup::Found(Some(xml)) => xml,
+        CacheLookup::Found(None) => return Ok(None),
+        CacheLookup::NotFound => match load_comicinfo_bytes_for_media(&source.media)? {
             Some(xml) => xml,
             None => return Ok(None),
-        }
+        },
     };
     let document = parse_comicinfo_xml(&xml).map_err(|error| {
         anyhow::anyhow!(error).context(format!(
@@ -186,15 +186,13 @@ async fn load_epub_series_patch_for_book(
         return Ok(None);
     }
 
-    let package_document = if let Some(cached) =
-        load_cached_epub_package_document(pool, &source.book_id).await?
-    {
-        cached
-    } else {
-        match load_epub_package_document(&source.media).await? {
+    let package_document = match load_cached_epub_package_document(pool, &source.book_id).await? {
+        CacheLookup::Found(Some(doc)) => doc,
+        CacheLookup::Found(None) => return Ok(None),
+        CacheLookup::NotFound => match load_epub_package_document(&source.media).await? {
             Some(doc) => doc,
             None => return Ok(None),
-        }
+        },
     };
     Ok(Some(extract_epub_series_patch(&package_document)?))
 }
