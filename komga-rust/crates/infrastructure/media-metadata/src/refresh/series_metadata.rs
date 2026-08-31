@@ -4,7 +4,7 @@ use komga_application::media_assets::{
     BookMediaRecord, book_media_is_epub, book_media_is_rar_archive, book_media_is_zip_archive,
 };
 use komga_application::runtime_sse::RuntimeSseEventSink;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
 use komga_infrastructure_base::resolve_rooted_path;
@@ -12,6 +12,7 @@ use komga_infrastructure_media_core::content::epub_resources::load_epub_package_
 
 use super::SeriesMetadataImportPatch;
 use super::epub::extract_epub_series_patch;
+use super::queries::{load_cached_comicinfo_bytes, load_cached_epub_package_document, CacheLookup};
 use super::sources::{extract_comicinfo_series_patch, load_mylar_series_patch};
 use super::support::{
     canonicalize_string_set, dedupe_strings_preserve_order, generated_collection_id,
@@ -19,7 +20,9 @@ use super::support::{
 };
 
 struct SeriesBookRefreshSource {
+    book_id: String,
     media: BookMediaRecord,
+    file_names: Vec<String>,
 }
 
 struct SeriesMetadataRefreshState {
@@ -59,7 +62,8 @@ async fn load_series_books_for_refresh(
 ) -> anyhow::Result<Vec<SeriesBookRefreshSource>> {
     let rows = sqlx::query(
         r#"
-        SELECT b.LIBRARY_ID AS LIBRARY_ID,
+        SELECT b.ID AS BOOK_ID,
+               b.LIBRARY_ID AS LIBRARY_ID,
                b.NAME AS FILE_NAME,
                b.URL AS BOOK_URL,
                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
@@ -82,24 +86,65 @@ async fn load_series_books_for_refresh(
         ))
     })?;
 
+    let book_ids: Vec<String> = rows.iter().map(|row| row.get::<String, _>("BOOK_ID")).collect();
+
+    let file_rows = if book_ids.is_empty() {
+        Vec::new()
+    } else {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT BOOK_ID, FILE_NAME FROM MEDIA_FILE WHERE BOOK_ID IN (",
+        );
+        for (i, book_id) in book_ids.iter().enumerate() {
+            if i > 0 {
+                query.push(", ");
+            }
+            query.push_bind(book_id);
+        }
+        query.push(")");
+        query
+            .build()
+            .fetch_all(pool)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context(format!(
+                    "failed to load series media files for metadata refresh '{series_id}': "
+                ))
+            })?
+    };
+
+    let mut files_by_book: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for row in file_rows {
+        files_by_book
+            .entry(row.get::<String, _>("BOOK_ID"))
+            .or_default()
+            .push(row.get::<String, _>("FILE_NAME"));
+    }
+
     Ok(rows
         .into_iter()
-        .map(|row| SeriesBookRefreshSource {
-            media: BookMediaRecord {
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-                media_type: row.get::<String, _>("MEDIA_TYPE"),
-                file_path: resolve_rooted_path(
-                    library_root,
-                    row.get::<String, _>("BOOK_URL").as_str(),
-                ),
-                file_name: row.get::<String, _>("FILE_NAME"),
-                page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
-            },
+        .map(|row| {
+            let book_id = row.get::<String, _>("BOOK_ID");
+            SeriesBookRefreshSource {
+                book_id: book_id.clone(),
+                media: BookMediaRecord {
+                    library_id: row.get::<String, _>("LIBRARY_ID"),
+                    media_type: row.get::<String, _>("MEDIA_TYPE"),
+                    file_path: resolve_rooted_path(
+                        library_root,
+                        row.get::<String, _>("BOOK_URL").as_str(),
+                    ),
+                    file_name: row.get::<String, _>("FILE_NAME"),
+                    page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
+                },
+                file_names: files_by_book.get(&book_id).cloned().unwrap_or_default(),
+            }
         })
         .collect())
 }
 
-fn load_comicinfo_series_patch_for_book(
+async fn load_comicinfo_series_patch_for_book(
+    pool: &SqlitePool,
     source: &SeriesBookRefreshSource,
     append_volume_to_title: bool,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
@@ -107,8 +152,19 @@ fn load_comicinfo_series_patch_for_book(
         return Ok(None);
     }
 
-    let Some(xml) = load_comicinfo_bytes_for_media(&source.media)? else {
+    let has_comicinfo = source.file_names.iter().any(|f| f.eq_ignore_ascii_case("ComicInfo.xml"));
+    let files_known = !source.file_names.is_empty();
+    if !has_comicinfo && files_known {
         return Ok(None);
+    }
+
+    let xml = match load_cached_comicinfo_bytes(pool, &source.book_id).await? {
+        CacheLookup::Found(Some(xml)) => xml,
+        CacheLookup::Found(None) => return Ok(None),
+        CacheLookup::NotFound => match load_comicinfo_bytes_for_media(&source.media)? {
+            Some(xml) => xml,
+            None => return Ok(None),
+        },
     };
     let document = parse_comicinfo_xml(&xml).map_err(|error| {
         anyhow::anyhow!(error).context(format!(
@@ -123,14 +179,20 @@ fn load_comicinfo_series_patch_for_book(
 }
 
 async fn load_epub_series_patch_for_book(
+    pool: &SqlitePool,
     source: &SeriesBookRefreshSource,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
     if !book_media_is_epub(&source.media) {
         return Ok(None);
     }
 
-    let Some(package_document) = load_epub_package_document(&source.media).await? else {
-        return Ok(None);
+    let package_document = match load_cached_epub_package_document(pool, &source.book_id).await? {
+        CacheLookup::Found(Some(doc)) => doc,
+        CacheLookup::Found(None) => return Ok(None),
+        CacheLookup::NotFound => match load_epub_package_document(&source.media).await? {
+            Some(doc) => doc,
+            None => return Ok(None),
+        },
     };
     Ok(Some(extract_epub_series_patch(&package_document)?))
 }
@@ -657,7 +719,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
         let mut patches = Vec::new();
         for source in &books {
             if let Some(patch) =
-                load_comicinfo_series_patch_for_book(source, import_comicinfo_series_append_volume)?
+                load_comicinfo_series_patch_for_book(pool, source, import_comicinfo_series_append_volume).await?
             {
                 patches.push(patch);
             }
@@ -683,7 +745,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
     if import_epub_series {
         let mut patches = Vec::new();
         for source in &books {
-            if let Some(patch) = load_epub_series_patch_for_book(source).await? {
+            if let Some(patch) = load_epub_series_patch_for_book(pool, source).await? {
                 patches.push(patch);
             }
         }

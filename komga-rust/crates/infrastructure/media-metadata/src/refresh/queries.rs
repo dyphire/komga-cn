@@ -78,6 +78,48 @@ pub(super) async fn load_book_page_row_for_refresh(
     }))
 }
 
+pub(super) async fn load_cached_comicinfo_bytes(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> anyhow::Result<CacheLookup> {
+    let row = sqlx::query(
+        "SELECT COMICINFO_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .context("query cached comicinfo bytes")?;
+
+    match row {
+        Some(row) => Ok(CacheLookup::Found(row.get::<Option<Vec<u8>>, _>("COMICINFO_BLOB"))),
+        None => Ok(CacheLookup::NotFound),
+    }
+}
+
+pub(super) async fn load_cached_epub_package_document(
+    pool: &SqlitePool,
+    book_id: &str,
+) -> anyhow::Result<CacheLookup> {
+    let row = sqlx::query(
+        "SELECT EPUB_PACKAGE_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await
+    .context("query cached epub package document")?;
+
+    match row {
+        Some(row) => Ok(CacheLookup::Found(row.get::<Option<Vec<u8>>, _>("EPUB_PACKAGE_BLOB"))),
+        None => Ok(CacheLookup::NotFound),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum CacheLookup {
+    Found(Option<Vec<u8>>),
+    NotFound,
+}
+
 pub(super) async fn load_book_metadata_for_refresh(
     pool: &SqlitePool,
     book_id: &str,

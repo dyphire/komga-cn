@@ -1,6 +1,7 @@
 use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
-use sqlx::SqlitePool;
+use sha2::{Sha256, Digest};
+use sqlx::{Row, SqlitePool};
 
 #[derive(Clone, Debug)]
 pub(super) struct BookAnalysisInput {
@@ -32,6 +33,8 @@ pub(super) struct AnalyzedBookMedia {
     pub(super) pages: Vec<AnalyzedBookPage>,
     pub(super) media_files: Vec<AnalyzedBookMediaFile>,
     pub(super) epub_extension_blob: Option<Vec<u8>>,
+    pub(super) comicinfo_blob: Option<Vec<u8>>,
+    pub(super) epub_package_blob: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug)]
@@ -76,6 +79,13 @@ pub(super) async fn analyze_book_input(
         ),
         previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
     }))
+}
+
+fn compute_sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    result.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub(super) async fn persist_book_analysis(
@@ -195,7 +205,7 @@ pub(super) async fn persist_book_analysis(
             r#"UPDATE MEDIA
                SET EXTENSION_CLASS = ?,
                    EXTENSION_VALUE_BLOB = ?
-             WHERE BOOK_ID = ?"#,
+              WHERE BOOK_ID = ?"#,
         )
         .bind("org.gotson.komga.domain.model.MediaExtensionEpub")
         .bind(blob)
@@ -211,7 +221,7 @@ pub(super) async fn persist_book_analysis(
             r#"UPDATE MEDIA
                SET EXTENSION_CLASS = NULL,
                    EXTENSION_VALUE_BLOB = NULL
-             WHERE BOOK_ID = ?"#,
+              WHERE BOOK_ID = ?"#,
         )
         .bind(book_id)
         .execute(&mut *tx)
@@ -219,6 +229,54 @@ pub(super) async fn persist_book_analysis(
         .map_err(|error| {
             anyhow::anyhow!(error)
                 .context(format!("failed to clear EPUB extension for '{book_id}'"))
+        })?;
+    }
+
+    let new_comicinfo_hash = analysis
+        .comicinfo_blob
+        .as_ref()
+        .map(|blob| compute_sha256_hex(blob));
+    let new_epub_package_hash = analysis
+        .epub_package_blob
+        .as_ref()
+        .map(|blob| compute_sha256_hex(blob));
+
+    let existing = sqlx::query(
+        "SELECT COMICINFO_HASH, EPUB_PACKAGE_HASH FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
+    )
+    .bind(book_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("failed to query existing metadata cache for analyze")?;
+
+    let should_update = existing.map_or(true, |row| {
+        let old_comicinfo_hash: Option<String> = row.get("COMICINFO_HASH");
+        let old_epub_package_hash: Option<String> = row.get("EPUB_PACKAGE_HASH");
+        new_comicinfo_hash.as_ref() != old_comicinfo_hash.as_ref()
+            || new_epub_package_hash.as_ref() != old_epub_package_hash.as_ref()
+    });
+
+    if should_update {
+        sqlx::query(
+            r#"INSERT INTO BOOK_METADATA_CACHE (BOOK_ID, COMICINFO_BLOB, EPUB_PACKAGE_BLOB, COMICINFO_HASH, EPUB_PACKAGE_HASH)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(BOOK_ID) DO UPDATE SET
+                  COMICINFO_BLOB = excluded.COMICINFO_BLOB,
+                  EPUB_PACKAGE_BLOB = excluded.EPUB_PACKAGE_BLOB,
+                  COMICINFO_HASH = excluded.COMICINFO_HASH,
+                  EPUB_PACKAGE_HASH = excluded.EPUB_PACKAGE_HASH,
+                  LAST_MODIFIED_DATE = CURRENT_TIMESTAMP"#,
+        )
+        .bind(book_id)
+        .bind(&analysis.comicinfo_blob)
+        .bind(&analysis.epub_package_blob)
+        .bind(&new_comicinfo_hash)
+        .bind(&new_epub_package_hash)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(error)
+                .context(format!("failed to persist metadata cache for '{book_id}'"))
         })?;
     }
 

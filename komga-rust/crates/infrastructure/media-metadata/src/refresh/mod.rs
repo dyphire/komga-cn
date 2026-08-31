@@ -140,7 +140,11 @@ pub async fn refresh_book_metadata(
                 && comicinfo_provider_matches_capabilities(capabilities);
             if should_read_comicinfo
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(xml) = load_comicinfo_bytes_for_media(&media)?
+                && let Some(xml) = match load_cached_comicinfo_bytes(pool, &book_id).await? {
+                    CacheLookup::Found(Some(xml)) => Some(xml),
+                    CacheLookup::Found(None) => None,
+                    CacheLookup::NotFound => load_comicinfo_bytes_for_media(&media)?,
+                }
             {
                 let document = parse_comicinfo_xml(&xml).map_err(|error| {
                     anyhow::anyhow!(error).context(format!(
@@ -172,7 +176,11 @@ pub async fn refresh_book_metadata(
             if import_epub_book
                 && epub_provider_matches_capabilities(capabilities)
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(package_document) = load_epub_package_document(&media).await?
+                && let Some(package_document) = match load_cached_epub_package_document(pool, &book_id).await? {
+                    CacheLookup::Found(Some(doc)) => Some(doc),
+                    CacheLookup::Found(None) => None,
+                    CacheLookup::NotFound => load_epub_package_document(&media).await?,
+                }
             {
                 let patch = extract_epub_book_patch(&package_document)?;
                 apply_book_metadata_import_patch(pool, &book_id, patch).await?;
@@ -309,6 +317,7 @@ async fn apply_book_metadata_import_patch(
 
 use queries::{
     load_book_media_for_refresh, load_book_metadata_for_refresh, load_book_page_row_for_refresh,
+    load_cached_comicinfo_bytes, load_cached_epub_package_document, CacheLookup,
     persist_book_metadata_for_refresh,
 };
 

@@ -5,6 +5,8 @@ use super::persistence::{
 use crate::MediaLibraryJobContext;
 use crate::analysis::analyze_book_media_file;
 use crate::maintenance::updates::adjust_analyzed_book_read_progress;
+use komga_infrastructure_media_core::load_epub_package_document_from_path;
+use komga_infrastructure_media_metadata::load_comicinfo_bytes_from_path;
 use komga_application::task_processing::TaskProcessingError;
 use komga_domain::discovery::MediaStatus;
 use komga_infrastructure_base::resolve_library_item_path;
@@ -48,7 +50,7 @@ pub async fn analyze_book(
 
     let persisted = AnalyzedBookMedia {
         status: analysis.status,
-        media_type: analysis.media_type,
+        media_type: analysis.media_type.clone(),
         comment: analysis.comment,
         page_count: analysis.page_count,
         epub_divina_compatible: analysis.epub_divina_compatible,
@@ -75,6 +77,11 @@ pub async fn analyze_book(
             })
             .collect(),
         epub_extension_blob: analysis.epub_extension_blob,
+        comicinfo_blob: load_comicinfo_bytes_from_path(&file_path, &analysis.media_type)
+            .unwrap_or_default(),
+        epub_package_blob: load_epub_package_document_from_path(&file_path, &analysis.media_type)
+            .await
+            .unwrap_or_default(),
     };
     let current_page_count = persisted.page_count.min(i64::MAX as u64) as i64;
 

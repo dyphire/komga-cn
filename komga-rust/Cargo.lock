@@ -2899,6 +2899,7 @@ dependencies = [
  "komga-infrastructure-base",
  "komga-infrastructure-discovery",
  "komga-infrastructure-media-core",
+ "komga-infrastructure-media-metadata",
  "komga-infrastructure-test-support",
  "lopdf",
  "sha2 0.11.0",
