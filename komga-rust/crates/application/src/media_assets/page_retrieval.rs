@@ -95,8 +95,13 @@ pub fn book_media_is_zip_archive(media: &BookMediaRecord) -> bool {
 }
 
 pub fn book_media_is_rar_archive(media: &BookMediaRecord) -> bool {
-    content_type_from_filename(&media.file_name, &media.media_type)
-        == "application/vnd.comicbook-rar"
+    matches!(
+        content_type_from_filename(&media.file_name, &media.media_type).as_str(),
+        "application/x-rar-compressed"
+            | "application/x-rar-compressed; version=4"
+            | "application/x-rar-compressed; version=5"
+            | "application/vnd.comicbook-rar"
+    )
 }
 
 pub fn book_media_is_epub(media: &BookMediaRecord) -> bool {
